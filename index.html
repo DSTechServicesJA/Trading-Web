@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IT Guru Trading Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="container">
+
+    <!-- HEADER -->
+    <h1>IT Guru – Bot</h1>
+
+    <div id="loginOverlay" class="login-overlay">
+      <div class="login-card">
+        <h2>Unlock Bot</h2>
+        <p>Use your Deriv OAuth login or paste API token, then continue.</p>
+        <button id="loginBtn" type="button" class="login-action-btn">CONTINUE</button>
+        <div id="loginError" class="login-error"></div>
+      </div>
+    </div>
+    
+    <nav class="bot-nav">
+  <div class="brand">🤖 IT Guru Bots</div>
+
+  <ul class="bot-links">
+    <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
+    <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)</a></li>
+    <li><a href="#">1HZ75</a></li>
+    <li><a href="#">1HZ100</a></li>
+  </ul>
+</nav>
+
+
+    <!-- GRID WRAPPER -->
+    <div class="layout-grid">
+
+      <!-- ================= LEFT PANEL ================= -->
+      <div class="left-panel">
+
+        <!-- Account type toggle -->
+        <section class="account-toggle" aria-labelledby="acct-label">
+          <label id="acct-label">
+            <input type="checkbox" id="liveToggle" />
+            <span>Live Account (Real Money)</span>
+          </label>
+          <p class="hint">Toggle off to use Demo; ON for Real.</p>
+        </section>
+
+        <!-- OAuth Login -->
+        <section class="oauth-box">
+          <button id="oauthLogin" type="button">Login with Deriv</button>
+          <button id="logoutBtn" type="button" style="display:none;">Logout</button>
+        </section>
+
+        <!-- Manual Token -->
+        <section class="box">
+          <label for="token">Deriv API Token (optional)</label>
+          <input type="password" id="token" placeholder="Enter Deriv API Token" />
+          <p class="hint">Use only if OAuth is not available.</p>
+          <button id="connectBtn" type="button">Connect</button>
+        </section>
+
+<section class="risk dashboard">
+    
+    <section>
+    <label style="display:flex;align-items:center;gap:6px" >
+  <input type="checkbox" id="autoSymbolToggle" checked />
+  Auto Symbol
+</label>
+</section>
+
+<div class="symbol-select">
+  <label for="symbolSelect" >Market Symbol</label>
+  <select id="symbolSelect" class="status-badge enabled">
+    <optgroup label="FAST 1s">
+      <option value="1HZ75V">1HZ75V</option>
+      <option value="1HZ50V">1HZ50V</option>
+      <option value="1HZ100V">1HZ100V</option>
+    </optgroup>
+    <optgroup label="STANDARD">
+      <option value="R_75">R_75</option>
+      <option value="R_100">R_100</option>
+      <option value="R_50">R_50</option>
+    </optgroup>
+  </select>
+</div>
+</section>
+
+        <!-- Risk Controls-->
+        <section class="risk dashboard">
+          <!-- compact TP/SL rows -->
+          <div><strong for="takeProfit">TP ($)</strong> <span><input type="number" id="takeProfit" placeholder="e.g. 10" /></span></div>
+          <div><strong for="takeProfit">SL ($)</strong> <span><input type="number" id="stopLoss" placeholder="e.g. 10" /></span></div>
+
+          <div class="risk-row">
+            <label>
+              Base Stake ($)
+              <input
+                type="number"
+                id="baseStakeInput"
+                min="0.35"
+                step="0.01"
+                value="0.35"
+              />
+            </label>
+
+            <label>
+              Max Stake ($)
+              <input
+                type="number"
+                id="maxStakeInput"
+                min="0.35"
+                step="0.01"
+                value="0.90"
+              />
+            </label>
+          </div>
+
+          <div class="control-group">
+            <label for="dailyTargetInput">Session Profit ($)</label>
+            <input
+              type="number"
+              id="dailyTargetInput"
+              min="0"
+              step="0.1"
+              placeholder="2.5"
+            />
+          </div>
+        </section>
+
+        <!-- Connection Info -->
+        <section class="info">
+          <p><strong>Balance:</strong> <span id="balance">---</span></p>
+
+          <div class="live-price">
+            <span class="label">Live Price</span>
+            <span id="livePrice" class="price">--</span>
+          </div>
+
+          <p><strong>Status:</strong> <span id="status">Disconnected</span></p>
+
+          <p class="env-label" id="environmentLabel">Environment: DEMO</p>
+          <div id="liveStatus" class="env-label">Live: Locked</div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls">
+          <button id="startBtn" disabled>Start Bot</button>
+          <button id="stopBtn" disabled>Stop Bot</button>
+        </section>
+
+      </div>
+
+      <!-- ================= RIGHT PANEL ================= -->
+      <div class="right-panel">
+
+        <!-- Live Chart -->
+        <section class="chart-embed">
+          <!-- NOTE: canvas needs numeric height -->
+          <canvas id="priceChart" width="620" height="320"></canvas>
+        </section>
+    
+            <h3 class="">PERFORMANCE</h3>
+   
+      
+        <section class="dashboard">
+          <div><strong>Wins:</strong> <span id="statWins">0</span></div>
+          <div><strong>Losses:</strong> <span id="statLosses">0</span></div>
+          <div><strong>Win Rate:</strong> <span id="statWinRate">0%</span></div>
+          <div><strong>P/L:</strong> <span id="statPL">0.00</span></div>
+          <div><strong>Max DD:</strong> <span id="statDD">0.00</span></div>
+          <button id="softReset" type="button">Soft Reset</button>
+          <!-- ✅ Added for JS compatibility -->
+     
+              
+                   <span><button id="resetSessionBtn" type="button">Reset Session</button></span>
+
+        
+        </section>
+
+        <h3 class="">EXPECTANCY DASHBOARD</h3>
+        <section class="dashboard">
+          <!-- ===== EXPECTANCY DASHBOARD ===== -->
+          <div><strong>Avg Win:</strong> <span id="expAvgWin">0.00</span></div>
+          <div><strong>Avg Loss:</strong> <span id="expAvgLoss">0.00</span></div>
+          <div><strong>Expectancy:</strong> <span id="expValue">0.00</span></div>
+          <div><strong>Edge:</strong> <span id="expStatus">—</span></div>
+        </section>
+
+        <h3>MARKET REGIME</h3>
+        <section class="history">
+          <div class="side-stats">
+
+            <div class="side-row">
+              <span>MARKET/SIGNAL</span>
+              <span id="marketSignal" class="status-badge enabled">--</span>
+            </div>
+
+            <div class="side-row">
+              <span>ODD Bias</span>
+              <div class="bar">
+                <div id="oddBar" class="bar-fill odd"></div>
+              </div>
+              <span id="oddPct">0%</span>
+            </div>
+
+            <div class="side-row">
+              <span>EVEN Bias</span>
+              <div class="bar">
+                <div id="evenBar" class="bar-fill even"></div>
+              </div>
+              <span id="evenPct">0%</span>
+            </div>
+
+            <div class="side-row">
+              <span>CHAOS</span>
+              <div class="bar">
+                <div id="chaosBar" class="bar-fill chaos "></div>
+              </div>
+              <span id="chaosPct">0%</span>
+            </div>
+
+            <div class="side-row">
+              <span>Auto Mode</span>
+              <span id="autoModeBadge" class="status-badge disabled">STANDBY</span>
+            </div>
+
+            <div class="side-row">
+              <span>FEED</span>
+              <span id="feedHealth" class="status-badge disabled">OFFLINE</span>
+            </div>
+
+            <div class="side-row">
+              <span>SPEED</span>
+              <span id="symbolSpeedBadge" class="status-badge disabled">
+                SPEED
+              </span>
+            </div>
+
+            <div class="side-row edge-row">
+              <span>PAYOUT EDGE</span>
+              <span id="payoutThresholdBadge" class="status-badge disabled">1.82x</span>
+              <span id="payoutSamples" class="env-label">0 samples</span>
+            </div>
+
+            <div class="side-row mode-row">
+              <span>MODE PAUSE</span>
+              <span id="modePauseBadge" class="status-badge standard">NONE</span>
+              <span id="modeCooldownText" class="env-label">Ready</span>
+            </div>
+
+            <div class="payout-trend-wrap">
+              <svg id="payoutSparkline" class="payout-sparkline" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="Payout threshold trend">
+                <polyline id="payoutSparklineLine" points="" />
+              </svg>
+            </div>
+
+          </div>
+        </section>
+
+        <section class="history">
+          <h3 class="collapsible">Trade History</h3>
+          <div class="collapsible-body">
+            <ul id="tradeHistory"></ul>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Your refactored script -->
+  <script src="bot.js"></script>
+
+  <!-- Optional: environment label sync -->
+  <script>
+    (function () {
+      const liveToggle = document.getElementById('liveToggle');
+      const envLabel = document.getElementById('environmentLabel');
+      if (liveToggle && envLabel) {
+        const updateLabel = () => {
+          envLabel.textContent = liveToggle.checked ? 'Environment: LIVE' : 'Environment: DEMO';
+        };
+        liveToggle.addEventListener('change', updateLabel);
+        updateLabel();
+      }
+    })();
+    
+      document.querySelectorAll(".bot-links a").forEach(link => {
+    if (link.href === window.location.href) {
+      link.style.background = "#1e293b";
+      link.style.color = "#38bdf8";
+    }
+  });
+  </script>
+</body>
+</html>

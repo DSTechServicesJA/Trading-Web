@@ -1,0 +1,761 @@
+
+/* =========================================================
+   IT Guru – V75 1(s) Bot | Full Stylesheet
+   Theme: Dark, modern, responsive, accessible
+   ========================================================= */
+
+/* -------------------------
+   CSS Variables (Theme)
+------------------------- */
+:root {
+  --bg-outer: #0f172a;       /* outer gradient end */
+  --bg-inner: #020617;       /* container/background blocks */
+  --text: #e5e7eb;
+  --text-soft: #cbd5e1;
+  --heading: #f8fafc;
+
+  --primary: #3b82f6;
+  --primary-strong: #2563eb;
+
+  --danger: #ef4444;
+  --danger-strong: #dc2626;
+
+  --success: #22c55e;
+  --success-strong: #16a34a;
+
+  --muted: #64748b;
+  --muted-strong: #475569;
+
+  --accent: #ff444f;         /* Deriv brand red tone */
+  --card-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+
+  --space-1: 6px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 15px;
+  --space-6: 20px;
+
+  --font-base: Arial, Helvetica, sans-serif;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 22px;
+}
+
+/* -------------------------
+   Global Reset & Base
+------------------------- */
+* {
+  box-sizing: border-box;
+}
+
+button,
+.bar-fill,
+.price,
+.status-badge {
+  transition: all 0.18s ease-in-out;
+}
+
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: linear-gradient(135deg, var(--bg-inner), var(--bg-outer));
+  color: var(--text);
+  font-family: var(--font-base);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------
+   Container & Layout
+------------------------- */
+.container,
+main.container {
+
+  grid-template-columns: minmax(320px, 360px) 1fr;
+  gap: 16px;
+
+  width: 95%;
+  max-width: 1200px;
+  margin: 20px auto;
+
+  background: var(--bg-inner);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+}
+
+/* -------------------------
+   Heading
+------------------------- */
+h1 {
+  text-align: center;
+  font-size: var(--font-size-xl);
+  margin-bottom: var(--space-6);
+  color: var(--heading);
+  letter-spacing: 0.3px;
+}
+
+/* -------------------------
+   Account Toggle
+------------------------- */
+.account-toggle {
+  margin-bottom: var(--space-4);
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.account-toggle label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.account-toggle input {
+  transform: scale(1.2);
+}
+
+.hint {
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
+  margin-top: var(--space-1);
+}
+
+/* -------------------------
+   OAuth Box
+------------------------- */
+.oauth-box {
+  margin-bottom: var(--space-2);
+  text-align: center;
+}
+
+#oauthLogin {
+  width: 100%;
+  padding: var(--space-2);
+  font-size: var(--font-size-lg);
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+#oauthLogin:hover {
+  filter: brightness(1.05);
+}
+
+#logoutBtn {
+  width: 100%;
+  padding: var(--space-2);
+  margin-top: var(--space-2);
+  background: var(--muted);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+#logoutBtn:hover {
+  background: var(--muted-strong);
+}
+
+/* -------------------------
+   Token Input Box
+------------------------- */
+.box {
+  margin-bottom: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.box input {
+  flex: 1;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  outline: none;
+  font-size: var(--font-size-md);
+  background: #0b1220;
+  color: var(--text);
+  
+    flex-direction: column;
+}
+
+.box input::placeholder {
+  color: #94a3b8;
+}
+
+.box button {
+  padding: var(--space-3) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--success);
+  color: #000000;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.box button:hover {
+  background: var(--success-strong);
+}
+
+/* -------------------------
+   Info Section
+------------------------- */
+.info {
+  margin-bottom: var(--space-4);
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.info p {
+  margin-bottom: var(--space-2);
+}
+
+.env-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
+}
+
+/* -------------------------
+   Dashboard
+------------------------- */
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.dashboard > div {
+  background: #0b1220;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.dashboard strong {
+  color: var(--heading);
+}
+
+/* -------------------------
+   Side Stats (Odd/Even)
+------------------------- */
+.side-stats {
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-md);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.side-stats h3 {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-lg);
+  color: var(--heading);
+}
+
+.side-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: #0b1220;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* Status badges */
+.status-badge {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.25px;
+  text-transform: uppercase;
+}
+
+.active {
+  background: var(--success);
+  color: #0b1220;
+}
+
+.disabled {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+/* -------------------------
+   Risk Controls
+------------------------- */
+.risk {
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.risk label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.risk input {
+  width: 100%;
+  padding: var(--space-3);
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #0b1220;
+  color: var(--text);
+}
+
+.risk-alert {
+  color: var(--danger);
+  font-weight: bold;
+}
+
+/* -------------------------
+   Controls (Start/Stop)
+------------------------- */
+.controls {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.controls button {
+  flex: 1;
+  padding: var(--space-4);
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  color: #ffffff;
+}
+
+.controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(20%);
+}
+
+/* Gradient buttons for depth */
+#startBtn {
+  background: linear-gradient(90deg, var(--primary), var(--primary-strong));
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+}
+
+#startBtn:hover {
+  filter: brightness(1.05);
+}
+
+#stopBtn {
+  background: linear-gradient(90deg, var(--danger), var(--danger-strong));
+  box-shadow: 0 8px 20px rgba(220, 38, 38, 0.25);
+}
+
+#stopBtn:hover {
+  filter: brightness(1.05);
+}
+
+/* -------------------------
+   Trade History
+------------------------- */
+.history {
+  background: var(--bg-inner);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.history h3 {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-lg);
+  color: var(--heading);
+}
+
+.history ul {
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.history li {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: #0b1220;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* Scrollbar styling */
+.history ul::-webkit-scrollbar {
+  width: 8px;
+}
+
+.history ul::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------
+   Utility Classes
+------------------------- */
+.hidden {
+  display: none !important;
+}
+
+.text-soft {
+  color: var(--text-soft);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--heading);
+}
+
+/* -------------------------
+   Animations (subtle)
+------------------------- */
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.012); }
+  100% { transform: scale(1); }
+}
+
+.pulse {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* -------------------------
+   Mobile Responsive
+------------------------- */
+@media (max-width: 480px) {
+  .container,
+  main.container {
+    margin: 22px auto;
+    padding: var(--space-5);
+  }
+
+
+  .box button {
+    width: 100%;
+  }
+
+  .controls {
+    flex-direction: column;
+  }
+
+  .controls button {
+    width: 100%;
+  }
+
+  .dashboard {
+    grid-template-columns: 1fr; /* stack stats for narrow screens */
+  }
+}
+
+
+.bias-chart {
+  background: #020617;
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.bias-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 50px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bar {
+  background: #0f172a;
+  height: 14px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 0.25s ease;
+}
+
+.bar-fill.odd {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.bar-fill.even {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.live-price {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #020617;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+
+.live-price .label {
+  color: #94a3b8;
+}
+
+.live-price .price {
+  font-weight: bold;
+  font-size: 18px;
+  color: #e5e7eb;
+  transition: color 0.15s ease;
+}
+
+.price.up {
+  color: #22c55e;
+}
+
+.price.down {
+  color: #ef4444;
+}
+
+.signal-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.signal-select label {
+  color: #94a3b8;
+}
+
+.signal-select select {
+  background: #020617;
+  border: 1px solid #1e293b;
+  color: #e5e7eb;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.signal-select select:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+
+/* LEFT PANEL – controls */
+.account-toggle,
+.oauth-box,
+.box,
+.info,
+.signal-select,
+.risk,
+.controls {
+  grid-column: 1;
+}
+
+/* RIGHT PANEL – analytics */
+.dashboard,
+.bias-chart,
+.side-stats,
+.history {
+  grid-column: 2;
+}
+
+@media (max-width: 480px) {
+  main.container {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+   .history ul {
+    max-height: 160px;
+  }
+}
+.controls {
+  position: sticky;
+  bottom: 12px;
+  background: #020617;
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+}
+.account-toggle,
+.info,
+.risk,
+.dashboard,
+.side-stats,
+.bias-chart,
+.history {
+  margin-bottom: 8px;
+}
+
+/* Compact API token box */
+.box {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 6px 8px;
+  align-items: center;
+}
+
+/* Label spans full width */
+.box label {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+/* Input smaller + tighter */
+.box input {
+  padding: 6px 8px;
+  font-size: 13px;
+  height: 34px;
+}
+
+/* Connect button compact */
+.box button {
+  padding: 6px 12px;
+  font-size: 13px;
+  height: 34px;
+  white-space: nowrap;
+}
+
+/* Hint text smaller */
+.box .hint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+
+#priceChart {
+  width: 100%;
+  background: #020617;
+  border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.2);
+}
+
+/* ===== Force iframe to top-right under H1 ===== */
+
+.chart-embed .priceChart{
+  grid-column: 2;        /* right column */
+  grid-row: 2;           /* directly under h1 */
+  align-self: start;     /* stick to top */
+}
+.account-toggle,
+.oauth-box,
+.box,
+.signal-select,
+.risk,
+.info,
+.controls {
+  grid-column: 1;
+  grid-row: auto; /* natural flow under h1 */
+}
+
+/* ===== FORCE CANVAS TO TOP-RIGHT UNDER H1 ===== */
+
+.chart-embed {
+  grid-column: 2;   /* right column */
+  align-self: start;
+}
+
+#priceChart {
+  width: 100%;
+  height: 260px;
+  background: #020617;
+  border-radius: 12px;
+  border: 1px solid rgba(148,163,184,0.2);
+}
+.layout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.left-panel,
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapsible::after {
+  content: "▼";
+  float: right;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.collapsible.collapsed::after {
+  content: "▶";
+}
+
+.collapsible-body {
+  max-height: 1000px; /* allow expand */
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+.collapsible.collapsed + .collapsible-body {
+  max-height: 0;
+}
+
+

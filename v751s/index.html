@@ -1,0 +1,150 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IT Guru – High-Confidence 1HZ75V Bot (Safe Mode)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+<main class="container">
+
+  <h1>IT Guru – High Confidence 1HZ75V Bot <span class="badge">SAFE MODE</span></h1>
+  
+          <section class="account-toggle alert" aria-labelledby="acct-label">
+          <label id="acct-label">
+            <input type="checkbox" id="liveToggle" />
+            <span>Live Account (Real Money)</span>
+          </label>
+          <p class="hint">Toggle off to use Demo; ON for Real.</p>
+        </section>
+        
+    <nav class="bot-nav">
+  <div class="brand">🤖 IT Guru Bots</div>
+
+  <ul class="bot-links">
+    <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
+    <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)/1HZ75</a></li>
+    <li><a href="#">1HZ75</a></li>
+    <li><a href="#">1HZ100</a></li>
+  </ul>
+</nav>
+
+  <!-- ================= GRID ================= -->
+  <div class="layout-grid">
+
+    <!-- ================= LEFT ================= -->
+    <div class="left-panel">
+
+      <section class="info">
+        <p><strong>Symbol:</strong> <span class="status-badge enabled">1HZ75V (LOCKED)</span></p>
+        <p><strong>Status:</strong> <span id="statusText">WAITING FOR EDGE</span></p>
+        <p><strong>Bot State:</strong> <span id="botState" class="status-badge enabled">ACTIVE</span></p>
+      </section>
+
+      <section class="risk dashboard">
+        <div><strong>Stake ($)</strong> <span id="stakeDisplay">1.00</span></div>
+<div><strong>Max Trades</strong> <span id="maxTrades">12</span></div>
+<div><strong>Max Losses</strong> <span id="maxLosses">3</span></div>
+
+        <div><strong>Balance</strong> <span id="balance">—</span></div>
+      </section>
+
+      <section class="controls">
+        <label for="token" class="text-soft">Deriv API Token (demo recommended)</label>
+        <input type="password" id="token" placeholder="Paste your Deriv API token..." />
+        <div class="buttons">
+          <button id="connectBtn" class="btn-primary">Connect</button>
+          <button id="resetSessionBtn" type="button" class="btn-primary">Reset Session</button>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ================= RIGHT ================= -->
+    <div class="right-panel">
+
+      <h3>SESSION PERFORMANCE</h3>
+      <section class="dashboard">
+        <div><strong>Trades:</strong> <span id="statTrades">0</span></div>
+        <div><strong>Wins:</strong> <span id="statWins">0</span></div>
+        <div><strong>Losses:</strong> <span id="statLosses">0</span></div>
+         <!-- ✅ NEW -->
+  <div>
+    <strong>Session P/L:</strong>
+    <span id="sessionPL" class="pl neutral">$0.00</span>
+  </div>
+
+  <div>
+    <strong>Daily P/L:</strong>
+    <span id="dailyPL" class="pl neutral">$0.00</span>
+  </div>
+  
+  <div class="trade-progress">
+  <div class="progress-label">
+    Trades Progress: <span id="tradeProgressText">0 / 12</span>
+  </div>
+
+  <div class="progress-bar">
+    <div id="tradeProgressFill" class="progress-fill"></div>
+  </div>
+</div>
+
+      </section>
+
+      <h3>EDGE MONITOR</h3>
+      <section class="dashboard">
+        <div><strong>Confidence:</strong> <span id="confidence">0.00</span></div>
+        <div><strong>Market:</strong> <span id="marketSignal">NO EDGE</span></div>
+      </section>
+
+      <h3>DIGIT BIAS</h3>
+      <section class="history">
+        <div class="side-row">
+          <span>ODD</span>
+          <div class="bar"><div id="oddBar" class="bar-fill odd"></div></div>
+          <span id="oddPct">0%</span>
+        </div>
+        <div class="side-row">
+          <span>EVEN</span>
+          <div class="bar"><div id="evenBar" class="bar-fill even"></div></div>
+          <span id="evenPct">0%</span>
+        </div>
+      </section>
+
+      <h3>TRADE HISTORY (SIMULATED)</h3>
+      <section class="history">
+        <ul id="tradeHistory"></ul>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<!-- BOT SCRIPT -->
+  <script src="bot.js"></script>
+
+<!-- SESSION RESET WIRING -->
+<script>
+    document.getElementById("maxTrades").textContent = MAX_TRADES;
+document.getElementById("maxLosses").textContent = MAX_LOSSES;
+
+  document.getElementById("resetSessionBtn").onclick = () => {
+    if (typeof resetSession === "function") {
+      resetSession();
+      document.getElementById("statusText").textContent = "SESSION RESET — Waiting for edge";
+    }
+  };
+  
+    document.querySelectorAll(".bot-links a").forEach(link => {
+    if (link.href === window.location.href) {
+      link.style.background = "#1e293b";
+      link.style.color = "#38bdf8";
+    }
+  });
+</script>
+</body>
+</html>
