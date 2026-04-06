@@ -1147,3 +1147,260 @@ h1 {
   font-size: 11px;
 }
 
+/* =========================================================
+   #23: LIGHT THEME
+   ========================================================= */
+
+body.light-theme {
+  --bg-outer: #e2e8f0;
+  --bg-inner: #f8fafc;
+  --text: #1e293b;
+  --text-soft: #475569;
+  --heading: #0f172a;
+  --muted: #94a3b8;
+  --muted-strong: #64748b;
+  --card-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, var(--bg-inner), var(--bg-outer));
+  color: var(--text);
+}
+
+body.light-theme .container,
+body.light-theme main.container {
+  background: var(--bg-inner);
+}
+
+body.light-theme .dashboard,
+body.light-theme .history,
+body.light-theme .box,
+body.light-theme .risk,
+body.light-theme .info,
+body.light-theme .chart-embed,
+body.light-theme .oauth-box {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+body.light-theme input,
+body.light-theme select {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
+body.light-theme button {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+body.light-theme button:hover {
+  background: #cbd5e1;
+}
+
+body.light-theme .status-badge.disabled {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+/* =========================================================
+   #15: SIGNAL STRENGTH METER
+   ========================================================= */
+
+.signal-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signal-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.signal-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease, background 0.3s ease;
+  width: 0%;
+}
+
+.signal-bar-fill.strong {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.signal-bar-fill.moderate {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.signal-bar-fill.weak {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+/* =========================================================
+   #14: EQUITY CURVE
+   ========================================================= */
+
+.equity-chart {
+  padding: 8px;
+}
+
+.equity-chart canvas {
+  width: 100%;
+  height: 140px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+body.light-theme .equity-chart canvas {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* =========================================================
+   TOOLS PANEL
+   ========================================================= */
+
+.tools-panel {
+  padding: var(--space-3);
+}
+
+.tools-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.tool-btn {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+body.light-theme .tool-btn {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+body.light-theme .tool-btn:hover {
+  background: #e2e8f0;
+}
+
+.shortcut-hints {
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* =========================================================
+   #22: MOBILE RESPONSIVE OVERHAUL
+   ========================================================= */
+
+@media (max-width: 640px) {
+  .container, main.container {
+    width: 100%;
+    padding: 8px;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .layout-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+
+  .left-panel, .right-panel {
+    min-width: 0;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+  .bot-nav {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .bot-links {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .bot-links a {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .chart-embed canvas {
+    height: 180px !important;
+  }
+
+  .equity-chart canvas {
+    height: 100px !important;
+  }
+
+  .dashboard, .history, .box, .risk, .info {
+    padding: 8px;
+  }
+
+  .side-row {
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  .tools-row {
+    flex-direction: column;
+  }
+
+  .tool-btn {
+    min-width: 0;
+  }
+
+  .risk-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  section.controls {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  section.controls button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .pa-dashboard .side-row span:first-child {
+    min-width: 70px;
+    font-size: 10px;
+  }
+
+  .status-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .signal-bar {
+    min-width: 40px;
+  }
+}
+

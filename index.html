@@ -296,6 +296,62 @@
             <span>CANDLES</span>
             <span id="candleCount" class="env-label">0/0</span>
           </div>
+          <div class="side-row signal-meter">
+            <span>SIGNAL</span>
+            <div class="signal-bar"><div id="signalStrengthBar" class="signal-bar-fill weak"></div></div>
+            <span id="signalStrengthLabel" class="env-label">0/0 (0%)</span>
+          </div>
+        </section>
+
+        <!-- EQUITY CURVE -->
+        <h3>EQUITY CURVE</h3>
+        <section class="chart-embed equity-chart">
+          <canvas id="equityCurveCanvas" width="620" height="140"></canvas>
+        </section>
+
+        <!-- ADVANCED STATS -->
+        <h3>ADVANCED STATS</h3>
+        <section class="dashboard pa-dashboard">
+          <div class="side-row">
+            <span>Profit Factor</span>
+            <span id="profitFactorVal" class="status-badge disabled">0.00</span>
+          </div>
+          <div class="side-row">
+            <span>Sharpe Ratio</span>
+            <span id="sharpeVal" class="status-badge disabled">0.00</span>
+          </div>
+          <div class="side-row">
+            <span>Sortino Ratio</span>
+            <span id="sortinoVal" class="status-badge disabled">0.00</span>
+          </div>
+        </section>
+
+        <!-- MODE PERFORMANCE -->
+        <h3 class="collapsible">MODE PERFORMANCE</h3>
+        <section class="dashboard pa-dashboard collapsible-body">
+          <div id="modeStatsBody"></div>
+        </section>
+
+        <!-- PATTERN PERFORMANCE -->
+        <h3 class="collapsible">PATTERN PERFORMANCE</h3>
+        <section class="dashboard pa-dashboard collapsible-body">
+          <div id="patternStatsBody"></div>
+        </section>
+
+        <!-- TRADE JOURNAL / QOL -->
+        <h3>TOOLS</h3>
+        <section class="dashboard tools-panel">
+          <div class="tools-row">
+            <button id="exportJournalBtn" type="button" class="tool-btn">📥 Export Journal</button>
+            <button id="themeToggleBtn" type="button" class="tool-btn">☀️ Light</button>
+          </div>
+          <div class="tools-row">
+            <button id="soundToggleBtn" type="button" class="tool-btn">🔊 Sound ON</button>
+            <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
+          </div>
+          <div class="shortcut-hints">
+            <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export | Alt+N Notifications</small>
+          </div>
         </section>
 
         <section class="history">

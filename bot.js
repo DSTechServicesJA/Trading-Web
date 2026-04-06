@@ -26,6 +26,30 @@ updatePayoutEdgeUI();
   // 4️⃣ Login gate LAST (blocks UI if needed)
   initLoginGate();
 
+  // #23: Restore theme preference
+  initTheme();
+  // #24: Wire keyboard shortcuts
+  initKeyboardShortcuts();
+  // Wire export button
+  const exportBtn = document.getElementById("exportJournalBtn");
+  if (exportBtn) exportBtn.addEventListener("click", exportJournalCSV);
+  // Wire theme toggle
+  const themeBtn = document.getElementById("themeToggleBtn");
+  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+  // Wire sound toggle
+  const soundBtn = document.getElementById("soundToggleBtn");
+  if (soundBtn) soundBtn.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    soundBtn.textContent = soundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF";
+  });
+  // Wire notification toggle
+  const notifBtn = document.getElementById("notifToggleBtn");
+  if (notifBtn) notifBtn.addEventListener("click", () => {
+    notificationsEnabled = !notificationsEnabled;
+    if (notificationsEnabled) requestNotificationPermission();
+    notifBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
+  });
+
   console.log("BOOT COMPLETE");
 });
 
@@ -166,6 +190,54 @@ let fibLevels       = [];  // { level, price } from recent swing range
 let supplyDemandZones = []; // { top, bottom, type: 'supply'|'demand', strength }
 let flippedLevels   = [];  // S/R levels that flipped role
 let lastFalseBreakout = null; // { direction: 'BULL'|'BEAR', level, time }
+
+// --- IMPROVEMENT #1: Adaptive Confluence Threshold ---
+let adaptiveConfluenceMin = CONFLUENCE_MIN_SCORE;
+const CONFLUENCE_ADAPT_WINDOW = 20;  // trades to evaluate
+let confluenceTradeLog = [];         // { score, won }
+
+// --- IMPROVEMENT #2: Pattern Accuracy Weighting ---
+let patternStats = {};  // { PATTERN_NAME: { wins: 0, losses: 0 } }
+
+// --- IMPROVEMENT #5: Harami & Abandoned Baby ---
+// (functions added below)
+
+// --- IMPROVEMENT #6: Equity Milestone + Time Restrictions ---
+let equityMilestoneLocked = false;
+let nextTradingWindowStart = 0; // 0 = no restriction
+
+// --- IMPROVEMENT #8: Circuit Breaker ---
+let circuitBreakerTripped = false;
+let avgVolatility = 0;
+let volatilityHistory = [];
+const CIRCUIT_BREAKER_MULT = 3;
+
+// --- IMPROVEMENT #9: Consecutive Loss Scaling ---
+let consecutiveLossScale = 1.0; // multiplier that shrinks after losses
+
+// --- IMPROVEMENT #10: Profit Factor + Win/Loss Ratio ---
+let grossProfit = 0;
+let grossLoss = 0;
+let profitFactor = 0;
+
+// --- IMPROVEMENT #19: Sharpe / Sortino Ratio ---
+let tradeReturns = [];  // all trade P/L values for ratios
+let sharpeRatio = 0;
+let sortinoRatio = 0;
+
+// --- IMPROVEMENT #7: Performance by Pattern & Mode ---
+let modeStats = {};  // { MODE: { wins: 0, losses: 0, pl: 0 } }
+
+// --- IMPROVEMENT #11: Trade Journal ---
+let tradeJournal = []; // { time, symbol, mode, pattern, side, stake, profit, confluence, detail }
+
+// --- IMPROVEMENT #3: Steep Trendline Protection ---
+const STEEP_TRENDLINE_THRESHOLD = 0.005; // slope > 0.5% per candle = steep
+
+// --- IMPROVEMENT #4: Walk-Forward Optimization ---
+const WALKFORWARD_WINDOW = 50;    // trades to evaluate
+const WALKFORWARD_INTERVAL = 25;  // re-evaluate every N trades
+let walkForwardCounter = 0;
 
 // --- Build OHLC candle from tick array ---
 function buildCandle(ticks) {
@@ -361,6 +433,55 @@ function detectRailwayTrack(curr, prev) {
   return null;
 }
 
+// --- IMPROVEMENT #5: Harami Pattern (Forex Millionaire: specific bullish/bearish variant) ---
+function detectHarami(curr, prev) {
+  if (!curr || !prev) return null;
+  const prevBody = candleBody(prev);
+  const currBody = candleBody(curr);
+  if (prevBody === 0) return null;
+  // Harami: current body contained within previous body (not just range)
+  const prevTop = Math.max(prev.o, prev.c);
+  const prevBot = Math.min(prev.o, prev.c);
+  const currTop = Math.max(curr.o, curr.c);
+  const currBot = Math.min(curr.o, curr.c);
+  if (currTop > prevTop || currBot < prevBot) return null;
+  if (currBody >= prevBody * 0.5) return null; // must be noticeably smaller
+
+  // Bullish Harami: bearish mother + small bullish inside at downtrend bottom
+  if (isBearish(prev) && isBullish(curr)) {
+    return { pattern: "BULLISH_HARAMI", bias: "BULL", strength: 0.6 };
+  }
+  // Bearish Harami: bullish mother + small bearish inside at uptrend top
+  if (isBullish(prev) && isBearish(curr)) {
+    return { pattern: "BEARISH_HARAMI", bias: "BEAR", strength: 0.6 };
+  }
+  return null;
+}
+
+// --- IMPROVEMENT #5: Abandoned Baby (3-candle gap reversal, ~70% accuracy) ---
+function detectAbandonedBaby(c3, c2, c1) {
+  if (!c3 || !c2 || !c1) return null;
+  const b2 = candleBody(c2);
+  const r2 = candleRange(c2);
+  if (r2 === 0) return null;
+  // Middle candle must be a doji/small body
+  if (b2 / r2 > 0.15) return null;
+
+  // Bullish abandoned baby: bearish c3, doji c2 gaps down, bullish c1 gaps up
+  if (isBearish(c3) && isBullish(c1)) {
+    if (c2.h < Math.min(c3.o, c3.c) && c2.h < Math.min(c1.o, c1.c)) {
+      return { pattern: "ABANDONED_BABY", bias: "BULL", strength: 0.85 };
+    }
+  }
+  // Bearish abandoned baby: bullish c3, doji c2 gaps up, bearish c1 gaps down
+  if (isBullish(c3) && isBearish(c1)) {
+    if (c2.l > Math.max(c3.o, c3.c) && c2.l > Math.max(c1.o, c1.c)) {
+      return { pattern: "ABANDONED_BABY", bias: "BEAR", strength: 0.85 };
+    }
+  }
+  return null;
+}
+
 // Scan latest candles for any pattern
 function scanCandlePatterns() {
   if (candles.length < 3) return null;
@@ -381,6 +502,12 @@ function scanCandlePatterns() {
   if (signal) return signal;
 
   signal = detectPiercingDarkCloud(c1, c2);
+  if (signal) return signal;
+
+  signal = detectAbandonedBaby(c3, c2, c1);
+  if (signal) return signal;
+
+  signal = detectHarami(c1, c2);
   if (signal) return signal;
 
   signal = detectRailwayTrack(c1, c2);
@@ -852,14 +979,18 @@ function scoreConfluence() {
   const pattern = scanCandlePatterns();
   lastPatternSignal = pattern;
   if (pattern) {
+    // #2: Apply pattern accuracy weighting
+    const pWeight = getPatternWeight(pattern.pattern);
     // Pattern aligned with trend = stronger
     if ((pattern.bias === "BULL" && trendDirection === "UP") ||
         (pattern.bias === "BEAR" && trendDirection === "DOWN")) {
-      score += 2;
-      detail.signal = 2;
+      const pts = Math.round(2 * pWeight);
+      score += pts;
+      detail.signal = pts;
     } else if (pattern.bias !== "NEUTRAL") {
-      score += 1;
-      detail.signal = 1;
+      const pts = Math.round(1 * pWeight);
+      score += pts;
+      detail.signal = pts;
     }
   }
 
@@ -951,9 +1082,430 @@ function scoreConfluence() {
   return { score, detail };
 }
 
+// ========== IMPROVEMENT FUNCTIONS (28 Items) ==========
+
+// --- #1: Adaptive Confluence Threshold ---
+function adaptConfluenceThreshold() {
+  if (confluenceTradeLog.length < CONFLUENCE_ADAPT_WINDOW) return;
+  const recent = confluenceTradeLog.slice(-CONFLUENCE_ADAPT_WINDOW);
+  const winRate = recent.filter(t => t.won).length / recent.length;
+  // If winning >65%, allow lower threshold; if <45%, raise it
+  if (winRate > 0.65) {
+    adaptiveConfluenceMin = Math.max(2, adaptiveConfluenceMin - 1);
+  } else if (winRate < 0.45) {
+    adaptiveConfluenceMin = Math.min(8, adaptiveConfluenceMin + 1);
+  }
+}
+
+// --- #2: Pattern Accuracy Weighting ---
+function getPatternWeight(patternName) {
+  if (!patternName || !patternStats[patternName]) return 1.0;
+  const s = patternStats[patternName];
+  const total = s.wins + s.losses;
+  if (total < 5) return 1.0; // not enough data
+  const wr = s.wins / total;
+  if (wr > 0.7) return 1.3;
+  if (wr > 0.55) return 1.1;
+  if (wr < 0.35) return 0.6;
+  if (wr < 0.45) return 0.8;
+  return 1.0;
+}
+
+function updatePatternStats(patternName, won) {
+  if (!patternName) return;
+  if (!patternStats[patternName]) patternStats[patternName] = { wins: 0, losses: 0 };
+  if (won) patternStats[patternName].wins++;
+  else patternStats[patternName].losses++;
+}
+
+// --- #3: Steep Trendline Protection ---
+function isSteepTrendline() {
+  const uptl = calcTrendline(swingLows.slice(-5));
+  const dntl = calcTrendline(swingHighs.slice(-5));
+  if (uptl && Math.abs(uptl.slope) > STEEP_TRENDLINE_THRESHOLD) return true;
+  if (dntl && Math.abs(dntl.slope) > STEEP_TRENDLINE_THRESHOLD) return true;
+  return false;
+}
+
+// --- #4: Walk-Forward Parameter Optimization ---
+function walkForwardOptimize() {
+  if (confluenceTradeLog.length < WALKFORWARD_WINDOW) return;
+  const window = confluenceTradeLog.slice(-WALKFORWARD_WINDOW);
+  const winRate = window.filter(t => t.won).length / window.length;
+
+  // Auto-tune: if edge is strong, tighten; if weak, loosen
+  if (winRate > 0.65) {
+    EMA_MIN_SPREAD = Math.max(0.00005, EMA_MIN_SPREAD * 0.95);
+  } else if (winRate < 0.45) {
+    EMA_MIN_SPREAD = Math.min(0.001, EMA_MIN_SPREAD * 1.1);
+  }
+}
+
+// --- #6: Equity Milestone Locks ---
+function checkEquityMilestone(balance) {
+  if (equityMilestoneLocked) return true;
+  const bal = parseFloat(balance);
+  if (!bal || bal <= 0) return false;
+  // Lock if session gained 10% on balance
+  if (sessionPL > 0 && sessionPL / bal > 0.10) {
+    equityMilestoneLocked = true;
+    setStatus("Equity milestone (10%) — session locked for safety", "#22c55e");
+    return true;
+  }
+  return false;
+}
+
+// --- #7: Time-Based Trading Restrictions ---
+function isInTradingWindow() {
+  if (nextTradingWindowStart === 0) return true;
+  return Date.now() >= nextTradingWindowStart;
+}
+
+function setTradingCooldownWindow(ms) {
+  nextTradingWindowStart = Date.now() + ms;
+}
+
+// --- #8: Circuit Breaker ---
+function updateVolatilityTracker(price) {
+  if (chartPrices.length < 2) return;
+  const prev = chartPrices[chartPrices.length - 2];
+  const change = Math.abs(price - prev) / Math.max(1e-9, Math.abs(prev));
+  volatilityHistory.push(change);
+  if (volatilityHistory.length > 50) volatilityHistory.shift();
+  avgVolatility = volatilityHistory.reduce((a, b) => a + b, 0) / volatilityHistory.length;
+}
+
+function checkCircuitBreaker(price) {
+  if (volatilityHistory.length < 10) return false;
+  const prev = chartPrices.length >= 2 ? chartPrices[chartPrices.length - 2] : price;
+  const currentChange = Math.abs(price - prev) / Math.max(1e-9, Math.abs(prev));
+  if (currentChange > avgVolatility * CIRCUIT_BREAKER_MULT) {
+    circuitBreakerTripped = true;
+    setStatus("Circuit breaker tripped — extreme volatility", "#ef4444");
+    // Auto-reset after 30 seconds
+    setTimeout(() => { circuitBreakerTripped = false; }, 30000);
+    return true;
+  }
+  return false;
+}
+
+// --- #9: Consecutive Loss Scaling ---
+function scaleAfterLosses() {
+  if (lossCount === 0) {
+    consecutiveLossScale = 1.0;
+  } else if (lossCount === 1) {
+    consecutiveLossScale = 0.85;
+  } else if (lossCount === 2) {
+    consecutiveLossScale = 0.7;
+  } else {
+    consecutiveLossScale = 0.5;
+  }
+}
+
+// --- #10: Profit Factor Tracking ---
+function updateProfitFactor(profit) {
+  if (profit > 0) grossProfit += profit;
+  else grossLoss += Math.abs(profit);
+  profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 999 : 0);
+}
+
+// --- #19: Sharpe / Sortino Ratio ---
+function updateSharpeRatio() {
+  if (tradeReturns.length < 5) { sharpeRatio = 0; return; }
+  const mean = tradeReturns.reduce((a, b) => a + b, 0) / tradeReturns.length;
+  const variance = tradeReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / tradeReturns.length;
+  const std = Math.sqrt(variance);
+  sharpeRatio = std > 0 ? mean / std : 0;
+}
+
+function updateSortinoRatio() {
+  if (tradeReturns.length < 5) { sortinoRatio = 0; return; }
+  const mean = tradeReturns.reduce((a, b) => a + b, 0) / tradeReturns.length;
+  const downsideReturns = tradeReturns.filter(r => r < 0);
+  if (downsideReturns.length === 0) { sortinoRatio = mean > 0 ? 999 : 0; return; }
+  const downsideVariance = downsideReturns.reduce((a, b) => a + b ** 2, 0) / downsideReturns.length;
+  const downsideStd = Math.sqrt(downsideVariance);
+  sortinoRatio = downsideStd > 0 ? mean / downsideStd : 0;
+}
+
+// --- #18: Performance by Mode ---
+function updateModeStatsTracking(mode, profit) {
+  if (!mode) return;
+  if (!modeStats[mode]) modeStats[mode] = { wins: 0, losses: 0, pl: 0 };
+  if (profit > 0) modeStats[mode].wins++;
+  else modeStats[mode].losses++;
+  modeStats[mode].pl += profit;
+}
+
+// --- #16: Trade Journal ---
+function logToJournal(entry) {
+  tradeJournal.push({
+    time: new Date().toISOString(),
+    symbol: symbol,
+    mode: currentTradeMode || "N/A",
+    pattern: lastPatternSignal ? lastPatternSignal.pattern : "NONE",
+    side: currentSide,
+    stake: currentStake,
+    profit: entry.profit,
+    confluence: confluenceScore,
+    detail: lastConfluenceDetail ? JSON.stringify(lastConfluenceDetail) : "",
+    balance: balanceEl?.textContent || "N/A",
+    trendDirection: trendDirection,
+    rsi: rsi
+  });
+  if (tradeJournal.length > 500) tradeJournal.shift();
+}
+
+function exportJournalCSV() {
+  if (tradeJournal.length === 0) { alert("No trades to export."); return; }
+  const headers = Object.keys(tradeJournal[0]);
+  const rows = tradeJournal.map(row => headers.map(h => {
+    let v = row[h];
+    if (typeof v === "string") v = v.replace(/"/g, '""');
+    return `"${v}"`;
+  }).join(","));
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `trade_journal_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// --- #20: Session Comparison ---
+let sessionHistory = [];
+
+function saveSessionSnapshot() {
+  const total = wins + losses;
+  if (total < 1) return;
+  sessionHistory.push({
+    time: new Date().toISOString(),
+    trades: total,
+    wins, losses,
+    pl: sessionPL,
+    winRate: total > 0 ? (wins / total * 100).toFixed(1) : 0,
+    profitFactor: profitFactor.toFixed(2),
+    sharpe: sharpeRatio.toFixed(2),
+    sortino: sortinoRatio.toFixed(2),
+    maxDD: maxDrawdown.toFixed(2)
+  });
+}
+
+// --- #21: Sound & Notifications ---
+let soundEnabled = true;
+let notificationsEnabled = false;
+
+function playTradeSound(won) {
+  if (!soundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = won ? 880 : 440;
+    osc.type = won ? "sine" : "triangle";
+    gain.gain.value = 0.1;
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  } catch (e) { /* audio not available */ }
+}
+
+function sendTradeNotification(won, profit) {
+  if (!notificationsEnabled || !("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification(`IT Guru Bot: ${won ? "WIN" : "LOSS"}`, {
+      body: `P/L: ${profit.toFixed(2)} | Session: ${sessionPL.toFixed(2)}`,
+      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🤖</text></svg>"
+    });
+  }
+}
+
+function requestNotificationPermission() {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}
+
+// --- #23: Dark/Light Theme Toggle ---
+let currentTheme = "dark";
+
+function toggleTheme() {
+  currentTheme = currentTheme === "dark" ? "light" : "dark";
+  document.body.classList.toggle("light-theme", currentTheme === "light");
+  try { localStorage.setItem("itguru_theme", currentTheme); } catch (e) {}
+  const btn = document.getElementById("themeToggleBtn");
+  if (btn) btn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
+}
+
+function initTheme() {
+  try {
+    const saved = localStorage.getItem("itguru_theme");
+    if (saved === "light") { currentTheme = "light"; document.body.classList.add("light-theme"); }
+  } catch (e) {}
+}
+
+// --- #24: Keyboard Shortcuts ---
+function initKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    // Alt + S = Start/Stop
+    if (e.altKey && e.key === "s") {
+      e.preventDefault();
+      if (botRunning) stopBtn?.click();
+      else startBtn?.click();
+    }
+    // Alt + R = Reset
+    if (e.altKey && e.key === "r") {
+      e.preventDefault();
+      resetSessionBtn?.click();
+    }
+    // Alt + T = Toggle theme
+    if (e.altKey && e.key === "t") {
+      e.preventDefault();
+      toggleTheme();
+    }
+    // Alt + E = Export journal
+    if (e.altKey && e.key === "e") {
+      e.preventDefault();
+      exportJournalCSV();
+    }
+    // Alt + N = Toggle notifications
+    if (e.altKey && e.key === "n") {
+      e.preventDefault();
+      notificationsEnabled = !notificationsEnabled;
+      if (notificationsEnabled) requestNotificationPermission();
+      setStatus(`Notifications ${notificationsEnabled ? "ON" : "OFF"}`, "#38bdf8");
+    }
+  });
+}
+
+// --- #25: Performance Optimization ---
+let lastChartDrawTime = 0;
+const CHART_DRAW_INTERVAL = 200; // max 5fps
+
+function throttledDrawChart() {
+  const now = Date.now();
+  if (now - lastChartDrawTime < CHART_DRAW_INTERVAL) return;
+  lastChartDrawTime = now;
+  drawPriceChart();
+}
+
+// Incremental SMA (avoids recalculating full array each time)
+function incrementalSMA(arr, newVal, period) {
+  arr.push(newVal);
+  if (arr.length > CANDLE_HISTORY_MAX) arr.shift();
+  if (arr.length < period) return null;
+  // Only calculate from the last `period` candle closes
+  const slice = candles.slice(-period);
+  const sum = slice.reduce((a, c) => a + c.c, 0);
+  return sum / period;
+}
+
+// --- #27: WebSocket Reconnection State Preservation ---
+let wsReconnectState = null;
+
+function saveWsState() {
+  wsReconnectState = {
+    symbol,
+    botRunning,
+    currentStake,
+    sessionPL,
+    wins,
+    losses,
+    peakPL,
+    maxDrawdown,
+    adaptiveThreshold,
+    lossCount
+  };
+}
+
+function restoreWsState() {
+  if (!wsReconnectState) return;
+  symbol = wsReconnectState.symbol;
+  currentStake = wsReconnectState.currentStake;
+  sessionPL = wsReconnectState.sessionPL;
+  wins = wsReconnectState.wins;
+  losses = wsReconnectState.losses;
+  peakPL = wsReconnectState.peakPL;
+  maxDrawdown = wsReconnectState.maxDrawdown;
+  adaptiveThreshold = wsReconnectState.adaptiveThreshold;
+  lossCount = wsReconnectState.lossCount;
+  // Resume bot if it was running before disconnect
+  if (wsReconnectState.botRunning) {
+    botRunning = true;
+    setStatus("Reconnected — bot resumed", "#22c55e");
+  }
+  wsReconnectState = null;
+}
+
+// --- #28: Token Auto-Refresh ---
+function getStoredToken() {
+  return sessionStorage.getItem("deriv_token") || "";
+}
+
+function isTokenExpiring() {
+  // Deriv tokens don't have built-in expiry, but we re-authorize on reconnect
+  // This acts as a keep-alive mechanism
+  return false;
+}
+
+function reauthorizeOnReconnect() {
+  const token = getStoredToken();
+  if (token && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ authorize: token }));
+  }
+}
+
+// --- #15: Signal Strength Meter ---
+function getSignalStrength() {
+  let strength = 0;
+  let maxStrength = 0;
+
+  // Confluence portion (max 5)
+  strength += Math.min(5, confluenceScore);
+  maxStrength += 5;
+
+  // Pattern strength (max 2)
+  if (lastPatternSignal) {
+    strength += lastPatternSignal.strength * 2;
+  }
+  maxStrength += 2;
+
+  // RSI confirmation (max 1)
+  if (rsi !== null) {
+    if ((trendDirection === "UP" && rsi > 50 && rsi < 70) ||
+        (trendDirection === "DOWN" && rsi < 50 && rsi > 30)) {
+      strength += 1;
+    }
+  }
+  maxStrength += 1;
+
+  // Volatility OK (max 1)
+  if (typeof isMarketVolatile === "function" && isMarketVolatile()) {
+    strength += 1;
+  }
+  maxStrength += 1;
+
+  // EMA alignment (max 1)
+  const ef = emaFastArr.at(-1);
+  const es = emaSlowArr.at(-1);
+  if (ef && es && Math.abs(ef - es) / es > EMA_MIN_SPREAD) {
+    strength += 1;
+  }
+  maxStrength += 1;
+
+  return { strength, maxStrength, pct: maxStrength > 0 ? (strength / maxStrength * 100) : 0 };
+}
+
 // --- Candle Aggregation Processor (called on each tick) ---
 
 function onTickPriceAction(price) {
+  // #8: Update volatility tracker & circuit breaker
+  updateVolatilityTracker(price);
+  checkCircuitBreaker(price);
+
   // Short-term candle builder
   candleBuffer.push(price);
   if (candleBuffer.length >= CANDLE_TICK_SIZE) {
@@ -2256,6 +2808,31 @@ function analyzeSignal() {
     return false;
   }
 
+  // --- IMPROVEMENT #6: Equity Milestone Lock ---
+  if (equityMilestoneLocked) {
+    setStatus("Equity milestone locked — session complete", "#22c55e");
+    return false;
+  }
+
+  // --- IMPROVEMENT #7: Time-Based Trading Window ---
+  if (!isInTradingWindow()) {
+    const secs = Math.ceil((nextTradingWindowStart - Date.now()) / 1000);
+    setStatus(`Trading cooldown (${secs}s remaining)`, "#f59e0b");
+    return false;
+  }
+
+  // --- IMPROVEMENT #8: Circuit Breaker ---
+  if (circuitBreakerTripped) {
+    setStatus("Circuit breaker active — waiting for reset", "#ef4444");
+    return false;
+  }
+
+  // --- IMPROVEMENT #3: Steep Trendline Protection ---
+  if (candles.length >= 5 && isSteepTrendline()) {
+    setStatus("Blocked: Steep trendline — waiting for pullback", "#f59e0b");
+    return false;
+  }
+
   const auto = detectMarketRegime();
 
   // 🚫 LOW EDGE REGIMES — skip entirely
@@ -2396,14 +2973,19 @@ function analyzeSignal() {
 
   // Require minimum confluence for TREND mode (strongest filter)
   // ODD_EVEN and REVERSAL use lighter confluence requirements
-  const cfRequired = mode === "TREND" ? CONFLUENCE_MIN_SCORE :
-                     mode === "REVERSAL" ? Math.max(1, CONFLUENCE_MIN_SCORE - 1) :
-                     Math.max(1, CONFLUENCE_MIN_SCORE - 2);
+  // #1: Use adaptive threshold instead of fixed CONFLUENCE_MIN_SCORE
+  const cfBase = adaptiveConfluenceMin;
+  const cfRequired = mode === "TREND" ? cfBase :
+                     mode === "REVERSAL" ? Math.max(1, cfBase - 1) :
+                     Math.max(1, cfBase - 2);
 
   if (candles.length >= 5 && cfScore < cfRequired) {
     setStatus(`Blocked: Low confluence ${cfScore}/${cfRequired} [T:${cfDetail.trend} L:${cfDetail.level} S:${cfDetail.signal}]`, "#f59e0b");
     return false;
   }
+
+  // --- #15: Update signal strength meter UI ---
+  updateSignalStrengthUI();
 
   // 🕯️ PATTERN ALIGNMENT — if pattern detected, trade must align with pattern bias
   if (lastPatternSignal && lastPatternSignal.bias !== "NEUTRAL") {
@@ -2548,12 +3130,20 @@ function placeTrade() {
     tradeInProgress = false;
     return;
   }
-onTradeStart();
 
+  // #6: Equity Milestone Check
+  const balTextCheck = balanceEl?.textContent;
+  if (balTextCheck && balTextCheck !== "---" && checkEquityMilestone(balTextCheck)) {
+    botRunning = false;
+    tradeInProgress = false;
+    return;
+  }
+
+  onTradeStart();
   tradeInProgress = true;
   lastTradeTime = Date.now();
 
-  // � RISK-PER-TRADE — never risk > 2% of balance (Forex Millionaire rule)
+  // Risk-per-trade: never risk > 2% of balance
   const balText = balanceEl?.textContent;
   if (balText && balText !== "---") {
     const riskStake = riskAdjustedStake(balText);
@@ -2562,14 +3152,18 @@ onTradeStart();
     }
   }
 
-  // �🚫 RISK CHECK — enforce positive expectancy
-if (currentStake > BASE_STAKE * 1.6) {
-  setStatus("Stake too high for expectancy — skipping", "#f59e0b");
-  tradeInProgress = false;
-  onTradeEnd(); // 🔓 unlock dropdown
-  return;
-}
+  // #9: Consecutive Loss Scaling
+  scaleAfterLosses();
+  currentStake = roundStake(currentStake * consecutiveLossScale);
+  if (currentStake < BASE_STAKE) currentStake = BASE_STAKE;
 
+  // Risk check: enforce positive expectancy
+  if (currentStake > BASE_STAKE * 1.6) {
+    setStatus("Stake too high for expectancy — skipping", "#f59e0b");
+    tradeInProgress = false;
+    onTradeEnd();
+    return;
+  }
 
   ws.send(JSON.stringify({
     proposal: 1,
@@ -2586,8 +3180,43 @@ if (currentStake > BASE_STAKE * 1.6) {
 /* ================= RESULT ================= */
 function handleResult(contract) {
   const profit = Number(contract.profit);
+  const won = profit > 0;
   updateModePerformance(currentTradeMode, profit);
   maybeDisableWorstMode();
+
+  // --- Improvement Integrations ---
+  // #10: Profit Factor
+  updateProfitFactor(profit);
+  // #19: Sharpe/Sortino
+  tradeReturns.push(profit);
+  if (tradeReturns.length > 200) tradeReturns.shift();
+  updateSharpeRatio();
+  updateSortinoRatio();
+  // #2: Pattern Stats
+  updatePatternStats(lastPatternSignal ? lastPatternSignal.pattern : null, won);
+  // #18: Mode Stats
+  updateModeStatsTracking(currentTradeMode, profit);
+  // #16: Trade Journal
+  logToJournal({ profit });
+  // #1: Adaptive Confluence
+  confluenceTradeLog.push({ score: confluenceScore, won });
+  if (confluenceTradeLog.length > CONFLUENCE_ADAPT_WINDOW * 2) confluenceTradeLog.shift();
+  adaptConfluenceThreshold();
+  // #4: Walk-Forward
+  walkForwardCounter++;
+  if (walkForwardCounter >= WALKFORWARD_INTERVAL) {
+    walkForwardOptimize();
+    walkForwardCounter = 0;
+  }
+  // #21: Sound & Notifications
+  playTradeSound(won);
+  sendTradeNotification(won, profit);
+  // #7: Time cooldown after 3+ consecutive losses
+  if (lossCount >= 3 && !won) {
+    setTradingCooldownWindow(10000);
+  }
+  // Update advanced stats UI
+  updateAdvancedStatsUI();
 
   tradeInProgress = false;
   onTradeEnd(); // 🔓 unlock once, always
@@ -2896,6 +3525,9 @@ function connectWS() {
       const oauthLoginBtn = document.getElementById("oauthLogin");
       if (oauthLoginBtn) oauthLoginBtn.style.display = "none";
 
+      // #27: Restore state after reconnect
+      restoreWsState();
+
       setStatus("Authorized – loading market", "#22c55e");
 
       requestActiveSymbols().then(() => {
@@ -2933,7 +3565,8 @@ function connectWS() {
       chartPrices.push(price);
       if (chartPrices.length > CHART_POINTS) chartPrices.shift();
 
-      drawPriceChart();
+      // #25: Throttled chart draw (max 5fps)
+      throttledDrawChart();
       livePriceEl.textContent = price.toFixed(2);
       if (lastPrice !== null) {
         livePriceEl.classList.remove("up", "down");
@@ -3006,6 +3639,8 @@ function connectWS() {
 
   ws.onclose = () => {
     clearInterval(wsHeartbeat);
+    // #27: Save state before reconnect
+    saveWsState();
     setStatus("Connection closed – reconnecting...", "#f59e0b");
     setTimeout(() => {
       try { connectWS(); } catch (err) { console.error("Reconnect failed:", err); }
@@ -3174,6 +3809,23 @@ resetSessionBtn?.addEventListener("click", () => {
   smaFastArr = []; smaSlowArr = []; bollingerBands = null;
   fibLevels = []; supplyDemandZones = []; flippedLevels = [];
   lastFalseBreakout = null;
+
+  // Reset 28-improvement state
+  adaptiveConfluenceMin = CONFLUENCE_MIN_SCORE;
+  confluenceTradeLog = [];
+  patternStats = {};
+  equityMilestoneLocked = false;
+  nextTradingWindowStart = 0;
+  circuitBreakerTripped = false;
+  avgVolatility = 0;
+  volatilityHistory = [];
+  consecutiveLossScale = 1.0;
+  grossProfit = 0; grossLoss = 0; profitFactor = 0;
+  tradeReturns = []; sharpeRatio = 0; sortinoRatio = 0;
+  modeStats = {};
+  saveSessionSnapshot();
+  tradeJournal = [];
+  walkForwardCounter = 0;
 
 updatePerformanceUI();
   expectancyHistory = [];
@@ -3372,6 +4024,115 @@ function logLoss(profit) {
 }
 
 /* ================= PRICE ACTION UI ================= */
+
+// --- #15: Signal Strength Meter UI ---
+function updateSignalStrengthUI() {
+  const { strength, maxStrength, pct } = getSignalStrength();
+  const el = document.getElementById("signalStrengthBar");
+  const labelEl = document.getElementById("signalStrengthLabel");
+  if (el) {
+    el.style.width = `${pct}%`;
+    el.className = "signal-bar-fill";
+    if (pct >= 70) el.classList.add("strong");
+    else if (pct >= 40) el.classList.add("moderate");
+    else el.classList.add("weak");
+  }
+  if (labelEl) labelEl.textContent = `${strength}/${maxStrength} (${pct.toFixed(0)}%)`;
+}
+
+// --- Advanced Stats UI (Profit Factor, Sharpe, Sortino, Mode) ---
+function updateAdvancedStatsUI() {
+  const pfEl = document.getElementById("profitFactorVal");
+  if (pfEl) pfEl.textContent = profitFactor > 100 ? "∞" : profitFactor.toFixed(2);
+
+  const shEl = document.getElementById("sharpeVal");
+  if (shEl) shEl.textContent = sharpeRatio.toFixed(2);
+
+  const soEl = document.getElementById("sortinoVal");
+  if (soEl) soEl.textContent = sortinoRatio.toFixed(2);
+
+  // Mode stats
+  const modeEl = document.getElementById("modeStatsBody");
+  if (modeEl) {
+    modeEl.innerHTML = "";
+    for (const [mode, s] of Object.entries(modeStats)) {
+      const total = s.wins + s.losses;
+      const wr = total > 0 ? (s.wins / total * 100).toFixed(0) : 0;
+      const row = document.createElement("div");
+      row.className = "side-row";
+      row.innerHTML = `<span>${mode}</span><span class="env-label">${s.wins}W/${s.losses}L (${wr}%) $${s.pl.toFixed(2)}</span>`;
+      modeEl.appendChild(row);
+    }
+  }
+
+  // Pattern stats
+  const patEl = document.getElementById("patternStatsBody");
+  if (patEl) {
+    patEl.innerHTML = "";
+    const sorted = Object.entries(patternStats).sort((a, b) => (b[1].wins + b[1].losses) - (a[1].wins + a[1].losses));
+    for (const [name, s] of sorted.slice(0, 6)) {
+      const total = s.wins + s.losses;
+      const wr = total > 0 ? (s.wins / total * 100).toFixed(0) : 0;
+      const row = document.createElement("div");
+      row.className = "side-row";
+      row.innerHTML = `<span>${name}</span><span class="env-label">${s.wins}W/${s.losses}L (${wr}%)</span>`;
+      patEl.appendChild(row);
+    }
+  }
+
+  // Equity curve
+  drawEquityCurve();
+}
+
+// --- #14: Equity Curve ---
+let equityHistory = [];
+
+function drawEquityCurve() {
+  equityHistory.push(sessionPL);
+  if (equityHistory.length > 200) equityHistory.shift();
+
+  const canvas = document.getElementById("equityCurveCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (equityHistory.length < 2) return;
+
+  const max = Math.max(...equityHistory, 0.01);
+  const min = Math.min(...equityHistory, -0.01);
+  const range = max - min || 1;
+
+  // Zero line
+  const zeroY = h - ((0 - min) / range) * h;
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(w, zeroY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Equity line
+  const lastVal = equityHistory[equityHistory.length - 1];
+  ctx.strokeStyle = lastVal >= 0 ? "#22c55e" : "#ef4444";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  equityHistory.forEach((val, i) => {
+    const x = (i / (equityHistory.length - 1)) * w;
+    const y = h - ((val - min) / range) * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Fill area under
+  ctx.lineTo(w, h);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  ctx.fillStyle = lastVal >= 0 ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)";
+  ctx.fill();
+}
 
 function updateConfluenceUI(score, detail) {
   const scoreEl = document.getElementById("confluenceScore");
