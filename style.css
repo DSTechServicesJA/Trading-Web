@@ -1121,4 +1121,29 @@ h1 {
   }
 }
 
+/* =========================================================
+   PRICE ACTION ANALYSIS DASHBOARD
+   ========================================================= */
+
+.pa-dashboard {
+  border-top: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.pa-dashboard .side-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.pa-dashboard .side-row span:first-child {
+  min-width: 100px;
+  color: var(--text-soft);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
 

@@ -117,6 +117,463 @@ const stopLossInput   = document.getElementById("stopLoss");
 const MAX_LOSSES = 5;
 const EMA_MIN_SPREAD = 0.00002;   // 0.015% of price
 
+/* =========================================================
+   PRICE ACTION ANALYSIS ENGINE
+   Based on:
+     - Forex Millionaire in 365 Days (L. Tshakoane)
+     - Trendline Trading Strategy (M & W)
+   ---------------------------------------------------------
+   Aggregates ticks → OHLC candles
+   Detects: Pin Bar, Engulfing, Inside Bar, Doji, Morning/Evening Star
+   Identifies: S/R levels, trendlines, HH/HL/LH/LL structure
+   Scores entries via confluence (Trend + Level + Signal)
+   ========================================================= */
+
+// --- Candle aggregation ---
+const CANDLE_TICK_SIZE    = 10;   // ticks per candle (short-term)
+const CANDLE_TICK_SIZE_LG = 30;   // ticks per candle (long-term / "higher TF")
+const CANDLE_HISTORY_MAX  = 60;   // candles to keep
+const SR_LOOKBACK         = 40;   // candles to scan for S/R
+const SR_TOUCH_TOLERANCE  = 0.0004; // 0.04% price tolerance for level touches
+const TRENDLINE_MIN_TOUCHES = 2;
+const CONFLUENCE_MIN_SCORE  = 3;   // minimum confluence points to allow trade
+const RISK_PER_TRADE_PCT   = 0.02; // 2% of balance per trade (Forex Millionaire rule)
+
+let candleBuffer   = [];  // raw ticks accumulating into next candle
+let candles        = [];  // completed short-term OHLC candles
+let candleLgBuffer = [];  // raw ticks for long-term candle
+let candlesLg      = [];  // completed long-term candles
+let swingHighs     = [];  // { index, price }
+let swingLows      = [];  // { index, price }
+let srLevels       = [];  // { price, touches, type: 'support'|'resistance' }
+let trendDirection = "NONE"; // "UP", "DOWN", "NONE"
+let lastPatternSignal = null; // { pattern, bias: 'BULL'|'BEAR', strength, candle }
+let confluenceScore = 0;
+let lastConfluenceDetail = {};
+
+// --- Build OHLC candle from tick array ---
+function buildCandle(ticks) {
+  if (!ticks.length) return null;
+  return {
+    o: ticks[0],
+    h: Math.max(...ticks),
+    l: Math.min(...ticks),
+    c: ticks[ticks.length - 1],
+    ticks: ticks.length,
+    time: Date.now()
+  };
+}
+
+function candleBody(c)  { return Math.abs(c.c - c.o); }
+function candleRange(c) { return c.h - c.l; }
+function upperWick(c)   { return c.h - Math.max(c.o, c.c); }
+function lowerWick(c)   { return Math.min(c.o, c.c) - c.l; }
+function isBullish(c)   { return c.c > c.o; }
+function isBearish(c)   { return c.c < c.o; }
+
+// --- Candlestick Pattern Detection (from Forex Millionaire reference) ---
+
+function detectPinBar(c) {
+  // Pin bar: small body, long tail >= 2× body
+  const body = candleBody(c);
+  const range = candleRange(c);
+  if (range === 0) return null;
+  const bodyRatio = body / range;
+  if (bodyRatio > 0.35) return null; // body too large
+
+  const lw = lowerWick(c);
+  const uw = upperWick(c);
+
+  // Bullish pin bar: long lower wick
+  if (lw >= body * 2 && lw > uw * 1.5) {
+    return { pattern: "PIN_BAR", bias: "BULL", strength: lw / range };
+  }
+  // Bearish pin bar (shooting star): long upper wick
+  if (uw >= body * 2 && uw > lw * 1.5) {
+    return { pattern: "PIN_BAR", bias: "BEAR", strength: uw / range };
+  }
+  return null;
+}
+
+function detectDoji(c) {
+  const body = candleBody(c);
+  const range = candleRange(c);
+  if (range === 0) return null;
+  if (body / range > 0.08) return null; // not a doji
+
+  const lw = lowerWick(c);
+  const uw = upperWick(c);
+
+  // Dragonfly Doji (bullish at bottom)
+  if (lw > uw * 3 && lw > range * 0.6) {
+    return { pattern: "DRAGONFLY_DOJI", bias: "BULL", strength: 0.6 };
+  }
+  // Gravestone Doji (bearish at top)
+  if (uw > lw * 3 && uw > range * 0.6) {
+    return { pattern: "GRAVESTONE_DOJI", bias: "BEAR", strength: 0.6 };
+  }
+  // Standard Doji (neutral/indecision)
+  return { pattern: "DOJI", bias: "NEUTRAL", strength: 0.3 };
+}
+
+function detectEngulfing(curr, prev) {
+  if (!prev || !curr) return null;
+  const currBody = candleBody(curr);
+  const prevBody = candleBody(prev);
+  if (prevBody === 0) return null;
+
+  // Bullish engulfing: prev bearish, curr bullish, curr body covers prev body
+  if (isBearish(prev) && isBullish(curr) && curr.o <= prev.c && curr.c >= prev.o) {
+    return { pattern: "ENGULFING", bias: "BULL", strength: currBody / prevBody };
+  }
+  // Bearish engulfing: prev bullish, curr bearish, curr body covers prev body
+  if (isBullish(prev) && isBearish(curr) && curr.o >= prev.c && curr.c <= prev.o) {
+    return { pattern: "ENGULFING", bias: "BEAR", strength: currBody / prevBody };
+  }
+  return null;
+}
+
+function detectInsideBar(curr, prev) {
+  if (!prev || !curr) return null;
+  // Inside bar: current candle completely contained within previous
+  if (curr.h <= prev.h && curr.l >= prev.l) {
+    // Bias from breakout direction of mother candle
+    const bias = isBullish(prev) ? "BULL" : "BEAR";
+    return { pattern: "INSIDE_BAR", bias, strength: 0.5 };
+  }
+  return null;
+}
+
+function detectMorningStar(c3, c2, c1) {
+  // c3=oldest, c2=middle(star), c1=newest
+  if (!c3 || !c2 || !c1) return null;
+  const b3 = candleBody(c3);
+  const b2 = candleBody(c2);
+  const b1 = candleBody(c1);
+
+  if (b3 === 0) return null;
+
+  // Morning star: large bearish, small body, large bullish closing into c3
+  if (isBearish(c3) && b2 < b3 * 0.4 && isBullish(c1) && b1 > b3 * 0.5) {
+    if (c1.c > (c3.o + c3.c) / 2) {
+      return { pattern: "MORNING_STAR", bias: "BULL", strength: 0.8 };
+    }
+  }
+  // Evening star: large bullish, small body, large bearish closing into c3
+  if (isBullish(c3) && b2 < b3 * 0.4 && isBearish(c1) && b1 > b3 * 0.5) {
+    if (c1.c < (c3.o + c3.c) / 2) {
+      return { pattern: "EVENING_STAR", bias: "BEAR", strength: 0.8 };
+    }
+  }
+  return null;
+}
+
+// Scan latest candles for any pattern
+function scanCandlePatterns() {
+  if (candles.length < 3) return null;
+  const c1 = candles[candles.length - 1]; // newest
+  const c2 = candles[candles.length - 2];
+  const c3 = candles[candles.length - 3];
+
+  // Priority order (strongest first per reference docs)
+  let signal;
+
+  signal = detectMorningStar(c3, c2, c1);
+  if (signal) return signal;
+
+  signal = detectEngulfing(c1, c2);
+  if (signal) return signal;
+
+  signal = detectPinBar(c1);
+  if (signal) return signal;
+
+  signal = detectInsideBar(c1, c2);
+  if (signal) return signal;
+
+  signal = detectDoji(c1);
+  if (signal && signal.bias !== "NEUTRAL") return signal;
+
+  return null;
+}
+
+// --- Swing Point Detection (HH/HL/LH/LL from Trendline Strategy) ---
+
+function detectSwingPoints() {
+  if (candles.length < 5) return;
+  swingHighs = [];
+  swingLows  = [];
+
+  for (let i = 2; i < candles.length - 2; i++) {
+    const c = candles[i];
+    // Swing high: higher than 2 candles on each side
+    if (c.h > candles[i-1].h && c.h > candles[i-2].h &&
+        c.h > candles[i+1].h && c.h > candles[i+2].h) {
+      swingHighs.push({ index: i, price: c.h });
+    }
+    // Swing low: lower than 2 candles on each side
+    if (c.l < candles[i-1].l && c.l < candles[i-2].l &&
+        c.l < candles[i+1].l && c.l < candles[i+2].l) {
+      swingLows.push({ index: i, price: c.l });
+    }
+  }
+}
+
+// --- Trend Structure (HH/HL = uptrend, LH/LL = downtrend) ---
+
+function detectTrendStructure() {
+  if (swingHighs.length < 2 && swingLows.length < 2) {
+    trendDirection = "NONE";
+    return "NONE";
+  }
+
+  let hhCount = 0, hlCount = 0, lhCount = 0, llCount = 0;
+
+  // Check highs
+  for (let i = 1; i < swingHighs.length; i++) {
+    if (swingHighs[i].price > swingHighs[i-1].price) hhCount++;
+    else lhCount++;
+  }
+  // Check lows
+  for (let i = 1; i < swingLows.length; i++) {
+    if (swingLows[i].price > swingLows[i-1].price) hlCount++;
+    else llCount++;
+  }
+
+  // Uptrend: mostly HH + HL
+  if (hhCount > lhCount && hlCount > llCount) {
+    trendDirection = "UP";
+  }
+  // Downtrend: mostly LH + LL
+  else if (lhCount > hhCount && llCount > hlCount) {
+    trendDirection = "DOWN";
+  }
+  // Mixed/ranging
+  else {
+    trendDirection = "NONE";
+  }
+  return trendDirection;
+}
+
+// --- Support & Resistance Detection ---
+
+function detectSupportResistance() {
+  srLevels = [];
+  if (candles.length < 6) return;
+
+  const lookback = Math.min(candles.length, SR_LOOKBACK);
+  const start = candles.length - lookback;
+  const relevantCandles = candles.slice(start);
+
+  // Collect all swing points as candidate levels
+  const candidates = [];
+  swingHighs.filter(s => s.index >= start).forEach(s => {
+    candidates.push({ price: s.price, type: "resistance" });
+  });
+  swingLows.filter(s => s.index >= start).forEach(s => {
+    candidates.push({ price: s.price, type: "support" });
+  });
+
+  // Cluster nearby levels
+  const merged = [];
+  const used = new Set();
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (used.has(i)) continue;
+    let cluster = [candidates[i].price];
+    let type = candidates[i].type;
+
+    for (let j = i + 1; j < candidates.length; j++) {
+      if (used.has(j)) continue;
+      const pctDiff = Math.abs(candidates[j].price - candidates[i].price) / candidates[i].price;
+      if (pctDiff < SR_TOUCH_TOLERANCE) {
+        cluster.push(candidates[j].price);
+        used.add(j);
+      }
+    }
+    used.add(i);
+
+    const avgPrice = cluster.reduce((a, b) => a + b, 0) / cluster.length;
+
+    // Count how many candles touched this level
+    let touches = 0;
+    for (const c of relevantCandles) {
+      const pctH = Math.abs(c.h - avgPrice) / avgPrice;
+      const pctL = Math.abs(c.l - avgPrice) / avgPrice;
+      if (pctH < SR_TOUCH_TOLERANCE || pctL < SR_TOUCH_TOLERANCE) touches++;
+    }
+
+    merged.push({ price: avgPrice, touches, type });
+  }
+
+  // Sort by touch count (more touches = stronger level)
+  srLevels = merged.sort((a, b) => b.touches - a.touches).slice(0, 8);
+}
+
+// --- Trendline Calculation (linear regression from swing points) ---
+
+function calcTrendline(points) {
+  if (points.length < TRENDLINE_MIN_TOUCHES) return null;
+  const n = points.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const p of points) {
+    sumX += p.index;
+    sumY += p.price;
+    sumXY += p.index * p.price;
+    sumX2 += p.index * p.index;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept, points: n };
+}
+
+function getTrendlineValue(tl, index) {
+  if (!tl) return null;
+  return tl.slope * index + tl.intercept;
+}
+
+function isPriceNearTrendline(tl, idx, price) {
+  if (!tl) return false;
+  const tlPrice = getTrendlineValue(tl, idx);
+  if (tlPrice === null) return false;
+  return Math.abs(price - tlPrice) / price < SR_TOUCH_TOLERANCE * 2;
+}
+
+// --- Confluence Scoring (Forex Millionaire: Trend + Level + Signal) ---
+
+function scoreConfluence() {
+  let score = 0;
+  let detail = { trend: 0, level: 0, signal: 0, momentum: 0, structure: 0 };
+
+  const currentPrice = candles.length ? candles[candles.length - 1].c : null;
+  if (!currentPrice) return { score: 0, detail };
+
+  const currentIdx = candles.length - 1;
+
+  // 1. TREND DIRECTION (EMA alignment + structure)
+  const ef = emaFastArr.at(-1);
+  const es = emaSlowArr.at(-1);
+  if (ef && es) {
+    const emaSpread = Math.abs(ef - es) / es;
+    if (emaSpread > EMA_MIN_SPREAD) {
+      if ((trendDirection === "UP" && ef > es) || (trendDirection === "DOWN" && ef < es)) {
+        score += 2; // EMA and structure agree
+        detail.trend = 2;
+      } else if (ef !== es) {
+        score += 1; // EMA trend only
+        detail.trend = 1;
+      }
+    }
+  }
+
+  // 2. KEY LEVEL (S/R proximity — from Trendline Strategy + Forex Millionaire)
+  for (const level of srLevels) {
+    const dist = Math.abs(currentPrice - level.price) / currentPrice;
+    if (dist < SR_TOUCH_TOLERANCE * 3) {
+      const levelScore = Math.min(2, level.touches);
+      score += levelScore;
+      detail.level = Math.max(detail.level, levelScore);
+      break; // only count nearest level
+    }
+  }
+
+  // 2b. TRENDLINE proximity
+  const uptl = calcTrendline(swingLows.slice(-5));
+  const dntl = calcTrendline(swingHighs.slice(-5));
+
+  if (isPriceNearTrendline(uptl, currentIdx, currentPrice) && trendDirection === "UP") {
+    score += 1;
+    detail.level += 1;
+  }
+  if (isPriceNearTrendline(dntl, currentIdx, currentPrice) && trendDirection === "DOWN") {
+    score += 1;
+    detail.level += 1;
+  }
+
+  // 3. SIGNAL (candlestick pattern — from Forex Millionaire candlestick chapter)
+  const pattern = scanCandlePatterns();
+  lastPatternSignal = pattern;
+  if (pattern) {
+    // Pattern aligned with trend = stronger
+    if ((pattern.bias === "BULL" && trendDirection === "UP") ||
+        (pattern.bias === "BEAR" && trendDirection === "DOWN")) {
+      score += 2;
+      detail.signal = 2;
+    } else if (pattern.bias !== "NEUTRAL") {
+      score += 1;
+      detail.signal = 1;
+    }
+  }
+
+  // 4. RSI MOMENTUM confirmation
+  if (rsi !== null) {
+    if (trendDirection === "UP" && rsi > 45 && rsi < RSI_OVERBOUGHT) {
+      score += 1;
+      detail.momentum = 1;
+    } else if (trendDirection === "DOWN" && rsi < 55 && rsi > RSI_OVERSOLD) {
+      score += 1;
+      detail.momentum = 1;
+    }
+  }
+
+  // 5. MULTI-TIMEFRAME alignment (long-term candles agree with short-term)
+  if (candlesLg.length >= 3) {
+    const lgC = candlesLg[candlesLg.length - 1];
+    if ((trendDirection === "UP" && isBullish(lgC)) ||
+        (trendDirection === "DOWN" && isBearish(lgC))) {
+      score += 1;
+      detail.structure = 1;
+    }
+  }
+
+  confluenceScore = score;
+  lastConfluenceDetail = detail;
+  return { score, detail };
+}
+
+// --- Candle Aggregation Processor (called on each tick) ---
+
+function onTickPriceAction(price) {
+  // Short-term candle builder
+  candleBuffer.push(price);
+  if (candleBuffer.length >= CANDLE_TICK_SIZE) {
+    const candle = buildCandle(candleBuffer);
+    if (candle) {
+      candles.push(candle);
+      if (candles.length > CANDLE_HISTORY_MAX) candles.shift();
+    }
+    candleBuffer = [];
+
+    // Recalculate structure each new candle
+    detectSwingPoints();
+    detectTrendStructure();
+    detectSupportResistance();
+  }
+
+  // Long-term candle builder (multi-timeframe)
+  candleLgBuffer.push(price);
+  if (candleLgBuffer.length >= CANDLE_TICK_SIZE_LG) {
+    const candle = buildCandle(candleLgBuffer);
+    if (candle) {
+      candlesLg.push(candle);
+      if (candlesLg.length > CANDLE_HISTORY_MAX) candlesLg.shift();
+    }
+    candleLgBuffer = [];
+  }
+}
+
+// --- Risk-Per-Trade Calculator (Forex Millionaire: never risk >2%) ---
+
+function riskAdjustedStake(balanceStr) {
+  const bal = parseFloat(balanceStr);
+  if (!bal || bal <= 0) return BASE_STAKE;
+
+  const maxRisk = bal * RISK_PER_TRADE_PCT;
+  // Clamp between BASE_STAKE and MAX_STAKE, but never exceed 2% of balance
+  return roundStake(clamp(maxRisk, BASE_STAKE, MAX_STAKE));
+}
+
 const LIVE_MIN_TRADES = 30;
 const LIVE_MIN_WINS = 18;
 const LIVE_MIN_WR = 60;
@@ -598,6 +1055,9 @@ function detectMarketRegime() {
   if (ent > ENTROPY_MAX) {
     proposedMode = "CHAOS";
   } else if (spread > 0.00010 && vol && Math.abs(rsiMom) > 0.18) {
+    proposedMode = "TREND";
+  } else if (trendDirection !== "NONE" && spread > 0.00006 && vol) {
+    // Price Action Engine: HH/HL or LH/LL structure confirms trend even with weaker EMA
     proposedMode = "TREND";
   } else if (Math.max(oddRatio, evenRatio) >= 65 && ent < 0.85) {
     proposedMode = "ODD_EVEN";
@@ -1505,6 +1965,39 @@ function analyzeSignal() {
     return false;
   }
 
+  // 📊 CONFLUENCE GATE — Price Action Engine (Forex Millionaire: Trend + Level + Signal)
+  const { score: cfScore, detail: cfDetail } = scoreConfluence();
+  updateConfluenceUI(cfScore, cfDetail);
+
+  // Require minimum confluence for TREND mode (strongest filter)
+  // ODD_EVEN and REVERSAL use lighter confluence requirements
+  const cfRequired = mode === "TREND" ? CONFLUENCE_MIN_SCORE :
+                     mode === "REVERSAL" ? Math.max(1, CONFLUENCE_MIN_SCORE - 1) :
+                     Math.max(1, CONFLUENCE_MIN_SCORE - 2);
+
+  if (candles.length >= 5 && cfScore < cfRequired) {
+    setStatus(`Blocked: Low confluence ${cfScore}/${cfRequired} [T:${cfDetail.trend} L:${cfDetail.level} S:${cfDetail.signal}]`, "#f59e0b");
+    return false;
+  }
+
+  // 🕯️ PATTERN ALIGNMENT — if pattern detected, trade must align with pattern bias
+  if (lastPatternSignal && lastPatternSignal.bias !== "NEUTRAL") {
+    const patternBias = lastPatternSignal.bias; // "BULL" or "BEAR"
+
+    // For TREND mode: pattern must agree with trend
+    if (mode === "TREND") {
+      const ef2 = emaFastArr.at(-1);
+      const es2 = emaSlowArr.at(-1);
+      if (ef2 && es2) {
+        const emaBull = ef2 > es2;
+        if ((patternBias === "BULL" && !emaBull) || (patternBias === "BEAR" && emaBull)) {
+          setStatus(`Blocked: Pattern ${lastPatternSignal.pattern} conflicts with EMA trend`, "#f59e0b");
+          return false;
+        }
+      }
+    }
+  }
+
   // Volatility gate with detailed status (and per-mode probe)
   if (!isMarketVolatile()) {
     setStatus(`Blocked: Low volatility (acc=${acc.toFixed(4)} < req=${reqVol.toFixed(4)})`, "#f59e0b");
@@ -1635,7 +2128,16 @@ onTradeStart();
   tradeInProgress = true;
   lastTradeTime = Date.now();
 
-  // 🚫 RISK CHECK — enforce positive expectancy
+  // � RISK-PER-TRADE — never risk > 2% of balance (Forex Millionaire rule)
+  const balText = balanceEl?.textContent;
+  if (balText && balText !== "---") {
+    const riskStake = riskAdjustedStake(balText);
+    if (riskStake < currentStake) {
+      currentStake = riskStake;
+    }
+  }
+
+  // �🚫 RISK CHECK — enforce positive expectancy
 if (currentStake > BASE_STAKE * 1.6) {
   setStatus("Stake too high for expectancy — skipping", "#f59e0b");
   tradeInProgress = false;
@@ -2020,6 +2522,9 @@ function connectWS() {
       if (priceHistory.length > 50) priceHistory.shift();
       if (tickHistory.length > ANALYSIS_TICKS) tickHistory.shift();
 
+      // Price Action Engine: aggregate ticks into candles & detect patterns
+      onTickPriceAction(price);
+
       // NOW calculate RSI using updated prices
       rsi = calcRSI(chartPrices, RSI_PERIOD);
 
@@ -2236,6 +2741,12 @@ resetSessionBtn?.addEventListener("click", () => {
   avgWin = 0;
   avgLoss = 0;
   totalLossAmount = 0;
+
+  // Reset Price Action Engine state
+  candleBuffer = []; candles = []; candleLgBuffer = []; candlesLg = [];
+  swingHighs = []; swingLows = []; srLevels = [];
+  trendDirection = "NONE"; lastPatternSignal = null; confluenceScore = 0;
+
 updatePerformanceUI();
   expectancyHistory = [];
   resetModeTracking();
@@ -2431,4 +2942,101 @@ function logLoss(profit) {
     lossCount
   });
 }
+
+/* ================= PRICE ACTION UI ================= */
+
+function updateConfluenceUI(score, detail) {
+  const scoreEl = document.getElementById("confluenceScore");
+  const detailEl = document.getElementById("confluenceDetail");
+  const patternEl = document.getElementById("patternSignal");
+  const trendStructEl = document.getElementById("trendStructure");
+  const srCountEl = document.getElementById("srLevelCount");
+  const candleCountEl = document.getElementById("candleCount");
+
+  if (scoreEl) {
+    scoreEl.textContent = score;
+    scoreEl.className = "status-badge";
+    if (score >= CONFLUENCE_MIN_SCORE) scoreEl.classList.add("trend");
+    else if (score >= 2) scoreEl.classList.add("bias");
+    else scoreEl.classList.add("disabled");
+  }
+
+  if (detailEl) {
+    detailEl.textContent = `T:${detail.trend} L:${detail.level} S:${detail.signal} M:${detail.momentum}`;
+  }
+
+  if (patternEl) {
+    if (lastPatternSignal) {
+      patternEl.textContent = `${lastPatternSignal.pattern} (${lastPatternSignal.bias})`;
+      patternEl.className = "status-badge";
+      if (lastPatternSignal.bias === "BULL") patternEl.classList.add("trend");
+      else if (lastPatternSignal.bias === "BEAR") patternEl.classList.add("reversal");
+      else patternEl.classList.add("disabled");
+    } else {
+      patternEl.textContent = "NONE";
+      patternEl.className = "status-badge disabled";
+    }
+  }
+
+  if (trendStructEl) {
+    trendStructEl.textContent = trendDirection;
+    trendStructEl.className = "status-badge";
+    if (trendDirection === "UP") trendStructEl.classList.add("trend");
+    else if (trendDirection === "DOWN") trendStructEl.classList.add("reversal");
+    else trendStructEl.classList.add("disabled");
+  }
+
+  if (srCountEl) {
+    srCountEl.textContent = `${srLevels.length} levels`;
+  }
+
+  if (candleCountEl) {
+    candleCountEl.textContent = `${candles.length}/${candlesLg.length}`;
+  }
+}
+
+// Draw S/R levels and pattern markers on the price chart
+const _origDrawPriceChart = drawPriceChart;
+
+drawPriceChart = function() {
+  _origDrawPriceChart();
+  if (!chartCtx || chartPrices.length < 2) return;
+
+  const w = chartCanvas.width;
+  const h = chartCanvas.height;
+  const max = Math.max(...chartPrices);
+  const min = Math.min(...chartPrices);
+  const range = max - min || 1;
+
+  // Draw S/R levels as dashed horizontal lines
+  chartCtx.setLineDash([4, 4]);
+  srLevels.slice(0, 4).forEach(level => {
+    if (level.price < min || level.price > max) return;
+    const y = h - ((level.price - min) / range) * h;
+    chartCtx.strokeStyle = level.type === "support" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
+    chartCtx.lineWidth = 1;
+    chartCtx.beginPath();
+    chartCtx.moveTo(0, y);
+    chartCtx.lineTo(w, y);
+    chartCtx.stroke();
+  });
+  chartCtx.setLineDash([]);
+
+  // Draw trend direction arrow
+  if (trendDirection !== "NONE") {
+    chartCtx.fillStyle = trendDirection === "UP" ? "#22c55e" : "#ef4444";
+    chartCtx.font = "bold 14px sans-serif";
+    const arrow = trendDirection === "UP" ? "▲ UPTREND" : "▼ DOWNTREND";
+    chartCtx.fillText(arrow, w - 100, 16);
+  }
+
+  // Draw pattern marker on latest candle
+  if (lastPatternSignal) {
+    const x = w - 10;
+    const y = 32;
+    chartCtx.fillStyle = lastPatternSignal.bias === "BULL" ? "#22c55e" : "#ef4444";
+    chartCtx.font = "10px sans-serif";
+    chartCtx.fillText(lastPatternSignal.pattern, x - 70, y);
+  }
+};
 
