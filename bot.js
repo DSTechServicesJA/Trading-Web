@@ -139,6 +139,13 @@ const TRENDLINE_MIN_TOUCHES = 2;
 const CONFLUENCE_MIN_SCORE  = 3;   // minimum confluence points to allow trade
 const RISK_PER_TRADE_PCT   = 0.02; // 2% of balance per trade (Forex Millionaire rule)
 
+// --- SMA / Bollinger / Fibonacci constants (Forex Millionaire: 8 & 21 SMA, BB, Fib 50/61) ---
+const SMA_FAST_PERIOD   = 8;
+const SMA_SLOW_PERIOD   = 21;
+const BB_PERIOD         = 20;
+const BB_STD_DEV        = 2;
+const FIB_LEVELS        = [0.382, 0.5, 0.618]; // key Fibonacci retracement levels
+
 let candleBuffer   = [];  // raw ticks accumulating into next candle
 let candles        = [];  // completed short-term OHLC candles
 let candleLgBuffer = [];  // raw ticks for long-term candle
@@ -150,6 +157,15 @@ let trendDirection = "NONE"; // "UP", "DOWN", "NONE"
 let lastPatternSignal = null; // { pattern, bias: 'BULL'|'BEAR', strength, candle }
 let confluenceScore = 0;
 let lastConfluenceDetail = {};
+
+// --- SMA / Bollinger / Fibonacci / S&D state ---
+let smaFastArr      = [];  // 8 SMA values (one per candle)
+let smaSlowArr      = [];  // 21 SMA values (one per candle)
+let bollingerBands  = null; // { upper, middle, lower }
+let fibLevels       = [];  // { level, price } from recent swing range
+let supplyDemandZones = []; // { top, bottom, type: 'supply'|'demand', strength }
+let flippedLevels   = [];  // S/R levels that flipped role
+let lastFalseBreakout = null; // { direction: 'BULL'|'BEAR', level, time }
 
 // --- Build OHLC candle from tick array ---
 function buildCandle(ticks) {
@@ -268,6 +284,83 @@ function detectMorningStar(c3, c2, c1) {
   return null;
 }
 
+// --- Additional Candlestick Patterns (Trendline Trading Strategy + Forex Millionaire) ---
+
+function detectTweezers(curr, prev) {
+  // Tweezers: two candles with matching highs (top) or lows (bottom)
+  if (!curr || !prev) return null;
+  const tolerance = candleRange(prev) * 0.05 || 0.0001;
+
+  // Tweezers Top: matching highs, first bullish second bearish
+  if (Math.abs(curr.h - prev.h) <= tolerance && isBullish(prev) && isBearish(curr)) {
+    return { pattern: "TWEEZERS_TOP", bias: "BEAR", strength: 0.65 };
+  }
+  // Tweezers Bottom: matching lows, first bearish second bullish
+  if (Math.abs(curr.l - prev.l) <= tolerance && isBearish(prev) && isBullish(curr)) {
+    return { pattern: "TWEEZERS_BOTTOM", bias: "BULL", strength: 0.65 };
+  }
+  return null;
+}
+
+function detectSpinningTop(c) {
+  // Spinning Top: small body with roughly equal upper and lower wicks
+  if (!c) return null;
+  const body = candleBody(c);
+  const range = candleRange(c);
+  if (range === 0) return null;
+  const bodyRatio = body / range;
+  if (bodyRatio > 0.3) return null; // body must be small
+  const uw = upperWick(c);
+  const lw = lowerWick(c);
+  if (uw < body * 0.8 || lw < body * 0.8) return null; // both wicks must be notable
+  // Roughly equal wicks (neither > 2× the other)
+  const wickRatio = uw > lw ? uw / Math.max(lw, 0.0001) : lw / Math.max(uw, 0.0001);
+  if (wickRatio > 2.5) return null;
+  // Bias from trend context
+  const bias = trendDirection === "UP" ? "BEAR" : trendDirection === "DOWN" ? "BULL" : "NEUTRAL";
+  return { pattern: "SPINNING_TOP", bias, strength: 0.45 };
+}
+
+function detectPiercingDarkCloud(curr, prev) {
+  // Piercing Line: bearish prev + bullish curr opens below prev low, closes above 50% of prev body
+  // Dark Cloud Cover: bullish prev + bearish curr opens above prev high, closes below 50% of prev body
+  if (!curr || !prev) return null;
+  const prevBody = candleBody(prev);
+  if (prevBody === 0) return null;
+  const prevMid = (prev.o + prev.c) / 2;
+
+  // Piercing Line (bullish reversal)
+  if (isBearish(prev) && isBullish(curr) && curr.o <= prev.l && curr.c > prevMid && curr.c < prev.o) {
+    return { pattern: "PIERCING_LINE", bias: "BULL", strength: 0.7 };
+  }
+  // Dark Cloud Cover (bearish reversal)
+  if (isBullish(prev) && isBearish(curr) && curr.o >= prev.h && curr.c < prevMid && curr.c > prev.o) {
+    return { pattern: "DARK_CLOUD_COVER", bias: "BEAR", strength: 0.7 };
+  }
+  return null;
+}
+
+function detectRailwayTrack(curr, prev) {
+  // Railway Track: two candles of roughly equal size but opposite direction
+  if (!curr || !prev) return null;
+  const b1 = candleBody(prev);
+  const b2 = candleBody(curr);
+  if (b1 === 0 || b2 === 0) return null;
+  // Bodies roughly equal size (within 30%)
+  const sizeRatio = Math.min(b1, b2) / Math.max(b1, b2);
+  if (sizeRatio < 0.7) return null;
+  // Both bodies should be dominant (not doji-like)
+  if (b1 / candleRange(prev) < 0.5 || b2 / candleRange(curr) < 0.5) return null;
+  // Opposite direction
+  if (isBullish(prev) && isBearish(curr)) {
+    return { pattern: "RAILWAY_TRACK", bias: "BEAR", strength: 0.7 };
+  }
+  if (isBearish(prev) && isBullish(curr)) {
+    return { pattern: "RAILWAY_TRACK", bias: "BULL", strength: 0.7 };
+  }
+  return null;
+}
+
 // Scan latest candles for any pattern
 function scanCandlePatterns() {
   if (candles.length < 3) return null;
@@ -287,10 +380,22 @@ function scanCandlePatterns() {
   signal = detectPinBar(c1);
   if (signal) return signal;
 
+  signal = detectPiercingDarkCloud(c1, c2);
+  if (signal) return signal;
+
+  signal = detectRailwayTrack(c1, c2);
+  if (signal) return signal;
+
+  signal = detectTweezers(c1, c2);
+  if (signal) return signal;
+
   signal = detectInsideBar(c1, c2);
   if (signal) return signal;
 
   signal = detectDoji(c1);
+  if (signal && signal.bias !== "NEUTRAL") return signal;
+
+  signal = detectSpinningTop(c1);
   if (signal && signal.bias !== "NEUTRAL") return signal;
 
   return null;
@@ -409,6 +514,252 @@ function detectSupportResistance() {
   srLevels = merged.sort((a, b) => b.touches - a.touches).slice(0, 8);
 }
 
+// --- SMA Calculation (Forex Millionaire: 8 & 21 SMA as dynamic S/R) ---
+
+function calcSMA(candleArr, period) {
+  if (candleArr.length < period) return null;
+  let sum = 0;
+  for (let i = candleArr.length - period; i < candleArr.length; i++) {
+    sum += candleArr[i].c;
+  }
+  return sum / period;
+}
+
+function updateSMAArrays() {
+  // Compute running SMAs from candle close prices
+  smaFastArr = [];
+  smaSlowArr = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i + 1 >= SMA_FAST_PERIOD) {
+      let sum = 0;
+      for (let j = i + 1 - SMA_FAST_PERIOD; j <= i; j++) sum += candles[j].c;
+      smaFastArr.push(sum / SMA_FAST_PERIOD);
+    }
+    if (i + 1 >= SMA_SLOW_PERIOD) {
+      let sum = 0;
+      for (let j = i + 1 - SMA_SLOW_PERIOD; j <= i; j++) sum += candles[j].c;
+      smaSlowArr.push(sum / SMA_SLOW_PERIOD);
+    }
+  }
+}
+
+function isPriceNearSMA(price, smaArr, tolerance) {
+  if (!smaArr.length) return false;
+  const smaVal = smaArr[smaArr.length - 1];
+  return Math.abs(price - smaVal) / price < (tolerance || SR_TOUCH_TOLERANCE * 3);
+}
+
+// --- Bollinger Bands (Forex Millionaire: ranging market confirmation) ---
+
+function updateBollingerBands() {
+  if (candles.length < BB_PERIOD) { bollingerBands = null; return; }
+  let sum = 0;
+  const slice = candles.slice(-BB_PERIOD);
+  for (const c of slice) sum += c.c;
+  const mean = sum / BB_PERIOD;
+
+  let sqDiffSum = 0;
+  for (const c of slice) sqDiffSum += (c.c - mean) * (c.c - mean);
+  const stdDev = Math.sqrt(sqDiffSum / BB_PERIOD);
+
+  bollingerBands = {
+    upper: mean + BB_STD_DEV * stdDev,
+    middle: mean,
+    lower: mean - BB_STD_DEV * stdDev,
+    width: (BB_STD_DEV * stdDev * 2) / mean // normalized bandwidth
+  };
+}
+
+function isBBSqueeze() {
+  // Bollinger squeeze = low bandwidth → ranging market about to break out
+  return bollingerBands && bollingerBands.width < 0.001;
+}
+
+function isPriceAtBBExtreme(price) {
+  // Returns 'UPPER', 'LOWER', or null
+  if (!bollingerBands) return null;
+  if (price >= bollingerBands.upper) return "UPPER";
+  if (price <= bollingerBands.lower) return "LOWER";
+  return null;
+}
+
+// --- Fibonacci Retracement (Forex Millionaire: 50% & 61% key levels) ---
+
+function updateFibLevels() {
+  fibLevels = [];
+  if (swingHighs.length < 1 || swingLows.length < 1) return;
+
+  // Use most recent significant swing high and low
+  const recentHigh = swingHighs.reduce((a, b) => b.price > a.price ? b : a);
+  const recentLow = swingLows.reduce((a, b) => b.price < a.price ? b : a);
+
+  const range = recentHigh.price - recentLow.price;
+  if (range <= 0) return;
+
+  for (const level of FIB_LEVELS) {
+    // In uptrend: retracement from high
+    fibLevels.push({
+      level,
+      priceUp: recentHigh.price - range * level,   // retracement in uptrend
+      priceDown: recentLow.price + range * level,   // retracement in downtrend
+      range
+    });
+  }
+}
+
+function isPriceNearFib(price) {
+  // Returns the Fibonacci level if price is near any, else null
+  for (const fib of fibLevels) {
+    const refPrice = trendDirection === "DOWN" ? fib.priceDown : fib.priceUp;
+    if (Math.abs(price - refPrice) / price < SR_TOUCH_TOLERANCE * 3) {
+      return fib.level;
+    }
+  }
+  return null;
+}
+
+// --- S/R Level Flip Detection (both docs: broken support→resistance, vice versa) ---
+
+function detectLevelFlips() {
+  flippedLevels = [];
+  if (candles.length < 6 || srLevels.length < 1) return;
+
+  const recent = candles.slice(-6);
+  for (const level of srLevels) {
+    // Check if price crossed through this level recently
+    let aboveCount = 0, belowCount = 0;
+    for (const c of recent) {
+      if (c.c > level.price) aboveCount++;
+      else belowCount++;
+    }
+    // Price was on both sides → level was crossed
+    if (aboveCount > 0 && belowCount > 0) {
+      const currentPrice = recent[recent.length - 1].c;
+      // Support broken → now resistance (price went below)
+      if (level.type === "support" && currentPrice < level.price) {
+        flippedLevels.push({ price: level.price, newType: "resistance", touches: level.touches });
+      }
+      // Resistance broken → now support (price went above)
+      if (level.type === "resistance" && currentPrice > level.price) {
+        flippedLevels.push({ price: level.price, newType: "support", touches: level.touches });
+      }
+    }
+  }
+}
+
+// --- False Breakout Detection (Forex Millionaire: most powerful strategy) ---
+
+function detectFalseBreakout() {
+  lastFalseBreakout = null;
+  if (candles.length < 4 || srLevels.length < 1) return;
+
+  const c1 = candles[candles.length - 1]; // newest
+  const c2 = candles[candles.length - 2];
+  const c3 = candles[candles.length - 3];
+
+  for (const level of srLevels.slice(0, 4)) { // check top 4 strongest levels
+    // Bearish false breakout: price broke above resistance then closed back below
+    if (level.type === "resistance") {
+      if (c2.h > level.price && c2.c > level.price && // c2 broke above
+          c1.c < level.price && isBearish(c1)) {       // c1 closed back below
+        lastFalseBreakout = { direction: "BEAR", level: level.price, time: Date.now() };
+        return;
+      }
+    }
+    // Bullish false breakout: price broke below support then closed back above
+    if (level.type === "support") {
+      if (c2.l < level.price && c2.c < level.price && // c2 broke below
+          c1.c > level.price && isBullish(c1)) {       // c1 closed back above
+        lastFalseBreakout = { direction: "BULL", level: level.price, time: Date.now() };
+        return;
+      }
+    }
+  }
+}
+
+// --- Supply & Demand Zones (Forex Millionaire: 3 defining factors) ---
+
+function detectSupplyDemandZones() {
+  supplyDemandZones = [];
+  if (candles.length < 6) return;
+
+  const lookback = Math.min(candles.length - 1, 30);
+  for (let i = candles.length - lookback; i < candles.length - 1; i++) {
+    const c = candles[i];
+    const next = candles[i + 1];
+    const body = candleBody(c);
+    const nextBody = candleBody(next);
+    const avgBody = body > 0 ? body : 0.0001;
+
+    // Strong departure: next candle body >= 2× current (impulsive move away)
+    if (nextBody >= avgBody * 2) {
+      if (isBullish(next)) {
+        // Demand zone (buying pressure): use current candle's range as zone
+        supplyDemandZones.push({
+          top: c.h,
+          bottom: c.l,
+          type: "demand",
+          strength: nextBody / avgBody,
+          index: i
+        });
+      } else if (isBearish(next)) {
+        // Supply zone (selling pressure): use current candle's range as zone
+        supplyDemandZones.push({
+          top: c.h,
+          bottom: c.l,
+          type: "supply",
+          strength: nextBody / avgBody,
+          index: i
+        });
+      }
+    }
+  }
+
+  // Keep strongest zones, limit to 6
+  supplyDemandZones.sort((a, b) => b.strength - a.strength);
+  supplyDemandZones = supplyDemandZones.slice(0, 6);
+}
+
+function isPriceInSupplyDemandZone(price) {
+  // Returns the zone if price is within it, else null
+  for (const zone of supplyDemandZones) {
+    if (price >= zone.bottom && price <= zone.top) {
+      return zone;
+    }
+  }
+  return null;
+}
+
+// --- Double S/R Stacking (Trendline Strategy: trendline + horizontal at same level) ---
+
+function detectDoubleSR(price, candleIdx) {
+  // Check if price is near both a horizontal S/R level AND a trendline
+  let nearHorizontal = false;
+  let nearTrendline = false;
+
+  for (const level of srLevels) {
+    if (Math.abs(price - level.price) / price < SR_TOUCH_TOLERANCE * 2) {
+      nearHorizontal = true;
+      break;
+    }
+  }
+  // Also check flipped levels
+  for (const fl of flippedLevels) {
+    if (Math.abs(price - fl.price) / price < SR_TOUCH_TOLERANCE * 2) {
+      nearHorizontal = true;
+      break;
+    }
+  }
+
+  const uptl = calcTrendline(swingLows.slice(-5));
+  const dntl = calcTrendline(swingHighs.slice(-5));
+  if (isPriceNearTrendline(uptl, candleIdx, price) || isPriceNearTrendline(dntl, candleIdx, price)) {
+    nearTrendline = true;
+  }
+
+  return nearHorizontal && nearTrendline;
+}
+
 // --- Trendline Calculation (linear regression from swing points) ---
 
 function calcTrendline(points) {
@@ -444,7 +795,7 @@ function isPriceNearTrendline(tl, idx, price) {
 
 function scoreConfluence() {
   let score = 0;
-  let detail = { trend: 0, level: 0, signal: 0, momentum: 0, structure: 0 };
+  let detail = { trend: 0, level: 0, signal: 0, momentum: 0, structure: 0, sma: 0, fib: 0, bb: 0, sd: 0, flip: 0, fb: 0 };
 
   const currentPrice = candles.length ? candles[candles.length - 1].c : null;
   if (!currentPrice) return { score: 0, detail };
@@ -491,6 +842,12 @@ function scoreConfluence() {
     detail.level += 1;
   }
 
+  // 2c. DOUBLE S/R STACKING (Trendline Strategy: trendline + horizontal at same point)
+  if (detectDoubleSR(currentPrice, currentIdx)) {
+    score += 1;
+    detail.level += 1;
+  }
+
   // 3. SIGNAL (candlestick pattern — from Forex Millionaire candlestick chapter)
   const pattern = scanCandlePatterns();
   lastPatternSignal = pattern;
@@ -527,6 +884,68 @@ function scoreConfluence() {
     }
   }
 
+  // 6. SMA DYNAMIC S/R (Forex Millionaire: 8 & 21 SMA as dynamic S/R)
+  if (isPriceNearSMA(currentPrice, smaFastArr, SR_TOUCH_TOLERANCE * 2)) {
+    // Price bouncing off 8 SMA = dynamic support/resistance
+    if ((trendDirection === "UP" && currentPrice >= (smaFastArr.at(-1) || 0)) ||
+        (trendDirection === "DOWN" && currentPrice <= (smaFastArr.at(-1) || Infinity))) {
+      score += 1;
+      detail.sma = 1;
+    }
+  }
+  if (isPriceNearSMA(currentPrice, smaSlowArr, SR_TOUCH_TOLERANCE * 2)) {
+    // 21 SMA is stronger dynamic level
+    score += 1;
+    detail.sma = Math.min(2, detail.sma + 1);
+  }
+
+  // 7. FIBONACCI RETRACEMENT (Forex Millionaire: 50% & 61% key levels)
+  const nearFib = isPriceNearFib(currentPrice);
+  if (nearFib !== null) {
+    // Extra point for 50% or 61.8% (most important per Forex Millionaire)
+    const fibScore = (nearFib >= 0.5) ? 1 : 1;
+    score += fibScore;
+    detail.fib = fibScore;
+  }
+
+  // 8. BOLLINGER BANDS (Forex Millionaire: ranging market confirmation)
+  const bbExtreme = isPriceAtBBExtreme(currentPrice);
+  if (bbExtreme) {
+    // Price at BB extreme = potential reversal, adds confluence for reversal trades
+    if ((bbExtreme === "LOWER" && trendDirection !== "DOWN") ||
+        (bbExtreme === "UPPER" && trendDirection !== "UP")) {
+      score += 1;
+      detail.bb = 1;
+    }
+  }
+
+  // 9. SUPPLY/DEMAND ZONE (Forex Millionaire: institutional zones)
+  const sdZone = isPriceInSupplyDemandZone(currentPrice);
+  if (sdZone) {
+    if ((sdZone.type === "demand" && trendDirection === "UP") ||
+        (sdZone.type === "supply" && trendDirection === "DOWN")) {
+      score += 1;
+      detail.sd = 1;
+    }
+  }
+
+  // 10. FLIPPED S/R LEVEL (both docs: broken support→resistance and vice versa)
+  for (const fl of flippedLevels) {
+    const dist = Math.abs(currentPrice - fl.price) / currentPrice;
+    if (dist < SR_TOUCH_TOLERANCE * 3) {
+      score += 1;
+      detail.flip = 1;
+      break;
+    }
+  }
+
+  // 11. FALSE BREAKOUT (Forex Millionaire: most powerful strategy)
+  if (lastFalseBreakout && (Date.now() - lastFalseBreakout.time < 30000)) {
+    // Recent false breakout is a strong signal
+    score += 2;
+    detail.fb = 2;
+  }
+
   confluenceScore = score;
   lastConfluenceDetail = detail;
   return { score, detail };
@@ -549,6 +968,12 @@ function onTickPriceAction(price) {
     detectSwingPoints();
     detectTrendStructure();
     detectSupportResistance();
+    updateSMAArrays();
+    updateBollingerBands();
+    updateFibLevels();
+    detectLevelFlips();
+    detectFalseBreakout();
+    detectSupplyDemandZones();
   }
 
   // Long-term candle builder (multi-timeframe)
@@ -2746,6 +3171,9 @@ resetSessionBtn?.addEventListener("click", () => {
   candleBuffer = []; candles = []; candleLgBuffer = []; candlesLg = [];
   swingHighs = []; swingLows = []; srLevels = [];
   trendDirection = "NONE"; lastPatternSignal = null; confluenceScore = 0;
+  smaFastArr = []; smaSlowArr = []; bollingerBands = null;
+  fibLevels = []; supplyDemandZones = []; flippedLevels = [];
+  lastFalseBreakout = null;
 
 updatePerformanceUI();
   expectancyHistory = [];
@@ -2962,7 +3390,14 @@ function updateConfluenceUI(score, detail) {
   }
 
   if (detailEl) {
-    detailEl.textContent = `T:${detail.trend} L:${detail.level} S:${detail.signal} M:${detail.momentum}`;
+    const parts = [`T:${detail.trend}`, `L:${detail.level}`, `S:${detail.signal}`, `M:${detail.momentum}`];
+    if (detail.sma) parts.push(`SMA:${detail.sma}`);
+    if (detail.fib) parts.push(`FIB:${detail.fib}`);
+    if (detail.bb) parts.push(`BB:${detail.bb}`);
+    if (detail.sd) parts.push(`SD:${detail.sd}`);
+    if (detail.flip) parts.push(`FL:${detail.flip}`);
+    if (detail.fb) parts.push(`FB:${detail.fb}`);
+    detailEl.textContent = parts.join(" ");
   }
 
   if (patternEl) {
@@ -2987,11 +3422,50 @@ function updateConfluenceUI(score, detail) {
   }
 
   if (srCountEl) {
-    srCountEl.textContent = `${srLevels.length} levels`;
+    const extras = [];
+    if (flippedLevels.length) extras.push(`${flippedLevels.length}fl`);
+    if (fibLevels.length) extras.push(`${fibLevels.length}fib`);
+    if (supplyDemandZones.length) extras.push(`${supplyDemandZones.length}sd`);
+    const suffix = extras.length ? ` +${extras.join(",")}` : "";
+    srCountEl.textContent = `${srLevels.length} levels${suffix}`;
   }
 
   if (candleCountEl) {
     candleCountEl.textContent = `${candles.length}/${candlesLg.length}`;
+  }
+
+  // SMA status
+  const smaStatusEl = document.getElementById("smaStatus");
+  if (smaStatusEl) {
+    if (smaFastArr.length && smaSlowArr.length) {
+      const s8 = smaFastArr.at(-1).toFixed(2);
+      const s21 = smaSlowArr.at(-1).toFixed(2);
+      smaStatusEl.textContent = `8:${s8} 21:${s21}`;
+    } else {
+      smaStatusEl.textContent = "building…";
+    }
+  }
+
+  // Bollinger Bands status
+  const bbStatusEl = document.getElementById("bbStatus");
+  if (bbStatusEl) {
+    if (bollingerBands) {
+      const squeeze = isBBSqueeze() ? " SQUEEZE" : "";
+      bbStatusEl.textContent = `W:${(bollingerBands.width * 100).toFixed(2)}%${squeeze}`;
+    } else {
+      bbStatusEl.textContent = "building…";
+    }
+  }
+
+  // Fibonacci & Supply/Demand status
+  const fibSdStatusEl = document.getElementById("fibSdStatus");
+  if (fibSdStatusEl) {
+    const parts = [];
+    if (fibLevels.length) parts.push(`${fibLevels.length} fib`);
+    if (supplyDemandZones.length) parts.push(`${supplyDemandZones.length} s/d`);
+    if (flippedLevels.length) parts.push(`${flippedLevels.length} flip`);
+    if (lastFalseBreakout && (Date.now() - lastFalseBreakout.time < 30000)) parts.push("FB!");
+    fibSdStatusEl.textContent = parts.length ? parts.join(" | ") : "--";
   }
 }
 
@@ -3008,11 +3482,13 @@ drawPriceChart = function() {
   const min = Math.min(...chartPrices);
   const range = max - min || 1;
 
+  const priceToY = (p) => h - ((p - min) / range) * h;
+
   // Draw S/R levels as dashed horizontal lines
   chartCtx.setLineDash([4, 4]);
   srLevels.slice(0, 4).forEach(level => {
     if (level.price < min || level.price > max) return;
-    const y = h - ((level.price - min) / range) * h;
+    const y = priceToY(level.price);
     chartCtx.strokeStyle = level.type === "support" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)";
     chartCtx.lineWidth = 1;
     chartCtx.beginPath();
@@ -3020,7 +3496,65 @@ drawPriceChart = function() {
     chartCtx.lineTo(w, y);
     chartCtx.stroke();
   });
+
+  // Draw flipped S/R levels (dotted, different color)
+  flippedLevels.forEach(fl => {
+    if (fl.price < min || fl.price > max) return;
+    const y = priceToY(fl.price);
+    chartCtx.strokeStyle = fl.newType === "support" ? "rgba(34,197,94,0.8)" : "rgba(239,68,68,0.8)";
+    chartCtx.lineWidth = 1.5;
+    chartCtx.setLineDash([2, 6]);
+    chartCtx.beginPath();
+    chartCtx.moveTo(0, y);
+    chartCtx.lineTo(w, y);
+    chartCtx.stroke();
+  });
+
+  // Draw Fibonacci retracement levels
+  chartCtx.setLineDash([6, 3]);
+  fibLevels.forEach(fib => {
+    const refPrice = trendDirection === "DOWN" ? fib.priceDown : fib.priceUp;
+    if (refPrice < min || refPrice > max) return;
+    const y = priceToY(refPrice);
+    chartCtx.strokeStyle = "rgba(245,158,11,0.5)";
+    chartCtx.lineWidth = 1;
+    chartCtx.beginPath();
+    chartCtx.moveTo(0, y);
+    chartCtx.lineTo(w, y);
+    chartCtx.stroke();
+    // Label
+    chartCtx.fillStyle = "rgba(245,158,11,0.7)";
+    chartCtx.font = "9px sans-serif";
+    chartCtx.fillText(`${(fib.level * 100).toFixed(1)}%`, 2, y - 2);
+  });
   chartCtx.setLineDash([]);
+
+  // Draw Bollinger Bands
+  if (bollingerBands) {
+    const bbPrices = [bollingerBands.upper, bollingerBands.middle, bollingerBands.lower];
+    const bbColors = ["rgba(147,51,234,0.3)", "rgba(147,51,234,0.5)", "rgba(147,51,234,0.3)"];
+    bbPrices.forEach((bp, i) => {
+      if (bp < min || bp > max) return;
+      const y = priceToY(bp);
+      chartCtx.strokeStyle = bbColors[i];
+      chartCtx.lineWidth = i === 1 ? 1.5 : 1;
+      chartCtx.setLineDash(i === 1 ? [] : [3, 3]);
+      chartCtx.beginPath();
+      chartCtx.moveTo(0, y);
+      chartCtx.lineTo(w, y);
+      chartCtx.stroke();
+    });
+    chartCtx.setLineDash([]);
+  }
+
+  // Draw Supply/Demand zones as shaded rectangles
+  supplyDemandZones.slice(0, 3).forEach(zone => {
+    if (zone.top < min || zone.bottom > max) return;
+    const y1 = priceToY(Math.min(zone.top, max));
+    const y2 = priceToY(Math.max(zone.bottom, min));
+    chartCtx.fillStyle = zone.type === "demand" ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)";
+    chartCtx.fillRect(0, y1, w, y2 - y1);
+  });
 
   // Draw trend direction arrow
   if (trendDirection !== "NONE") {
@@ -3028,6 +3562,13 @@ drawPriceChart = function() {
     chartCtx.font = "bold 14px sans-serif";
     const arrow = trendDirection === "UP" ? "▲ UPTREND" : "▼ DOWNTREND";
     chartCtx.fillText(arrow, w - 100, 16);
+  }
+
+  // Draw false breakout marker
+  if (lastFalseBreakout && (Date.now() - lastFalseBreakout.time < 30000)) {
+    chartCtx.fillStyle = "#f59e0b";
+    chartCtx.font = "bold 11px sans-serif";
+    chartCtx.fillText(`⚡ FALSE BREAKOUT (${lastFalseBreakout.direction})`, w - 180, 46);
   }
 
   // Draw pattern marker on latest candle
