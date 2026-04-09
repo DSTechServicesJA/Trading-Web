@@ -141,6 +141,20 @@ function fmt(v, d) {
   return isNaN(n) ? "--" : n.toFixed(d != null ? d : 2);
 }
 
+/**
+ * Returns the recommended order type based on the current trade context.
+ * - Breakout trade (no retest yet): BUY STOP / SELL STOP
+ * - Pullback trade (retest detected): BUY LIMIT / SELL LIMIT
+ * - No breakout yet: null
+ */
+function getRecommendedOrderType() {
+  if (!breakout) return null;
+  if (!retestInfo) {
+    return breakout.dir === "BULL" ? "BUY STOP" : "SELL STOP";
+  }
+  return breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT";
+}
+
 function addLog(msg) {
   if (!UI.signalLog) return;
   const li = document.createElement("li");
@@ -194,11 +208,14 @@ function sendPhaseNotification(phaseName) {
   if (Notification.permission === "granted") {
     const symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
     let body = `${symbol} moved to ${phaseName} phase`;
-    /* Append order-type hint for actionable phases */
-    if (phaseName === "RETEST" && breakout && !retestInfo) {
-      body += breakout.dir === "BULL" ? " — BUY STOP" : " — SELL STOP";
-    } else if (phaseName === "INDECISION" && breakout && retestInfo) {
-      body += breakout.dir === "BULL" ? " — BUY LIMIT" : " — SELL LIMIT";
+    /*
+     * Append order-type hint for actionable phases:
+     *   RETEST phase  = breakout just happened, waiting for retest → STOP orders
+     *   INDECISION    = retest found, waiting for indecision       → LIMIT orders
+     */
+    const orderType = getRecommendedOrderType();
+    if (orderType && (phaseName === "RETEST" || phaseName === "INDECISION")) {
+      body += ` — ${orderType}`;
     }
     new Notification(`IT Guru Indicator: ${phaseName}`, {
       body,
@@ -404,15 +421,9 @@ function updateStateUI() {
 
   /* Next Action: recommended order type based on trade type */
   if (UI.nextAction) {
-    if (breakout && !retestInfo) {
-      /* Breakout trade → use stop orders to ride the breakout momentum */
-      const label = breakout.dir === "BULL" ? "BUY STOP" : "SELL STOP";
-      UI.nextAction.textContent = label;
-      UI.nextAction.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
-    } else if (breakout && retestInfo) {
-      /* Pullback / retest trade → use limit orders to enter at the retest level */
-      const label = breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT";
-      UI.nextAction.textContent = label;
+    const orderType = getRecommendedOrderType();
+    if (orderType) {
+      UI.nextAction.textContent = orderType;
       UI.nextAction.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
     } else {
       UI.nextAction.textContent = "--";
@@ -1022,9 +1033,7 @@ function drawChart() {
     ctx.fillText("BREAKOUT", bx1, by1 - 4);
 
     /* Show recommended order type below the breakout label */
-    const orderLabel = !retestInfo
-      ? (breakout.dir === "BULL" ? "→ BUY STOP" : "→ SELL STOP")
-      : (breakout.dir === "BULL" ? "→ BUY LIMIT" : "→ SELL LIMIT");
+    const orderLabel = "→ " + (getRecommendedOrderType() || "");
     ctx.font = "bold 9px Arial";
     ctx.fillText(orderLabel, bx1, by1 + bh + 14);
   }
@@ -1049,7 +1058,7 @@ function drawChart() {
 
     /* Show pullback order type below the retest label */
     if (breakout) {
-      const limitLabel = breakout.dir === "BULL" ? "→ BUY LIMIT" : "→ SELL LIMIT";
+      const limitLabel = "→ " + (getRecommendedOrderType() || "");
       ctx.font = "bold 9px Arial";
       ctx.fillText(limitLabel, rx1, ry1 + rh + 14);
     }
