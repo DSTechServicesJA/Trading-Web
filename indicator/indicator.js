@@ -1033,9 +1033,11 @@ function drawChart() {
     ctx.fillText("BREAKOUT", bx1, by1 - 4);
 
     /* Show recommended order type below the breakout label */
-    const orderLabel = "→ " + (getRecommendedOrderType() || "");
-    ctx.font = "bold 9px Arial";
-    ctx.fillText(orderLabel, bx1, by1 + bh + 14);
+    const orderType = getRecommendedOrderType();
+    if (orderType) {
+      ctx.font = "bold 9px Arial";
+      ctx.fillText("→ " + orderType, bx1, by1 + bh + 14);
+    }
   }
 
   /* ---- Retest zone highlight ---- */
@@ -1057,10 +1059,10 @@ function drawChart() {
     ctx.fillText("RETEST", rx1, ry1 - 3);
 
     /* Show pullback order type below the retest label */
-    if (breakout) {
-      const limitLabel = "→ " + (getRecommendedOrderType() || "");
+    const retestOrderType = getRecommendedOrderType();
+    if (retestOrderType) {
       ctx.font = "bold 9px Arial";
-      ctx.fillText(limitLabel, rx1, ry1 + rh + 14);
+      ctx.fillText("→ " + retestOrderType, rx1, ry1 + rh + 14);
     }
   }
 
