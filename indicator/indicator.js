@@ -682,6 +682,7 @@ function updateStateUI() {
     if (breakout) {
       confluenceScore = computeConfluenceScore();
       UI.confluenceDisplay.textContent = `${confluenceScore} / 9`;
+      /* Thresholds: ≥ 7 excellent (green), ≥ 4 moderate (yellow), < 4 weak (red) */
       if (confluenceScore >= 7) {
         UI.confluenceDisplay.className = "status-badge bull";
       } else if (confluenceScore >= 4) {
@@ -1117,8 +1118,8 @@ function computeRSI() {
 
   for (let i = 0; i < RSI_PERIOD; i++) rsiValues.push(null);
 
-  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-  rsiValues.push(100 - (100 / (1 + rs)));
+  /* When avgLoss is 0 all movement was up → RSI = 100 */
+  rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
 
   for (let i = RSI_PERIOD + 1; i < closes.length; i++) {
     const change = closes[i] - closes[i - 1];
@@ -1126,8 +1127,7 @@ function computeRSI() {
     const loss = change < 0 ? -change : 0;
     avgGain = (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD;
     avgLoss = (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD;
-    const rs2 = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    rsiValues.push(100 - (100 / (1 + rs2)));
+    rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
   }
 }
 
@@ -1236,6 +1236,7 @@ function isWithinActiveSession() {
     case "new_york":
       return hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end;
     case "overlap":
+      /* London starts at 07, NY at 12 — overlap is 12-16 UTC */
       return hour >= SESSION_NEW_YORK.start && hour < SESSION_LONDON.end;
     case "asian":
       return hour >= SESSION_ASIAN.start && hour < SESSION_ASIAN.end;
@@ -1265,7 +1266,7 @@ function getFibRetestLevel(level) {
   if (!fibRetestEnabled || !openingRange) return null;
   const lookbackEnd = Math.min(openingRange.endIdx, candles.length - 1);
   const lookbackStart = Math.max(0, lookbackEnd - SWING_LOOKBACK_PERIOD);
-  if (lookbackEnd <= lookbackStart) return null;
+  if (lookbackEnd < lookbackStart) return null;
 
   let swingHigh = -Infinity, swingLow = Infinity;
   for (let i = lookbackStart; i <= lookbackEnd; i++) {
@@ -1962,6 +1963,7 @@ function findSwingHigh(upToIdx) {
 function recordSignal(confirmPattern) {
   if (!trade) return;
   const pattern = confirmPattern || "engulfing";
+  const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
   const signal = {
     time: new Date().toISOString(),
     symbol: UI.symbolSelect.value,
@@ -1982,7 +1984,7 @@ function recordSignal(confirmPattern) {
     rsiAtRetest: getCurrentRSI(),
     volumeSpike: breakout ? hasVolumeSpikeOnBreakout(candles[breakout.candleIdx]) : null,
     session: getActiveSessionName(),
-    fibLevel: breakout ? (function() { const f = getFibRetestLevel(breakout.level); return f ? (f.ratio * 100).toFixed(1) + "%" : null; })() : null
+    fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null
   };
   signalHistory.push(signal);
   monitoringTrade = true;
