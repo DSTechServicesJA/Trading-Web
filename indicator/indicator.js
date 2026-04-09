@@ -1549,7 +1549,7 @@ function buildTrade(confirmCandle, confirmIdx) {
     const risk = sl - entry;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry - risk * rr;
-    const actualRR = pureTrailingEnabled ? rr : (risk > 0 ? Math.abs(entry - tp) / risk : rr);
+    const actualRR = pureTrailingEnabled ? rr : (entry - tp) / risk;
 
     /* Min R:R gate: reject trade if R:R is below minimum */
     if (minRREnabled && actualRR < minRRValue) {
@@ -1626,6 +1626,7 @@ function findSwingHigh(upToIdx) {
 /* ================= WIN/LOSS TRACKING ================= */
 function recordSignal(confirmPattern) {
   if (!trade) return;
+  const pattern = confirmPattern || "engulfing";
   const signal = {
     time: new Date().toISOString(),
     symbol: UI.symbolSelect.value,
@@ -1642,7 +1643,7 @@ function recordSignal(confirmPattern) {
     trailingSL: null,
     confluenceScore: computeConfluenceScore(),
     srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
-    confirmPattern: confirmPattern || "engulfing"
+    confirmPattern: pattern
   };
   signalHistory.push(signal);
   monitoringTrade = true;
