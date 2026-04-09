@@ -109,6 +109,9 @@ let partialTpHit  = false;
 let connectTime = null;
 let uptimeInterval = null;
 
+/* Candle countdown timer */
+let candleCountdownInterval = null;
+
 /* Sound & Notifications */
 let soundEnabled = true;
 let notificationsEnabled = false;
@@ -151,6 +154,7 @@ function initUI() {
   UI.canvas         = document.getElementById("mainChart");
   UI.ctx            = UI.canvas.getContext("2d");
   UI.uptimeDisplay  = document.getElementById("uptimeDisplay");
+  UI.candleCountdown = document.getElementById("candleCountdown");
 
   /* Configurable parameter inputs */
   UI.rangeDuration    = document.getElementById("rangeDuration");
@@ -609,6 +613,54 @@ function updateUptime() {
   UI.uptimeDisplay.textContent = `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
+/* ================= CANDLE COUNTDOWN TIMER ================= */
+function startCandleCountdown() {
+  stopCandleCountdown();
+  candleCountdownInterval = setInterval(updateCandleCountdown, 1000);
+  updateCandleCountdown();
+}
+
+function stopCandleCountdown() {
+  if (candleCountdownInterval) {
+    clearInterval(candleCountdownInterval);
+    candleCountdownInterval = null;
+  }
+  if (UI.candleCountdown) {
+    UI.candleCountdown.textContent = "--";
+    UI.candleCountdown.className = "countdown-badge";
+  }
+}
+
+function updateCandleCountdown() {
+  if (!UI.candleCountdown || candles.length === 0) return;
+
+  const gran = parseInt(UI.granSelect.value, 10);
+  const lastCandle = candles[candles.length - 1];
+  const candleEndEpoch = lastCandle.epoch + gran;
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  const remaining = candleEndEpoch - nowEpoch;
+
+  if (remaining <= 0) {
+    UI.candleCountdown.textContent = "0s";
+    UI.candleCountdown.className = "countdown-badge countdown-urgent";
+    return;
+  }
+
+  const min = Math.floor(remaining / 60);
+  const sec = remaining % 60;
+
+  if (min > 0) {
+    UI.candleCountdown.textContent = `${min}m ${sec.toString().padStart(2, "0")}s`;
+  } else {
+    UI.candleCountdown.textContent = `${sec}s`;
+  }
+
+  /* Add urgent class when under 10 seconds */
+  UI.candleCountdown.className = remaining <= 10
+    ? "countdown-badge countdown-urgent"
+    : "countdown-badge";
+}
+
 /* ================= PING / KEEPALIVE ================= */
 function startPing() {
   stopPing();
@@ -679,6 +731,7 @@ function connect() {
       computeEMAs();
       processAllCandles();
       drawChart();
+      startCandleCountdown();
     }
 
     /* Streaming OHLC */
@@ -713,6 +766,7 @@ function connect() {
 
   ws.onclose = () => {
     stopPing();
+    stopCandleCountdown();
     UI.wsStatus.textContent = "DISCONNECTED";
     UI.wsStatus.className = "status-badge disabled";
     UI.connectBtn.disabled = false;
@@ -738,6 +792,7 @@ function disconnect() {
   intentionalClose = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   stopPing();
+  stopCandleCountdown();
 
   /* Clean up active subscriptions before closing */
   try {
@@ -1054,16 +1109,16 @@ function processCandle(idx) {
 
   /* PHASE: looking for indecision */
   if (!indecisionInfo) {
-    if (idx <= retestInfo.candleIdx) return;
+    /* Allow the retest candle itself to also be indecision */
+    if (idx < retestInfo.candleIdx) return;
     if (isIndecision(c)) {
       indecisionInfo = { candleIdx: idx };
       setPhase("CONFIRM");
-      addLog(`Indecision candle at #${idx}`);
-    }
-    if (!indecisionInfo && idx === retestInfo.candleIdx && isIndecision(c)) {
-      indecisionInfo = { candleIdx: idx };
-      setPhase("CONFIRM");
-      addLog(`Retest candle #${idx} is also indecision`);
+      if (idx === retestInfo.candleIdx) {
+        addLog(`Retest candle #${idx} is also indecision`);
+      } else {
+        addLog(`Indecision candle at #${idx}`);
+      }
     }
     return;
   }
@@ -1643,6 +1698,42 @@ function drawChart() {
     ctx.fillRect(W - marginRight, liveY - 8, tw + 4, 16);
     ctx.fillStyle = "#fff";
     ctx.fillText(priceText, W - marginRight + 5, liveY + 4);
+
+    /* Candle countdown badge on chart (top-right corner) */
+    {
+      const gran = parseInt(UI.granSelect.value, 10);
+      const candleEndEpoch = lastCandle.epoch + gran;
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const remaining = Math.max(0, candleEndEpoch - nowEpoch);
+      const cMin = Math.floor(remaining / 60);
+      const cSec = remaining % 60;
+      const cdText = cMin > 0
+        ? `⏱ ${cMin}m ${cSec.toString().padStart(2, "0")}s`
+        : `⏱ ${cSec}s`;
+      ctx.save();
+      ctx.font = "bold 11px Arial";
+      const cdTW = ctx.measureText(cdText).width + 12;
+      const cdX = W - marginRight - cdTW - 4;
+      const cdY = marginTop + 6;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = remaining <= 10 ? "#ef4444" : "#3b82f6";
+      ctx.beginPath();
+      ctx.moveTo(cdX + 4, cdY);
+      ctx.lineTo(cdX + cdTW - 4, cdY);
+      ctx.quadraticCurveTo(cdX + cdTW, cdY, cdX + cdTW, cdY + 4);
+      ctx.lineTo(cdX + cdTW, cdY + 16);
+      ctx.quadraticCurveTo(cdX + cdTW, cdY + 20, cdX + cdTW - 4, cdY + 20);
+      ctx.lineTo(cdX + 4, cdY + 20);
+      ctx.quadraticCurveTo(cdX, cdY + 20, cdX, cdY + 16);
+      ctx.lineTo(cdX, cdY + 4);
+      ctx.quadraticCurveTo(cdX, cdY, cdX + 4, cdY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff";
+      ctx.fillText(cdText, cdX + 6, cdY + 14);
+      ctx.restore();
+    }
   }
 
   /* ---- Signal price badge (prominent display when trade is active) ---- */
