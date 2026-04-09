@@ -321,6 +321,7 @@ button:disabled {
 .ema-slow-swatch { background: rgba(139, 92, 246, 0.35); border: 1px solid #8b5cf6; }
 .htf-ema-swatch  { background: rgba(6, 182, 212, 0.35); border: 1px solid #06b6d4; }
 .trailing-sl-swatch { background: rgba(249, 115, 22, 0.35); border: 1px solid #f97316; }
+.live-price-swatch  { background: linear-gradient(90deg, rgba(34,197,94,0.35), rgba(239,68,68,0.35)); border: 1px dashed #94a3b8; }
 
 .ema-toggle-row label {
   display: flex;

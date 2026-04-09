@@ -1374,6 +1374,29 @@ function drawChart() {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
+  /* ---- Watermark: signal/symbol name in chart background ---- */
+  {
+    const sel = UI.symbolSelect;
+    const symbolLabel = sel ? (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value) : "";
+    if (symbolLabel) {
+      ctx.save();
+      ctx.globalAlpha = 0.07;
+      ctx.fillStyle = currentTheme === "light" ? "#000" : "#fff";
+      const wmFontSize = Math.max(28, Math.min(W * 0.06, 60));
+      ctx.font = `bold ${wmFontSize}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(symbolLabel, W / 2, H / 2 - wmFontSize * 0.4);
+      /* Show phase/signal direction beneath symbol name */
+      const signalLine = trade
+        ? `${trade.dir === "BULL" ? "▲ BUY" : "▼ SELL"} SIGNAL`
+        : phase;
+      ctx.font = `bold ${wmFontSize * 0.55}px Arial`;
+      ctx.fillText(signalLine, W / 2, H / 2 + wmFontSize * 0.45);
+      ctx.restore();
+    }
+  }
+
   if (candles.length < 2) return;
 
   const marginLeft = 10, marginRight = 60, marginTop = 20, marginBottom = 30;
@@ -1586,6 +1609,76 @@ function drawChart() {
     ctx.textAlign = "right";
     ctx.fillText(`R:R  1 : ${fmt(trade.rr, 1)}`, W - marginRight - 6, entryY - 6);
     ctx.textAlign = "left";
+  }
+
+  /* ---- Live price line ---- */
+  if (candles.length > 0) {
+    const lastCandle = candles[candles.length - 1];
+    const liveP = lastCandle.close;
+    const liveY = yOf(liveP);
+    const isBull = lastCandle.close >= lastCandle.open;
+    const livePriceColor = isBull ? "#22c55e" : "#ef4444";
+
+    /* Dashed horizontal line across chart */
+    ctx.strokeStyle = livePriceColor;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, liveY);
+    ctx.lineTo(W - marginRight, liveY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* Price label badge on right edge */
+    const priceText = fmt(liveP, 4);
+    ctx.font = "bold 11px Arial";
+    const tw = ctx.measureText(priceText).width + 10;
+    ctx.fillStyle = livePriceColor;
+    ctx.fillRect(W - marginRight, liveY - 8, tw + 4, 16);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(priceText, W - marginRight + 5, liveY + 4);
+  }
+
+  /* ---- Signal price badge (prominent display when trade is active) ---- */
+  if (trade) {
+    const sel = UI.symbolSelect;
+    const symbolLabel = sel ? (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value) : "";
+    const sigDir = trade.dir === "BULL" ? "▲ BUY" : "▼ SELL";
+    const sigColor = trade.dir === "BULL" ? "#22c55e" : "#ef4444";
+    const sigText = `${sigDir}  ${symbolLabel}  @  ${fmt(trade.entry, 4)}`;
+
+    ctx.save();
+    ctx.font = "bold 13px Arial";
+    const sigTW = ctx.measureText(sigText).width + 20;
+    const sigX = marginLeft + 6;
+    const sigY = marginTop + 6;
+    const sigH = 24;
+
+    /* Badge background */
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = currentTheme === "light" ? "#fff" : "#1e293b";
+    ctx.beginPath();
+    ctx.moveTo(sigX + 4, sigY);
+    ctx.lineTo(sigX + sigTW - 4, sigY);
+    ctx.quadraticCurveTo(sigX + sigTW, sigY, sigX + sigTW, sigY + 4);
+    ctx.lineTo(sigX + sigTW, sigY + sigH - 4);
+    ctx.quadraticCurveTo(sigX + sigTW, sigY + sigH, sigX + sigTW - 4, sigY + sigH);
+    ctx.lineTo(sigX + 4, sigY + sigH);
+    ctx.quadraticCurveTo(sigX, sigY + sigH, sigX, sigY + sigH - 4);
+    ctx.lineTo(sigX, sigY + 4);
+    ctx.quadraticCurveTo(sigX, sigY, sigX + 4, sigY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = sigColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    /* Badge text */
+    ctx.fillStyle = sigColor;
+    ctx.textAlign = "left";
+    ctx.fillText(sigText, sigX + 10, sigY + sigH / 2 + 4);
+    ctx.restore();
   }
 }
 
