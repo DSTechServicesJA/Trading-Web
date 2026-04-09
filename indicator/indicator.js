@@ -17,6 +17,14 @@ const APP_ID  = 120128;
 const WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 const RANGE_MINUTES = 15;
 
+/* Tuning constants */
+const MAX_CANDLE_HISTORY      = 200;
+const LEVEL_TOUCH_TOLERANCE   = 0.15;  // 15% of candle range
+const DOJI_BODY_RATIO         = 0.2;   // body < 20% of range = doji
+const SPINNING_TOP_BODY_RATIO = 0.35;  // body < 35% with wicks = spinning top
+const SWING_LOOKBACK_PERIOD   = 20;    // candles to scan for swing high/low
+const CHART_PRICE_PADDING     = 0.08;  // 8% padding above/below price range
+
 /* ================= STATE ================= */
 let ws            = null;
 let candles       = [];       // {open,high,low,close,epoch}
@@ -185,8 +193,8 @@ function connect() {
       } else {
         candles.push(c);
         // Keep last 200 candles visible
-        if (candles.length > 200) {
-          const removed = candles.length - 200;
+        if (candles.length > MAX_CANDLE_HISTORY) {
+          const removed = candles.length - MAX_CANDLE_HISTORY;
           candles = candles.slice(removed);
           // Adjust indices
           adjustIndicesAfterSlice(removed);
@@ -365,7 +373,7 @@ function processCandle(idx) {
 
 /* ---- Level touch detection ---- */
 function touchesLevel(candle, level) {
-  const tolerance = (candle.high - candle.low) * 0.15;
+  const tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE;
   return candle.low - tolerance <= level && candle.high + tolerance >= level;
 }
 
@@ -375,10 +383,10 @@ function isIndecision(c) {
   const range = c.high - c.low;
   if (range === 0) return true;
   const bodyRatio = body / range;
-  // Doji: body < 20% of range
-  // Spinning top: body < 35% with wicks on both sides
-  if (bodyRatio < 0.2) return true;
-  if (bodyRatio < 0.35) {
+  // Doji: body < DOJI_BODY_RATIO of range
+  // Spinning top: body < SPINNING_TOP_BODY_RATIO with wicks on both sides
+  if (bodyRatio < DOJI_BODY_RATIO) return true;
+  if (bodyRatio < SPINNING_TOP_BODY_RATIO) {
     const upperWick = c.high - Math.max(c.open, c.close);
     const lowerWick = Math.min(c.open, c.close) - c.low;
     if (upperWick > 0 && lowerWick > 0) return true;
@@ -429,7 +437,7 @@ function buildTrade(confirmCandle, confirmIdx) {
 
 function findSwingLow(upToIdx) {
   let low = Infinity;
-  const lookback = Math.max(0, upToIdx - 20);
+  const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
   for (let i = lookback; i <= upToIdx; i++) {
     if (candles[i].low < low) low = candles[i].low;
   }
@@ -438,7 +446,7 @@ function findSwingLow(upToIdx) {
 
 function findSwingHigh(upToIdx) {
   let high = -Infinity;
-  const lookback = Math.max(0, upToIdx - 20);
+  const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
   for (let i = lookback; i <= upToIdx; i++) {
     if (candles[i].high > high) high = candles[i].high;
   }
@@ -510,7 +518,7 @@ function drawChart() {
     if (trade.sl > priceHigh) priceHigh = trade.sl;
     if (trade.sl < priceLow)  priceLow = trade.sl;
   }
-  const pricePad = (priceHigh - priceLow) * 0.08;
+  const pricePad = (priceHigh - priceLow) * CHART_PRICE_PADDING;
   priceHigh += pricePad;
   priceLow  -= pricePad;
   const priceRange = priceHigh - priceLow || 1;
