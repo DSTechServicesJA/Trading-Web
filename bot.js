@@ -3987,6 +3987,7 @@ function initLoginGate() {
       : "flex";
 
   btn.onclick = () => {
+    /* Priority: overlay input → page-level input → previously stored token */
     const token = loginTokenInput?.value?.trim() || tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
 
     if (!token) {
