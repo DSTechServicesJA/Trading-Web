@@ -133,6 +133,19 @@
 
             <label class="toggle-row"><input type="checkbox" id="partialTpToggle" /> Partial TP (1:1)</label>
             <p class="hint">Move SL to breakeven when price reaches 1:1 reward.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="falseBreakoutToggle" /> False Breakout Filter</label>
+            <p class="hint">Invalidate breakout if next 3 candles close back inside range.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="minRRToggle" /> Min R:R Gate</label>
+            <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+              <label class="hint" for="minRRInput" style="margin-right:6px;">Min R:R</label>
+              <input type="number" id="minRRInput" min="1" max="10" step="0.5" value="2" style="width:60px;" />
+            </div>
+            <p class="hint">Reject trades with R:R below this threshold (from MD: min 1:2).</p>
+
+            <label class="toggle-row"><input type="checkbox" id="pureTrailingToggle" /> Pure Trailing (No TP)</label>
+            <p class="hint">No fixed TP — rely solely on trailing stop to exit. Captures bigger moves.</p>
           </div>
         </section>
 
@@ -197,6 +210,14 @@
             <span id="breakoutStrength" class="env-label">--</span>
           </div>
           <div class="side-row">
+            <span>Confluence Score</span>
+            <span id="confluenceDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>S/R Confluence</span>
+            <span id="srConfluenceDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
             <span>Retest</span>
             <span id="retestStatus" class="env-label">--</span>
           </div>
@@ -252,11 +273,18 @@
             <div class="side-row"><span>ATR Tolerance</span><span class="status-badge bull">ON ✅</span></div>
             <div class="side-row"><span>Trailing Stop</span><span class="status-badge bull">ON ✅</span></div>
             <div class="side-row"><span>Partial TP</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>False Breakout</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>Min R:R Gate</span><span class="status-badge bull">ON (1:2) ✅</span></div>
             <p class="hint" style="margin-top:8px;">
               <strong>Why:</strong> EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise.
               ATR tolerance adapts retest detection to volatility.
               Trailing stop locks in profits on extended moves.
               Partial TP at 1:1 secures gains and moves SL to breakeven.
+              False breakout filter prevents entering on fake-outs.
+              Min R:R gate ensures every trade has at least 1:2 risk-reward.
+              Pin bar, inside bar, and morning/evening star patterns
+              provide additional confirmation beyond basic engulfing.
+              Confluence score (0-5) gauges overall setup quality.
               Use on V75 (1s) or V100 (1s) for best signal frequency.
             </p>
           </div>
