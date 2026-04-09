@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>IT Guru – 15-Min Breakout Retest Indicator</title>
+  <title>IT Guru – Breakout Retest Indicator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
   <link rel="stylesheet" href="style.css" />
@@ -10,7 +10,7 @@
 <body>
 <main class="container">
 
-  <h1>IT Guru – 15-Min Breakout Retest <span class="badge">INDICATOR</span></h1>
+  <h1>IT Guru – Breakout Retest <span class="badge">INDICATOR</span></h1>
 
   <nav class="bot-nav">
     <div class="brand">🤖 IT Guru Bots</div>
@@ -25,125 +25,165 @@
   <div class="layout-grid">
 
     <!-- ===== LEFT PANEL ===== -->
-    <div class="left-panel">
+    <div class="left-panel" id="leftPanel">
 
-      <!-- Symbol Selection -->
-      <section class="box">
-        <label for="symbolSelect">Market Symbol</label>
-        <select id="symbolSelect">
-          <optgroup label="VOLATILITY (1s)">
-            <option value="1HZ10V">Volatility 10 (1s)</option>
-            <option value="1HZ15V">Volatility 15 (1s)</option>
-            <option value="1HZ25V">Volatility 25 (1s)</option>
-            <option value="1HZ30V">Volatility 30 (1s)</option>
-            <option value="1HZ50V">Volatility 50 (1s)</option>
-            <option value="1HZ75V" selected>Volatility 75 (1s)</option>
-            <option value="1HZ90V">Volatility 90 (1s)</option>
-            <option value="1HZ100V">Volatility 100 (1s)</option>
-          </optgroup>
-          <optgroup label="VOLATILITY (STANDARD)">
-            <option value="R_10">Volatility 10 Index</option>
-            <option value="R_25">Volatility 25 Index</option>
-            <option value="R_50">Volatility 50 Index</option>
-            <option value="R_75">Volatility 75 Index</option>
-            <option value="R_100">Volatility 100 Index</option>
-          </optgroup>
-        </select>
-      </section>
+      <!-- Mobile toggle button (visible only on small screens) -->
+      <button id="panelToggleBtn" class="panel-toggle" type="button" aria-label="Toggle settings panel">⚙️ Settings</button>
 
-      <!-- Timeframe -->
-      <section class="box">
-        <label for="granSelect">Candle Timeframe</label>
-        <select id="granSelect">
-          <option value="60" selected>1 Minute</option>
-          <option value="120">2 Minutes</option>
-          <option value="180">3 Minutes</option>
-          <option value="300">5 Minutes</option>
-          <option value="600">10 Minutes</option>
-          <option value="900">15 Minutes</option>
-        </select>
-        <p class="hint">Candle interval for chart. The opening range always spans 15 real-time minutes.</p>
-      </section>
+      <div id="panelContent" class="panel-content">
 
-      <!-- Risk:Reward -->
-      <section class="box">
-        <label>Risk : Reward</label>
-        <div class="rr-inputs">
-          <input type="number" id="riskInput" min="0.1" step="0.1" value="1" placeholder="1" />
-          <span class="rr-separator">:</span>
-          <input type="number" id="rewardInput" min="0.1" step="0.1" value="1" placeholder="1" />
-        </div>
-        <p class="hint">Enter risk and reward values (default 1:1). E.g. 1 and 3 = 1:3 R:R.</p>
-      </section>
+        <!-- Symbol Selection -->
+        <section class="box">
+          <label for="symbolSelect">Market Symbol</label>
+          <select id="symbolSelect">
+            <optgroup label="VOLATILITY (1s)">
+              <option value="1HZ10V">Volatility 10 (1s)</option>
+              <option value="1HZ15V">Volatility 15 (1s)</option>
+              <option value="1HZ25V">Volatility 25 (1s)</option>
+              <option value="1HZ30V">Volatility 30 (1s)</option>
+              <option value="1HZ50V">Volatility 50 (1s)</option>
+              <option value="1HZ75V" selected>Volatility 75 (1s)</option>
+              <option value="1HZ90V">Volatility 90 (1s)</option>
+              <option value="1HZ100V">Volatility 100 (1s)</option>
+            </optgroup>
+            <optgroup label="VOLATILITY (STANDARD)">
+              <option value="R_10">Volatility 10 Index</option>
+              <option value="R_25">Volatility 25 Index</option>
+              <option value="R_50">Volatility 50 Index</option>
+              <option value="R_75">Volatility 75 Index</option>
+              <option value="R_100">Volatility 100 Index</option>
+            </optgroup>
+          </select>
+        </section>
 
-      <!-- Status Panel -->
-      <section class="info">
-        <p><strong>Status:</strong> <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span></p>
-        <p><strong>Candles:</strong> <span id="candleCount">0</span></p>
-        <div class="live-price">
-          <span class="label">Live Price</span>
-          <span id="livePrice" class="price">--</span>
-        </div>
-      </section>
+        <!-- Timeframe -->
+        <section class="box">
+          <label for="granSelect">Candle Timeframe</label>
+          <select id="granSelect">
+            <option value="60" selected>1 Minute</option>
+            <option value="120">2 Minutes</option>
+            <option value="180">3 Minutes</option>
+            <option value="300">5 Minutes</option>
+            <option value="600">10 Minutes</option>
+            <option value="900">15 Minutes</option>
+          </select>
+          <p class="hint">Candle interval for chart.</p>
+        </section>
 
-      <!-- Controls -->
-      <section class="controls">
-        <button id="connectBtn" type="button">Connect</button>
-        <button id="disconnectBtn" type="button" disabled>Disconnect</button>
-      </section>
+        <!-- Risk:Reward -->
+        <section class="box">
+          <label>Risk : Reward</label>
+          <div class="rr-inputs">
+            <input type="number" id="riskInput" min="0.1" step="0.1" value="1" placeholder="1" />
+            <span class="rr-separator">:</span>
+            <input type="number" id="rewardInput" min="0.1" step="0.1" value="1" placeholder="1" />
+          </div>
+          <p class="hint">Default 1:1. E.g. 1 and 3 = 1:3 R:R.</p>
+        </section>
 
-      <!-- Indicator State -->
-      <section class="dashboard indicator-state">
-        <h3>Indicator State</h3>
-        <div class="side-row">
-          <span>Phase</span>
-          <span id="phaseLabel" class="status-badge disabled">WAITING</span>
-        </div>
-        <div class="side-row">
-          <span>Range High</span>
-          <span id="rangeHigh" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Range Low</span>
-          <span id="rangeLow" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Breakout Dir</span>
-          <span id="breakoutDir" class="status-badge disabled">NONE</span>
-        </div>
-        <div class="side-row">
-          <span>Retest</span>
-          <span id="retestStatus" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Confirmation</span>
-          <span id="confirmStatus" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Entry Price</span>
-          <span id="entryPrice" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Stop Loss</span>
-          <span id="slPrice" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>Take Profit</span>
-          <span id="tpPrice" class="env-label">--</span>
-        </div>
-        <div class="side-row">
-          <span>R:R</span>
-          <span id="rrDisplay" class="env-label">--</span>
-        </div>
-      </section>
+        <!-- Configurable Parameters -->
+        <section class="box">
+          <h3 class="collapsible">Advanced Parameters</h3>
+          <div class="collapsible-body">
+            <label for="rangeDuration">Opening Range (min)</label>
+            <select id="rangeDuration">
+              <option value="5">5 min</option>
+              <option value="10">10 min</option>
+              <option value="15" selected>15 min</option>
+              <option value="30">30 min</option>
+            </select>
 
-      <!-- Trade Log -->
-      <section class="history">
-        <h3 class="collapsible">Signal Log</h3>
-        <div class="collapsible-body">
-          <ul id="signalLog"></ul>
-        </div>
-      </section>
+            <label for="touchTolerance">Level Touch Tolerance (%)</label>
+            <input type="number" id="touchTolerance" min="5" max="30" step="1" value="15" />
+
+            <label for="dojiRatio">Doji Body Ratio (%)</label>
+            <input type="number" id="dojiRatio" min="5" max="40" step="1" value="20" />
+
+            <label for="lookbackPeriod">Swing Lookback (candles)</label>
+            <input type="number" id="lookbackPeriod" min="5" max="50" step="1" value="20" />
+          </div>
+        </section>
+
+        <!-- Status Panel -->
+        <section class="info">
+          <p><strong>Status:</strong> <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span></p>
+          <p><strong>Candles:</strong> <span id="candleCount">0</span></p>
+          <p><strong>Uptime:</strong> <span id="uptimeDisplay" class="env-label">--</span></p>
+          <div class="live-price">
+            <span class="label">Live Price</span>
+            <span id="livePrice" class="price">--</span>
+          </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls">
+          <button id="connectBtn" type="button">Connect</button>
+          <button id="disconnectBtn" type="button" disabled>Disconnect</button>
+        </section>
+
+        <!-- Indicator State -->
+        <section class="dashboard indicator-state">
+          <h3>Indicator State</h3>
+          <div class="side-row">
+            <span>Phase</span>
+            <span id="phaseLabel" class="status-badge disabled">WAITING</span>
+          </div>
+          <div class="side-row">
+            <span>Range High</span>
+            <span id="rangeHigh" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Range Low</span>
+            <span id="rangeLow" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Breakout Dir</span>
+            <span id="breakoutDir" class="status-badge disabled">NONE</span>
+          </div>
+          <div class="side-row">
+            <span>Retest</span>
+            <span id="retestStatus" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Confirmation</span>
+            <span id="confirmStatus" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Entry Price</span>
+            <span id="entryPrice" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Stop Loss</span>
+            <span id="slPrice" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Take Profit</span>
+            <span id="tpPrice" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>R:R</span>
+            <span id="rrDisplay" class="env-label">--</span>
+          </div>
+        </section>
+
+        <!-- Signal Accuracy Stats -->
+        <section class="dashboard">
+          <h3>Signal Accuracy</h3>
+          <div class="side-row"><span>Signals</span><span id="signalCount" class="env-label">0</span></div>
+          <div class="side-row"><span>Wins</span><span id="signalWins" class="env-label">0</span></div>
+          <div class="side-row"><span>Losses</span><span id="signalLosses" class="env-label">0</span></div>
+          <div class="side-row"><span>Win Rate</span><span id="signalWinRate" class="env-label">0%</span></div>
+        </section>
+
+        <!-- Signal Log -->
+        <section class="history">
+          <h3 class="collapsible">Signal Log</h3>
+          <div class="collapsible-body">
+            <ul id="signalLog"></ul>
+          </div>
+        </section>
+
+      </div><!-- /panelContent -->
     </div>
 
     <!-- ===== RIGHT PANEL ===== -->
@@ -154,10 +194,10 @@
         <canvas id="mainChart" width="900" height="500"></canvas>
       </section>
 
-      <!-- Legend -->
+      <!-- Legend + EMA toggle -->
       <section class="dashboard chart-legend">
         <div class="legend-row">
-          <span class="legend-swatch range-swatch"></span> Opening Range (15 min)
+          <span class="legend-swatch range-swatch"></span> Opening Range
         </div>
         <div class="legend-row">
           <span class="legend-swatch breakout-bull-swatch"></span> Bullish Breakout
@@ -169,10 +209,35 @@
           <span class="legend-swatch retest-swatch"></span> Retest Zone
         </div>
         <div class="legend-row">
-          <span class="legend-swatch confirm-swatch"></span> Confirmation Candle
+          <span class="legend-swatch confirm-swatch"></span> Confirmation
         </div>
         <div class="legend-row">
-          <span class="legend-swatch entry-swatch"></span> Entry / SL / TP Levels
+          <span class="legend-swatch entry-swatch"></span> Entry / SL / TP
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch ema-fast-swatch"></span> EMA 8
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch ema-slow-swatch"></span> EMA 21
+        </div>
+        <div class="legend-row ema-toggle-row">
+          <label><input type="checkbox" id="emaToggle" /> Show EMA</label>
+        </div>
+      </section>
+
+      <!-- Tools Panel -->
+      <h3>TOOLS</h3>
+      <section class="dashboard tools-panel">
+        <div class="tools-row">
+          <button id="exportSignalsBtn" type="button" class="tool-btn">📥 Export Signals</button>
+          <button id="themeToggleBtn" type="button" class="tool-btn">☀️ Light</button>
+        </div>
+        <div class="tools-row">
+          <button id="soundToggleBtn" type="button" class="tool-btn">🔊 Sound ON</button>
+          <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
+        </div>
+        <div class="shortcut-hints">
+          <small>Alt+C Connect | Alt+D Disconnect | Alt+T Theme | Alt+E Export | Alt+N Notifications</small>
         </div>
       </section>
 
@@ -183,18 +248,17 @@
 
 <script src="indicator.js"></script>
 <script>
-  document.querySelectorAll(".bot-links a").forEach(link => {
-    if (link.href === window.location.href) {
-      link.style.background = "#1e293b";
-      link.style.color = "#38bdf8";
+  /* Mobile panel toggle */
+  (function() {
+    const btn = document.getElementById("panelToggleBtn");
+    const content = document.getElementById("panelContent");
+    if (btn && content) {
+      btn.addEventListener("click", () => {
+        content.classList.toggle("panel-open");
+        btn.textContent = content.classList.contains("panel-open") ? "✕ Close" : "⚙️ Settings";
+      });
     }
-  });
-  document.querySelectorAll(".collapsible").forEach(el => {
-    el.addEventListener("click", () => {
-      const body = el.nextElementSibling;
-      if (body) body.classList.toggle("open");
-    });
-  });
+  })();
 </script>
 </body>
 </html>
