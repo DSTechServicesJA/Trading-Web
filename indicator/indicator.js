@@ -419,9 +419,9 @@ function isBearishEngulfing(prev, curr) {
 function buildTrade(confirmCandle, confirmIdx) {
   const riskVal   = parseFloat(UI.riskInput.value);
   const rewardVal = parseFloat(UI.rewardInput.value);
-  const risk_units  = (riskVal > 0) ? riskVal : 1;
-  const reward_units = (rewardVal > 0) ? rewardVal : 1;
-  const rr = reward_units / risk_units;
+  const riskUnits  = (riskVal > 0) ? riskVal : 1;
+  const rewardUnits = (rewardVal > 0) ? rewardVal : 1;
+  const rr = rewardUnits / riskUnits;
 
   if (breakout.dir === "BULL") {
     const entry = confirmCandle.close;
