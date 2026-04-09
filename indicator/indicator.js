@@ -5,8 +5,9 @@
      1. RANGE       – Collect the first 15 real-time minutes
      2. BREAKOUT    – Detect candle closing outside range
      3. RETEST      – Price returns to breakout level
-     4. INDECISION  – Doji / spinning-top at retest zone
-     5. CONFIRM     – Engulfing candle confirms direction
+     4. INDECISION  – Doji / spinning-top / pin bar / inside bar
+     5. CONFIRM     – Engulfing / morning-evening star / inside
+                      bar breakout confirms direction
      6. TRADE       – Entry plotted with SL + TP (R:R)
 
    Features:
@@ -27,6 +28,15 @@
      - True swing point detection for structural SL placement
      - Breakout strength / volume proxy via candle range vs ATR
      - Trailing stop (ATR-based) and partial TP at 1:1
+     - Pin bar / hammer / shooting star indecision detection
+     - Inside bar indecision + mother-candle breakout confirm
+     - Morning star / evening star 3-candle confirmation
+     - S/R confluence check at retest level
+     - False breakout invalidation
+     - Confluence score (0-5) quality gauge
+     - Body-size breakout conviction check
+     - Minimum R:R gate to reject low-quality trades
+     - Pure trailing stop mode (no fixed TP)
    ========================================================= */
 
 "use strict";
@@ -58,6 +68,21 @@ const SWING_NEIGHBOR_BARS = 3;
 
 /* Trailing stop distance in ATR multiples */
 const TRAILING_STOP_ATR_MULT = 1.5;
+
+/* Pin bar: tail must be at least this multiple of body */
+const PIN_BAR_TAIL_RATIO = 2.0;
+/* Pin bar: the rejection wick must be this much larger than the other wick */
+const PIN_BAR_WICK_DOMINANCE = 1.5;
+
+/* Morning/Evening star: max body-to-range ratio for the middle "star" candle */
+const STAR_BODY_RATIO = 0.35;
+
+/* S/R confluence: ATR multiplier for tolerance, and fallback price percentage */
+const SR_CONFLUENCE_ATR_MULT = 0.5;
+const SR_CONFLUENCE_PRICE_PCT = 0.002;
+
+/* False breakout: number of candles to watch for price returning inside range */
+const FALSE_BREAKOUT_CANDLES = 3;
 
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
@@ -126,6 +151,13 @@ let htfFilterEnabled    = false;
 let atrToleranceEnabled = false;
 let trailingStopEnabled = false;
 let partialTpEnabled    = false;
+let falseBreakoutEnabled = false;
+let minRREnabled         = false;
+let pureTrailingEnabled  = false;
+let minRRValue           = 2.0;
+
+/* Confluence score for current setup */
+let confluenceScore = 0;
 
 /* ================= UI REFS ================= */
 const UI = {};
@@ -183,6 +215,14 @@ function initUI() {
   UI.atrToleranceToggle = document.getElementById("atrToleranceToggle");
   UI.trailingStopToggle = document.getElementById("trailingStopToggle");
   UI.partialTpToggle    = document.getElementById("partialTpToggle");
+  UI.falseBreakoutToggle = document.getElementById("falseBreakoutToggle");
+  UI.minRRToggle         = document.getElementById("minRRToggle");
+  UI.minRRInput          = document.getElementById("minRRInput");
+  UI.pureTrailingToggle  = document.getElementById("pureTrailingToggle");
+
+  /* New indicator state displays */
+  UI.confluenceDisplay  = document.getElementById("confluenceDisplay");
+  UI.srConfluenceDisplay = document.getElementById("srConfluenceDisplay");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -317,7 +357,11 @@ function saveSettings() {
       htfFilterEnabled,
       atrToleranceEnabled,
       trailingStopEnabled,
-      partialTpEnabled
+      partialTpEnabled,
+      falseBreakoutEnabled,
+      minRREnabled,
+      minRRValue,
+      pureTrailingEnabled
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -360,12 +404,20 @@ function restoreSettings() {
     if (s.atrToleranceEnabled != null) atrToleranceEnabled = s.atrToleranceEnabled;
     if (s.trailingStopEnabled != null) trailingStopEnabled = s.trailingStopEnabled;
     if (s.partialTpEnabled != null) partialTpEnabled = s.partialTpEnabled;
+    if (s.falseBreakoutEnabled != null) falseBreakoutEnabled = s.falseBreakoutEnabled;
+    if (s.minRREnabled != null) minRREnabled = s.minRREnabled;
+    if (s.minRRValue != null) minRRValue = s.minRRValue;
+    if (s.pureTrailingEnabled != null) pureTrailingEnabled = s.pureTrailingEnabled;
     if (UI.autoResetToggle) UI.autoResetToggle.checked = autoResetEnabled;
     if (UI.emaFilterToggle) UI.emaFilterToggle.checked = emaFilterEnabled;
     if (UI.htfFilterToggle) UI.htfFilterToggle.checked = htfFilterEnabled;
     if (UI.atrToleranceToggle) UI.atrToleranceToggle.checked = atrToleranceEnabled;
     if (UI.trailingStopToggle) UI.trailingStopToggle.checked = trailingStopEnabled;
     if (UI.partialTpToggle) UI.partialTpToggle.checked = partialTpEnabled;
+    if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
+    if (UI.minRRToggle) UI.minRRToggle.checked = minRREnabled;
+    if (UI.minRRInput) UI.minRRInput.value = minRRValue;
+    if (UI.pureTrailingToggle) UI.pureTrailingToggle.checked = pureTrailingEnabled;
   } catch (e) { /* storage not available */ }
 }
 
@@ -423,7 +475,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -554,12 +606,44 @@ function updateStateUI() {
     if (breakout && breakout.candleIdx < candles.length && atrValue > 0) {
       const bc = candles[breakout.candleIdx];
       const candleRange = bc.high - bc.low;
-      const strong = candleRange >= atrValue * 0.8;
+      const bodySize = Math.abs(bc.close - bc.open);
+      const strong = candleRange >= atrValue * 0.8 && bodySize >= candleRange * 0.6;
       UI.breakoutStrength.textContent = strong ? "STRONG" : "WEAK";
       UI.breakoutStrength.className = "status-badge " + (strong ? "bull" : "warning");
     } else {
       UI.breakoutStrength.textContent = "--";
       UI.breakoutStrength.className = "env-label";
+    }
+  }
+
+  /* Confluence score */
+  if (UI.confluenceDisplay) {
+    if (breakout) {
+      confluenceScore = computeConfluenceScore();
+      UI.confluenceDisplay.textContent = `${confluenceScore} / 5`;
+      if (confluenceScore >= 4) {
+        UI.confluenceDisplay.className = "status-badge bull";
+      } else if (confluenceScore >= 2) {
+        UI.confluenceDisplay.className = "status-badge warning";
+      } else {
+        UI.confluenceDisplay.className = "status-badge bear";
+      }
+    } else {
+      confluenceScore = 0;
+      UI.confluenceDisplay.textContent = "--";
+      UI.confluenceDisplay.className = "env-label";
+    }
+  }
+
+  /* S/R Confluence */
+  if (UI.srConfluenceDisplay) {
+    if (breakout) {
+      const hasSR = hasSRConfluence(breakout.level);
+      UI.srConfluenceDisplay.textContent = hasSR ? "YES ✅" : "NO";
+      UI.srConfluenceDisplay.className = "status-badge " + (hasSR ? "bull" : "disabled");
+    } else {
+      UI.srConfluenceDisplay.textContent = "--";
+      UI.srConfluenceDisplay.className = "env-label";
     }
   }
 
@@ -580,7 +664,7 @@ function updateStateUI() {
   if (trade) {
     if (UI.entryPrice) UI.entryPrice.textContent = fmt(trade.entry, 4);
     if (UI.slPrice) UI.slPrice.textContent    = fmt(trade.sl, 4);
-    if (UI.tpPrice) UI.tpPrice.textContent    = fmt(trade.tp, 4);
+    if (UI.tpPrice) UI.tpPrice.textContent    = trade.tp != null ? fmt(trade.tp, 4) : "TRAILING";
     if (UI.rrDisplay) UI.rrDisplay.textContent  = `1 : ${fmt(trade.rr, 1)}`;
   } else {
     if (UI.entryPrice) UI.entryPrice.textContent = "--";
@@ -944,14 +1028,200 @@ function isHTFAligned(dir) {
 
 /* ================= BREAKOUT STRENGTH (VOLUME PROXY) ================= */
 /**
- * Checks breakout conviction by comparing candle range to ATR.
- * A strong breakout candle should have range >= 80% of ATR.
+ * Checks breakout conviction by comparing candle range AND body size to ATR.
+ * A strong breakout candle should have:
+ *   - range >= 80% of ATR
+ *   - body (|close-open|) >= 60% of candle range (strong directional move)
  * When ATR data is unavailable, returns true (no filter).
  */
 function hasBreakoutConviction(candle) {
   if (atrValue <= 0) return true;
   const candleRange = candle.high - candle.low;
-  return candleRange >= atrValue * 0.8;
+  const bodySize = Math.abs(candle.close - candle.open);
+  const rangeOk = candleRange >= atrValue * 0.8;
+  const bodyOk = candleRange > 0 ? bodySize >= candleRange * 0.6 : false;
+  return rangeOk && bodyOk;
+}
+
+/* ================= PIN BAR / HAMMER / SHOOTING STAR ================= */
+/**
+ * Detects pin bar patterns (hammer for bullish, shooting star for bearish).
+ * A pin bar has a small body and a long tail (shadow) in the rejection direction.
+ * The tail must be >= PIN_BAR_TAIL_RATIO × the body length.
+ * @param {object} c - candle object
+ * @param {string|null} dir - if provided, only detect pin bars in that direction
+ * @returns {boolean}
+ */
+function isPinBar(c, dir) {
+  const body = Math.abs(c.close - c.open);
+  const range = c.high - c.low;
+  if (range === 0) return false;
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+
+  /* Hammer / bullish pin bar: long lower wick, small body at top */
+  if (!dir || dir === "BULL") {
+    if (lowerWick >= body * PIN_BAR_TAIL_RATIO && lowerWick > upperWick * PIN_BAR_WICK_DOMINANCE) {
+      return true;
+    }
+  }
+  /* Shooting star / bearish pin bar: long upper wick, small body at bottom */
+  if (!dir || dir === "BEAR") {
+    if (upperWick >= body * PIN_BAR_TAIL_RATIO && upperWick > lowerWick * PIN_BAR_WICK_DOMINANCE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ================= INSIDE BAR DETECTION ================= */
+/**
+ * Returns true if 'curr' candle is completely contained within 'prev' candle range.
+ * The inside bar indicates consolidation/indecision before a breakout.
+ */
+function isInsideBar(prev, curr) {
+  if (!prev || !curr) return false;
+  return curr.high <= prev.high && curr.low >= prev.low;
+}
+
+/**
+ * Returns true if 'curr' breaks out of the inside bar 'mother' in the given direction.
+ */
+function isInsideBarBreakout(mother, curr, dir) {
+  if (!mother || !curr) return false;
+  if (dir === "BULL") return curr.close > mother.high;
+  if (dir === "BEAR") return curr.close < mother.low;
+  return false;
+}
+
+/* ================= MORNING STAR / EVENING STAR ================= */
+/**
+ * Morning Star: 3-candle bullish reversal.
+ *   c1 = large bearish, c2 = small-bodied (star), c3 = large bullish closing into c1.
+ */
+function isMorningStar(c1, c2, c3) {
+  if (!c1 || !c2 || !c3) return false;
+  const c1Body = c1.close - c1.open;
+  const c2Body = Math.abs(c2.close - c2.open);
+  const c3Body = c3.close - c3.open;
+  const c1Range = c1.high - c1.low;
+
+  if (c1Body >= 0) return false;              /* c1 must be bearish */
+  if (c3Body <= 0) return false;              /* c3 must be bullish */
+  if (c1Range === 0) return false;
+  if (c2Body / c1Range > STAR_BODY_RATIO) return false;  /* c2 must be small relative to c1 */
+  /* c3 should close well into c1's body (at least 50%) */
+  const c1MidBody = (c1.open + c1.close) / 2;
+  return c3.close >= c1MidBody;
+}
+
+/**
+ * Evening Star: 3-candle bearish reversal.
+ *   c1 = large bullish, c2 = small-bodied (star), c3 = large bearish closing into c1.
+ */
+function isEveningStar(c1, c2, c3) {
+  if (!c1 || !c2 || !c3) return false;
+  const c1Body = c1.close - c1.open;
+  const c2Body = Math.abs(c2.close - c2.open);
+  const c3Body = c3.close - c3.open;
+  const c1Range = c1.high - c1.low;
+
+  if (c1Body <= 0) return false;              /* c1 must be bullish */
+  if (c3Body >= 0) return false;              /* c3 must be bearish */
+  if (c1Range === 0) return false;
+  if (c2Body / c1Range > STAR_BODY_RATIO) return false;  /* c2 must be small relative to c1 */
+  /* c3 should close well into c1's body (at least 50%) */
+  const c1MidBody = (c1.open + c1.close) / 2;
+  return c3.close <= c1MidBody;
+}
+
+/* ================= S/R CONFLUENCE CHECK ================= */
+/**
+ * Checks if the breakout level coincides with a recent swing high or swing low,
+ * providing double support/resistance confirmation.
+ * Returns true if the level is within ATR tolerance of a recent swing point.
+ */
+function hasSRConfluence(level) {
+  if (level == null || candles.length < SWING_LOOKBACK_PERIOD) return false;
+  const tolerance = atrValue > 0 ? atrValue * SR_CONFLUENCE_ATR_MULT : Math.abs(level * SR_CONFLUENCE_PRICE_PCT);
+  const lookbackStart = Math.max(0, candles.length - SWING_LOOKBACK_PERIOD);
+
+  /* Check for true swing highs/lows near the level */
+  for (let i = lookbackStart + SWING_NEIGHBOR_BARS; i < candles.length - SWING_NEIGHBOR_BARS; i++) {
+    if (isTrueSwingHigh(i) && Math.abs(candles[i].high - level) <= tolerance) return true;
+    if (isTrueSwingLow(i) && Math.abs(candles[i].low - level) <= tolerance) return true;
+  }
+
+  return false;
+}
+
+/* ================= FALSE BREAKOUT DETECTION ================= */
+/**
+ * After a breakout is detected, check if the next FALSE_BREAKOUT_CANDLES candles
+ * have all closed back inside the opening range, invalidating the breakout.
+ * Returns true if the breakout appears false.
+ */
+function isFalseBreakout(currentIdx) {
+  if (!falseBreakoutEnabled || !breakout || !openingRange) return false;
+  /* Need at least FALSE_BREAKOUT_CANDLES after breakout to judge */
+  const checkStart = breakout.candleIdx + 1;
+  const checkEnd = Math.min(checkStart + FALSE_BREAKOUT_CANDLES, candles.length);
+  if (currentIdx < checkStart + FALSE_BREAKOUT_CANDLES - 1) return false;
+
+  let allInside = true;
+  for (let i = checkStart; i < checkEnd; i++) {
+    const c = candles[i];
+    if (c.close > openingRange.high || c.close < openingRange.low) {
+      allInside = false;
+      break;
+    }
+  }
+  return allInside;
+}
+
+/* ================= CONFLUENCE SCORE ================= */
+/**
+ * Computes a quality score (0-5) for the current setup based on multiple factors:
+ *   +1 EMA 8/21 aligned with breakout direction
+ *   +1 HTF EMA 100 aligned
+ *   +1 Strong breakout candle (range+body vs ATR)
+ *   +1 Pin bar or inside bar at retest zone
+ *   +1 S/R confluence at breakout level
+ */
+function computeConfluenceScore() {
+  if (!breakout) return 0;
+  let score = 0;
+
+  /* Factor 1: EMA alignment */
+  const lastFast = emaFast.length > 0 ? emaFast[emaFast.length - 1] : null;
+  const lastSlow = emaSlow.length > 0 ? emaSlow[emaSlow.length - 1] : null;
+  if (lastFast != null && lastSlow != null) {
+    if ((breakout.dir === "BULL" && lastFast > lastSlow) ||
+        (breakout.dir === "BEAR" && lastFast < lastSlow)) {
+      score++;
+    }
+  }
+
+  /* Factor 2: HTF trend alignment (only counts if actually aligned, not just FLAT) */
+  const htf = getHTFTrend();
+  if (htf === breakout.dir) score++;
+
+  /* Factor 3: Strong breakout candle */
+  if (breakout.strong) score++;
+
+  /* Factor 4: Pin bar or inside bar at retest */
+  if (retestInfo && retestInfo.candleIdx < candles.length) {
+    const rc = candles[retestInfo.candleIdx];
+    const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
+    if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc))) {
+      score++;
+    }
+  }
+
+  /* Factor 5: S/R confluence */
+  if (hasSRConfluence(breakout.level)) score++;
+
+  return score;
 }
 
 /* ================= STRATEGY LOGIC ================= */
@@ -1090,6 +1360,14 @@ function processCandle(idx) {
     return;
   }
 
+  /* FALSE BREAKOUT DETECTION: invalidate if price returns inside range */
+  if (!retestInfo && isFalseBreakout(idx)) {
+    addLog(`⚠ FALSE BREAKOUT detected — ${FALSE_BREAKOUT_CANDLES} candles closed back inside range. Resetting.`);
+    breakout = null;
+    setPhase("BREAKOUT");
+    return;
+  }
+
   /* PHASE: looking for retest */
   if (!retestInfo) {
     if (idx <= breakout.candleIdx) return;
@@ -1098,6 +1376,10 @@ function processCandle(idx) {
       retestInfo = { candleIdx: idx };
       setPhase("INDECISION");
       addLog(`Retest detected at candle #${idx}`);
+      /* Log S/R confluence if present */
+      if (hasSRConfluence(breakout.level)) {
+        addLog("✅ S/R confluence: breakout level aligns with recent swing point");
+      }
       if (breakout.dir === "BULL") {
         addLog("Pullback trade: BUY LIMIT at retest level");
       } else {
@@ -1111,34 +1393,72 @@ function processCandle(idx) {
   if (!indecisionInfo) {
     /* Allow the retest candle itself to also be indecision */
     if (idx < retestInfo.candleIdx) return;
-    if (isIndecision(c)) {
+    if (isIndecision(c, idx)) {
       indecisionInfo = { candleIdx: idx };
       setPhase("CONFIRM");
+      /* Describe what type of indecision was detected */
+      let indecisionType = "doji/spinning-top";
+      if (breakout && isPinBar(c, breakout.dir)) indecisionType = "pin bar";
+      else if (idx > 0 && isInsideBar(candles[idx - 1], c)) indecisionType = "inside bar";
       if (idx === retestInfo.candleIdx) {
-        addLog(`Retest candle #${idx} is also indecision`);
+        addLog(`Retest candle #${idx} is also indecision (${indecisionType})`);
       } else {
-        addLog(`Indecision candle at #${idx}`);
+        addLog(`Indecision candle at #${idx} (${indecisionType})`);
       }
     }
     return;
   }
 
-  /* PHASE: looking for confirmation (engulfing) */
+  /* PHASE: looking for confirmation (engulfing / morning-evening star / inside bar breakout) */
   if (!confirmInfo) {
     if (idx <= indecisionInfo.candleIdx) return;
     const prev = candles[idx - 1];
+    let confirmed = false;
+    let confirmPattern = "";
+
+    /* Classic engulfing pattern */
     if (breakout.dir === "BULL" && isBullishEngulfing(prev, c)) {
-      confirmInfo = { candleIdx: idx };
-      buildTrade(c, idx);
-      setPhase("TRADE");
-      addLog(`Bullish engulfing confirmed at #${idx} — TRADE ENTRY`);
-      recordSignal();
+      confirmed = true;
+      confirmPattern = "bullish engulfing";
     } else if (breakout.dir === "BEAR" && isBearishEngulfing(prev, c)) {
-      confirmInfo = { candleIdx: idx };
+      confirmed = true;
+      confirmPattern = "bearish engulfing";
+    }
+
+    /* Morning Star / Evening Star (3-candle pattern) */
+    if (!confirmed && idx >= 2) {
+      const c1 = candles[idx - 2];
+      const c2 = candles[idx - 1];
+      if (breakout.dir === "BULL" && isMorningStar(c1, c2, c)) {
+        confirmed = true;
+        confirmPattern = "morning star";
+      } else if (breakout.dir === "BEAR" && isEveningStar(c1, c2, c)) {
+        confirmed = true;
+        confirmPattern = "evening star";
+      }
+    }
+
+    /* Inside bar breakout: if indecision was an inside bar, breakout of mother confirms */
+    if (!confirmed && indecisionInfo.candleIdx > 0) {
+      const mother = candles[indecisionInfo.candleIdx - 1];
+      const indecisionCandle = candles[indecisionInfo.candleIdx];
+      if (isInsideBar(mother, indecisionCandle) && isInsideBarBreakout(mother, c, breakout.dir)) {
+        confirmed = true;
+        confirmPattern = "inside bar breakout";
+      }
+    }
+
+    if (confirmed) {
+      confirmInfo = { candleIdx: idx, pattern: confirmPattern };
       buildTrade(c, idx);
-      setPhase("TRADE");
-      addLog(`Bearish engulfing confirmed at #${idx} — TRADE ENTRY`);
-      recordSignal();
+      if (trade) {
+        setPhase("TRADE");
+        addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
+        /* Log confluence score */
+        confluenceScore = computeConfluenceScore();
+        addLog(`Confluence score: ${confluenceScore}/5`);
+        recordSignal(confirmPattern);
+      }
     }
     return;
   }
@@ -1156,17 +1476,31 @@ function touchesLevel(candle, level) {
 }
 
 /* ---- Indecision candle detection ---- */
-function isIndecision(c) {
+function isIndecision(c, idx) {
   const body = Math.abs(c.close - c.open);
   const range = c.high - c.low;
   if (range === 0) return true;
   const bodyRatio = body / range;
+
+  /* Classic doji */
   if (bodyRatio < DOJI_BODY_RATIO) return true;
+
+  /* Spinning top */
   if (bodyRatio < SPINNING_TOP_BODY_RATIO) {
     const upperWick = c.high - Math.max(c.open, c.close);
     const lowerWick = Math.min(c.open, c.close) - c.low;
     if (upperWick > 0 && lowerWick > 0) return true;
   }
+
+  /* Pin bar / hammer / shooting star at retest zone */
+  if (breakout && isPinBar(c, breakout.dir)) return true;
+
+  /* Inside bar: current candle contained within previous candle */
+  if (idx != null && idx > 0 && idx < candles.length) {
+    const prev = candles[idx - 1];
+    if (isInsideBar(prev, c)) return true;
+  }
+
   return false;
 }
 
@@ -1200,15 +1534,29 @@ function buildTrade(confirmCandle, confirmIdx) {
     const sl = findSwingLow(confirmIdx);
     const risk = entry - sl;
     if (risk <= 0) return;
-    const tp = entry + risk * rr;
-    trade = { entry, sl, tp, dir: "BULL", rr };
+    const tp = pureTrailingEnabled ? null : entry + risk * rr;
+    const actualRR = pureTrailingEnabled ? rr : (tp - entry) / risk;
+
+    /* Min R:R gate: reject trade if R:R is below minimum */
+    if (minRREnabled && actualRR < minRRValue) {
+      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
+      return;
+    }
+    trade = { entry, sl, tp, dir: "BULL", rr: actualRR };
   } else {
     const entry = confirmCandle.close;
     const sl = findSwingHigh(confirmIdx);
     const risk = sl - entry;
     if (risk <= 0) return;
-    const tp = entry - risk * rr;
-    trade = { entry, sl, tp, dir: "BEAR", rr };
+    const tp = pureTrailingEnabled ? null : entry - risk * rr;
+    const actualRR = pureTrailingEnabled ? rr : (entry - tp) / risk;
+
+    /* Min R:R gate: reject trade if R:R is below minimum */
+    if (minRREnabled && actualRR < minRRValue) {
+      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
+      return;
+    }
+    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR };
   }
 
   /* Reset trailing/partial state for new trade */
@@ -1276,8 +1624,9 @@ function findSwingHigh(upToIdx) {
 }
 
 /* ================= WIN/LOSS TRACKING ================= */
-function recordSignal() {
+function recordSignal(confirmPattern) {
   if (!trade) return;
+  const pattern = confirmPattern || "engulfing";
   const signal = {
     time: new Date().toISOString(),
     symbol: UI.symbolSelect.value,
@@ -1291,7 +1640,10 @@ function recordSignal() {
     htfTrend: getHTFTrend(),
     breakoutStrength: (breakout && breakout.strong) ? "STRONG" : "WEAK",
     partialTpHit: false,
-    trailingSL: null
+    trailingSL: null,
+    confluenceScore: computeConfluenceScore(),
+    srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
+    confirmPattern: pattern
   };
   signalHistory.push(signal);
   monitoringTrade = true;
@@ -1350,11 +1702,19 @@ function monitorTradeOutcome(candle) {
 
   if (trade.dir === "BULL") {
     if (candle.low <= checkSL) {
-      pending.result = "LOSS";
-      signalLosses++;
-      resolved = true;
-      addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
-    } else if (candle.high >= trade.tp) {
+      /* In pure trailing mode, a trailing stop hit above entry is a WIN */
+      if (pureTrailingEnabled && trailingSL != null && trailingSL > trade.entry) {
+        pending.result = "WIN";
+        signalWins++;
+        resolved = true;
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (pure trailing mode, above entry)`);
+      } else {
+        pending.result = "LOSS";
+        signalLosses++;
+        resolved = true;
+        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
+      }
+    } else if (!pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp) {
       pending.result = "WIN";
       signalWins++;
       resolved = true;
@@ -1362,11 +1722,18 @@ function monitorTradeOutcome(candle) {
     }
   } else {
     if (candle.high >= checkSL) {
-      pending.result = "LOSS";
-      signalLosses++;
-      resolved = true;
-      addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
-    } else if (candle.low <= trade.tp) {
+      if (pureTrailingEnabled && trailingSL != null && trailingSL < trade.entry) {
+        pending.result = "WIN";
+        signalWins++;
+        resolved = true;
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (pure trailing mode, below entry)`);
+      } else {
+        pending.result = "LOSS";
+        signalLosses++;
+        resolved = true;
+        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
+      }
+    } else if (!pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp) {
       pending.result = "WIN";
       signalWins++;
       resolved = true;
@@ -1471,8 +1838,10 @@ function drawChart() {
     if (c.low < priceLow)  priceLow = c.low;
   }
   if (trade) {
-    if (trade.tp > priceHigh) priceHigh = trade.tp;
-    if (trade.tp < priceLow)  priceLow = trade.tp;
+    if (trade.tp != null) {
+      if (trade.tp > priceHigh) priceHigh = trade.tp;
+      if (trade.tp < priceLow)  priceLow = trade.tp;
+    }
     if (trade.sl > priceHigh) priceHigh = trade.sl;
     if (trade.sl < priceLow)  priceLow = trade.sl;
   }
@@ -1636,7 +2005,9 @@ function drawChart() {
   if (trade) {
     drawHLine(ctx, yOf(trade.entry), marginLeft, W - marginRight, COLORS.entryLine, "ENTRY " + fmt(trade.entry, 4), W, marginRight);
     drawHLine(ctx, yOf(trade.sl),    marginLeft, W - marginRight, COLORS.slLine,    "SL " + fmt(trade.sl, 4), W, marginRight);
-    drawHLine(ctx, yOf(trade.tp),    marginLeft, W - marginRight, COLORS.tpLine,    "TP " + fmt(trade.tp, 4), W, marginRight);
+    if (trade.tp != null) {
+      drawHLine(ctx, yOf(trade.tp), marginLeft, W - marginRight, COLORS.tpLine, "TP " + fmt(trade.tp, 4), W, marginRight);
+    }
 
     /* Trailing SL line (if different from original SL) */
     if (trailingSL != null && trailingSL !== trade.sl) {
@@ -1653,22 +2024,29 @@ function drawChart() {
 
     const entryY = yOf(trade.entry);
     const slY    = yOf(trade.sl);
-    const tpY    = yOf(trade.tp);
 
+    /* Risk zone shading */
     const riskTop = Math.min(entryY, slY);
     const riskH   = Math.abs(slY - entryY);
     ctx.fillStyle = "rgba(239,68,68,0.08)";
     ctx.fillRect(marginLeft, riskTop, chartW, riskH);
 
-    const rewTop = Math.min(entryY, tpY);
-    const rewH   = Math.abs(tpY - entryY);
-    ctx.fillStyle = "rgba(34,197,94,0.08)";
-    ctx.fillRect(marginLeft, rewTop, chartW, rewH);
+    /* Reward zone shading (only if TP exists) */
+    if (trade.tp != null) {
+      const tpY    = yOf(trade.tp);
+      const rewTop = Math.min(entryY, tpY);
+      const rewH   = Math.abs(tpY - entryY);
+      ctx.fillStyle = "rgba(34,197,94,0.08)";
+      ctx.fillRect(marginLeft, rewTop, chartW, rewH);
+    }
 
     ctx.fillStyle = COLORS.entryLine;
     ctx.font = "bold 12px Arial";
     ctx.textAlign = "right";
-    ctx.fillText(`R:R  1 : ${fmt(trade.rr, 1)}`, W - marginRight - 6, entryY - 6);
+    ctx.fillText(
+      pureTrailingEnabled ? "PURE TRAILING" : `R:R  1 : ${fmt(trade.rr, 1)}`,
+      W - marginRight - 6, entryY - 6
+    );
     ctx.textAlign = "left";
   }
 
@@ -1937,6 +2315,22 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.partialTpToggle) {
     UI.partialTpToggle.addEventListener("change", () => { partialTpEnabled = UI.partialTpToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
+  }
+  if (UI.falseBreakoutToggle) {
+    UI.falseBreakoutToggle.addEventListener("change", () => { falseBreakoutEnabled = UI.falseBreakoutToggle.checked; saveSettings(); });
+  }
+  if (UI.minRRToggle) {
+    UI.minRRToggle.addEventListener("change", () => { minRREnabled = UI.minRRToggle.checked; saveSettings(); });
+  }
+  if (UI.minRRInput) {
+    UI.minRRInput.addEventListener("change", () => {
+      const v = parseFloat(UI.minRRInput.value);
+      if (!isNaN(v) && v > 0) minRRValue = v;
+      saveSettings();
+    });
+  }
+  if (UI.pureTrailingToggle) {
+    UI.pureTrailingToggle.addEventListener("change", () => { pureTrailingEnabled = UI.pureTrailingToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
   }
 
   /* Tool buttons */
