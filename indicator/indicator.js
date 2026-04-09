@@ -49,6 +49,10 @@ let reconnectAttempts = 0;
 let reconnectTimer    = null;
 let intentionalClose  = false;
 
+/* Ping/keepalive (Deriv WS sessions time out after inactivity) */
+const PING_INTERVAL_MS = 30000;
+let pingTimer = null;
+
 /* Debounce */
 let reconnectDebounceTimer = null;
 const RECONNECT_DEBOUNCE_MS = 400;
@@ -467,6 +471,23 @@ function updateUptime() {
   UI.uptimeDisplay.textContent = `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
+/* ================= PING / KEEPALIVE ================= */
+function startPing() {
+  stopPing();
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ ping: 1 }));
+    }
+  }, PING_INTERVAL_MS);
+}
+
+function stopPing() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+}
+
 /* ================= WEBSOCKET ================= */
 function connect() {
   if (ws && ws.readyState <= 1) return;
@@ -486,6 +507,7 @@ function connect() {
     UI.disconnectBtn.disabled = false;
     reconnectAttempts = 0;
     startUptimeTimer();
+    startPing();
     addLog(`Connected – subscribing to ${symbol} (${gran}s candles)`);
 
     ws.send(JSON.stringify({
@@ -501,6 +523,10 @@ function connect() {
 
   ws.onmessage = (evt) => {
     const msg = JSON.parse(evt.data);
+
+    /* Ignore ping/pong responses */
+    if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
+
     if (msg.error) {
       addLog("API error: " + msg.error.message);
       return;
@@ -547,12 +573,16 @@ function connect() {
   };
 
   ws.onclose = () => {
+    stopPing();
     UI.wsStatus.textContent = "DISCONNECTED";
     UI.wsStatus.className = "status-badge disabled";
     UI.connectBtn.disabled = false;
     UI.disconnectBtn.disabled = true;
     stopUptimeTimer();
     addLog("WebSocket closed");
+
+    /* Nullify so connect() guard doesn't block reconnection */
+    ws = null;
 
     /* Auto-reconnect if not intentional */
     if (!intentionalClose) {
@@ -568,6 +598,16 @@ function connect() {
 function disconnect() {
   intentionalClose = true;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  stopPing();
+
+  /* Clean up active subscriptions before closing */
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ forget_all: "candles" }));
+      ws.send(JSON.stringify({ forget_all: "ticks" }));
+    }
+  } catch (e) { /* ignore send errors during teardown */ }
+
   if (ws) { ws.close(); ws = null; }
 }
 
@@ -586,7 +626,8 @@ function scheduleReconnect() {
 function debouncedReconnect() {
   if (reconnectDebounceTimer) clearTimeout(reconnectDebounceTimer);
   reconnectDebounceTimer = setTimeout(() => {
-    if (ws) { disconnect(); setTimeout(connect, 100); }
+    disconnect();
+    setTimeout(connect, 100);
   }, RECONNECT_DEBOUNCE_MS);
 }
 
