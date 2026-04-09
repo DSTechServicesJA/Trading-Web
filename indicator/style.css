@@ -175,6 +175,22 @@ select, input[type="number"], input[type="text"], input[type="password"] {
   font-size: var(--font-size-md);
 }
 
+/* ---- Risk:Reward Inputs ---- */
+.rr-inputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rr-inputs input[type="number"] {
+  flex: 1;
+  width: auto;
+}
+.rr-separator {
+  font-weight: 700;
+  font-size: var(--font-size-lg);
+  color: var(--text-soft);
+}
+
 /* ---- Buttons ---- */
 button {
   padding: 8px 16px;
@@ -299,6 +315,142 @@ button:disabled {
 .collapsible::after { content: " ▸"; font-size: 12px; }
 .collapsible-body { display: none; }
 .collapsible-body.open { display: block; }
+
+/* ---- EMA Legend Swatches ---- */
+.ema-fast-swatch { background: rgba(245, 158, 11, 0.35); border: 1px solid #f59e0b; }
+.ema-slow-swatch { background: rgba(139, 92, 246, 0.35); border: 1px solid #8b5cf6; }
+
+.ema-toggle-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.ema-toggle-row input[type="checkbox"] {
+  width: auto;
+}
+
+/* ---- Tools Panel ---- */
+.tools-panel {
+  padding: var(--space-3);
+}
+.tools-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.tool-btn {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.shortcut-hints {
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Mobile Panel Toggle ---- */
+.panel-toggle {
+  display: none;
+  width: 100%;
+  text-align: center;
+  background: var(--primary);
+  color: #fff;
+  padding: 10px;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+}
+
+@media (max-width: 860px) {
+  .panel-toggle { display: block; }
+  .panel-content { display: none; }
+  .panel-content.panel-open { display: block; }
+  .controls button { min-height: 44px; font-size: var(--font-size-lg); }
+  select, input[type="number"] { min-height: 44px; font-size: var(--font-size-lg); }
+}
+
+/* =========================================================
+   LIGHT THEME
+   ========================================================= */
+
+body.light-theme {
+  --bg-outer: #e2e8f0;
+  --bg-inner: #f8fafc;
+  --text: #1e293b;
+  --text-soft: #475569;
+  --heading: #0f172a;
+  --muted: #94a3b8;
+  --muted-strong: #64748b;
+  --card-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, var(--bg-inner), var(--bg-outer));
+  color: var(--text);
+}
+
+body.light-theme .container {
+  background: var(--bg-inner);
+}
+
+body.light-theme .dashboard,
+body.light-theme .history,
+body.light-theme .box,
+body.light-theme .info,
+body.light-theme .chart-embed {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+body.light-theme input,
+body.light-theme select {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #cbd5e1;
+}
+
+body.light-theme button {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+body.light-theme button:hover {
+  background: #cbd5e1;
+}
+
+body.light-theme .status-badge.disabled {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+body.light-theme .tool-btn {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+body.light-theme .tool-btn:hover {
+  background: #e2e8f0;
+}
+
+body.light-theme .chart-embed canvas {
+  background: #f8fafc;
+}
 
 /* ---- Scrollbar ---- */
 ::-webkit-scrollbar { width: 6px; }
