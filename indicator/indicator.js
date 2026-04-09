@@ -42,7 +42,8 @@ const UI = {};
 function initUI() {
   UI.symbolSelect  = document.getElementById("symbolSelect");
   UI.granSelect    = document.getElementById("granSelect");
-  UI.rrInput       = document.getElementById("rrInput");
+  UI.riskInput     = document.getElementById("riskInput");
+  UI.rewardInput   = document.getElementById("rewardInput");
   UI.connectBtn    = document.getElementById("connectBtn");
   UI.disconnectBtn = document.getElementById("disconnectBtn");
   UI.wsStatus      = document.getElementById("wsStatus");
@@ -416,7 +417,11 @@ function isBearishEngulfing(prev, curr) {
 
 /* ---- Trade setup builder ---- */
 function buildTrade(confirmCandle, confirmIdx) {
-  const rr = parseFloat(UI.rrInput.value) || 2;
+  const riskVal   = parseFloat(UI.riskInput.value);
+  const rewardVal = parseFloat(UI.rewardInput.value);
+  const risk_units  = (riskVal > 0) ? riskVal : 1;
+  const reward_units = (rewardVal > 0) ? rewardVal : 1;
+  const rr = reward_units / risk_units;
 
   if (breakout.dir === "BULL") {
     const entry = confirmCandle.close;
@@ -740,6 +745,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // Reconnect on symbol/timeframe change
   UI.symbolSelect.addEventListener("change", () => { if (ws) { disconnect(); connect(); } });
   UI.granSelect.addEventListener("change",   () => { if (ws) { disconnect(); connect(); } });
+
+  // Recalculate trade when risk/reward inputs change
+  function onRRChange() {
+    if (trade && confirmInfo) {
+      const c = candles[confirmInfo.candleIdx];
+      if (c) {
+        buildTrade(c, confirmInfo.candleIdx);
+        updateStateUI();
+        drawChart();
+      }
+    }
+  }
+  UI.riskInput.addEventListener("input", onRRChange);
+  UI.rewardInput.addEventListener("input", onRRChange);
 
   // Resize redraw
   window.addEventListener("resize", drawChart);
