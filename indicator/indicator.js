@@ -102,6 +102,7 @@ function initUI() {
   UI.rangeHigh      = document.getElementById("rangeHigh");
   UI.rangeLow       = document.getElementById("rangeLow");
   UI.breakoutDir    = document.getElementById("breakoutDir");
+  UI.nextAction     = document.getElementById("nextAction");
   UI.retestStatus   = document.getElementById("retestStatus");
   UI.confirmStatus  = document.getElementById("confirmStatus");
   UI.entryPrice     = document.getElementById("entryPrice");
@@ -192,8 +193,15 @@ function sendPhaseNotification(phaseName) {
   if (!notificationsEnabled || !("Notification" in window)) return;
   if (Notification.permission === "granted") {
     const symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
+    let body = `${symbol} moved to ${phaseName} phase`;
+    /* Append order-type hint for actionable phases */
+    if (phaseName === "RETEST" && breakout && !retestInfo) {
+      body += breakout.dir === "BULL" ? " — BUY STOP" : " — SELL STOP";
+    } else if (phaseName === "INDECISION" && breakout && retestInfo) {
+      body += breakout.dir === "BULL" ? " — BUY LIMIT" : " — SELL LIMIT";
+    }
     new Notification(`IT Guru Indicator: ${phaseName}`, {
-      body: `${symbol} moved to ${phaseName} phase`,
+      body,
       icon: NOTIF_ICON
     });
   }
@@ -393,6 +401,24 @@ function updateStateUI() {
 
   if (UI.retestStatus) UI.retestStatus.textContent  = retestInfo  ? `Candle #${retestInfo.candleIdx}` : "--";
   if (UI.confirmStatus) UI.confirmStatus.textContent = confirmInfo ? `Candle #${confirmInfo.candleIdx}` : "--";
+
+  /* Next Action: recommended order type based on trade type */
+  if (UI.nextAction) {
+    if (breakout && !retestInfo) {
+      /* Breakout trade → use stop orders to ride the breakout momentum */
+      const label = breakout.dir === "BULL" ? "BUY STOP" : "SELL STOP";
+      UI.nextAction.textContent = label;
+      UI.nextAction.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
+    } else if (breakout && retestInfo) {
+      /* Pullback / retest trade → use limit orders to enter at the retest level */
+      const label = breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT";
+      UI.nextAction.textContent = label;
+      UI.nextAction.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
+    } else {
+      UI.nextAction.textContent = "--";
+      UI.nextAction.className = "status-badge disabled";
+    }
+  }
 
   if (trade) {
     if (UI.entryPrice) UI.entryPrice.textContent = fmt(trade.entry, 4);
@@ -667,10 +693,12 @@ function processCandle(idx) {
       breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high };
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}`);
+      addLog("Next action: BUY STOP — ride the breakout momentum");
     } else if (c.close < openingRange.low) {
       breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low };
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}`);
+      addLog("Next action: SELL STOP — ride the breakout momentum");
     }
     return;
   }
@@ -683,6 +711,11 @@ function processCandle(idx) {
       retestInfo = { candleIdx: idx };
       setPhase("INDECISION");
       addLog(`Retest detected at candle #${idx}`);
+      if (breakout.dir === "BULL") {
+        addLog("Pullback trade: BUY LIMIT at retest level");
+      } else {
+        addLog("Pullback trade: SELL LIMIT at retest level");
+      }
     }
     return;
   }
@@ -987,6 +1020,13 @@ function drawChart() {
     ctx.fillStyle = boxColor;
     ctx.font = "bold 10px Arial";
     ctx.fillText("BREAKOUT", bx1, by1 - 4);
+
+    /* Show recommended order type below the breakout label */
+    const orderLabel = !retestInfo
+      ? (breakout.dir === "BULL" ? "→ BUY STOP" : "→ SELL STOP")
+      : (breakout.dir === "BULL" ? "→ BUY LIMIT" : "→ SELL LIMIT");
+    ctx.font = "bold 9px Arial";
+    ctx.fillText(orderLabel, bx1, by1 + bh + 14);
   }
 
   /* ---- Retest zone highlight ---- */
@@ -1006,6 +1046,13 @@ function drawChart() {
     ctx.fillStyle = COLORS.retestBorder;
     ctx.font = "bold 10px Arial";
     ctx.fillText("RETEST", rx1, ry1 - 3);
+
+    /* Show pullback order type below the retest label */
+    if (breakout) {
+      const limitLabel = breakout.dir === "BULL" ? "→ BUY LIMIT" : "→ SELL LIMIT";
+      ctx.font = "bold 9px Arial";
+      ctx.fillText(limitLabel, rx1, ry1 + rh + 14);
+    }
   }
 
   /* ---- Indecision candle marker ---- */
