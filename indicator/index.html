@@ -146,6 +146,30 @@
 
             <label class="toggle-row"><input type="checkbox" id="pureTrailingToggle" /> Pure Trailing (No TP)</label>
             <p class="hint">No fixed TP — rely solely on trailing stop to exit. Captures bigger moves.</p>
+
+            <hr class="param-divider" />
+            <p class="param-group-title">Advanced Signals</p>
+
+            <label class="toggle-row"><input type="checkbox" id="rsiFilterToggle" /> RSI at Retest</label>
+            <p class="hint">Confirm pullback has room to reverse (RSI ≤ 50 for BULL, ≥ 50 for BEAR).</p>
+
+            <label class="toggle-row"><input type="checkbox" id="volumeSpikeToggle" /> Volume Spike Filter</label>
+            <p class="hint">Require breakout candle range ≥ 1.5× average — filters weak/fake breakouts.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="sessionFilterToggle" /> Session Filter</label>
+            <div style="margin-top:4px;margin-bottom:4px;">
+              <select id="sessionFilterMode" style="width:100%;">
+                <option value="london_ny">London + NY</option>
+                <option value="london">London (07–16 UTC)</option>
+                <option value="new_york">New York (12–21 UTC)</option>
+                <option value="overlap">Overlap (12–16 UTC)</option>
+                <option value="asian">Asian (00–09 UTC)</option>
+              </select>
+            </div>
+            <p class="hint">Only allow signals during high-liquidity sessions.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="fibRetestToggle" /> Fibonacci at Retest</label>
+            <p class="hint">Check if retest level aligns with a Fibonacci level (23.6%–78.6%).</p>
           </div>
         </section>
 
@@ -218,6 +242,22 @@
             <span id="srConfluenceDisplay" class="env-label">--</span>
           </div>
           <div class="side-row">
+            <span>RSI(14)</span>
+            <span id="rsiDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Volume Spike</span>
+            <span id="volumeSpikeDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Session</span>
+            <span id="sessionDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Fib Level</span>
+            <span id="fibRetestDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
             <span>Retest</span>
             <span id="retestStatus" class="env-label">--</span>
           </div>
@@ -275,6 +315,10 @@
             <div class="side-row"><span>Partial TP</span><span class="status-badge bull">ON ✅</span></div>
             <div class="side-row"><span>False Breakout</span><span class="status-badge bull">ON ✅</span></div>
             <div class="side-row"><span>Min R:R Gate</span><span class="status-badge bull">ON (1:2) ✅</span></div>
+            <div class="side-row"><span>RSI at Retest</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>Volume Spike</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>Session Filter</span><span class="status-badge bull">ON (London+NY) ✅</span></div>
+            <div class="side-row"><span>Fibonacci Retest</span><span class="status-badge bull">ON ✅</span></div>
             <p class="hint" style="margin-top:8px;">
               <strong>Why:</strong> EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise.
               ATR tolerance adapts retest detection to volatility.
@@ -282,9 +326,11 @@
               Partial TP at 1:1 secures gains and moves SL to breakeven.
               False breakout filter prevents entering on fake-outs.
               Min R:R gate ensures every trade has at least 1:2 risk-reward.
-              Pin bar, inside bar, and morning/evening star patterns
-              provide additional confirmation beyond basic engulfing.
-              Confluence score (0-5) gauges overall setup quality.
+              RSI at retest confirms the pullback has room to reverse.
+              Volume spike filter ensures strong momentum behind breakouts.
+              Session filter avoids low-liquidity periods.
+              Fibonacci confluence adds a powerful S/R layer at retest.
+              Confluence score (0-9) gauges overall setup quality.
               Use on V75 (1s) or V100 (1s) for best signal frequency.
             </p>
           </div>
