@@ -249,6 +249,34 @@ button:disabled {
   color: var(--heading);
 }
 
+/* ---- Candle Countdown ---- */
+.candle-countdown {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.candle-countdown .label { color: var(--text-soft); font-size: var(--font-size-sm); }
+.countdown-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  color: #fff;
+  background: var(--primary);
+  min-width: 54px;
+  text-align: center;
+}
+.countdown-badge.countdown-urgent {
+  background: var(--danger);
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+@keyframes countdown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
 /* ---- Dashboard / Side Rows ---- */
 .dashboard { display: flex; flex-direction: column; gap: var(--space-1); }
 .side-row {

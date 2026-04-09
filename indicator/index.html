@@ -141,6 +141,10 @@
           <p><strong>Status:</strong> <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span></p>
           <p><strong>Candles:</strong> <span id="candleCount">0</span></p>
           <p><strong>Uptime:</strong> <span id="uptimeDisplay" class="env-label">--</span></p>
+          <div class="candle-countdown">
+            <span class="label">Next Candle</span>
+            <span id="candleCountdown" class="countdown-badge">--</span>
+          </div>
           <div class="live-price">
             <span class="label">Live Price</span>
             <span id="livePrice" class="price">--</span>
@@ -233,6 +237,29 @@
           <div class="side-row"><span>Wins</span><span id="signalWins" class="env-label">0</span></div>
           <div class="side-row"><span>Losses</span><span id="signalLosses" class="env-label">0</span></div>
           <div class="side-row"><span>Win Rate</span><span id="signalWinRate" class="env-label">0%</span></div>
+        </section>
+
+        <!-- Recommended Settings -->
+        <section class="dashboard recommended-settings">
+          <h3 class="collapsible">Recommended Settings</h3>
+          <div class="collapsible-body">
+            <p class="hint" style="margin-bottom:6px;">Best signal configuration for higher win rate:</p>
+            <div class="side-row"><span>Timeframe</span><span class="env-label">5 min candles</span></div>
+            <div class="side-row"><span>Risk : Reward</span><span class="env-label">1 : 2 or 1 : 3</span></div>
+            <div class="side-row"><span>Opening Range</span><span class="env-label">15 min</span></div>
+            <div class="side-row"><span>EMA Filter</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>HTF Filter</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>ATR Tolerance</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>Trailing Stop</span><span class="status-badge bull">ON ✅</span></div>
+            <div class="side-row"><span>Partial TP</span><span class="status-badge bull">ON ✅</span></div>
+            <p class="hint" style="margin-top:8px;">
+              <strong>Why:</strong> EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise.
+              ATR tolerance adapts retest detection to volatility.
+              Trailing stop locks in profits on extended moves.
+              Partial TP at 1:1 secures gains and moves SL to breakeven.
+              Use on V75 (1s) or V100 (1s) for best signal frequency.
+            </p>
+          </div>
         </section>
 
         <!-- Signal Log -->
