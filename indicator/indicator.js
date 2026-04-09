@@ -1226,7 +1226,7 @@ function recordSignal() {
     tp: trade.tp,
     rr: trade.rr,
     result: "PENDING",
-    emaAligned: emaFilterEnabled ? isEmaAligned(trade.dir) : "N/A",
+    emaAligned: emaFilterEnabled ? isEmaAligned(trade.dir) : null,
     htfTrend: getHTFTrend(),
     breakoutStrength: (breakout && breakout.strong) ? "STRONG" : "WEAK",
     partialTpHit: false,
@@ -1271,7 +1271,7 @@ function monitorTradeOutcome(candle) {
   if (trailingStopEnabled && atrValue > 0) {
     if (trade.dir === "BULL") {
       const newTrail = candle.high - atrValue * TRAILING_STOP_ATR_MULT;
-      if (newTrail > effectiveSL) {
+      if (trailingSL == null || newTrail > effectiveSL) {
         trailingSL = newTrail;
       }
     } else {
