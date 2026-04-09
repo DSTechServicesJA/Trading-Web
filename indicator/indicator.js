@@ -20,6 +20,13 @@
      - Light/Dark theme toggle
      - EMA overlays (8 & 21)
      - Keyboard shortcuts
+     - Auto-reset after trade for continuous scanning
+     - EMA 8/21 trend filter for breakout alignment
+     - Higher-timeframe trend via EMA 100 proxy
+     - ATR-based tolerance for consistent retest detection
+     - True swing point detection for structural SL placement
+     - Breakout strength / volume proxy via candle range vs ATR
+     - Trailing stop (ATR-based) and partial TP at 1:1
    ========================================================= */
 
 "use strict";
@@ -41,6 +48,16 @@ const CHART_PRICE_PADDING     = 0.08;
 /* EMA periods */
 const EMA_FAST_PERIOD = 8;
 const EMA_SLOW_PERIOD = 21;
+const HTF_EMA_PERIOD  = 100;  /* long EMA on current TF as HTF trend proxy */
+
+/* ATR */
+const ATR_PERIOD = 14;
+
+/* True swing detection: bars on each side to confirm a pivot */
+const SWING_NEIGHBOR_BARS = 3;
+
+/* Trailing stop distance in ATR multiples */
+const TRAILING_STOP_ATR_MULT = 1.5;
 
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
@@ -78,6 +95,15 @@ let monitoringTrade = false;
 /* EMA state */
 let emaFast = [];
 let emaSlow = [];
+let emaHTF  = [];   /* EMA 100 for HTF trend proxy */
+
+/* ATR state */
+let atrValue  = 0;
+let atrValues = [];
+
+/* Trailing stop / partial TP state */
+let trailingSL    = null;
+let partialTpHit  = false;
 
 /* Connection uptime */
 let connectTime = null;
@@ -89,6 +115,14 @@ let notificationsEnabled = false;
 
 /* Theme */
 let currentTheme = "dark";
+
+/* Strategy filter toggles */
+let autoResetEnabled    = true;
+let emaFilterEnabled    = false;
+let htfFilterEnabled    = false;
+let atrToleranceEnabled = false;
+let trailingStopEnabled = false;
+let partialTpEnabled    = false;
 
 /* ================= UI REFS ================= */
 const UI = {};
@@ -129,6 +163,22 @@ function initUI() {
   UI.signalLosses     = document.getElementById("signalLosses");
   UI.signalWinRate    = document.getElementById("signalWinRate");
   UI.signalCount      = document.getElementById("signalCount");
+
+  /* New indicator state displays */
+  UI.emaFilterStatus    = document.getElementById("emaFilterStatus");
+  UI.htfTrend           = document.getElementById("htfTrend");
+  UI.atrDisplay         = document.getElementById("atrDisplay");
+  UI.breakoutStrength   = document.getElementById("breakoutStrength");
+  UI.trailingSLDisplay  = document.getElementById("trailingSLDisplay");
+  UI.partialTpDisplay   = document.getElementById("partialTpDisplay");
+
+  /* Strategy filter toggles */
+  UI.autoResetToggle    = document.getElementById("autoResetToggle");
+  UI.emaFilterToggle    = document.getElementById("emaFilterToggle");
+  UI.htfFilterToggle    = document.getElementById("htfFilterToggle");
+  UI.atrToleranceToggle = document.getElementById("atrToleranceToggle");
+  UI.trailingStopToggle = document.getElementById("trailingStopToggle");
+  UI.partialTpToggle    = document.getElementById("partialTpToggle");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -251,7 +301,13 @@ function saveSettings() {
       soundEnabled,
       notificationsEnabled,
       theme: currentTheme,
-      showEma: UI.emaToggle ? UI.emaToggle.checked : false
+      showEma: UI.emaToggle ? UI.emaToggle.checked : false,
+      autoResetEnabled,
+      emaFilterEnabled,
+      htfFilterEnabled,
+      atrToleranceEnabled,
+      trailingStopEnabled,
+      partialTpEnabled
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -286,6 +342,20 @@ function restoreSettings() {
     if (s.notificationsEnabled != null) notificationsEnabled = s.notificationsEnabled;
     if (s.theme === "light") { currentTheme = "light"; document.body.classList.add("light-theme"); }
     if (s.showEma && UI.emaToggle) UI.emaToggle.checked = true;
+
+    /* Strategy filter toggles */
+    if (s.autoResetEnabled != null) autoResetEnabled = s.autoResetEnabled;
+    if (s.emaFilterEnabled != null) emaFilterEnabled = s.emaFilterEnabled;
+    if (s.htfFilterEnabled != null) htfFilterEnabled = s.htfFilterEnabled;
+    if (s.atrToleranceEnabled != null) atrToleranceEnabled = s.atrToleranceEnabled;
+    if (s.trailingStopEnabled != null) trailingStopEnabled = s.trailingStopEnabled;
+    if (s.partialTpEnabled != null) partialTpEnabled = s.partialTpEnabled;
+    if (UI.autoResetToggle) UI.autoResetToggle.checked = autoResetEnabled;
+    if (UI.emaFilterToggle) UI.emaFilterToggle.checked = emaFilterEnabled;
+    if (UI.htfFilterToggle) UI.htfFilterToggle.checked = htfFilterEnabled;
+    if (UI.atrToleranceToggle) UI.atrToleranceToggle.checked = atrToleranceEnabled;
+    if (UI.trailingStopToggle) UI.trailingStopToggle.checked = trailingStopEnabled;
+    if (UI.partialTpToggle) UI.partialTpToggle.checked = partialTpEnabled;
   } catch (e) { /* storage not available */ }
 }
 
@@ -343,7 +413,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -401,6 +471,11 @@ function resetIndicator() {
   monitoringTrade = false;
   emaFast = [];
   emaSlow = [];
+  emaHTF  = [];
+  atrValue  = 0;
+  atrValues = [];
+  trailingSL   = null;
+  partialTpHit = false;
   setPhase("WAITING");
   updateStateUI();
 }
@@ -432,6 +507,63 @@ function updateStateUI() {
     } else {
       UI.nextAction.textContent = "--";
       UI.nextAction.className = "status-badge disabled";
+    }
+  }
+
+  /* EMA filter status */
+  if (UI.emaFilterStatus) {
+    if (!emaFilterEnabled) {
+      UI.emaFilterStatus.textContent = "OFF";
+      UI.emaFilterStatus.className = "env-label";
+    } else if (breakout) {
+      const aligned = isEmaAligned(breakout.dir);
+      UI.emaFilterStatus.textContent = aligned ? "ALIGNED ✅" : "BLOCKED ❌";
+      UI.emaFilterStatus.className = "status-badge " + (aligned ? "bull" : "bear");
+    } else {
+      UI.emaFilterStatus.textContent = "WAITING";
+      UI.emaFilterStatus.className = "env-label";
+    }
+  }
+
+  /* HTF Trend */
+  if (UI.htfTrend) {
+    const trend = getHTFTrend();
+    UI.htfTrend.textContent = trend;
+    UI.htfTrend.className = "status-badge " + ({
+      BULL: "bull", BEAR: "bear", FLAT: "disabled"
+    }[trend] || "disabled");
+  }
+
+  /* ATR display */
+  if (UI.atrDisplay) {
+    UI.atrDisplay.textContent = atrValue > 0 ? fmt(atrValue, 4) : "--";
+  }
+
+  /* Breakout strength */
+  if (UI.breakoutStrength) {
+    if (breakout && breakout.candleIdx < candles.length && atrValue > 0) {
+      const bc = candles[breakout.candleIdx];
+      const candleRange = bc.high - bc.low;
+      const strong = candleRange >= atrValue * 0.8;
+      UI.breakoutStrength.textContent = strong ? "STRONG" : "WEAK";
+      UI.breakoutStrength.className = "status-badge " + (strong ? "bull" : "warning");
+    } else {
+      UI.breakoutStrength.textContent = "--";
+      UI.breakoutStrength.className = "env-label";
+    }
+  }
+
+  /* Trailing SL */
+  if (UI.trailingSLDisplay) {
+    UI.trailingSLDisplay.textContent = trailingSL != null ? fmt(trailingSL, 4) : "--";
+  }
+
+  /* Partial TP */
+  if (UI.partialTpDisplay) {
+    if (!partialTpEnabled) {
+      UI.partialTpDisplay.textContent = "OFF";
+    } else {
+      UI.partialTpDisplay.textContent = partialTpHit ? "HIT ✅" : "--";
     }
   }
 
@@ -566,6 +698,7 @@ function connect() {
       if (UI.livePrice) UI.livePrice.textContent = fmt(c.close, 4);
 
       computeEMAs();
+      computeATR();
       processLatestCandle();
       monitorTradeOutcome(c);
       drawChart();
@@ -644,8 +777,10 @@ function adjustIndicesAfterSlice(removed) {
 
 /* ================= EMA COMPUTATION ================= */
 function computeEMAs() {
-  emaFast = computeEMA(candles.map(c => c.close), EMA_FAST_PERIOD);
-  emaSlow = computeEMA(candles.map(c => c.close), EMA_SLOW_PERIOD);
+  const closes = candles.map(c => c.close);
+  emaFast = computeEMA(closes, EMA_FAST_PERIOD);
+  emaSlow = computeEMA(closes, EMA_SLOW_PERIOD);
+  emaHTF  = computeEMA(closes, HTF_EMA_PERIOD);
 }
 
 function computeEMA(data, period) {
@@ -669,6 +804,95 @@ function computeEMA(data, period) {
   return result;
 }
 
+/* ================= ATR COMPUTATION ================= */
+function computeATR() {
+  if (candles.length < 2) { atrValue = 0; atrValues = []; return; }
+  const trueRanges = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i];
+    const prev = candles[i - 1];
+    const tr = Math.max(
+      c.high - c.low,
+      Math.abs(c.high - prev.close),
+      Math.abs(c.low - prev.close)
+    );
+    trueRanges.push(tr);
+  }
+  /* Simple moving average for initial ATR, then EMA-smooth */
+  atrValues = [];
+  if (trueRanges.length < ATR_PERIOD) {
+    const avg = trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
+    atrValue = avg;
+    atrValues = trueRanges.map(() => avg);
+    return;
+  }
+  let sum = 0;
+  for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
+  let prevATR = sum / ATR_PERIOD;
+  for (let i = 0; i < trueRanges.length; i++) {
+    if (i < ATR_PERIOD) {
+      atrValues.push(i === ATR_PERIOD - 1 ? prevATR : null);
+    } else {
+      prevATR = (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD;
+      atrValues.push(prevATR);
+    }
+  }
+  atrValue = prevATR;
+}
+
+/* ================= EMA TREND FILTER ================= */
+/**
+ * Returns true if the EMA 8/21 crossover aligns with the given breakout direction.
+ * If emaFilterEnabled is off, always returns true.
+ */
+function isEmaAligned(dir) {
+  if (!emaFilterEnabled) return true;
+  const lastFast = emaFast.length > 0 ? emaFast[emaFast.length - 1] : null;
+  const lastSlow = emaSlow.length > 0 ? emaSlow[emaSlow.length - 1] : null;
+  if (lastFast == null || lastSlow == null) return true; /* not enough data */
+  if (dir === "BULL") return lastFast > lastSlow;
+  if (dir === "BEAR") return lastFast < lastSlow;
+  return true;
+}
+
+/* ================= HTF TREND (EMA 100 PROXY) ================= */
+/**
+ * Returns the higher-timeframe trend direction based on EMA 100.
+ * Price above EMA 100 = BULL, below = BEAR, within 0.1% = FLAT.
+ */
+function getHTFTrend() {
+  const lastHTF = emaHTF.length > 0 ? emaHTF[emaHTF.length - 1] : null;
+  const lastPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+  if (lastHTF == null || lastPrice == null) return "FLAT";
+  if (lastPrice > lastHTF * 1.001) return "BULL";
+  if (lastPrice < lastHTF * 0.999) return "BEAR";
+  return "FLAT";
+}
+
+/**
+ * Returns true if the HTF trend agrees with the breakout direction.
+ * If htfFilterEnabled is off, always returns true.
+ * "FLAT" trend allows both directions.
+ */
+function isHTFAligned(dir) {
+  if (!htfFilterEnabled) return true;
+  const trend = getHTFTrend();
+  if (trend === "FLAT") return true;
+  return trend === dir;
+}
+
+/* ================= BREAKOUT STRENGTH (VOLUME PROXY) ================= */
+/**
+ * Checks breakout conviction by comparing candle range to ATR.
+ * A strong breakout candle should have range >= 80% of ATR.
+ * When ATR data is unavailable, returns true (no filter).
+ */
+function hasBreakoutConviction(candle) {
+  if (atrValue <= 0) return true;
+  const candleRange = candle.high - candle.low;
+  return candleRange >= atrValue * 0.8;
+}
+
 /* ================= STRATEGY LOGIC ================= */
 
 function processAllCandles() {
@@ -678,10 +902,13 @@ function processAllCandles() {
   indecisionInfo = null;
   confirmInfo = null;
   trade = null;
+  trailingSL   = null;
+  partialTpHit = false;
   setPhase("WAITING");
 
   if (candles.length === 0) return;
   rangeStartEpoch = candles[0].epoch;
+  computeATR();
 
   buildOpeningRange();
 
@@ -696,6 +923,11 @@ function processAllCandles() {
 }
 
 function processLatestCandle() {
+  /* When monitoring a resolved trade with auto-reset, skip the short-circuit */
+  if (phase === "TRADE" && !monitoringTrade && autoResetEnabled) {
+    resetForNextSetup();
+    addLog("Auto-reset: scanning for new setup...");
+  }
   if (phase === "TRADE") { updateStateUI(); return; }
 
   if (phase === "WAITING" || phase === "RANGE") {
@@ -706,6 +938,25 @@ function processLatestCandle() {
 
   const idx = candles.length - 1;
   processCandle(idx);
+  updateStateUI();
+}
+
+/**
+ * Reset indicator state for next setup while keeping candle data and signal history.
+ * Starts a new opening range from the latest candle epoch.
+ */
+function resetForNextSetup() {
+  openingRange   = null;
+  breakout       = null;
+  retestInfo     = null;
+  indecisionInfo = null;
+  confirmInfo    = null;
+  trade          = null;
+  trailingSL     = null;
+  partialTpHit   = false;
+  /* Start new range from the latest candle */
+  rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
+  setPhase("RANGE");
   updateStateUI();
 }
 
@@ -742,14 +993,37 @@ function processCandle(idx) {
   /* PHASE: looking for breakout */
   if (!breakout) {
     if (c.close > openingRange.high) {
-      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high };
+      /* Apply EMA filter */
+      if (!isEmaAligned("BULL")) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by EMA filter (EMA8 < EMA21)`);
+        return;
+      }
+      /* Apply HTF trend filter */
+      if (!isHTFAligned("BULL")) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by HTF trend filter`);
+        return;
+      }
+      /* Log breakout strength (volume proxy) */
+      const conviction = hasBreakoutConviction(c);
+      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction };
       setPhase("RETEST");
-      addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}`);
+      addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}`);
       addLog("Next action: BUY STOP — ride the breakout momentum");
     } else if (c.close < openingRange.low) {
-      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low };
+      /* Apply EMA filter */
+      if (!isEmaAligned("BEAR")) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by EMA filter (EMA8 > EMA21)`);
+        return;
+      }
+      /* Apply HTF trend filter */
+      if (!isHTFAligned("BEAR")) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by HTF trend filter`);
+        return;
+      }
+      const conviction = hasBreakoutConviction(c);
+      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction };
       setPhase("RETEST");
-      addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}`);
+      addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}`);
       addLog("Next action: SELL STOP — ride the breakout momentum");
     }
     return;
@@ -809,9 +1083,14 @@ function processCandle(idx) {
   }
 }
 
-/* ---- Level touch detection ---- */
+/* ---- Level touch detection (with optional ATR-based tolerance) ---- */
 function touchesLevel(candle, level) {
-  const tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE;
+  let tolerance;
+  if (atrToleranceEnabled && atrValue > 0) {
+    tolerance = atrValue * 0.5;  /* half ATR as tolerance */
+  } else {
+    tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE;
+  }
   return candle.low - tolerance <= level && candle.high + tolerance >= level;
 }
 
@@ -870,11 +1149,49 @@ function buildTrade(confirmCandle, confirmIdx) {
     const tp = entry - risk * rr;
     trade = { entry, sl, tp, dir: "BEAR", rr };
   }
+
+  /* Reset trailing/partial state for new trade */
+  trailingSL   = null;
+  partialTpHit = false;
+}
+
+/* ---- True swing point detection ---- */
+/**
+ * A true swing low is a candle whose low is lower than the lows of
+ * SWING_NEIGHBOR_BARS candles on each side.
+ */
+function isTrueSwingLow(idx) {
+  const n = SWING_NEIGHBOR_BARS;
+  if (idx - n < 0 || idx + n >= candles.length) return false;
+  const low = candles[idx].low;
+  for (let i = idx - n; i <= idx + n; i++) {
+    if (i === idx) continue;
+    if (candles[i].low <= low) return false;
+  }
+  return true;
+}
+
+function isTrueSwingHigh(idx) {
+  const n = SWING_NEIGHBOR_BARS;
+  if (idx - n < 0 || idx + n >= candles.length) return false;
+  const high = candles[idx].high;
+  for (let i = idx - n; i <= idx + n; i++) {
+    if (i === idx) continue;
+    if (candles[i].high >= high) return false;
+  }
+  return true;
 }
 
 function findSwingLow(upToIdx) {
-  let low = Infinity;
   const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
+
+  /* Try true swing point first (scan from most recent backwards) */
+  for (let i = upToIdx - SWING_NEIGHBOR_BARS; i >= lookback + SWING_NEIGHBOR_BARS; i--) {
+    if (isTrueSwingLow(i)) return candles[i].low;
+  }
+
+  /* Fallback to simple min in lookback window */
+  let low = Infinity;
   for (let i = lookback; i <= upToIdx; i++) {
     if (candles[i].low < low) low = candles[i].low;
   }
@@ -882,8 +1199,15 @@ function findSwingLow(upToIdx) {
 }
 
 function findSwingHigh(upToIdx) {
-  let high = -Infinity;
   const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
+
+  /* Try true swing point first (scan from most recent backwards) */
+  for (let i = upToIdx - SWING_NEIGHBOR_BARS; i >= lookback + SWING_NEIGHBOR_BARS; i--) {
+    if (isTrueSwingHigh(i)) return candles[i].high;
+  }
+
+  /* Fallback to simple max in lookback window */
+  let high = -Infinity;
   for (let i = lookback; i <= upToIdx; i++) {
     if (candles[i].high > high) high = candles[i].high;
   }
@@ -901,7 +1225,12 @@ function recordSignal() {
     sl: trade.sl,
     tp: trade.tp,
     rr: trade.rr,
-    result: "PENDING"
+    result: "PENDING",
+    emaAligned: emaFilterEnabled ? isEmaAligned(trade.dir) : "N/A",
+    htfTrend: getHTFTrend(),
+    breakoutStrength: (breakout && breakout.strong) ? "STRONG" : "WEAK",
+    partialTpHit: false,
+    trailingSL: null
   };
   signalHistory.push(signal);
   monitoringTrade = true;
@@ -914,33 +1243,78 @@ function monitorTradeOutcome(candle) {
   const pending = signalHistory.find(s => s.result === "PENDING");
   if (!pending) { monitoringTrade = false; return; }
 
+  const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
+
+  /* ---- Partial TP at 1:1 ---- */
+  if (partialTpEnabled && !partialTpHit) {
+    const risk = Math.abs(trade.entry - trade.sl);
+    if (trade.dir === "BULL") {
+      const partialLevel = trade.entry + risk; /* 1:1 reward */
+      if (candle.high >= partialLevel) {
+        partialTpHit = true;
+        trailingSL = trade.entry; /* move SL to breakeven */
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
+        pending.partialTpHit = true;
+      }
+    } else {
+      const partialLevel = trade.entry - risk; /* 1:1 reward */
+      if (candle.low <= partialLevel) {
+        partialTpHit = true;
+        trailingSL = trade.entry; /* move SL to breakeven */
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
+        pending.partialTpHit = true;
+      }
+    }
+  }
+
+  /* ---- Trailing stop (ATR-based) ---- */
+  if (trailingStopEnabled && atrValue > 0) {
+    if (trade.dir === "BULL") {
+      const newTrail = candle.high - atrValue * TRAILING_STOP_ATR_MULT;
+      if (newTrail > effectiveSL) {
+        trailingSL = newTrail;
+      }
+    } else {
+      const newTrail = candle.low + atrValue * TRAILING_STOP_ATR_MULT;
+      if (trailingSL == null || newTrail < effectiveSL) {
+        trailingSL = newTrail;
+      }
+    }
+    pending.trailingSL = trailingSL;
+  }
+
+  /* ---- Check SL / TP outcome ---- */
+  const checkSL = trailingSL != null ? trailingSL : trade.sl;
+  let resolved = false;
+
   if (trade.dir === "BULL") {
-    if (candle.low <= trade.sl) {
+    if (candle.low <= checkSL) {
       pending.result = "LOSS";
       signalLosses++;
-      monitoringTrade = false;
-      addLog(`Signal LOSS — price hit SL at ${fmt(trade.sl, 4)}`);
+      resolved = true;
+      addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
     } else if (candle.high >= trade.tp) {
       pending.result = "WIN";
       signalWins++;
-      monitoringTrade = false;
+      resolved = true;
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
     }
   } else {
-    if (candle.high >= trade.sl) {
+    if (candle.high >= checkSL) {
       pending.result = "LOSS";
       signalLosses++;
-      monitoringTrade = false;
-      addLog(`Signal LOSS — price hit SL at ${fmt(trade.sl, 4)}`);
+      resolved = true;
+      addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
     } else if (candle.low <= trade.tp) {
       pending.result = "WIN";
       signalWins++;
-      monitoringTrade = false;
+      resolved = true;
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
     }
   }
 
-  if (!monitoringTrade) {
+  if (resolved) {
+    monitoringTrade = false;
     persistSignalHistory();
     updateStatsUI();
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
@@ -973,7 +1347,9 @@ function getColors() {
     tpLine:        "#22c55e",
     crosshairText: isLight ? "#1e293b" : "#e5e7eb",
     emaFast:       "#f59e0b",
-    emaSlow:       "#8b5cf6"
+    emaSlow:       "#8b5cf6",
+    emaHTF:        "#06b6d4",    /* cyan for HTF EMA 100 */
+    trailingSL:    "#f97316"     /* orange for trailing stop */
   };
 }
 
@@ -1164,6 +1540,12 @@ function drawChart() {
   if (showEma) {
     drawEMALine(ctx, emaFast, xOf, yOf, COLORS.emaFast);
     drawEMALine(ctx, emaSlow, xOf, yOf, COLORS.emaSlow);
+    /* Draw HTF EMA (long period) as a thicker, semi-transparent line */
+    if (emaHTF.length > 0) {
+      ctx.globalAlpha = 0.5;
+      drawEMALine(ctx, emaHTF, xOf, yOf, COLORS.emaHTF || "#06b6d4");
+      ctx.globalAlpha = 1;
+    }
   }
 
   /* ---- Trade levels: Entry / SL / TP ---- */
@@ -1171,6 +1553,19 @@ function drawChart() {
     drawHLine(ctx, yOf(trade.entry), marginLeft, W - marginRight, COLORS.entryLine, "ENTRY " + fmt(trade.entry, 4), W, marginRight);
     drawHLine(ctx, yOf(trade.sl),    marginLeft, W - marginRight, COLORS.slLine,    "SL " + fmt(trade.sl, 4), W, marginRight);
     drawHLine(ctx, yOf(trade.tp),    marginLeft, W - marginRight, COLORS.tpLine,    "TP " + fmt(trade.tp, 4), W, marginRight);
+
+    /* Trailing SL line (if different from original SL) */
+    if (trailingSL != null && trailingSL !== trade.sl) {
+      drawHLine(ctx, yOf(trailingSL), marginLeft, W - marginRight, COLORS.trailingSL || "#f97316", "TRAIL " + fmt(trailingSL, 4), W, marginRight);
+    }
+
+    /* Partial TP line at 1:1 level */
+    if (partialTpEnabled) {
+      const risk = Math.abs(trade.entry - trade.sl);
+      const partialLevel = trade.dir === "BULL" ? trade.entry + risk : trade.entry - risk;
+      const partialColor = partialTpHit ? "rgba(34,197,94,0.5)" : "rgba(168,85,247,0.4)";
+      drawHLine(ctx, yOf(partialLevel), marginLeft, W - marginRight, partialColor, "1:1 " + fmt(partialLevel, 4), W, marginRight);
+    }
 
     const entryY = yOf(trade.entry);
     const slY    = yOf(trade.sl);
@@ -1308,6 +1703,26 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = UI[id];
     if (el) el.addEventListener("change", syncConfigFromUI);
   });
+
+  /* Strategy filter toggle listeners */
+  if (UI.autoResetToggle) {
+    UI.autoResetToggle.addEventListener("change", () => { autoResetEnabled = UI.autoResetToggle.checked; saveSettings(); });
+  }
+  if (UI.emaFilterToggle) {
+    UI.emaFilterToggle.addEventListener("change", () => { emaFilterEnabled = UI.emaFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.htfFilterToggle) {
+    UI.htfFilterToggle.addEventListener("change", () => { htfFilterEnabled = UI.htfFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.atrToleranceToggle) {
+    UI.atrToleranceToggle.addEventListener("change", () => { atrToleranceEnabled = UI.atrToleranceToggle.checked; saveSettings(); });
+  }
+  if (UI.trailingStopToggle) {
+    UI.trailingStopToggle.addEventListener("change", () => { trailingStopEnabled = UI.trailingStopToggle.checked; saveSettings(); });
+  }
+  if (UI.partialTpToggle) {
+    UI.partialTpToggle.addEventListener("change", () => { partialTpEnabled = UI.partialTpToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
+  }
 
   /* Tool buttons */
   if (UI.exportBtn) UI.exportBtn.addEventListener("click", exportSignalsCSV);

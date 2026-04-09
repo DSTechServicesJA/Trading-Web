@@ -101,6 +101,27 @@
 
             <label for="lookbackPeriod">Swing Lookback (candles)</label>
             <input type="number" id="lookbackPeriod" min="5" max="50" step="1" value="20" />
+
+            <hr class="param-divider" />
+            <p class="param-group-title">Strategy Filters</p>
+
+            <label class="toggle-row"><input type="checkbox" id="autoResetToggle" checked /> Auto-Reset After Trade</label>
+            <p class="hint">Automatically scan for new setups after trade resolves.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="emaFilterToggle" /> EMA 8/21 Trend Filter</label>
+            <p class="hint">Only allow breakouts aligned with EMA crossover direction.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="htfFilterToggle" /> HTF Trend Filter</label>
+            <p class="hint">Require alignment with higher-timeframe trend (EMA 100).</p>
+
+            <label class="toggle-row"><input type="checkbox" id="atrToleranceToggle" /> ATR-Based Tolerance</label>
+            <p class="hint">Use ATR(14) instead of candle range for retest detection.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="trailingStopToggle" /> Trailing Stop</label>
+            <p class="hint">Trail SL using 1.5× ATR as price moves favourably.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="partialTpToggle" /> Partial TP (1:1)</label>
+            <p class="hint">Move SL to breakeven when price reaches 1:1 reward.</p>
           </div>
         </section>
 
@@ -145,6 +166,22 @@
             <span id="nextAction" class="status-badge disabled">--</span>
           </div>
           <div class="side-row">
+            <span>EMA Filter</span>
+            <span id="emaFilterStatus" class="env-label">OFF</span>
+          </div>
+          <div class="side-row">
+            <span>HTF Trend</span>
+            <span id="htfTrend" class="status-badge disabled">--</span>
+          </div>
+          <div class="side-row">
+            <span>ATR(14)</span>
+            <span id="atrDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Breakout Strength</span>
+            <span id="breakoutStrength" class="env-label">--</span>
+          </div>
+          <div class="side-row">
             <span>Retest</span>
             <span id="retestStatus" class="env-label">--</span>
           </div>
@@ -161,8 +198,16 @@
             <span id="slPrice" class="env-label">--</span>
           </div>
           <div class="side-row">
+            <span>Trailing SL</span>
+            <span id="trailingSLDisplay" class="env-label">--</span>
+          </div>
+          <div class="side-row">
             <span>Take Profit</span>
             <span id="tpPrice" class="env-label">--</span>
+          </div>
+          <div class="side-row">
+            <span>Partial TP</span>
+            <span id="partialTpDisplay" class="env-label">--</span>
           </div>
           <div class="side-row">
             <span>R:R</span>
@@ -223,6 +268,12 @@
         </div>
         <div class="legend-row">
           <span class="legend-swatch ema-slow-swatch"></span> EMA 21
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch htf-ema-swatch"></span> EMA 100 (HTF)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch trailing-sl-swatch"></span> Trailing SL
         </div>
         <div class="legend-row ema-toggle-row">
           <label><input type="checkbox" id="emaToggle" /> Show EMA</label>

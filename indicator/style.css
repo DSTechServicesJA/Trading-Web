@@ -319,6 +319,8 @@ button:disabled {
 /* ---- EMA Legend Swatches ---- */
 .ema-fast-swatch { background: rgba(245, 158, 11, 0.35); border: 1px solid #f59e0b; }
 .ema-slow-swatch { background: rgba(139, 92, 246, 0.35); border: 1px solid #8b5cf6; }
+.htf-ema-swatch  { background: rgba(6, 182, 212, 0.35); border: 1px solid #06b6d4; }
+.trailing-sl-swatch { background: rgba(249, 115, 22, 0.35); border: 1px solid #f97316; }
 
 .ema-toggle-row label {
   display: flex;
@@ -456,3 +458,33 @@ body.light-theme .chart-embed canvas {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--muted-strong); border-radius: 3px; }
+
+/* ---- Parameter Divider / Group ---- */
+.param-divider {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 10px 0 6px;
+}
+.param-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 3px 0;
+}
+.toggle-row input[type="checkbox"] {
+  width: auto;
+}
+body.light-theme .param-divider {
+  border-top-color: #e2e8f0;
+}
