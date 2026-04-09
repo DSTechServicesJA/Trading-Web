@@ -71,6 +71,15 @@ const TRAILING_STOP_ATR_MULT = 1.5;
 
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
+/* Pin bar: the rejection wick must be this much larger than the other wick */
+const PIN_BAR_WICK_DOMINANCE = 1.5;
+
+/* Morning/Evening star: max body-to-range ratio for the middle "star" candle */
+const STAR_BODY_RATIO = 0.35;
+
+/* S/R confluence: ATR multiplier for tolerance, and fallback price percentage */
+const SR_CONFLUENCE_ATR_MULT = 0.5;
+const SR_CONFLUENCE_PRICE_PCT = 0.002;
 
 /* False breakout: number of candles to watch for price returning inside range */
 const FALSE_BREAKOUT_CANDLES = 3;
@@ -1052,13 +1061,13 @@ function isPinBar(c, dir) {
 
   /* Hammer / bullish pin bar: long lower wick, small body at top */
   if (!dir || dir === "BULL") {
-    if (lowerWick >= body * PIN_BAR_TAIL_RATIO && lowerWick > upperWick * 1.5) {
+    if (lowerWick >= body * PIN_BAR_TAIL_RATIO && lowerWick > upperWick * PIN_BAR_WICK_DOMINANCE) {
       return true;
     }
   }
   /* Shooting star / bearish pin bar: long upper wick, small body at bottom */
   if (!dir || dir === "BEAR") {
-    if (upperWick >= body * PIN_BAR_TAIL_RATIO && upperWick > lowerWick * 1.5) {
+    if (upperWick >= body * PIN_BAR_TAIL_RATIO && upperWick > lowerWick * PIN_BAR_WICK_DOMINANCE) {
       return true;
     }
   }
@@ -1100,7 +1109,7 @@ function isMorningStar(c1, c2, c3) {
   if (c1Body >= 0) return false;              /* c1 must be bearish */
   if (c3Body <= 0) return false;              /* c3 must be bullish */
   if (c1Range === 0) return false;
-  if (c2Body / c1Range > 0.35) return false;  /* c2 must be small relative to c1 */
+  if (c2Body / c1Range > STAR_BODY_RATIO) return false;  /* c2 must be small relative to c1 */
   /* c3 should close well into c1's body (at least 50%) */
   const c1MidBody = (c1.open + c1.close) / 2;
   return c3.close >= c1MidBody;
@@ -1120,7 +1129,7 @@ function isEveningStar(c1, c2, c3) {
   if (c1Body <= 0) return false;              /* c1 must be bullish */
   if (c3Body >= 0) return false;              /* c3 must be bearish */
   if (c1Range === 0) return false;
-  if (c2Body / c1Range > 0.35) return false;  /* c2 must be small relative to c1 */
+  if (c2Body / c1Range > STAR_BODY_RATIO) return false;  /* c2 must be small relative to c1 */
   /* c3 should close well into c1's body (at least 50%) */
   const c1MidBody = (c1.open + c1.close) / 2;
   return c3.close <= c1MidBody;
@@ -1133,8 +1142,8 @@ function isEveningStar(c1, c2, c3) {
  * Returns true if the level is within ATR tolerance of a recent swing point.
  */
 function hasSRConfluence(level) {
-  if (candles.length < SWING_LOOKBACK_PERIOD) return false;
-  const tolerance = atrValue > 0 ? atrValue * 0.5 : Math.abs(level * 0.002);
+  if (level == null || candles.length < SWING_LOOKBACK_PERIOD) return false;
+  const tolerance = atrValue > 0 ? atrValue * SR_CONFLUENCE_ATR_MULT : Math.abs(level * SR_CONFLUENCE_PRICE_PCT);
   const lookbackStart = Math.max(0, candles.length - SWING_LOOKBACK_PERIOD);
 
   /* Check for true swing highs/lows near the level */
@@ -1193,9 +1202,9 @@ function computeConfluenceScore() {
     }
   }
 
-  /* Factor 2: HTF trend alignment */
+  /* Factor 2: HTF trend alignment (only counts if actually aligned, not just FLAT) */
   const htf = getHTFTrend();
-  if (htf === breakout.dir || htf === "FLAT") score++;
+  if (htf === breakout.dir) score++;
 
   /* Factor 3: Strong breakout candle */
   if (breakout.strong) score++;
@@ -1540,7 +1549,7 @@ function buildTrade(confirmCandle, confirmIdx) {
     const risk = sl - entry;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry - risk * rr;
-    const actualRR = pureTrailingEnabled ? rr : risk > 0 ? Math.abs(entry - tp) / risk : rr;
+    const actualRR = pureTrailingEnabled ? rr : (risk > 0 ? Math.abs(entry - tp) / risk : rr);
 
     /* Min R:R gate: reject trade if R:R is below minimum */
     if (minRREnabled && actualRR < minRRValue) {
@@ -1632,7 +1641,7 @@ function recordSignal(confirmPattern) {
     partialTpHit: false,
     trailingSL: null,
     confluenceScore: computeConfluenceScore(),
-    srConfluence: hasSRConfluence(breakout ? breakout.level : 0),
+    srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
     confirmPattern: confirmPattern || "engulfing"
   };
   signalHistory.push(signal);
@@ -1692,8 +1701,8 @@ function monitorTradeOutcome(candle) {
 
   if (trade.dir === "BULL") {
     if (candle.low <= checkSL) {
-      /* In pure trailing mode, a trailing stop hit after partial TP is still a WIN */
-      if (pureTrailingEnabled && trailingSL != null && trailingSL >= trade.entry) {
+      /* In pure trailing mode, a trailing stop hit above entry is a WIN */
+      if (pureTrailingEnabled && trailingSL != null && trailingSL > trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
@@ -1712,7 +1721,7 @@ function monitorTradeOutcome(candle) {
     }
   } else {
     if (candle.high >= checkSL) {
-      if (pureTrailingEnabled && trailingSL != null && trailingSL <= trade.entry) {
+      if (pureTrailingEnabled && trailingSL != null && trailingSL < trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
