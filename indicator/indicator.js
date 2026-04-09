@@ -27,6 +27,7 @@
 /* ================= CONFIG ================= */
 const APP_ID  = 120128;
 const WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
 /* Tuning defaults (user-configurable via UI) */
 let RANGE_MINUTES             = 15;
@@ -193,7 +194,7 @@ function sendPhaseNotification(phaseName) {
     const symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
     new Notification(`IT Guru Indicator: ${phaseName}`, {
       body: `${symbol} moved to ${phaseName} phase`,
-      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>"
+      icon: NOTIF_ICON
     });
   }
 }
@@ -236,10 +237,22 @@ function restoreSettings() {
     if (s.granularity && UI.granSelect) UI.granSelect.value = s.granularity;
     if (s.risk && UI.riskInput) UI.riskInput.value = s.risk;
     if (s.reward && UI.rewardInput) UI.rewardInput.value = s.reward;
-    if (s.rangeDuration != null) { RANGE_MINUTES = s.rangeDuration; if (UI.rangeDuration) UI.rangeDuration.value = s.rangeDuration; }
-    if (s.touchTolerance != null) { LEVEL_TOUCH_TOLERANCE = s.touchTolerance; if (UI.touchTolerance) UI.touchTolerance.value = (s.touchTolerance * 100).toFixed(0); }
-    if (s.dojiRatio != null) { DOJI_BODY_RATIO = s.dojiRatio; if (UI.dojiRatio) UI.dojiRatio.value = (s.dojiRatio * 100).toFixed(0); }
-    if (s.lookbackPeriod != null) { SWING_LOOKBACK_PERIOD = s.lookbackPeriod; if (UI.lookbackPeriod) UI.lookbackPeriod.value = s.lookbackPeriod; }
+    if (s.rangeDuration !== null && s.rangeDuration !== undefined) {
+      RANGE_MINUTES = s.rangeDuration;
+      if (UI.rangeDuration) UI.rangeDuration.value = s.rangeDuration;
+    }
+    if (s.touchTolerance !== null && s.touchTolerance !== undefined) {
+      LEVEL_TOUCH_TOLERANCE = s.touchTolerance;
+      if (UI.touchTolerance) UI.touchTolerance.value = (s.touchTolerance * 100).toFixed(0);
+    }
+    if (s.dojiRatio !== null && s.dojiRatio !== undefined) {
+      DOJI_BODY_RATIO = s.dojiRatio;
+      if (UI.dojiRatio) UI.dojiRatio.value = (s.dojiRatio * 100).toFixed(0);
+    }
+    if (s.lookbackPeriod !== null && s.lookbackPeriod !== undefined) {
+      SWING_LOOKBACK_PERIOD = s.lookbackPeriod;
+      if (UI.lookbackPeriod) UI.lookbackPeriod.value = s.lookbackPeriod;
+    }
     if (s.soundEnabled != null) soundEnabled = s.soundEnabled;
     if (s.notificationsEnabled != null) notificationsEnabled = s.notificationsEnabled;
     if (s.theme === "light") { currentTheme = "light"; document.body.classList.add("light-theme"); }
@@ -753,8 +766,8 @@ function isBearishEngulfing(prev, curr) {
 function buildTrade(confirmCandle, confirmIdx) {
   const riskVal   = parseFloat(UI.riskInput.value);
   const rewardVal = parseFloat(UI.rewardInput.value);
-  const riskUnits  = (riskVal > 0) ? riskVal : 1;
-  const rewardUnits = (rewardVal > 0) ? rewardVal : 1;
+  const riskUnits  = (!isNaN(riskVal) && riskVal > 0) ? riskVal : 1;
+  const rewardUnits = (!isNaN(rewardVal) && rewardVal > 0) ? rewardVal : 1;
   const rr = rewardUnits / riskUnits;
 
   if (breakout.dir === "BULL") {
