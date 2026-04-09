@@ -10,6 +10,17 @@
 <body>
 <main class="container">
 
+  <!-- Login Gate Overlay -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+      <h2>Unlock Indicator</h2>
+      <p>Paste your Deriv API token below, then press Continue.</p>
+      <input type="password" id="loginToken" class="login-token-input" placeholder="Enter Deriv API Token" />
+      <button id="loginBtn" type="button" class="login-action-btn">CONTINUE</button>
+      <div id="loginError" class="login-error"></div>
+    </div>
+  </div>
+
   <h1>IT Guru – Breakout Retest <span class="badge">INDICATOR</span></h1>
 
   <nav class="bot-nav">

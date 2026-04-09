@@ -186,6 +186,12 @@ function initUI() {
   UI.soundToggleBtn   = document.getElementById("soundToggleBtn");
   UI.notifToggleBtn   = document.getElementById("notifToggleBtn");
   UI.emaToggle        = document.getElementById("emaToggle");
+
+  /* Login gate */
+  UI.loginOverlay     = document.getElementById("loginOverlay");
+  UI.loginBtn         = document.getElementById("loginBtn");
+  UI.loginError       = document.getElementById("loginError");
+  UI.loginToken       = document.getElementById("loginToken");
 }
 
 /* ================= HELPERS ================= */
@@ -1759,9 +1765,34 @@ function syncConfigFromUI() {
   saveSettings();
 }
 
+/* ================= LOGIN GATE ================= */
+function initLoginGate() {
+  if (!UI.loginOverlay || !UI.loginBtn) return;
+
+  UI.loginOverlay.style.display =
+    sessionStorage.getItem("itguru_logged_in") === "1"
+      ? "none"
+      : "flex";
+
+  UI.loginBtn.onclick = () => {
+    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+
+    if (!token) {
+      if (UI.loginError) UI.loginError.textContent = "Enter Deriv API token to continue";
+      return;
+    }
+
+    sessionStorage.setItem("deriv_token", token);
+    sessionStorage.setItem("itguru_logged_in", "1");
+    UI.loginOverlay.style.display = "none";
+    if (UI.loginError) UI.loginError.textContent = "";
+  };
+}
+
 /* ================= BOOT ================= */
 document.addEventListener("DOMContentLoaded", () => {
   initUI();
+  initLoginGate();
   restoreSettings();
   restoreSignalLog();
   restoreSignalHistory();

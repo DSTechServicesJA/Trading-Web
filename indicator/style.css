@@ -489,3 +489,73 @@ body.light-theme .chart-embed canvas {
 body.light-theme .param-divider {
   border-top-color: #e2e8f0;
 }
+
+/* ---- Login Overlay ---- */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.92);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+}
+
+.login-card {
+  width: min(380px, 92vw);
+  text-align: center;
+  border-radius: 14px;
+  padding: 26px 22px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.95));
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
+}
+
+.login-card h2 {
+  margin: 0 0 8px;
+  color: var(--heading);
+}
+
+.login-card p {
+  margin: 0 0 14px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.login-token-input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #e5e7eb;
+  font-size: 14px;
+}
+.login-token-input::placeholder {
+  color: #64748b;
+}
+.login-token-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.login-action-btn {
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: var(--font-size-md);
+  color: #0b1220;
+  background: linear-gradient(90deg, var(--success), var(--success-strong));
+}
+
+.login-error {
+  color: #f87171;
+  margin-top: 10px;
+  min-height: 18px;
+  font-size: 13px;
+}

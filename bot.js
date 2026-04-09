@@ -3977,6 +3977,7 @@ function initLoginGate() {
   const overlay = document.getElementById("loginOverlay");
   const btn = document.getElementById("loginBtn");
   const err = document.getElementById("loginError");
+  const loginTokenInput = document.getElementById("loginToken");
 
   if (!overlay || !btn) return;
 
@@ -3986,7 +3987,7 @@ function initLoginGate() {
       : "flex";
 
   btn.onclick = () => {
-    const token = tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+    const token = loginTokenInput?.value?.trim() || tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
 
     if (!token) {
       if (err) err.textContent = "Enter Deriv API token to continue";
@@ -3997,6 +3998,9 @@ function initLoginGate() {
     sessionStorage.setItem("itguru_logged_in", "1");
     overlay.style.display = "none";
     if (err) err.textContent = "";
+
+    /* Sync token into the page-level token input if it exists */
+    if (tokenInput) tokenInput.value = token;
 
     if (!wsStarted) {
       wsStarted = true;
