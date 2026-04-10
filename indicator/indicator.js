@@ -33,10 +33,14 @@
      - Morning star / evening star 3-candle confirmation
      - S/R confluence check at retest level
      - False breakout invalidation
-     - Confluence score (0-5) quality gauge
+     - Confluence score (0-9) quality gauge
      - Body-size breakout conviction check
      - Minimum R:R gate to reject low-quality trades
      - Pure trailing stop mode (no fixed TP)
+     - RSI at retest (confirms pullback has room to reverse)
+     - Volume spike on breakout (filters weak/fake breakouts)
+     - Session filter (London/NY/Asian/Overlap)
+     - Fibonacci at retest (S/R confluence from fib levels)
    ========================================================= */
 
 "use strict";
@@ -83,6 +87,24 @@ const SR_CONFLUENCE_PRICE_PCT = 0.002;
 
 /* False breakout: number of candles to watch for price returning inside range */
 const FALSE_BREAKOUT_CANDLES = 3;
+
+/* RSI */
+const RSI_PERIOD = 14;
+const RSI_RETEST_BULL_MAX = 50;  /* RSI at retest should be ≤ this for BULL (room to rise) */
+const RSI_RETEST_BEAR_MIN = 50;  /* RSI at retest should be ≥ this for BEAR (room to fall) */
+
+/* Volume spike (range-based proxy – synthetic indices have no tick volume) */
+const VOLUME_SPIKE_LOOKBACK = 20;
+const VOLUME_SPIKE_MULT = 1.5;   /* breakout candle range must be ≥ this × avg range */
+
+/* Session filter (UTC hours) */
+const SESSION_LONDON   = { start: 7, end: 16 };
+const SESSION_NEW_YORK = { start: 12, end: 21 };
+const SESSION_ASIAN    = { start: 0, end: 9 };
+
+/* Fibonacci retracement levels & tolerance */
+const FIB_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786];
+const FIB_TOLERANCE_ATR_MULT = 0.3;
 
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
@@ -159,6 +181,16 @@ let minRRValue           = 2.0;
 /* Confluence score for current setup */
 let confluenceScore = 0;
 
+/* RSI state */
+let rsiValues = [];
+
+/* New strategy filter toggles */
+let rsiFilterEnabled     = false;
+let volumeSpikeEnabled   = false;
+let sessionFilterEnabled = false;
+let sessionFilterMode    = "london_ny";  /* london | new_york | overlap | asian | london_ny */
+let fibRetestEnabled     = false;
+
 /* ================= UI REFS ================= */
 const UI = {};
 function initUI() {
@@ -223,6 +255,17 @@ function initUI() {
   /* New indicator state displays */
   UI.confluenceDisplay  = document.getElementById("confluenceDisplay");
   UI.srConfluenceDisplay = document.getElementById("srConfluenceDisplay");
+
+  /* New filter UI refs */
+  UI.rsiFilterToggle     = document.getElementById("rsiFilterToggle");
+  UI.volumeSpikeToggle   = document.getElementById("volumeSpikeToggle");
+  UI.sessionFilterToggle = document.getElementById("sessionFilterToggle");
+  UI.sessionFilterMode   = document.getElementById("sessionFilterMode");
+  UI.fibRetestToggle     = document.getElementById("fibRetestToggle");
+  UI.rsiDisplay          = document.getElementById("rsiDisplay");
+  UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
+  UI.sessionDisplay      = document.getElementById("sessionDisplay");
+  UI.fibRetestDisplay    = document.getElementById("fibRetestDisplay");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -361,7 +404,12 @@ function saveSettings() {
       falseBreakoutEnabled,
       minRREnabled,
       minRRValue,
-      pureTrailingEnabled
+      pureTrailingEnabled,
+      rsiFilterEnabled,
+      volumeSpikeEnabled,
+      sessionFilterEnabled,
+      sessionFilterMode,
+      fibRetestEnabled
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -418,6 +466,18 @@ function restoreSettings() {
     if (UI.minRRToggle) UI.minRRToggle.checked = minRREnabled;
     if (UI.minRRInput) UI.minRRInput.value = minRRValue;
     if (UI.pureTrailingToggle) UI.pureTrailingToggle.checked = pureTrailingEnabled;
+
+    /* New filter toggles */
+    if (s.rsiFilterEnabled != null) rsiFilterEnabled = s.rsiFilterEnabled;
+    if (s.volumeSpikeEnabled != null) volumeSpikeEnabled = s.volumeSpikeEnabled;
+    if (s.sessionFilterEnabled != null) sessionFilterEnabled = s.sessionFilterEnabled;
+    if (s.sessionFilterMode != null) sessionFilterMode = s.sessionFilterMode;
+    if (s.fibRetestEnabled != null) fibRetestEnabled = s.fibRetestEnabled;
+    if (UI.rsiFilterToggle) UI.rsiFilterToggle.checked = rsiFilterEnabled;
+    if (UI.volumeSpikeToggle) UI.volumeSpikeToggle.checked = volumeSpikeEnabled;
+    if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
+    if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
+    if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
   } catch (e) { /* storage not available */ }
 }
 
@@ -475,7 +535,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -536,6 +596,7 @@ function resetIndicator() {
   emaHTF  = [];
   atrValue  = 0;
   atrValues = [];
+  rsiValues = [];
   trailingSL   = null;
   partialTpHit = false;
   setPhase("WAITING");
@@ -620,10 +681,11 @@ function updateStateUI() {
   if (UI.confluenceDisplay) {
     if (breakout) {
       confluenceScore = computeConfluenceScore();
-      UI.confluenceDisplay.textContent = `${confluenceScore} / 5`;
-      if (confluenceScore >= 4) {
+      UI.confluenceDisplay.textContent = `${confluenceScore} / 9`;
+      /* Thresholds: ≥ 7 excellent (green), ≥ 4 moderate (yellow), < 4 weak (red) */
+      if (confluenceScore >= 7) {
         UI.confluenceDisplay.className = "status-badge bull";
-      } else if (confluenceScore >= 2) {
+      } else if (confluenceScore >= 4) {
         UI.confluenceDisplay.className = "status-badge warning";
       } else {
         UI.confluenceDisplay.className = "status-badge bear";
@@ -644,6 +706,59 @@ function updateStateUI() {
     } else {
       UI.srConfluenceDisplay.textContent = "--";
       UI.srConfluenceDisplay.className = "env-label";
+    }
+  }
+
+  /* RSI display */
+  if (UI.rsiDisplay) {
+    const rsi = getCurrentRSI();
+    if (rsi != null) {
+      UI.rsiDisplay.textContent = fmt(rsi, 1);
+      if (rsi <= 30) UI.rsiDisplay.className = "status-badge bull";
+      else if (rsi >= 70) UI.rsiDisplay.className = "status-badge bear";
+      else UI.rsiDisplay.className = "env-label";
+    } else {
+      UI.rsiDisplay.textContent = "--";
+      UI.rsiDisplay.className = "env-label";
+    }
+  }
+
+  /* Volume spike display */
+  if (UI.volumeSpikeDisplay) {
+    if (breakout && breakout.candleIdx < candles.length) {
+      const spike = hasVolumeSpikeOnBreakout(breakout.candleIdx);
+      UI.volumeSpikeDisplay.textContent = spike ? "YES ✅" : "NO";
+      UI.volumeSpikeDisplay.className = "status-badge " + (spike ? "bull" : "disabled");
+    } else {
+      UI.volumeSpikeDisplay.textContent = "--";
+      UI.volumeSpikeDisplay.className = "env-label";
+    }
+  }
+
+  /* Session display */
+  if (UI.sessionDisplay) {
+    const sessionName = getActiveSessionName();
+    const inSession = isWithinActiveSession();
+    UI.sessionDisplay.textContent = sessionName + (sessionFilterEnabled ? (inSession ? " ✅" : " ❌") : "");
+    UI.sessionDisplay.className = sessionFilterEnabled
+      ? ("status-badge " + (inSession ? "bull" : "bear"))
+      : "env-label";
+  }
+
+  /* Fibonacci retest display */
+  if (UI.fibRetestDisplay) {
+    if (breakout) {
+      const fibResult = getFibRetestLevel(breakout.level);
+      if (fibResult) {
+        UI.fibRetestDisplay.textContent = `${(fibResult.ratio * 100).toFixed(1)}% ✅`;
+        UI.fibRetestDisplay.className = "status-badge bull";
+      } else {
+        UI.fibRetestDisplay.textContent = "NO";
+        UI.fibRetestDisplay.className = "status-badge disabled";
+      }
+    } else {
+      UI.fibRetestDisplay.textContent = "--";
+      UI.fibRetestDisplay.className = "env-label";
     }
   }
 
@@ -842,6 +957,7 @@ function connect() {
 
       computeEMAs();
       computeATR();
+      computeRSI();
       processLatestCandle();
       monitorTradeOutcome(c);
       drawChart();
@@ -985,6 +1101,41 @@ function computeATR() {
   atrValue = prevATR;
 }
 
+/* ================= RSI COMPUTATION ================= */
+function computeRSI() {
+  const closes = candles.map(c => c.close);
+  if (closes.length < RSI_PERIOD + 1) { rsiValues = []; return; }
+  rsiValues = [];
+
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= RSI_PERIOD; i++) {
+    const change = closes[i] - closes[i - 1];
+    if (change > 0) gains += change;
+    else losses -= change;
+  }
+  let avgGain = gains / RSI_PERIOD;
+  let avgLoss = losses / RSI_PERIOD;
+
+  for (let i = 0; i < RSI_PERIOD; i++) rsiValues.push(null);
+
+  /* When avgLoss is 0 all movement was up → RSI = 100 */
+  rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+
+  for (let i = RSI_PERIOD + 1; i < closes.length; i++) {
+    const change = closes[i] - closes[i - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? -change : 0;
+    avgGain = (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD;
+    avgLoss = (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD;
+    rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+  }
+}
+
+function getCurrentRSI() {
+  if (rsiValues.length === 0) return null;
+  return rsiValues[rsiValues.length - 1];
+}
+
 /* ================= EMA TREND FILTER ================= */
 /**
  * Returns true if the EMA 8/21 crossover aligns with the given breakout direction.
@@ -1024,6 +1175,126 @@ function isHTFAligned(dir) {
   const trend = getHTFTrend();
   if (trend === "FLAT") return true;
   return trend === dir;
+}
+
+/* ================= RSI AT RETEST ================= */
+/**
+ * Returns true if the RSI confirms the pullback has room to reverse.
+ * For BULL retest: RSI should be ≤ RSI_RETEST_BULL_MAX (pulled back enough).
+ * For BEAR retest: RSI should be ≥ RSI_RETEST_BEAR_MIN (bounced enough).
+ * If rsiFilterEnabled is off, always returns true.
+ */
+function isRSIFavorable(dir) {
+  if (!rsiFilterEnabled) return true;
+  if (rsiValues.length === 0) return true;
+  const currentRSI = rsiValues[rsiValues.length - 1];
+  if (currentRSI == null) return true;
+  if (dir === "BULL") return currentRSI <= RSI_RETEST_BULL_MAX;
+  if (dir === "BEAR") return currentRSI >= RSI_RETEST_BEAR_MIN;
+  return true;
+}
+
+/* ================= VOLUME SPIKE ON BREAKOUT ================= */
+/**
+ * Checks if the breakout candle has a significantly larger range than
+ * the average of recent candles, serving as a volume/momentum proxy.
+ * Synthetic indices have no tick volume, so range is the best proxy.
+ * If volumeSpikeEnabled is off, always returns true.
+ * @param {number} candleIdx - index of the breakout candle in the candles array
+ */
+function hasVolumeSpikeOnBreakout(candleIdx) {
+  if (!volumeSpikeEnabled) return true;
+  if (candleIdx < 0 || candleIdx >= candles.length) return true;
+  const startIdx = Math.max(0, candleIdx - VOLUME_SPIKE_LOOKBACK);
+  if (startIdx >= candleIdx) return true;
+  let sumRange = 0;
+  let count = 0;
+  for (let i = startIdx; i < candleIdx; i++) {
+    sumRange += candles[i].high - candles[i].low;
+    count++;
+  }
+  if (count === 0) return true;
+  const avgRange = sumRange / count;
+  if (avgRange <= 0) return true;
+  const breakoutRange = candles[candleIdx].high - candles[candleIdx].low;
+  return breakoutRange >= avgRange * VOLUME_SPIKE_MULT;
+}
+
+/* ================= SESSION FILTER ================= */
+/**
+ * Returns true if the current UTC hour falls within the active trading session.
+ * Sessions help avoid low-liquidity periods that produce noisy signals.
+ * If sessionFilterEnabled is off, always returns true.
+ */
+function isWithinActiveSession() {
+  if (!sessionFilterEnabled) return true;
+  const hour = new Date().getUTCHours();
+  switch (sessionFilterMode) {
+    case "london":
+      return hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end;
+    case "new_york":
+      return hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end;
+    case "overlap":
+      /* Overlap = intersection of London and New York sessions */
+      return hour >= Math.max(SESSION_LONDON.start, SESSION_NEW_YORK.start) &&
+             hour < Math.min(SESSION_LONDON.end, SESSION_NEW_YORK.end);
+    case "asian":
+      return hour >= SESSION_ASIAN.start && hour < SESSION_ASIAN.end;
+    case "london_ny":
+    default:
+      return (hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end) ||
+             (hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end);
+  }
+}
+
+function getActiveSessionName() {
+  const hour = new Date().getUTCHours();
+  const sessions = [];
+  if (hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end) sessions.push("London");
+  if (hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end) sessions.push("NY");
+  if (hour >= SESSION_ASIAN.start && hour < SESSION_ASIAN.end) sessions.push("Asian");
+  return sessions.length > 0 ? sessions.join("/") : "Off-Hours";
+}
+
+/* ================= FIBONACCI AT RETEST ================= */
+/**
+ * Finds the nearest Fibonacci retracement level to a price level.
+ * Uses the swing from the lookback period before/including the opening range.
+ * Returns { level, ratio, from } if within tolerance, or null.
+ */
+function getFibRetestLevel(level) {
+  if (!fibRetestEnabled || !openingRange) return null;
+  const lookbackEnd = Math.min(openingRange.endIdx, candles.length - 1);
+  const lookbackStart = Math.max(0, lookbackEnd - SWING_LOOKBACK_PERIOD);
+  if (lookbackEnd < lookbackStart) return null;
+
+  let swingHigh = -Infinity, swingLow = Infinity;
+  for (let i = lookbackStart; i <= lookbackEnd; i++) {
+    if (candles[i].high > swingHigh) swingHigh = candles[i].high;
+    if (candles[i].low < swingLow) swingLow = candles[i].low;
+  }
+
+  const swingRange = swingHigh - swingLow;
+  if (swingRange <= 0) return null;
+  const tolerance = atrValue > 0
+    ? atrValue * FIB_TOLERANCE_ATR_MULT
+    : swingRange * 0.02;
+
+  for (const fib of FIB_LEVELS) {
+    const fibFromHigh = swingHigh - swingRange * fib;
+    if (Math.abs(level - fibFromHigh) <= tolerance) {
+      return { level: fibFromHigh, ratio: fib, from: "high" };
+    }
+    const fibFromLow = swingLow + swingRange * fib;
+    if (Math.abs(level - fibFromLow) <= tolerance) {
+      return { level: fibFromLow, ratio: fib, from: "low" };
+    }
+  }
+  return null;
+}
+
+function hasFibConfluence(level) {
+  return getFibRetestLevel(level) !== null;
 }
 
 /* ================= BREAKOUT STRENGTH (VOLUME PROXY) ================= */
@@ -1181,12 +1452,16 @@ function isFalseBreakout(currentIdx) {
 
 /* ================= CONFLUENCE SCORE ================= */
 /**
- * Computes a quality score (0-5) for the current setup based on multiple factors:
+ * Computes a quality score (0-9) for the current setup based on multiple factors:
  *   +1 EMA 8/21 aligned with breakout direction
  *   +1 HTF EMA 100 aligned
  *   +1 Strong breakout candle (range+body vs ATR)
  *   +1 Pin bar or inside bar at retest zone
  *   +1 S/R confluence at breakout level
+ *   +1 RSI favorable at retest
+ *   +1 Volume spike on breakout candle
+ *   +1 Within active trading session
+ *   +1 Fibonacci confluence at retest level
  */
 function computeConfluenceScore() {
   if (!breakout) return 0;
@@ -1221,6 +1496,28 @@ function computeConfluenceScore() {
   /* Factor 5: S/R confluence */
   if (hasSRConfluence(breakout.level)) score++;
 
+  /* Factor 6: RSI favorable at retest */
+  if (rsiValues.length > 0) {
+    const rsi = rsiValues[rsiValues.length - 1];
+    if (rsi != null) {
+      if ((breakout.dir === "BULL" && rsi <= RSI_RETEST_BULL_MAX) ||
+          (breakout.dir === "BEAR" && rsi >= RSI_RETEST_BEAR_MIN)) {
+        score++;
+      }
+    }
+  }
+
+  /* Factor 7: Volume spike on breakout */
+  if (breakout.candleIdx < candles.length) {
+    if (hasVolumeSpikeOnBreakout(breakout.candleIdx)) score++;
+  }
+
+  /* Factor 8: Within active trading session */
+  if (isWithinActiveSession()) score++;
+
+  /* Factor 9: Fibonacci confluence at retest level */
+  if (hasFibConfluence(breakout.level)) score++;
+
   return score;
 }
 
@@ -1240,6 +1537,7 @@ function processAllCandles() {
   if (candles.length === 0) return;
   rangeStartEpoch = candles[0].epoch;
   computeATR();
+  computeRSI();
 
   buildOpeningRange();
 
@@ -1334,11 +1632,22 @@ function processCandle(idx) {
         addLog(`Bullish breakout at #${idx} BLOCKED by HTF trend filter`);
         return;
       }
+      /* Apply session filter */
+      if (!isWithinActiveSession()) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by session filter (${getActiveSessionName()})`);
+        return;
+      }
       /* Log breakout strength (volume proxy) */
       const conviction = hasBreakoutConviction(c);
-      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction };
+      /* Apply volume spike filter */
+      const volumeSpike = hasVolumeSpikeOnBreakout(idx);
+      if (!volumeSpike) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
+        return;
+      }
+      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
       setPhase("RETEST");
-      addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}`);
+      addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       addLog("Next action: BUY STOP — ride the breakout momentum");
     } else if (c.close < openingRange.low) {
       /* Apply EMA filter */
@@ -1351,10 +1660,21 @@ function processCandle(idx) {
         addLog(`Bearish breakout at #${idx} BLOCKED by HTF trend filter`);
         return;
       }
+      /* Apply session filter */
+      if (!isWithinActiveSession()) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by session filter (${getActiveSessionName()})`);
+        return;
+      }
       const conviction = hasBreakoutConviction(c);
-      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction };
+      /* Apply volume spike filter */
+      const volumeSpike = hasVolumeSpikeOnBreakout(idx);
+      if (!volumeSpike) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
+        return;
+      }
+      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
       setPhase("RETEST");
-      addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}`);
+      addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       addLog("Next action: SELL STOP — ride the breakout momentum");
     }
     return;
@@ -1373,12 +1693,28 @@ function processCandle(idx) {
     if (idx <= breakout.candleIdx) return;
     const touches = touchesLevel(c, breakout.level);
     if (touches) {
+      /* Apply RSI filter at retest */
+      if (!isRSIFavorable(breakout.dir)) {
+        const rsi = getCurrentRSI();
+        addLog(`Retest at #${idx} — RSI ${fmt(rsi, 1)} not favorable for ${breakout.dir} (skipping)`);
+        return;
+      }
       retestInfo = { candleIdx: idx };
       setPhase("INDECISION");
       addLog(`Retest detected at candle #${idx}`);
+      /* Log RSI at retest */
+      const rsi = getCurrentRSI();
+      if (rsi != null) {
+        addLog(`RSI at retest: ${fmt(rsi, 1)}${rsi <= 30 ? " (oversold)" : rsi >= 70 ? " (overbought)" : ""}`);
+      }
       /* Log S/R confluence if present */
       if (hasSRConfluence(breakout.level)) {
         addLog("✅ S/R confluence: breakout level aligns with recent swing point");
+      }
+      /* Log Fibonacci confluence if present */
+      const fibResult = getFibRetestLevel(breakout.level);
+      if (fibResult) {
+        addLog(`✅ Fibonacci confluence: retest near ${(fibResult.ratio * 100).toFixed(1)}% level`);
       }
       if (breakout.dir === "BULL") {
         addLog("Pullback trade: BUY LIMIT at retest level");
@@ -1456,7 +1792,7 @@ function processCandle(idx) {
         addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
         /* Log confluence score */
         confluenceScore = computeConfluenceScore();
-        addLog(`Confluence score: ${confluenceScore}/5`);
+        addLog(`Confluence score: ${confluenceScore}/9`);
         recordSignal(confirmPattern);
       }
     }
@@ -1627,6 +1963,7 @@ function findSwingHigh(upToIdx) {
 function recordSignal(confirmPattern) {
   if (!trade) return;
   const pattern = confirmPattern || "engulfing";
+  const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
   const signal = {
     time: new Date().toISOString(),
     symbol: UI.symbolSelect.value,
@@ -1643,7 +1980,11 @@ function recordSignal(confirmPattern) {
     trailingSL: null,
     confluenceScore: computeConfluenceScore(),
     srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
-    confirmPattern: pattern
+    confirmPattern: pattern,
+    rsiAtRetest: getCurrentRSI(),
+    volumeSpike: breakout ? (breakout.volumeSpike != null ? breakout.volumeSpike : hasVolumeSpikeOnBreakout(breakout.candleIdx)) : null,
+    session: getActiveSessionName(),
+    fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null
   };
   signalHistory.push(signal);
   monitoringTrade = true;
@@ -2331,6 +2672,21 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.pureTrailingToggle) {
     UI.pureTrailingToggle.addEventListener("change", () => { pureTrailingEnabled = UI.pureTrailingToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
+  }
+  if (UI.rsiFilterToggle) {
+    UI.rsiFilterToggle.addEventListener("change", () => { rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.volumeSpikeToggle) {
+    UI.volumeSpikeToggle.addEventListener("change", () => { volumeSpikeEnabled = UI.volumeSpikeToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.sessionFilterToggle) {
+    UI.sessionFilterToggle.addEventListener("change", () => { sessionFilterEnabled = UI.sessionFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.sessionFilterMode) {
+    UI.sessionFilterMode.addEventListener("change", () => { sessionFilterMode = UI.sessionFilterMode.value; saveSettings(); updateStateUI(); });
+  }
+  if (UI.fibRetestToggle) {
+    UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
   }
 
   /* Tool buttons */
