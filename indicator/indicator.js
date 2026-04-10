@@ -601,6 +601,18 @@ function initKeyboardShortcuts() {
   });
 }
 
+/* Granularity → human-readable label map (used for display + recommended settings) */
+const GRAN_LABELS = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min" };
+
+/* Session filter mode → display label map */
+const SESSION_MODE_LABELS = {
+  london_ny: "London+NY ✅",
+  london:    "London ✅",
+  new_york:  "NY ✅",
+  overlap:   "Overlap ✅",
+  asian:     "Asian ✅"
+};
+
 /* ================= SYMBOL NAVIGATION ================= */
 function cycleSymbol(dir) {
   if (!UI.symbolSelect) return;
@@ -638,8 +650,7 @@ function updateRecommendedSettings() {
   /* Timeframe: recommended = 5 min (300s) */
   if (UI.recActive_timeframe && UI.granSelect) {
     const gran = parseInt(UI.granSelect.value, 10);
-    const tfLabels = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min" };
-    UI.recActive_timeframe.textContent = tfLabels[gran] || (gran + "s");
+    UI.recActive_timeframe.textContent = GRAN_LABELS[gran] || (gran + "s");
     if (gran === 300) {
       UI.recActive_timeframe.className = "status-badge bull rec-badge-active";
     } else {
@@ -698,14 +709,7 @@ function updateRecommendedSettings() {
   /* Session filter: recommended = ON with london_ny */
   if (UI.recActive_session) {
     if (sessionFilterEnabled) {
-      const modeLabels = {
-        london_ny: "London+NY ✅",
-        london: "London ✅",
-        new_york: "NY ✅",
-        overlap: "Overlap ✅",
-        asian: "Asian ✅"
-      };
-      UI.recActive_session.textContent = modeLabels[sessionFilterMode] || sessionFilterMode;
+      UI.recActive_session.textContent = SESSION_MODE_LABELS[sessionFilterMode] || sessionFilterMode;
       UI.recActive_session.className = sessionFilterMode === "london_ny"
         ? "status-badge bull rec-badge-active"
         : "status-badge warning rec-badge-active";
