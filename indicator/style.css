@@ -714,10 +714,10 @@ button:disabled {
 }
 
 /* ---- Scrollbar ---- */
-::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(99, 128, 255, 0.15); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(99, 128, 255, 0.25); }
+::-webkit-scrollbar-thumb:hover { background: rgba(99, 128, 255, 0.3); }
 
 /* ---- Section Headers with icons ---- */
 .section-header {
@@ -732,6 +732,15 @@ button:disabled {
 }
 .section-header h3 {
   margin: 0;
+}
+
+/* ---- Utility classes ---- */
+.status-meta {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+}
+.spaced-label {
+  margin-top: 8px;
 }
 
 /* ---- Indicator State ---- */

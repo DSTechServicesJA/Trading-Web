@@ -53,7 +53,7 @@
             <h3>Connection</h3>
           </div>
           <p><strong>Status:</strong> <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span></p>
-          <p style="margin-top:4px;font-size:12px;"><strong>Candles:</strong> <span id="candleCount">0</span> &nbsp;·&nbsp; <strong>Uptime:</strong> <span id="uptimeDisplay" class="env-label">--</span></p>
+          <p class="status-meta"><strong>Candles:</strong> <span id="candleCount">0</span> &nbsp;·&nbsp; <strong>Uptime:</strong> <span id="uptimeDisplay" class="env-label">--</span></p>
           <div class="candle-countdown">
             <span class="label">Next Candle</span>
             <span id="candleCountdown" class="countdown-badge">--</span>
@@ -200,13 +200,13 @@
               <option value="30">30 min</option>
             </select>
 
-            <label for="touchTolerance" style="margin-top:8px;">Level Touch Tolerance (%)</label>
+            <label for="touchTolerance" class="spaced-label">Level Touch Tolerance (%)</label>
             <input type="number" id="touchTolerance" min="5" max="30" step="1" value="15" />
 
-            <label for="dojiRatio" style="margin-top:8px;">Doji Body Ratio (%)</label>
+            <label for="dojiRatio" class="spaced-label">Doji Body Ratio (%)</label>
             <input type="number" id="dojiRatio" min="5" max="40" step="1" value="20" />
 
-            <label for="lookbackPeriod" style="margin-top:8px;">Swing Lookback (candles)</label>
+            <label for="lookbackPeriod" class="spaced-label">Swing Lookback (candles)</label>
             <input type="number" id="lookbackPeriod" min="5" max="50" step="1" value="20" />
           </div>
         </section>
