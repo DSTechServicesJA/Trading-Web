@@ -117,57 +117,21 @@ const SYMBOL_TUNING = {
     DRAWDOWN_MULTIPLIER: 1.6
   },
 
-  // 💱 FOREX MARKETS — SLOW/PATIENT
-  "frxEURUSD": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxGBPUSD": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxAUDUSD": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxUSDJPY": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxUSDCAD": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxUSDCHF": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  },
-  "frxNZDUSD": {
-    EXPECTANCY_WINDOW: 8,
-    ENTROPY_SLOPE_CUT: 0.10,
-    STAKE_SCALE: 1.03,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.8
-  }
+  // 💱 FOREX MARKETS — SLOW/PATIENT (shared preset spread across all pairs)
 };
+
+// Shared tuning object for all forex pairs
+const FOREX_TUNING = {
+  EXPECTANCY_WINDOW: 8,
+  ENTROPY_SLOPE_CUT: 0.10,
+  STAKE_SCALE: 1.03,
+  LOSS_CLUSTER_LIMIT: 2,
+  DRAWDOWN_MULTIPLIER: 1.8
+};
+[
+  "frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY",
+  "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"
+].forEach(sym => { SYMBOL_TUNING[sym] = FOREX_TUNING; });
 
 // ================= RSI SLOPE TUNING =================
 const RSI_SLOPE_TUNING = {
@@ -1374,10 +1338,10 @@ function sendTradeNotification(won, profit) {
   }
 }
 
-function sendForexSignalNotification(direction, price) {
+function sendForexSignalNotification(direction, sym, price) {
   if (!("Notification" in window)) return;
   if (Notification.permission === "granted") {
-    new Notification(`MT5 Signal: ${direction} ${symbol}`, {
+    new Notification(`MT5 Signal: ${direction} ${sym}`, {
       body: `Entry ≈ ${price} | Take on MetaTrader 5`,
       icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📈</text></svg>"
     });
@@ -2448,7 +2412,7 @@ function updateSymbolSpeedBadge(sym) {
     el.classList.add("standard");
   } else if (SYMBOL_SPEED.FOREX.includes(sym)) {
     el.textContent = "FOREX";
-    el.classList.add("standard");
+    el.classList.add("forex");
   } else {
     el.textContent = "UNKNOWN";
     el.classList.add("disabled");
@@ -3293,16 +3257,23 @@ function placeTrade() {
 
   // 💱 FOREX: emit MT5 signal instead of placing a Deriv trade
   if (isForexSymbol(symbol)) {
-    const price = chartPrices.at(-1) ?? 0;
+    const price = chartPrices.at(-1);
+    if (!price) {
+      tradeInProgress = false;
+      onTradeEnd();
+      return;
+    }
     const dir = currentSide === CONTRACT_BUY ? "BUY" : "SELL";
-    sendForexSignalNotification(dir, price.toFixed(5));
+    sendForexSignalNotification(dir, symbol, price.toFixed(5));
     lastTradeTime = Date.now();
 
     const li = document.createElement("li");
     li.textContent = `MT5 ${dir} | ${symbol} | @ ${price.toFixed(5)}`;
     li.style.color = dir === "BUY" ? "#22c55e" : "#ef4444";
     li.style.borderLeft = `4px solid ${dir === "BUY" ? "#22c55e" : "#ef4444"}`;
-    try { historyEl.prepend(li); } catch (e) {}
+    if (historyEl) {
+      try { historyEl.prepend(li); } catch (e) { console.warn("Trade history append failed", e); }
+    }
 
     tradeInProgress = false;
     onTradeEnd();

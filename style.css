@@ -628,6 +628,12 @@ input::placeholder { color: var(--text-muted); }
   border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
+.status-badge.forex {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
 .status-badge.chaos {
   background: rgba(250, 204, 21, 0.15);
   color: #facc15;
