@@ -115,8 +115,23 @@ const SYMBOL_TUNING = {
     STAKE_SCALE: 1.06,
     LOSS_CLUSTER_LIMIT: 2,
     DRAWDOWN_MULTIPLIER: 1.6
-  }
+  },
+
+  // 💱 FOREX MARKETS — SLOW/PATIENT (shared preset spread across all pairs)
 };
+
+// Shared tuning object for all forex pairs
+const FOREX_TUNING = {
+  EXPECTANCY_WINDOW: 8,
+  ENTROPY_SLOPE_CUT: 0.10,
+  STAKE_SCALE: 1.03,
+  LOSS_CLUSTER_LIMIT: 2,
+  DRAWDOWN_MULTIPLIER: 1.8
+};
+[
+  "frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY",
+  "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"
+].forEach(sym => { SYMBOL_TUNING[sym] = FOREX_TUNING; });
 
 // ================= RSI SLOPE TUNING =================
 const RSI_SLOPE_TUNING = {
@@ -1323,6 +1338,16 @@ function sendTradeNotification(won, profit) {
   }
 }
 
+function sendForexSignalNotification(direction, sym, price) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    new Notification(`MT5 Signal: ${direction} ${sym}`, {
+      body: `Entry ≈ ${price} | Take on MetaTrader 5`,
+      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📈</text></svg>"
+    });
+  }
+}
+
 function requestNotificationPermission() {
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
@@ -1571,6 +1596,8 @@ const TRADE_COOLDOWN_MS = 3000;
 
 const CONTRACT_ODD  = "DIGITODD";
 const CONTRACT_EVEN = "DIGITEVEN";
+const CONTRACT_BUY  = "BUY";
+const CONTRACT_SELL = "SELL";
 const MIN_PAYOUT_RATIO = 1.82;
 const PAYOUT_WINDOW = 120;
 const PAYOUT_MIN_SAMPLES = 24;
@@ -1743,7 +1770,8 @@ let modeDisabledUntil = {
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
   FAST: ["1HZ75V", "1HZ50V", "1HZ100V"],
-  STANDARD: ["R_100", "R_75", "R_50"]
+  STANDARD: ["R_100", "R_75", "R_50"],
+  FOREX: ["frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY", "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"]
 };
 const MARKET_SIGNAL_LABEL = {
   "1HZ75V":  "1-Second Vol 75",
@@ -1751,7 +1779,14 @@ const MARKET_SIGNAL_LABEL = {
   "1HZ100V": "1-Second Vol 100",
   "R_100": "Volatility 100",
   "R_75": "Volatility 75",
-  "R_50": "Volatility 50"
+  "R_50": "Volatility 50",
+  "frxEURUSD": "EUR/USD",
+  "frxGBPUSD": "GBP/USD",
+  "frxAUDUSD": "AUD/USD",
+  "frxUSDJPY": "USD/JPY",
+  "frxUSDCAD": "USD/CAD",
+  "frxUSDCHF": "USD/CHF",
+  "frxNZDUSD": "NZD/USD"
 };
 
 function autoBindSymbolToMode(mode) {
@@ -2359,6 +2394,10 @@ function updateSymbolSelectLock() {
 }
 
 
+function isForexSymbol(sym) {
+  return SYMBOL_SPEED.FOREX.includes(sym);
+}
+
 function updateSymbolSpeedBadge(sym) {
   const el = document.getElementById("symbolSpeedBadge");
   if (!el) return;
@@ -2371,6 +2410,9 @@ function updateSymbolSpeedBadge(sym) {
   } else if (SYMBOL_SPEED.STANDARD.includes(sym)) {
     el.textContent = "STANDARD";
     el.classList.add("standard");
+  } else if (SYMBOL_SPEED.FOREX.includes(sym)) {
+    el.textContent = "FOREX";
+    el.classList.add("forex");
   } else {
     el.textContent = "UNKNOWN";
     el.classList.add("disabled");
@@ -2460,6 +2502,7 @@ function buildPayoutSparklinePoints(values) {
 function payoutRatioFloor(sym) {
   if (SYMBOL_SPEED.FAST.includes(sym)) return 1.78;
   if (SYMBOL_SPEED.STANDARD.includes(sym)) return 1.72;
+  if (SYMBOL_SPEED.FOREX.includes(sym)) return 1.70;
   return 1.75;
 }
 
@@ -2799,6 +2842,48 @@ function updatePerformanceUI() {
 }
 
 
+/* ================= FOREX SIGNAL (MT5) ================= */
+function analyzeForexSignal() {
+  if (Date.now() - lastTradeTime < TRADE_COOLDOWN_MS) return false;
+
+  const ef = emaFastArr.at(-1);
+  const es = emaSlowArr.at(-1);
+  if (ef == null || es == null) {
+    setStatus("Forex: waiting for EMA data…", "#38bdf8");
+    return false;
+  }
+
+  // EMA compression check — avoid choppy markets
+  const spread = Math.abs(ef - es) / Math.max(1e-9, Math.abs(es));
+  if (spread < EMA_MIN_SPREAD) {
+    setStatus("Forex: EMA compression — no signal", "#f59e0b");
+    return false;
+  }
+
+  const rsiMom = rsiSlope();
+  const { MIN, CONFIRM } = getRsiSlopeThresholds(symbol);
+
+  if (Math.abs(rsiMom) < MIN) {
+    setStatus("Forex: RSI momentum too weak", "#f59e0b");
+    return false;
+  }
+
+  if (ef > es && rsiMom >= CONFIRM) {
+    currentSide = CONTRACT_BUY;
+    setStatus(`Forex signal: BUY ${symbol}`, "#22c55e");
+    return true;
+  }
+
+  if (ef < es && rsiMom <= -CONFIRM) {
+    currentSide = CONTRACT_SELL;
+    setStatus(`Forex signal: SELL ${symbol}`, "#ef4444");
+    return true;
+  }
+
+  setStatus("Forex: no clear directional signal", "#f59e0b");
+  return false;
+}
+
 /* ================= SIGNAL LOGIC ================= */
 function analyzeSignal() {
   if (!botRunning) return false;
@@ -2806,6 +2891,11 @@ function analyzeSignal() {
   if (!SYMBOL_TUNING[symbol]) {
     setStatus("Symbol tuning not ready — waiting", "#f59e0b");
     return false;
+  }
+
+  // 💱 FOREX PATH — skip digit-based checks, use EMA+RSI direction for MT5 signal
+  if (isForexSymbol(symbol)) {
+    return analyzeForexSignal();
   }
 
   // --- IMPROVEMENT #6: Equity Milestone Lock ---
@@ -3160,6 +3250,31 @@ function placeTrade() {
   // Risk check: enforce positive expectancy
   if (currentStake > BASE_STAKE * 1.6) {
     setStatus("Stake too high for expectancy — skipping", "#f59e0b");
+    tradeInProgress = false;
+    onTradeEnd();
+    return;
+  }
+
+  // 💱 FOREX: emit MT5 signal instead of placing a Deriv trade
+  if (isForexSymbol(symbol)) {
+    const price = chartPrices.at(-1);
+    if (!price) {
+      tradeInProgress = false;
+      onTradeEnd();
+      return;
+    }
+    const dir = currentSide === CONTRACT_BUY ? "BUY" : "SELL";
+    sendForexSignalNotification(dir, symbol, price.toFixed(5));
+    lastTradeTime = Date.now();
+
+    const li = document.createElement("li");
+    li.textContent = `MT5 ${dir} | ${symbol} | @ ${price.toFixed(5)}`;
+    li.style.color = dir === "BUY" ? "#22c55e" : "#ef4444";
+    li.style.borderLeft = `4px solid ${dir === "BUY" ? "#22c55e" : "#ef4444"}`;
+    if (historyEl) {
+      try { historyEl.prepend(li); } catch (e) { console.warn("Trade history append failed", e); }
+    }
+
     tradeInProgress = false;
     onTradeEnd();
     return;
