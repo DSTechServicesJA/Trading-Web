@@ -24,6 +24,8 @@
     </div>
   </div>
 
+  <h1>IT Guru – Breakout Retest <span class="badge">INDICATOR</span></h1>
+
   <nav class="bot-nav">
     <div class="brand">🤖 IT Guru Bots</div>
     <ul class="bot-links">
@@ -33,44 +35,6 @@
     </ul>
   </nav>
 
-  <!-- ========== STICKY STATUS BAR ========== -->
-  <header class="status-bar" id="statusBar">
-    <div class="sb-group">
-      <span class="sb-label">Status</span>
-      <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span>
-    </div>
-    <div class="sb-group">
-      <span class="sb-label">Phase</span>
-      <span id="phaseLabel" class="status-badge disabled">WAITING</span>
-    </div>
-    <div class="sb-group">
-      <span class="sb-label">Direction</span>
-      <span id="breakoutDir" class="status-badge disabled">NONE</span>
-    </div>
-    <div class="sb-group">
-      <span class="sb-label">Price</span>
-      <span id="livePrice" class="price">--</span>
-    </div>
-    <div class="sb-group">
-      <span class="sb-label">Candles</span>
-      <span id="candleCount" class="sb-value">0</span>
-    </div>
-    <div class="sb-group">
-      <span class="sb-label">Uptime</span>
-      <span id="uptimeDisplay" class="sb-value">--</span>
-    </div>
-    <div class="sb-actions">
-      <button id="connectBtn" type="button" class="sb-btn sb-connect">Connect</button>
-      <button id="disconnectBtn" type="button" class="sb-btn sb-disconnect" disabled>Disconnect</button>
-    </div>
-    <div class="sb-tools">
-      <button id="exportSignalsBtn" type="button" class="tool-btn" title="Export Signals (Alt+E)" aria-label="Export Signals">📥</button>
-      <button id="themeToggleBtn" type="button" class="tool-btn" title="Toggle Theme (Alt+T)" aria-label="Toggle Theme">☀️</button>
-      <button id="soundToggleBtn" type="button" class="tool-btn" title="Toggle Sound" aria-label="Toggle Sound">🔊</button>
-      <button id="notifToggleBtn" type="button" class="tool-btn" title="Notifications (Alt+N)" aria-label="Toggle Notifications">🔕</button>
-    </div>
-  </header>
-
   <!-- ========== GRID ========== -->
   <div class="layout-grid">
 
@@ -78,201 +42,10 @@
     <div class="left-panel" id="leftPanel">
 
       <!-- Mobile toggle button (visible only on small screens) -->
-      <button id="panelToggleBtn" class="panel-toggle" type="button" aria-label="Toggle settings panel">⚙️ Panel</button>
+      <button id="panelToggleBtn" class="panel-toggle" type="button" aria-label="Toggle settings panel">⚙️ Settings</button>
 
       <div id="panelContent" class="panel-content">
 
-        <!-- Tabs -->
-        <div class="tab-bar" id="tabBar">
-          <button class="tab-btn active" data-tab="tab-settings" type="button">⚙️ Settings</button>
-          <button class="tab-btn" data-tab="tab-state" type="button">📊 State</button>
-          <button class="tab-btn" data-tab="tab-stats" type="button">📈 Stats</button>
-        </div>
-
-        <!-- ===== TAB: SETTINGS ===== -->
-        <div class="tab-pane active" id="tab-settings">
-          <section class="box">
-            <label for="symbolSelect">Market Symbol</label>
-            <select id="symbolSelect">
-              <optgroup label="VOLATILITY (1s)">
-                <option value="1HZ10V">Volatility 10 (1s)</option>
-                <option value="1HZ15V">Volatility 15 (1s)</option>
-                <option value="1HZ25V">Volatility 25 (1s)</option>
-                <option value="1HZ30V">Volatility 30 (1s)</option>
-                <option value="1HZ50V">Volatility 50 (1s)</option>
-                <option value="1HZ75V" selected>Volatility 75 (1s)</option>
-                <option value="1HZ90V">Volatility 90 (1s)</option>
-                <option value="1HZ100V">Volatility 100 (1s)</option>
-              </optgroup>
-              <optgroup label="VOLATILITY (STANDARD)">
-                <option value="R_10">Volatility 10 Index</option>
-                <option value="R_25">Volatility 25 Index</option>
-                <option value="R_50">Volatility 50 Index</option>
-                <option value="R_75">Volatility 75 Index</option>
-                <option value="R_100">Volatility 100 Index</option>
-              </optgroup>
-            </select>
-          </section>
-
-          <section class="box">
-            <label for="granSelect">Candle Timeframe</label>
-            <select id="granSelect">
-              <option value="60" selected>1 Minute</option>
-              <option value="120">2 Minutes</option>
-              <option value="180">3 Minutes</option>
-              <option value="300">5 Minutes</option>
-              <option value="600">10 Minutes</option>
-              <option value="900">15 Minutes</option>
-            </select>
-          </section>
-
-          <section class="box">
-            <label>Risk : Reward</label>
-            <div class="rr-inputs">
-              <input type="number" id="riskInput" min="0.1" step="0.1" value="1" placeholder="1" />
-              <span class="rr-separator">:</span>
-              <input type="number" id="rewardInput" min="0.1" step="0.1" value="1" placeholder="1" />
-            </div>
-          </section>
-
-          <section class="box">
-            <h3 class="collapsible">Advanced Parameters</h3>
-            <div class="collapsible-body">
-              <label for="rangeDuration">Opening Range (min)</label>
-              <select id="rangeDuration">
-                <option value="5">5 min</option>
-                <option value="10">10 min</option>
-                <option value="15" selected>15 min</option>
-                <option value="30">30 min</option>
-              </select>
-
-              <label for="touchTolerance">Touch Tolerance (%)</label>
-              <input type="number" id="touchTolerance" min="5" max="30" step="1" value="15" />
-
-              <label for="dojiRatio">Doji Body Ratio (%)</label>
-              <input type="number" id="dojiRatio" min="5" max="40" step="1" value="20" />
-
-              <label for="lookbackPeriod">Swing Lookback</label>
-              <input type="number" id="lookbackPeriod" min="5" max="50" step="1" value="20" />
-            </div>
-          </section>
-
-          <section class="box">
-            <h3 class="collapsible">Strategy Filters</h3>
-            <div class="collapsible-body">
-              <label class="toggle-row"><input type="checkbox" id="autoResetToggle" checked /> Auto-Reset</label>
-              <label class="toggle-row"><input type="checkbox" id="emaFilterToggle" /> EMA 8/21 Filter</label>
-              <label class="toggle-row"><input type="checkbox" id="htfFilterToggle" /> HTF Trend Filter</label>
-              <label class="toggle-row"><input type="checkbox" id="atrToleranceToggle" /> ATR Tolerance</label>
-              <label class="toggle-row"><input type="checkbox" id="trailingStopToggle" /> Trailing Stop</label>
-              <label class="toggle-row"><input type="checkbox" id="partialTpToggle" /> Partial TP (1:1)</label>
-            </div>
-          </section>
-        </div>
-
-        <!-- ===== TAB: STATE ===== -->
-        <div class="tab-pane" id="tab-state">
-          <section class="dashboard indicator-state">
-            <h3>Trade Setup</h3>
-            <div class="state-grid">
-              <div class="sg-cell">
-                <span class="sg-label">Next Action</span>
-                <span id="nextAction" class="status-badge disabled">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">R:R</span>
-                <span id="rrDisplay" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Entry</span>
-                <span id="entryPrice" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Stop Loss</span>
-                <span id="slPrice" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Take Profit</span>
-                <span id="tpPrice" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Trailing SL</span>
-                <span id="trailingSLDisplay" class="env-label">--</span>
-              </div>
-            </div>
-
-            <h3>Range &amp; Breakout</h3>
-            <div class="state-grid">
-              <div class="sg-cell">
-                <span class="sg-label">Range High</span>
-                <span id="rangeHigh" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Range Low</span>
-                <span id="rangeLow" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Strength</span>
-                <span id="breakoutStrength" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">ATR(14)</span>
-                <span id="atrDisplay" class="env-label">--</span>
-              </div>
-            </div>
-
-            <h3>Filters &amp; Phases</h3>
-            <div class="state-grid">
-              <div class="sg-cell">
-                <span class="sg-label">EMA Filter</span>
-                <span id="emaFilterStatus" class="env-label">OFF</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">HTF Trend</span>
-                <span id="htfTrend" class="status-badge disabled">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Retest</span>
-                <span id="retestStatus" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Confirmation</span>
-                <span id="confirmStatus" class="env-label">--</span>
-              </div>
-              <div class="sg-cell">
-                <span class="sg-label">Partial TP</span>
-                <span id="partialTpDisplay" class="env-label">--</span>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <!-- ===== TAB: STATS ===== -->
-        <div class="tab-pane" id="tab-stats">
-          <section class="dashboard">
-            <h3>Signal Accuracy</h3>
-            <div class="stats-cards">
-              <div class="stat-card">
-                <span class="stat-value" id="signalCount">0</span>
-                <span class="stat-label">Signals</span>
-              </div>
-              <div class="stat-card stat-win">
-                <span class="stat-value" id="signalWins">0</span>
-                <span class="stat-label">Wins</span>
-              </div>
-              <div class="stat-card stat-loss">
-                <span class="stat-value" id="signalLosses">0</span>
-                <span class="stat-label">Losses</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-value" id="signalWinRate">0%</span>
-                <span class="stat-label">Win Rate</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="history">
-            <h3>Signal Log</h3>
         <!-- Connection Status -->
         <section class="info">
           <div class="section-header">
@@ -596,8 +369,8 @@
           <h3 class="collapsible">📋 Signal Log</h3>
           <div class="collapsible-body">
             <ul id="signalLog"></ul>
-          </section>
-        </div>
+          </div>
+        </section>
 
       </div><!-- /panelContent -->
     </div>
@@ -613,22 +386,22 @@
       <!-- Legend + EMA toggle -->
       <section class="dashboard chart-legend">
         <div class="legend-row">
-          <span class="legend-swatch range-swatch"></span> Range
+          <span class="legend-swatch range-swatch"></span> Opening Range
         </div>
         <div class="legend-row">
-          <span class="legend-swatch breakout-bull-swatch"></span> Bull
+          <span class="legend-swatch breakout-bull-swatch"></span> Bullish Breakout
         </div>
         <div class="legend-row">
-          <span class="legend-swatch breakout-bear-swatch"></span> Bear
+          <span class="legend-swatch breakout-bear-swatch"></span> Bearish Breakout
         </div>
         <div class="legend-row">
-          <span class="legend-swatch retest-swatch"></span> Retest
+          <span class="legend-swatch retest-swatch"></span> Retest Zone
         </div>
         <div class="legend-row">
-          <span class="legend-swatch confirm-swatch"></span> Confirm
+          <span class="legend-swatch confirm-swatch"></span> Confirmation
         </div>
         <div class="legend-row">
-          <span class="legend-swatch entry-swatch"></span> Entry/SL/TP
+          <span class="legend-swatch entry-swatch"></span> Entry / SL / TP
         </div>
         <div class="legend-row">
           <span class="legend-swatch ema-fast-swatch"></span> EMA 8
@@ -637,13 +410,13 @@
           <span class="legend-swatch ema-slow-swatch"></span> EMA 21
         </div>
         <div class="legend-row">
-          <span class="legend-swatch htf-ema-swatch"></span> EMA 100
+          <span class="legend-swatch htf-ema-swatch"></span> EMA 100 (HTF)
         </div>
         <div class="legend-row">
-          <span class="legend-swatch trailing-sl-swatch"></span> Trail SL
+          <span class="legend-swatch trailing-sl-swatch"></span> Trailing SL
         </div>
         <div class="legend-row">
-          <span class="legend-swatch live-price-swatch"></span> Live
+          <span class="legend-swatch live-price-swatch"></span> Live Price
         </div>
         <div class="legend-row ema-toggle-row">
           <label><input type="checkbox" id="emaToggle" /> Show EMA</label>
@@ -683,25 +456,9 @@
     if (btn && content) {
       btn.addEventListener("click", () => {
         content.classList.toggle("panel-open");
-        btn.textContent = content.classList.contains("panel-open") ? "✕ Close" : "⚙️ Panel";
+        btn.textContent = content.classList.contains("panel-open") ? "✕ Close" : "⚙️ Settings";
       });
     }
-  })();
-
-  /* Tab switching */
-  (function() {
-    const tabBar = document.getElementById("tabBar");
-    if (!tabBar) return;
-    tabBar.addEventListener("click", (e) => {
-      const btn = e.target.closest(".tab-btn");
-      if (!btn) return;
-      const target = btn.dataset.tab;
-      tabBar.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
-      const pane = document.getElementById(target);
-      if (pane) pane.classList.add("active");
-    });
   })();
 </script>
 </body>
