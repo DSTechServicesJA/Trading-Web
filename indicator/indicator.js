@@ -551,7 +551,7 @@ function exportSignalsCSV() {
 function toggleTheme() {
   currentTheme = currentTheme === "dark" ? "light" : "dark";
   document.body.classList.toggle("light-theme", currentTheme === "light");
-  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
+  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️" : "🌙";
   saveSettings();
   drawChart();
 }
@@ -560,7 +560,7 @@ function initTheme() {
   if (currentTheme === "light") {
     document.body.classList.add("light-theme");
   }
-  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
+  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️" : "🌙";
 }
 
 /* ================= KEYBOARD SHORTCUTS ================= */
@@ -574,7 +574,7 @@ function initKeyboardShortcuts() {
       e.preventDefault();
       notificationsEnabled = !notificationsEnabled;
       if (notificationsEnabled) requestNotificationPermission();
-      if (UI.notifToggleBtn) UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
+      if (UI.notifToggleBtn) UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔" : "🔕";
       saveSettings();
     }
   });
@@ -2693,19 +2693,19 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.exportBtn) UI.exportBtn.addEventListener("click", exportSignalsCSV);
   if (UI.themeToggleBtn) UI.themeToggleBtn.addEventListener("click", toggleTheme);
   if (UI.soundToggleBtn) {
-    UI.soundToggleBtn.textContent = soundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF";
+    UI.soundToggleBtn.textContent = soundEnabled ? "🔊" : "🔇";
     UI.soundToggleBtn.addEventListener("click", () => {
       soundEnabled = !soundEnabled;
-      UI.soundToggleBtn.textContent = soundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF";
+      UI.soundToggleBtn.textContent = soundEnabled ? "🔊" : "🔇";
       saveSettings();
     });
   }
   if (UI.notifToggleBtn) {
-    UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
+    UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔" : "🔕";
     UI.notifToggleBtn.addEventListener("click", () => {
       notificationsEnabled = !notificationsEnabled;
       if (notificationsEnabled) requestNotificationPermission();
-      UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
+      UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔" : "🔕";
       saveSettings();
     });
   }
