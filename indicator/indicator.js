@@ -274,6 +274,27 @@ function initUI() {
   UI.notifToggleBtn   = document.getElementById("notifToggleBtn");
   UI.emaToggle        = document.getElementById("emaToggle");
 
+  /* Symbol nav */
+  UI.prevSymbolBtn      = document.getElementById("prevSymbolBtn");
+  UI.nextSymbolBtn      = document.getElementById("nextSymbolBtn");
+  UI.currentSymbolLabel = document.getElementById("currentSymbolLabel");
+
+  /* Recommended settings active badges */
+  UI.recActive_timeframe    = document.getElementById("recActive_timeframe");
+  UI.recActive_rr           = document.getElementById("recActive_rr");
+  UI.recActive_range        = document.getElementById("recActive_range");
+  UI.recActive_ema          = document.getElementById("recActive_ema");
+  UI.recActive_htf          = document.getElementById("recActive_htf");
+  UI.recActive_atr          = document.getElementById("recActive_atr");
+  UI.recActive_trailing     = document.getElementById("recActive_trailing");
+  UI.recActive_partialTp    = document.getElementById("recActive_partialTp");
+  UI.recActive_falseBreakout = document.getElementById("recActive_falseBreakout");
+  UI.recActive_minRR        = document.getElementById("recActive_minRR");
+  UI.recActive_rsiFilter    = document.getElementById("recActive_rsiFilter");
+  UI.recActive_volSpike     = document.getElementById("recActive_volSpike");
+  UI.recActive_session      = document.getElementById("recActive_session");
+  UI.recActive_fib          = document.getElementById("recActive_fib");
+
   /* Login gate */
   UI.loginOverlay     = document.getElementById("loginOverlay");
   UI.loginBtn         = document.getElementById("loginBtn");
@@ -580,6 +601,121 @@ function initKeyboardShortcuts() {
   });
 }
 
+/* ================= SYMBOL NAVIGATION ================= */
+function cycleSymbol(dir) {
+  if (!UI.symbolSelect) return;
+  const opts = Array.from(UI.symbolSelect.options);
+  const currentIdx = UI.symbolSelect.selectedIndex;
+  let newIdx = currentIdx + dir;
+  if (newIdx < 0) newIdx = opts.length - 1;
+  if (newIdx >= opts.length) newIdx = 0;
+  UI.symbolSelect.selectedIndex = newIdx;
+  updateCurrentSymbolLabel();
+  saveSettings();
+  debouncedReconnect();
+}
+
+function updateCurrentSymbolLabel() {
+  if (!UI.currentSymbolLabel || !UI.symbolSelect) return;
+  const opt = UI.symbolSelect.options[UI.symbolSelect.selectedIndex];
+  UI.currentSymbolLabel.textContent = opt ? opt.text : "--";
+}
+
+/* ================= RECOMMENDED SETTINGS (DYNAMIC) ================= */
+function setRecBadge(el, isActive, matchesRec, onLabel, offLabel) {
+  if (!el) return;
+  el.textContent = isActive ? (onLabel || "ON ✅") : (offLabel || "OFF");
+  if (isActive && matchesRec) {
+    el.className = "status-badge bull rec-badge-active";
+  } else if (isActive && !matchesRec) {
+    el.className = "status-badge warning rec-badge-active";
+  } else {
+    el.className = "status-badge disabled rec-badge-active";
+  }
+}
+
+function updateRecommendedSettings() {
+  /* Timeframe: recommended = 5 min (300s) */
+  if (UI.recActive_timeframe && UI.granSelect) {
+    const gran = parseInt(UI.granSelect.value, 10);
+    const tfLabels = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min" };
+    UI.recActive_timeframe.textContent = tfLabels[gran] || (gran + "s");
+    if (gran === 300) {
+      UI.recActive_timeframe.className = "status-badge bull rec-badge-active";
+    } else {
+      UI.recActive_timeframe.className = "status-badge warning rec-badge-active";
+    }
+  }
+
+  /* R:R: recommended = 1:2 or 1:3 */
+  if (UI.recActive_rr && UI.riskInput && UI.rewardInput) {
+    const risk   = parseFloat(UI.riskInput.value)   || 1;
+    const reward = parseFloat(UI.rewardInput.value) || 1;
+    const rr = reward / risk;
+    UI.recActive_rr.textContent = `1:${reward}`;
+    if (rr >= 2) {
+      UI.recActive_rr.className = "status-badge bull rec-badge-active";
+    } else {
+      UI.recActive_rr.className = "status-badge warning rec-badge-active";
+    }
+  }
+
+  /* Opening Range: recommended = 15 min */
+  if (UI.recActive_range && UI.rangeDuration) {
+    const rm = parseInt(UI.rangeDuration.value, 10) || RANGE_MINUTES;
+    UI.recActive_range.textContent = rm + " min";
+    if (rm === 15) {
+      UI.recActive_range.className = "status-badge bull rec-badge-active";
+    } else {
+      UI.recActive_range.className = "status-badge warning rec-badge-active";
+    }
+  }
+
+  /* Boolean toggle filters */
+  setRecBadge(UI.recActive_ema,           emaFilterEnabled,     true);
+  setRecBadge(UI.recActive_htf,           htfFilterEnabled,     true);
+  setRecBadge(UI.recActive_atr,           atrToleranceEnabled,  true);
+  setRecBadge(UI.recActive_trailing,      trailingStopEnabled,  true);
+  setRecBadge(UI.recActive_partialTp,     partialTpEnabled,     true);
+  setRecBadge(UI.recActive_falseBreakout, falseBreakoutEnabled, true);
+  setRecBadge(UI.recActive_rsiFilter,     rsiFilterEnabled,     true);
+  setRecBadge(UI.recActive_volSpike,      volumeSpikeEnabled,   true);
+  setRecBadge(UI.recActive_fib,           fibRetestEnabled,     true);
+
+  /* Min R:R: recommended = ON with 2.0 */
+  if (UI.recActive_minRR) {
+    const on = minRREnabled;
+    const val = minRRValue;
+    if (on) {
+      UI.recActive_minRR.textContent = `1:${val} ✅`;
+      UI.recActive_minRR.className = val >= 2 ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active";
+    } else {
+      UI.recActive_minRR.textContent = "OFF";
+      UI.recActive_minRR.className = "status-badge disabled rec-badge-active";
+    }
+  }
+
+  /* Session filter: recommended = ON with london_ny */
+  if (UI.recActive_session) {
+    if (sessionFilterEnabled) {
+      const modeLabels = {
+        london_ny: "London+NY ✅",
+        london: "London ✅",
+        new_york: "NY ✅",
+        overlap: "Overlap ✅",
+        asian: "Asian ✅"
+      };
+      UI.recActive_session.textContent = modeLabels[sessionFilterMode] || sessionFilterMode;
+      UI.recActive_session.className = sessionFilterMode === "london_ny"
+        ? "status-badge bull rec-badge-active"
+        : "status-badge warning rec-badge-active";
+    } else {
+      UI.recActive_session.textContent = "OFF";
+      UI.recActive_session.className = "status-badge disabled rec-badge-active";
+    }
+  }
+}
+
 /* ================= INDICATOR STATE ================= */
 function resetIndicator() {
   candles = [];
@@ -787,6 +923,9 @@ function updateStateUI() {
     if (UI.tpPrice) UI.tpPrice.textContent    = "--";
     if (UI.rrDisplay) UI.rrDisplay.textContent  = "--";
   }
+
+  /* Update recommended settings active state */
+  updateRecommendedSettings();
 }
 
 /* ================= CONNECTION UPTIME ================= */
@@ -2614,7 +2753,7 @@ document.addEventListener("DOMContentLoaded", () => {
   UI.disconnectBtn.addEventListener("click", disconnect);
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); debouncedReconnect(); });
+  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); debouncedReconnect(); });
   UI.granSelect.addEventListener("change",   () => { saveSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */
@@ -2714,6 +2853,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.emaToggle) {
     UI.emaToggle.addEventListener("change", () => { saveSettings(); drawChart(); });
   }
+
+  /* Symbol nav buttons */
+  if (UI.prevSymbolBtn) UI.prevSymbolBtn.addEventListener("click", () => cycleSymbol(-1));
+  if (UI.nextSymbolBtn) UI.nextSymbolBtn.addEventListener("click", () => cycleSymbol(1));
+  updateCurrentSymbolLabel();
 
   /* Resize redraw */
   window.addEventListener("resize", drawChart);

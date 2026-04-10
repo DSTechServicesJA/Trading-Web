@@ -107,6 +107,22 @@
                 <option value="R_75">Volatility 75 Index</option>
                 <option value="R_100">Volatility 100 Index</option>
               </optgroup>
+              <optgroup label="FOREX">
+                <option value="frxEURUSD">EUR / USD</option>
+                <option value="frxGBPUSD">GBP / USD</option>
+                <option value="frxUSDJPY">USD / JPY</option>
+                <option value="frxUSDCHF">USD / CHF</option>
+                <option value="frxAUDUSD">AUD / USD</option>
+                <option value="frxUSDCAD">USD / CAD</option>
+                <option value="frxNZDUSD">NZD / USD</option>
+                <option value="frxGBPJPY">GBP / JPY</option>
+                <option value="frxEURJPY">EUR / JPY</option>
+                <option value="frxEURGBP">EUR / GBP</option>
+              </optgroup>
+              <optgroup label="COMMODITIES">
+                <option value="frxXAUUSD">Gold / USD (XAU/USD)</option>
+                <option value="frxXAGUSD">Silver / USD (XAG/USD)</option>
+              </optgroup>
             </select>
             <div style="margin-top:10px;">
               <label for="granSelect">Timeframe</label>
@@ -233,6 +249,11 @@
             <div class="section-header">
               <span class="icon">📈</span>
               <h3>Indicator State</h3>
+              <div class="symbol-nav">
+                <button id="prevSymbolBtn" type="button" class="sym-nav-btn" title="Previous Symbol">◀</button>
+                <span id="currentSymbolLabel" class="sym-nav-label">--</span>
+                <button id="nextSymbolBtn" type="button" class="sym-nav-btn" title="Next Symbol">▶</button>
+              </div>
             </div>
 
             <!-- Quick-glance grid at the top -->
@@ -375,20 +396,25 @@
             <h3 class="collapsible">💡 Recommended Settings</h3>
             <div class="collapsible-body">
               <p class="hint" style="margin-bottom:6px;">Best signal configuration for higher win rate:</p>
-              <div class="side-row"><span>Timeframe</span><span class="env-label">5 min candles</span></div>
-              <div class="side-row"><span>Risk : Reward</span><span class="env-label">1 : 2 or 1 : 3</span></div>
-              <div class="side-row"><span>Opening Range</span><span class="env-label">15 min</span></div>
-              <div class="side-row"><span>EMA Filter</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>HTF Filter</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>ATR Tolerance</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>Trailing Stop</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>Partial TP</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>False Breakout</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>Min R:R Gate</span><span class="status-badge bull">ON (1:2) ✅</span></div>
-              <div class="side-row"><span>RSI at Retest</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>Volume Spike</span><span class="status-badge bull">ON ✅</span></div>
-              <div class="side-row"><span>Session Filter</span><span class="status-badge bull">ON (London+NY) ✅</span></div>
-              <div class="side-row"><span>Fibonacci Retest</span><span class="status-badge bull">ON ✅</span></div>
+              <div class="rec-header-row">
+                <span class="rec-col-name"></span>
+                <span class="rec-col-label">Rec</span>
+                <span class="rec-col-label">Active</span>
+              </div>
+              <div class="rec-row"><span class="rec-name">Timeframe</span><span class="status-badge warning rec-badge-rec">5 min</span><span id="recActive_timeframe" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">Risk : Reward</span><span class="status-badge warning rec-badge-rec">1:2–1:3</span><span id="recActive_rr" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">Opening Range</span><span class="status-badge warning rec-badge-rec">15 min</span><span id="recActive_range" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">EMA Filter</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_ema" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">HTF Filter</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_htf" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">ATR Tolerance</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_atr" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Trailing Stop</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_trailing" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Partial TP</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_partialTp" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">False Breakout</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_falseBreakout" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Min R:R Gate</span><span class="status-badge bull rec-badge-rec">1:2 ✅</span><span id="recActive_minRR" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">RSI at Retest</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_rsiFilter" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Volume Spike</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_volSpike" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Session Filter</span><span class="status-badge bull rec-badge-rec">London+NY ✅</span><span id="recActive_session" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Fibonacci Retest</span><span class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_fib" class="status-badge disabled rec-badge-active">OFF</span></div>
               <p class="hint" style="margin-top:8px;">
                 <strong>Why:</strong> EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise.
                 ATR tolerance adapts retest detection to volatility.
@@ -403,7 +429,7 @@
                 Pin bar, inside bar, and morning/evening star patterns
                 provide additional confirmation beyond basic engulfing.
                 Confluence score (0-9) gauges overall setup quality.
-                Use on V75 (1s) or V100 (1s) for best signal frequency.
+                Works on Volatility indices (V75, V100) and Forex (XAU/USD, USD/JPY, EUR/USD, etc.)
               </p>
             </div>
           </section>
