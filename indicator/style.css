@@ -151,7 +151,7 @@ h3 {
   gap: 4px;
 }
 .sb-label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--muted);
@@ -395,7 +395,7 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
 .sg-label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   color: var(--muted);
@@ -431,7 +431,7 @@ button:disabled {
   line-height: 1.2;
 }
 .stat-card .stat-label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--muted);
