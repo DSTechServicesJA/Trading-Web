@@ -74,13 +74,13 @@
 
         <!-- Tab Navigation -->
         <div class="sidebar-tabs" role="tablist">
-          <button class="sidebar-tab active" data-tab="tab-settings" role="tab" aria-selected="true">⚙️ Settings</button>
-          <button class="sidebar-tab" data-tab="tab-state" role="tab" aria-selected="false">📈 State</button>
-          <button class="sidebar-tab" data-tab="tab-stats" role="tab" aria-selected="false">🎯 Stats</button>
+          <button class="sidebar-tab active" data-tab="tab-settings" role="tab" aria-selected="true" aria-controls="tab-settings">⚙️ Settings</button>
+          <button class="sidebar-tab" data-tab="tab-state" role="tab" aria-selected="false" aria-controls="tab-state">📈 State</button>
+          <button class="sidebar-tab" data-tab="tab-stats" role="tab" aria-selected="false" aria-controls="tab-stats">🎯 Stats</button>
         </div>
 
         <!-- ===== TAB: SETTINGS ===== -->
-        <div id="tab-settings" class="tab-pane active" role="tabpanel">
+        <div id="tab-settings" class="tab-pane active" role="tabpanel" aria-labelledby="tab-settings">
 
           <!-- Symbol Selection -->
           <section class="box">
@@ -226,7 +226,7 @@
         </div><!-- /tab-settings -->
 
         <!-- ===== TAB: STATE ===== -->
-        <div id="tab-state" class="tab-pane" role="tabpanel">
+        <div id="tab-state" class="tab-pane" role="tabpanel" aria-labelledby="tab-state">
 
           <!-- Indicator State -->
           <section class="dashboard indicator-state">
@@ -333,7 +333,7 @@
         </div><!-- /tab-state -->
 
         <!-- ===== TAB: STATS ===== -->
-        <div id="tab-stats" class="tab-pane" role="tabpanel">
+        <div id="tab-stats" class="tab-pane" role="tabpanel" aria-labelledby="tab-stats">
 
           <!-- Signal Accuracy Stats -->
           <section class="dashboard">

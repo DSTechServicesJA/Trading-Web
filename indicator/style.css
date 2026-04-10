@@ -317,6 +317,7 @@ h3 {
 }
 
 /* ---- Sidebar scroll containment ---- */
+/* 140px accounts for status bar (~52px) + nav (~36px) + tabs (~40px) + spacing */
 .panel-content {
   max-height: calc(100vh - 140px);
   overflow-y: auto;
