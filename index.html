@@ -39,6 +39,38 @@
 </nav>
 
 
+    <!-- ================= STICKY METRICS BAR ================= -->
+    <div class="metrics-bar">
+      <div class="metric-item">
+        <span class="metric-label">Balance</span>
+        <span id="balance" class="metric-value">---</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">P/L</span>
+        <span id="statPL" class="metric-value">0.00</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Win Rate</span>
+        <span id="statWinRate" class="metric-value">0%</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Live Price</span>
+        <span id="livePrice" class="metric-value price">--</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Signal</span>
+        <span id="marketSignal" class="metric-value status-badge enabled">--</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Status</span>
+        <span id="status" class="metric-value status-badge disabled">Disconnected</span>
+      </div>
+      <div class="metric-actions">
+        <button id="startBtn" disabled>▶ Start</button>
+        <button id="stopBtn" disabled>■ Stop</button>
+      </div>
+    </div>
+
     <!-- GRID WRAPPER -->
     <div class="layout-grid">
 
@@ -138,23 +170,8 @@
 
         <!-- Connection Info -->
         <section class="info">
-          <p><strong>Balance:</strong> <span id="balance">---</span></p>
-
-          <div class="live-price">
-            <span class="label">Live Price</span>
-            <span id="livePrice" class="price">--</span>
-          </div>
-
-          <p><strong>Status:</strong> <span id="status">Disconnected</span></p>
-
           <p class="env-label" id="environmentLabel">Environment: DEMO</p>
           <div id="liveStatus" class="env-label">Live: Locked</div>
-        </section>
-
-        <!-- Controls -->
-        <section class="controls">
-          <button id="startBtn" disabled>Start Bot</button>
-          <button id="stopBtn" disabled>Stop Bot</button>
         </section>
 
       </div>
@@ -162,209 +179,224 @@
       <!-- ================= RIGHT PANEL ================= -->
       <div class="right-panel">
 
-        <!-- Live Chart -->
-        <section class="chart-embed">
-          <!-- NOTE: canvas needs numeric height -->
-          <canvas id="priceChart" width="620" height="320"></canvas>
-        </section>
-    
-            <h3 class="">PERFORMANCE</h3>
-   
-      
-        <section class="dashboard">
-          <div><strong>Wins:</strong> <span id="statWins">0</span></div>
-          <div><strong>Losses:</strong> <span id="statLosses">0</span></div>
-          <div><strong>Win Rate:</strong> <span id="statWinRate">0%</span></div>
-          <div><strong>P/L:</strong> <span id="statPL">0.00</span></div>
-          <div><strong>Max DD:</strong> <span id="statDD">0.00</span></div>
-          <button id="softReset" type="button">Soft Reset</button>
-          <!-- ✅ Added for JS compatibility -->
-     
-              
-                   <span><button id="resetSessionBtn" type="button">Reset Session</button></span>
+        <!-- TAB NAVIGATION -->
+        <nav class="tab-nav" role="tablist" aria-label="Dashboard tabs">
+          <button class="tab-btn active" data-tab="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="tab-overview" id="btn-tab-overview">📊 Overview</button>
+          <button class="tab-btn" data-tab="tab-analysis" type="button" role="tab" aria-selected="false" aria-controls="tab-analysis" id="btn-tab-analysis">🔬 Analysis</button>
+          <button class="tab-btn" data-tab="tab-tools" type="button" role="tab" aria-selected="false" aria-controls="tab-tools" id="btn-tab-tools">🛠 Tools</button>
+        </nav>
 
-        
-        </section>
+        <!-- ===== TAB: OVERVIEW ===== -->
+        <div id="tab-overview" class="tab-panel active" role="tabpanel" aria-labelledby="btn-tab-overview">
 
-        <h3 class="">EXPECTANCY DASHBOARD</h3>
-        <section class="dashboard">
-          <!-- ===== EXPECTANCY DASHBOARD ===== -->
-          <div><strong>Avg Win:</strong> <span id="expAvgWin">0.00</span></div>
-          <div><strong>Avg Loss:</strong> <span id="expAvgLoss">0.00</span></div>
-          <div><strong>Expectancy:</strong> <span id="expValue">0.00</span></div>
-          <div><strong>Edge:</strong> <span id="expStatus">—</span></div>
-        </section>
+          <!-- Live Chart -->
+          <section class="chart-embed">
+            <canvas id="priceChart" width="620" height="320"></canvas>
+          </section>
 
-        <h3>MARKET REGIME</h3>
-        <section class="history">
-          <div class="side-stats">
-
-            <div class="side-row">
-              <span>MARKET/SIGNAL</span>
-              <span id="marketSignal" class="status-badge enabled">--</span>
-            </div>
-
-            <div class="side-row">
-              <span>ODD Bias</span>
-              <div class="bar">
-                <div id="oddBar" class="bar-fill odd"></div>
+          <!-- Combined Performance + Expectancy in a single compact grid -->
+          <div class="split-grid">
+            <section class="dashboard compact-dash">
+              <h3 class="dash-title">PERFORMANCE</h3>
+              <div><strong>Wins:</strong> <span id="statWins">0</span></div>
+              <div><strong>Losses:</strong> <span id="statLosses">0</span></div>
+              <div><strong>Max DD:</strong> <span id="statDD">0.00</span></div>
+              <div>
+                <button id="softReset" type="button">Soft Reset</button>
               </div>
-              <span id="oddPct">0%</span>
-            </div>
-
-            <div class="side-row">
-              <span>EVEN Bias</span>
-              <div class="bar">
-                <div id="evenBar" class="bar-fill even"></div>
+              <div>
+                <button id="resetSessionBtn" type="button">Reset Session</button>
               </div>
-              <span id="evenPct">0%</span>
-            </div>
+            </section>
 
-            <div class="side-row">
-              <span>CHAOS</span>
-              <div class="bar">
-                <div id="chaosBar" class="bar-fill chaos "></div>
+            <section class="dashboard compact-dash">
+              <h3 class="dash-title">EXPECTANCY</h3>
+              <div><strong>Avg Win:</strong> <span id="expAvgWin">0.00</span></div>
+              <div><strong>Avg Loss:</strong> <span id="expAvgLoss">0.00</span></div>
+              <div><strong>Expectancy:</strong> <span id="expValue">0.00</span></div>
+              <div><strong>Edge:</strong> <span id="expStatus">—</span></div>
+            </section>
+          </div>
+
+          <!-- Equity Curve -->
+          <section class="chart-embed equity-chart">
+            <canvas id="equityCurveCanvas" width="620" height="140"></canvas>
+          </section>
+
+        </div>
+
+        <!-- ===== TAB: ANALYSIS ===== -->
+        <div id="tab-analysis" class="tab-panel" role="tabpanel" aria-labelledby="btn-tab-analysis">
+
+          <div class="split-grid">
+            <!-- Market Regime -->
+            <section class="history compact-analysis">
+              <h3 class="dash-title">MARKET REGIME</h3>
+              <div class="side-stats">
+
+                <div class="side-row">
+                  <span>ODD Bias</span>
+                  <div class="bar">
+                    <div id="oddBar" class="bar-fill odd"></div>
+                  </div>
+                  <span id="oddPct">0%</span>
+                </div>
+
+                <div class="side-row">
+                  <span>EVEN Bias</span>
+                  <div class="bar">
+                    <div id="evenBar" class="bar-fill even"></div>
+                  </div>
+                  <span id="evenPct">0%</span>
+                </div>
+
+                <div class="side-row">
+                  <span>CHAOS</span>
+                  <div class="bar">
+                    <div id="chaosBar" class="bar-fill chaos "></div>
+                  </div>
+                  <span id="chaosPct">0%</span>
+                </div>
+
+                <div class="side-row">
+                  <span>Auto Mode</span>
+                  <span id="autoModeBadge" class="status-badge disabled">STANDBY</span>
+                </div>
+
+                <div class="side-row">
+                  <span>FEED</span>
+                  <span id="feedHealth" class="status-badge disabled">OFFLINE</span>
+                </div>
+
+                <div class="side-row">
+                  <span>SPEED</span>
+                  <span id="symbolSpeedBadge" class="status-badge disabled">
+                    SPEED
+                  </span>
+                </div>
+
+                <div class="side-row edge-row">
+                  <span>PAYOUT EDGE</span>
+                  <span id="payoutThresholdBadge" class="status-badge disabled">1.82x</span>
+                  <span id="payoutSamples" class="env-label">0 samples</span>
+                </div>
+
+                <div class="side-row mode-row">
+                  <span>MODE PAUSE</span>
+                  <span id="modePauseBadge" class="status-badge standard">NONE</span>
+                  <span id="modeCooldownText" class="env-label">Ready</span>
+                </div>
+
+                <div class="payout-trend-wrap">
+                  <svg id="payoutSparkline" class="payout-sparkline" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="Payout threshold trend">
+                    <polyline id="payoutSparklineLine" points="" />
+                  </svg>
+                </div>
+
               </div>
-              <span id="chaosPct">0%</span>
-            </div>
+            </section>
 
+            <!-- Price Action Analysis -->
+            <section class="dashboard pa-dashboard compact-analysis">
+              <h3 class="dash-title">PRICE ACTION</h3>
+              <div class="side-row">
+                <span>CONFLUENCE</span>
+                <span id="confluenceScore" class="status-badge disabled">0</span>
+                <span id="confluenceDetail" class="env-label">T:0 L:0 S:0 M:0</span>
+              </div>
+              <div class="side-row">
+                <span>PATTERN</span>
+                <span id="patternSignal" class="status-badge disabled">NONE</span>
+              </div>
+              <div class="side-row">
+                <span>TREND STRUCT</span>
+                <span id="trendStructure" class="status-badge disabled">NONE</span>
+              </div>
+              <div class="side-row">
+                <span>S/R LEVELS</span>
+                <span id="srLevelCount" class="env-label">0 levels</span>
+              </div>
+              <div class="side-row">
+                <span>SMA 8/21</span>
+                <span id="smaStatus" class="env-label">--</span>
+              </div>
+              <div class="side-row">
+                <span>BOLLINGER</span>
+                <span id="bbStatus" class="env-label">--</span>
+              </div>
+              <div class="side-row">
+                <span>FIB / S&D</span>
+                <span id="fibSdStatus" class="env-label">--</span>
+              </div>
+              <div class="side-row">
+                <span>CANDLES</span>
+                <span id="candleCount" class="env-label">0/0</span>
+              </div>
+              <div class="side-row signal-meter">
+                <span>SIGNAL</span>
+                <div class="signal-bar"><div id="signalStrengthBar" class="signal-bar-fill weak"></div></div>
+                <span id="signalStrengthLabel" class="env-label">0/0 (0%)</span>
+              </div>
+            </section>
+          </div>
+
+          <!-- Advanced Stats -->
+          <h3>ADVANCED STATS</h3>
+          <section class="dashboard pa-dashboard">
             <div class="side-row">
-              <span>Auto Mode</span>
-              <span id="autoModeBadge" class="status-badge disabled">STANDBY</span>
+              <span>Profit Factor</span>
+              <span id="profitFactorVal" class="status-badge disabled">0.00</span>
             </div>
-
             <div class="side-row">
-              <span>FEED</span>
-              <span id="feedHealth" class="status-badge disabled">OFFLINE</span>
+              <span>Sharpe Ratio</span>
+              <span id="sharpeVal" class="status-badge disabled">0.00</span>
             </div>
-
             <div class="side-row">
-              <span>SPEED</span>
-              <span id="symbolSpeedBadge" class="status-badge disabled">
-                SPEED
-              </span>
+              <span>Sortino Ratio</span>
+              <span id="sortinoVal" class="status-badge disabled">0.00</span>
             </div>
+          </section>
 
-            <div class="side-row edge-row">
-              <span>PAYOUT EDGE</span>
-              <span id="payoutThresholdBadge" class="status-badge disabled">1.82x</span>
-              <span id="payoutSamples" class="env-label">0 samples</span>
+          <!-- MODE PERFORMANCE -->
+          <h3 class="collapsible">MODE PERFORMANCE</h3>
+          <section class="dashboard pa-dashboard collapsible-body">
+            <div id="modeStatsBody"></div>
+          </section>
+
+          <!-- PATTERN PERFORMANCE -->
+          <h3 class="collapsible">PATTERN PERFORMANCE</h3>
+          <section class="dashboard pa-dashboard collapsible-body">
+            <div id="patternStatsBody"></div>
+          </section>
+
+        </div>
+
+        <!-- ===== TAB: TOOLS & HISTORY ===== -->
+        <div id="tab-tools" class="tab-panel" role="tabpanel" aria-labelledby="btn-tab-tools">
+
+          <section class="dashboard tools-panel">
+            <h3 class="dash-title">TOOLS</h3>
+            <div class="tools-row">
+              <button id="exportJournalBtn" type="button" class="tool-btn">📥 Export Journal</button>
+              <button id="themeToggleBtn" type="button" class="tool-btn">☀️ Light</button>
             </div>
-
-            <div class="side-row mode-row">
-              <span>MODE PAUSE</span>
-              <span id="modePauseBadge" class="status-badge standard">NONE</span>
-              <span id="modeCooldownText" class="env-label">Ready</span>
+            <div class="tools-row">
+              <button id="soundToggleBtn" type="button" class="tool-btn">🔊 Sound ON</button>
+              <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
             </div>
-
-            <div class="payout-trend-wrap">
-              <svg id="payoutSparkline" class="payout-sparkline" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="Payout threshold trend">
-                <polyline id="payoutSparklineLine" points="" />
-              </svg>
+            <div class="shortcut-hints">
+              <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export | Alt+N Notifications</small>
             </div>
+          </section>
 
-          </div>
-        </section>
+          <section class="history">
+            <h3 class="collapsible">Trade History</h3>
+            <div class="collapsible-body">
+              <ul id="tradeHistory"></ul>
+            </div>
+          </section>
 
-        <h3>PRICE ACTION ANALYSIS</h3>
-        <section class="dashboard pa-dashboard">
-          <div class="side-row">
-            <span>CONFLUENCE</span>
-            <span id="confluenceScore" class="status-badge disabled">0</span>
-            <span id="confluenceDetail" class="env-label">T:0 L:0 S:0 M:0</span>
-          </div>
-          <div class="side-row">
-            <span>PATTERN</span>
-            <span id="patternSignal" class="status-badge disabled">NONE</span>
-          </div>
-          <div class="side-row">
-            <span>TREND STRUCT</span>
-            <span id="trendStructure" class="status-badge disabled">NONE</span>
-          </div>
-          <div class="side-row">
-            <span>S/R LEVELS</span>
-            <span id="srLevelCount" class="env-label">0 levels</span>
-          </div>
-          <div class="side-row">
-            <span>SMA 8/21</span>
-            <span id="smaStatus" class="env-label">--</span>
-          </div>
-          <div class="side-row">
-            <span>BOLLINGER</span>
-            <span id="bbStatus" class="env-label">--</span>
-          </div>
-          <div class="side-row">
-            <span>FIB / S&D</span>
-            <span id="fibSdStatus" class="env-label">--</span>
-          </div>
-          <div class="side-row">
-            <span>CANDLES</span>
-            <span id="candleCount" class="env-label">0/0</span>
-          </div>
-          <div class="side-row signal-meter">
-            <span>SIGNAL</span>
-            <div class="signal-bar"><div id="signalStrengthBar" class="signal-bar-fill weak"></div></div>
-            <span id="signalStrengthLabel" class="env-label">0/0 (0%)</span>
-          </div>
-        </section>
-
-        <!-- EQUITY CURVE -->
-        <h3>EQUITY CURVE</h3>
-        <section class="chart-embed equity-chart">
-          <canvas id="equityCurveCanvas" width="620" height="140"></canvas>
-        </section>
-
-        <!-- ADVANCED STATS -->
-        <h3>ADVANCED STATS</h3>
-        <section class="dashboard pa-dashboard">
-          <div class="side-row">
-            <span>Profit Factor</span>
-            <span id="profitFactorVal" class="status-badge disabled">0.00</span>
-          </div>
-          <div class="side-row">
-            <span>Sharpe Ratio</span>
-            <span id="sharpeVal" class="status-badge disabled">0.00</span>
-          </div>
-          <div class="side-row">
-            <span>Sortino Ratio</span>
-            <span id="sortinoVal" class="status-badge disabled">0.00</span>
-          </div>
-        </section>
-
-        <!-- MODE PERFORMANCE -->
-        <h3 class="collapsible">MODE PERFORMANCE</h3>
-        <section class="dashboard pa-dashboard collapsible-body">
-          <div id="modeStatsBody"></div>
-        </section>
-
-        <!-- PATTERN PERFORMANCE -->
-        <h3 class="collapsible">PATTERN PERFORMANCE</h3>
-        <section class="dashboard pa-dashboard collapsible-body">
-          <div id="patternStatsBody"></div>
-        </section>
-
-        <!-- TRADE JOURNAL / QOL -->
-        <h3>TOOLS</h3>
-        <section class="dashboard tools-panel">
-          <div class="tools-row">
-            <button id="exportJournalBtn" type="button" class="tool-btn">📥 Export Journal</button>
-            <button id="themeToggleBtn" type="button" class="tool-btn">☀️ Light</button>
-          </div>
-          <div class="tools-row">
-            <button id="soundToggleBtn" type="button" class="tool-btn">🔊 Sound ON</button>
-            <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
-          </div>
-          <div class="shortcut-hints">
-            <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export | Alt+N Notifications</small>
-          </div>
-        </section>
-
-        <section class="history">
-          <h3 class="collapsible">Trade History</h3>
-          <div class="collapsible-body">
-            <ul id="tradeHistory"></ul>
-          </div>
-        </section>
+        </div>
 
       </div>
     </div>
@@ -393,6 +425,38 @@
       link.style.color = "#38bdf8";
     }
   });
+
+    /* ---- Tab Switching with ARIA keyboard support ---- */
+    (function () {
+      const btns = Array.from(document.querySelectorAll('.tab-btn'));
+      const panels = document.querySelectorAll('.tab-panel');
+
+      function activateTab(btn) {
+        btns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); b.tabIndex = -1; });
+        panels.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        btn.tabIndex = 0;
+        btn.focus();
+        const target = document.getElementById(btn.dataset.tab);
+        if (target) target.classList.add('active');
+      }
+
+      btns.forEach((btn, i) => {
+        btn.tabIndex = btn.classList.contains('active') ? 0 : -1;
+        btn.addEventListener('click', () => activateTab(btn));
+        btn.addEventListener('keydown', (e) => {
+          let idx = i;
+          if (e.key === 'ArrowRight') idx = (i + 1) % btns.length;
+          else if (e.key === 'ArrowLeft') idx = (i - 1 + btns.length) % btns.length;
+          else if (e.key === 'Home') idx = 0;
+          else if (e.key === 'End') idx = btns.length - 1;
+          else return;
+          e.preventDefault();
+          activateTab(btns[idx]);
+        });
+      });
+    })();
   </script>
 </body>
 </html>
