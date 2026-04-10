@@ -726,7 +726,7 @@ function updateStateUI() {
   /* Volume spike display */
   if (UI.volumeSpikeDisplay) {
     if (breakout && breakout.candleIdx < candles.length) {
-      const spike = hasVolumeSpikeOnBreakout(candles[breakout.candleIdx]);
+      const spike = hasVolumeSpikeOnBreakout(breakout.candleIdx);
       UI.volumeSpikeDisplay.textContent = spike ? "YES ✅" : "NO";
       UI.volumeSpikeDisplay.className = "status-badge " + (spike ? "bull" : "disabled");
     } else {
@@ -1200,24 +1200,23 @@ function isRSIFavorable(dir) {
  * the average of recent candles, serving as a volume/momentum proxy.
  * Synthetic indices have no tick volume, so range is the best proxy.
  * If volumeSpikeEnabled is off, always returns true.
+ * @param {number} candleIdx - index of the breakout candle in the candles array
  */
-function hasVolumeSpikeOnBreakout(breakoutCandle) {
+function hasVolumeSpikeOnBreakout(candleIdx) {
   if (!volumeSpikeEnabled) return true;
-  if (!breakoutCandle) return true;
-  const endIdx = candles.indexOf(breakoutCandle);
-  if (endIdx < 0) return true;
-  const startIdx = Math.max(0, endIdx - VOLUME_SPIKE_LOOKBACK);
-  if (startIdx >= endIdx) return true;
+  if (candleIdx < 0 || candleIdx >= candles.length) return true;
+  const startIdx = Math.max(0, candleIdx - VOLUME_SPIKE_LOOKBACK);
+  if (startIdx >= candleIdx) return true;
   let sumRange = 0;
   let count = 0;
-  for (let i = startIdx; i < endIdx; i++) {
+  for (let i = startIdx; i < candleIdx; i++) {
     sumRange += candles[i].high - candles[i].low;
     count++;
   }
   if (count === 0) return true;
   const avgRange = sumRange / count;
   if (avgRange <= 0) return true;
-  const breakoutRange = breakoutCandle.high - breakoutCandle.low;
+  const breakoutRange = candles[candleIdx].high - candles[candleIdx].low;
   return breakoutRange >= avgRange * VOLUME_SPIKE_MULT;
 }
 
@@ -1236,8 +1235,9 @@ function isWithinActiveSession() {
     case "new_york":
       return hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end;
     case "overlap":
-      /* London starts at 07, NY at 12 — overlap is 12-16 UTC */
-      return hour >= SESSION_NEW_YORK.start && hour < SESSION_LONDON.end;
+      /* Overlap = intersection of London and New York sessions */
+      return hour >= Math.max(SESSION_LONDON.start, SESSION_NEW_YORK.start) &&
+             hour < Math.min(SESSION_LONDON.end, SESSION_NEW_YORK.end);
     case "asian":
       return hour >= SESSION_ASIAN.start && hour < SESSION_ASIAN.end;
     case "london_ny":
@@ -1509,7 +1509,7 @@ function computeConfluenceScore() {
 
   /* Factor 7: Volume spike on breakout */
   if (breakout.candleIdx < candles.length) {
-    if (hasVolumeSpikeOnBreakout(candles[breakout.candleIdx])) score++;
+    if (hasVolumeSpikeOnBreakout(breakout.candleIdx)) score++;
   }
 
   /* Factor 8: Within active trading session */
@@ -1640,12 +1640,12 @@ function processCandle(idx) {
       /* Log breakout strength (volume proxy) */
       const conviction = hasBreakoutConviction(c);
       /* Apply volume spike filter */
-      const volumeSpike = hasVolumeSpikeOnBreakout(c);
+      const volumeSpike = hasVolumeSpikeOnBreakout(idx);
       if (!volumeSpike) {
         addLog(`Bullish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction };
+      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       addLog("Next action: BUY STOP — ride the breakout momentum");
@@ -1667,12 +1667,12 @@ function processCandle(idx) {
       }
       const conviction = hasBreakoutConviction(c);
       /* Apply volume spike filter */
-      const volumeSpike = hasVolumeSpikeOnBreakout(c);
+      const volumeSpike = hasVolumeSpikeOnBreakout(idx);
       if (!volumeSpike) {
         addLog(`Bearish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction };
+      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       addLog("Next action: SELL STOP — ride the breakout momentum");
@@ -1982,7 +1982,7 @@ function recordSignal(confirmPattern) {
     srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
     confirmPattern: pattern,
     rsiAtRetest: getCurrentRSI(),
-    volumeSpike: breakout ? hasVolumeSpikeOnBreakout(candles[breakout.candleIdx]) : null,
+    volumeSpike: breakout ? (breakout.volumeSpike != null ? breakout.volumeSpike : hasVolumeSpikeOnBreakout(breakout.candleIdx)) : null,
     session: getActiveSessionName(),
     fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null
   };
