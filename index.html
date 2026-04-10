@@ -180,14 +180,14 @@
       <div class="right-panel">
 
         <!-- TAB NAVIGATION -->
-        <nav class="tab-nav" aria-label="Dashboard tabs">
-          <button class="tab-btn active" data-tab="tab-overview" type="button">📊 Overview</button>
-          <button class="tab-btn" data-tab="tab-analysis" type="button">🔬 Analysis</button>
-          <button class="tab-btn" data-tab="tab-tools" type="button">🛠 Tools</button>
+        <nav class="tab-nav" role="tablist" aria-label="Dashboard tabs">
+          <button class="tab-btn active" data-tab="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="tab-overview" id="btn-tab-overview">📊 Overview</button>
+          <button class="tab-btn" data-tab="tab-analysis" type="button" role="tab" aria-selected="false" aria-controls="tab-analysis" id="btn-tab-analysis">🔬 Analysis</button>
+          <button class="tab-btn" data-tab="tab-tools" type="button" role="tab" aria-selected="false" aria-controls="tab-tools" id="btn-tab-tools">🛠 Tools</button>
         </nav>
 
         <!-- ===== TAB: OVERVIEW ===== -->
-        <div id="tab-overview" class="tab-panel active">
+        <div id="tab-overview" class="tab-panel active" role="tabpanel" aria-labelledby="btn-tab-overview">
 
           <!-- Live Chart -->
           <section class="chart-embed">
@@ -226,7 +226,7 @@
         </div>
 
         <!-- ===== TAB: ANALYSIS ===== -->
-        <div id="tab-analysis" class="tab-panel">
+        <div id="tab-analysis" class="tab-panel" role="tabpanel" aria-labelledby="btn-tab-analysis">
 
           <div class="split-grid">
             <!-- Market Regime -->
@@ -372,7 +372,7 @@
         </div>
 
         <!-- ===== TAB: TOOLS & HISTORY ===== -->
-        <div id="tab-tools" class="tab-panel">
+        <div id="tab-tools" class="tab-panel" role="tabpanel" aria-labelledby="btn-tab-tools">
 
           <section class="dashboard tools-panel">
             <h3 class="dash-title">TOOLS</h3>
@@ -426,17 +426,34 @@
     }
   });
 
-    /* ---- Tab Switching ---- */
+    /* ---- Tab Switching with ARIA keyboard support ---- */
     (function () {
-      const btns = document.querySelectorAll('.tab-btn');
+      const btns = Array.from(document.querySelectorAll('.tab-btn'));
       const panels = document.querySelectorAll('.tab-panel');
-      btns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          btns.forEach(b => b.classList.remove('active'));
-          panels.forEach(p => p.classList.remove('active'));
-          btn.classList.add('active');
-          const target = document.getElementById(btn.dataset.tab);
-          if (target) target.classList.add('active');
+
+      function activateTab(btn) {
+        btns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); b.tabIndex = -1; });
+        panels.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        btn.tabIndex = 0;
+        btn.focus();
+        const target = document.getElementById(btn.dataset.tab);
+        if (target) target.classList.add('active');
+      }
+
+      btns.forEach((btn, i) => {
+        btn.tabIndex = btn.classList.contains('active') ? 0 : -1;
+        btn.addEventListener('click', () => activateTab(btn));
+        btn.addEventListener('keydown', (e) => {
+          let idx = i;
+          if (e.key === 'ArrowRight') idx = (i + 1) % btns.length;
+          else if (e.key === 'ArrowLeft') idx = (i - 1 + btns.length) % btns.length;
+          else if (e.key === 'Home') idx = 0;
+          else if (e.key === 'End') idx = btns.length - 1;
+          else return;
+          e.preventDefault();
+          activateTab(btns[idx]);
         });
       });
     })();
