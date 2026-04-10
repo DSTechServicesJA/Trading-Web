@@ -115,6 +115,57 @@ const SYMBOL_TUNING = {
     STAKE_SCALE: 1.06,
     LOSS_CLUSTER_LIMIT: 2,
     DRAWDOWN_MULTIPLIER: 1.6
+  },
+
+  // 💱 FOREX MARKETS — SLOW/PATIENT
+  "frxEURUSD": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxGBPUSD": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxAUDUSD": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxUSDJPY": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxUSDCAD": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxUSDCHF": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
+  },
+  "frxNZDUSD": {
+    EXPECTANCY_WINDOW: 8,
+    ENTROPY_SLOPE_CUT: 0.10,
+    STAKE_SCALE: 1.03,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.8
   }
 };
 
@@ -1743,7 +1794,8 @@ let modeDisabledUntil = {
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
   FAST: ["1HZ75V", "1HZ50V", "1HZ100V"],
-  STANDARD: ["R_100", "R_75", "R_50"]
+  STANDARD: ["R_100", "R_75", "R_50"],
+  FOREX: ["frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY", "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"]
 };
 const MARKET_SIGNAL_LABEL = {
   "1HZ75V":  "1-Second Vol 75",
@@ -1751,7 +1803,14 @@ const MARKET_SIGNAL_LABEL = {
   "1HZ100V": "1-Second Vol 100",
   "R_100": "Volatility 100",
   "R_75": "Volatility 75",
-  "R_50": "Volatility 50"
+  "R_50": "Volatility 50",
+  "frxEURUSD": "EUR/USD",
+  "frxGBPUSD": "GBP/USD",
+  "frxAUDUSD": "AUD/USD",
+  "frxUSDJPY": "USD/JPY",
+  "frxUSDCAD": "USD/CAD",
+  "frxUSDCHF": "USD/CHF",
+  "frxNZDUSD": "NZD/USD"
 };
 
 function autoBindSymbolToMode(mode) {
@@ -2359,6 +2418,10 @@ function updateSymbolSelectLock() {
 }
 
 
+function isForexSymbol(sym) {
+  return SYMBOL_SPEED.FOREX.includes(sym);
+}
+
 function updateSymbolSpeedBadge(sym) {
   const el = document.getElementById("symbolSpeedBadge");
   if (!el) return;
@@ -2370,6 +2433,9 @@ function updateSymbolSpeedBadge(sym) {
     el.classList.add("fast");
   } else if (SYMBOL_SPEED.STANDARD.includes(sym)) {
     el.textContent = "STANDARD";
+    el.classList.add("standard");
+  } else if (SYMBOL_SPEED.FOREX.includes(sym)) {
+    el.textContent = "FOREX";
     el.classList.add("standard");
   } else {
     el.textContent = "UNKNOWN";
@@ -2460,6 +2526,7 @@ function buildPayoutSparklinePoints(values) {
 function payoutRatioFloor(sym) {
   if (SYMBOL_SPEED.FAST.includes(sym)) return 1.78;
   if (SYMBOL_SPEED.STANDARD.includes(sym)) return 1.72;
+  if (SYMBOL_SPEED.FOREX.includes(sym)) return 1.70;
   return 1.75;
 }
 
