@@ -4401,6 +4401,7 @@ function focusPanel(symbol) {
 /* ---- Connect a multi-symbol panel ---- */
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
+  /* All panels share the same timeframe for consistent cross-symbol comparison */
   const gran = parseInt(UI.granSelect.value, 10);
 
   /* Reset panel state */
@@ -4758,6 +4759,7 @@ function initMultiSymbolPicker() {
       if (cb.checked) {
         if (multiPanels.size >= MULTI_MAX_PANELS) {
           cb.checked = false;
+          addLog(`[Multi] Max ${MULTI_MAX_PANELS} panels reached — deselect one first`);
           return;
         }
         addSymbolPanel(sym);

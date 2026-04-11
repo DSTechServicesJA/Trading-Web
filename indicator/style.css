@@ -1521,7 +1521,7 @@ body.light-theme .ms-card-footer {
 .ms-card-dot.disconnected { background: var(--danger); }
 
 /* Phase badge colours (reusing existing palette) */
-.ms-phase-waiting    { background: #334155; color: #94a3b8; }
+.ms-phase-waiting    { background: var(--bg-card-hover); color: var(--text-soft); }
 .ms-phase-range      { background: rgba(245,158,11,0.2); color: var(--warning); }
 .ms-phase-breakout   { background: rgba(34,197,94,0.2); color: var(--success); }
 .ms-phase-retest     { background: rgba(245,158,11,0.2); color: var(--warning); }
@@ -1532,7 +1532,7 @@ body.light-theme .ms-card-footer {
 /* Direction badge colours */
 .ms-dir-bull { background: rgba(34,197,94,0.2); color: var(--success); }
 .ms-dir-bear { background: rgba(239,68,68,0.2); color: var(--danger); }
-.ms-dir-none { background: #334155; color: #94a3b8; }
+.ms-dir-none { background: var(--bg-card-hover); color: var(--text-soft); }
 
 /* Responsive: stack grid on small screens */
 @media (max-width: 640px) {
