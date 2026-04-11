@@ -1735,12 +1735,13 @@ function processLatestCandle() {
   const idx = candles.length - 1;
 
   /* Allow multiple phase transitions on the same candle (e.g. retest candle
-     that is also indecision).  Cap the loop to avoid infinite spins. */
+     that is also indecision).  Cap the loop to avoid infinite spins.
+     TRADE is the terminal phase — once a trade is built, stop advancing. */
   let prevPhase = phase;
   const MAX_ADVANCES = 5;
   for (let attempt = 0; attempt < MAX_ADVANCES; attempt++) {
     processCandle(idx);
-    if (phase === prevPhase || phase === "TRADE") break;   /* no further advance */
+    if (phase === prevPhase || phase === "TRADE") break;
     prevPhase = phase;
   }
 
