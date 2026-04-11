@@ -1350,3 +1350,180 @@ body.light-theme .bar-btn-tool {
   color: var(--text-muted);
   opacity: 0.7;
 }
+
+/* =========================================================
+   Multi-Symbol Analysis
+   ========================================================= */
+
+/* ---- Picker (in settings sidebar) ---- */
+.multi-symbol-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin-top: 8px;
+}
+.ms-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  padding: 3px 4px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ms-check:hover { background: var(--bg-card-hover); }
+.ms-check input[type="checkbox"] {
+  width: 14px; height: 14px;
+  accent-color: var(--primary);
+}
+
+/* ---- Grid section (in right panel) ---- */
+.multi-symbol-section {
+  margin-bottom: var(--space-md);
+}
+.multi-symbol-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  backdrop-filter: blur(16px);
+}
+.multi-symbol-header h3 {
+  font-size: var(--fs-md);
+  color: var(--heading);
+  margin: 0;
+}
+.multi-symbol-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.multi-symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  backdrop-filter: blur(16px);
+}
+
+/* ---- Individual mini-chart card ---- */
+.ms-card {
+  position: relative;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+.ms-card:hover {
+  border-color: var(--primary-soft);
+  box-shadow: 0 0 12px var(--primary-glow);
+  transform: translateY(-1px);
+}
+.ms-card.ms-card-active {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px var(--primary-glow), 0 0 0 2px var(--primary-glow);
+}
+
+.ms-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--bg-card);
+}
+.ms-card-symbol {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--heading);
+}
+.ms-card-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.ms-card-phase {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ms-card-dir {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.ms-card-canvas {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+.ms-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--bg-card);
+  font-size: 10px;
+  color: var(--text-soft);
+}
+.ms-card-price {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+}
+.ms-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ms-card-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.ms-card-dot.connected { background: var(--success); }
+.ms-card-dot.disconnected { background: var(--danger); }
+
+/* Phase badge colours (reusing existing palette) */
+.ms-phase-waiting    { background: #334155; color: #94a3b8; }
+.ms-phase-range      { background: rgba(245,158,11,0.2); color: var(--warning); }
+.ms-phase-breakout   { background: rgba(34,197,94,0.2); color: var(--success); }
+.ms-phase-retest     { background: rgba(245,158,11,0.2); color: var(--warning); }
+.ms-phase-indecision { background: rgba(245,158,11,0.2); color: var(--warning); }
+.ms-phase-confirm    { background: rgba(34,197,94,0.2); color: var(--success); }
+.ms-phase-trade      { background: rgba(34,197,94,0.3); color: var(--success); }
+
+/* Direction badge colours */
+.ms-dir-bull { background: rgba(34,197,94,0.2); color: var(--success); }
+.ms-dir-bear { background: rgba(239,68,68,0.2); color: var(--danger); }
+.ms-dir-none { background: #334155; color: #94a3b8; }
+
+/* Responsive: stack grid on small screens */
+@media (max-width: 640px) {
+  .multi-symbol-grid {
+    grid-template-columns: 1fr;
+  }
+  .ms-card-canvas { height: 110px; }
+}
+@media (min-width: 1200px) {
+  .multi-symbol-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

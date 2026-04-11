@@ -594,10 +594,16 @@ function addLog(msg) {
   persistSignalLog();
 }
 
+/* Tracks whether we're inside a multi-panel WS handler (suppress main UI updates) */
+let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
+
 function setPhase(newPhase) {
   const prevPhase = phase;
   phase = newPhase;
-  if (UI.phaseLabel) {
+
+  /* Only update the main phase badge when NOT processing a non-focused panel */
+  const isFocusedOrSingle = !_multiPanelProcessing || _multiPanelProcessing === focusedPanelSymbol;
+  if (isFocusedOrSingle && UI.phaseLabel) {
     UI.phaseLabel.textContent = newPhase;
     UI.phaseLabel.className = "status-badge " + ({
       WAITING: "disabled", RANGE: "warning", BREAKOUT: "enabled",
@@ -607,10 +613,10 @@ function setPhase(newPhase) {
   /* Play alert on meaningful phase transitions */
   if (prevPhase !== newPhase && newPhase !== "WAITING") {
     playPhaseAlert(newPhase);
-    sendPhaseNotification(newPhase);
+    if (isFocusedOrSingle) sendPhaseNotification(newPhase);
   }
   /* Auto-send Telegram on TRADE phase */
-  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend) {
+  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend && isFocusedOrSingle) {
     /* Delay 500ms so drawChart() finishes rendering the trade on canvas */
     setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
   }
@@ -4196,8 +4202,571 @@ function initLoginGate() {
   };
 }
 
-/* ================= BOOT ================= */
-document.addEventListener("DOMContentLoaded", () => {
+/* ================= MULTI-SYMBOL ANALYSIS ================= */
+/**
+ * Multi-symbol system: runs up to 6 independent indicator instances
+ * simultaneously, each with its own WebSocket connection and state.
+ *
+ * Architecture:
+ *   - Each panel is a plain object holding all per-symbol state.
+ *   - Before calling existing analysis functions (which use globals),
+ *     we "activate" a panel (copy its state → globals), run the logic,
+ *     then "save" (copy globals → panel state).
+ *   - JavaScript is single-threaded so no race conditions occur.
+ *   - Each panel has a mini-chart canvas in the UI grid.
+ *   - Clicking a panel makes it the "focused" panel; the main chart
+ *     and sidebar detail panels update to show that panel's data.
+ */
+
+const MULTI_MAX_PANELS = 6;
+const multiPanels = new Map();   /* symbol → panel object */
+let focusedPanelSymbol = null;   /* which panel drives the main view */
+
+/* ---- Panel state factory ---- */
+function createPanelState(symbol) {
+  return {
+    symbol,
+    ws: null,
+    candles: [],
+    rangeStartEpoch: null,
+    openingRange: null,
+    breakout: null,
+    retestInfo: null,
+    indecisionInfo: null,
+    confirmInfo: null,
+    trade: null,
+    phase: "WAITING",
+    monitoringTrade: false,
+    emaFast: [],
+    emaSlow: [],
+    emaHTF: [],
+    atrValue: 0,
+    atrValues: [],
+    rsiValues: [],
+    trailingSL: null,
+    partialTpHit: false,
+    confluenceScore: 0,
+    signalHistory: [],
+    signalWins: 0,
+    signalLosses: 0,
+    connectTime: null,
+    pingTimer: null,
+    connected: false,
+    /* DOM refs for the card */
+    cardEl: null,
+    canvasEl: null,
+    phaseEl: null,
+    dirEl: null,
+    priceEl: null,
+    dotEl: null,
+  };
+}
+
+/* ---- Copy panel state → globals (activate) ---- */
+function activatePanel(p) {
+  candles        = p.candles;
+  rangeStartEpoch = p.rangeStartEpoch;
+  openingRange   = p.openingRange;
+  breakout       = p.breakout;
+  retestInfo     = p.retestInfo;
+  indecisionInfo = p.indecisionInfo;
+  confirmInfo    = p.confirmInfo;
+  trade          = p.trade;
+  phase          = p.phase;
+  monitoringTrade = p.monitoringTrade;
+  emaFast        = p.emaFast;
+  emaSlow        = p.emaSlow;
+  emaHTF         = p.emaHTF;
+  atrValue       = p.atrValue;
+  atrValues      = p.atrValues;
+  rsiValues      = p.rsiValues;
+  trailingSL     = p.trailingSL;
+  partialTpHit   = p.partialTpHit;
+  confluenceScore = p.confluenceScore;
+  signalHistory  = p.signalHistory;
+  signalWins     = p.signalWins;
+  signalLosses   = p.signalLosses;
+  ws             = p.ws;
+}
+
+/* ---- Copy globals → panel state (save) ---- */
+function savePanel(p) {
+  p.candles        = candles;
+  p.rangeStartEpoch = rangeStartEpoch;
+  p.openingRange   = openingRange;
+  p.breakout       = breakout;
+  p.retestInfo     = retestInfo;
+  p.indecisionInfo = indecisionInfo;
+  p.confirmInfo    = confirmInfo;
+  p.trade          = trade;
+  p.phase          = phase;
+  p.monitoringTrade = monitoringTrade;
+  p.emaFast        = emaFast;
+  p.emaSlow        = emaSlow;
+  p.emaHTF         = emaHTF;
+  p.atrValue       = atrValue;
+  p.atrValues      = atrValues;
+  p.rsiValues      = rsiValues;
+  p.trailingSL     = trailingSL;
+  p.partialTpHit   = partialTpHit;
+  p.confluenceScore = confluenceScore;
+  p.signalHistory  = signalHistory;
+  p.signalWins     = signalWins;
+  p.signalLosses   = signalLosses;
+  p.ws             = ws;
+}
+
+/* ---- Get display name for a symbol ---- */
+function getSymbolLabel(symbol) {
+  /* Try to find it in the main symbol select */
+  if (UI.symbolSelect) {
+    for (const opt of UI.symbolSelect.options) {
+      if (opt.value === symbol) return opt.text;
+    }
+  }
+  /* Fallback: the raw symbol string */
+  return symbol;
+}
+
+/* ---- Create card DOM for a panel ---- */
+function createPanelCard(p) {
+  const grid = document.getElementById("multiSymbolGrid");
+  if (!grid) return;
+
+  const card = document.createElement("div");
+  card.className = "ms-card";
+  card.dataset.symbol = p.symbol;
+  card.innerHTML = `
+    <div class="ms-card-header">
+      <span class="ms-card-symbol">${getSymbolLabel(p.symbol)}</span>
+      <div class="ms-card-badges">
+        <span class="ms-card-phase ms-phase-waiting">WAITING</span>
+        <span class="ms-card-dir ms-dir-none">--</span>
+      </div>
+    </div>
+    <canvas class="ms-card-canvas" width="520" height="280"></canvas>
+    <div class="ms-card-footer">
+      <span class="ms-card-price">--</span>
+      <span class="ms-card-status"><span class="ms-card-dot disconnected"></span> Offline</span>
+    </div>
+  `;
+
+  p.cardEl   = card;
+  p.canvasEl = card.querySelector(".ms-card-canvas");
+  p.phaseEl  = card.querySelector(".ms-card-phase");
+  p.dirEl    = card.querySelector(".ms-card-dir");
+  p.priceEl  = card.querySelector(".ms-card-price");
+  p.dotEl    = card.querySelector(".ms-card-dot");
+  p.statusTextEl = card.querySelector(".ms-card-status");
+
+  /* Click to focus */
+  card.addEventListener("click", () => focusPanel(p.symbol));
+
+  grid.appendChild(card);
+}
+
+/* ---- Focus a panel (show in main view) ---- */
+function focusPanel(symbol) {
+  const p = multiPanels.get(symbol);
+  if (!p) return;
+  focusedPanelSymbol = symbol;
+
+  /* Update active visual */
+  document.querySelectorAll(".ms-card").forEach(c => c.classList.remove("ms-card-active"));
+  if (p.cardEl) p.cardEl.classList.add("ms-card-active");
+
+  /* Activate panel state in globals */
+  activatePanel(p);
+
+  /* Sync the symbol dropdown to match */
+  if (UI.symbolSelect) {
+    UI.symbolSelect.value = symbol;
+    updateCurrentSymbolLabel();
+  }
+
+  /* Redraw main chart and sidebar */
+  updateStateUI();
+  drawChart();
+  updateStatsUI();
+}
+
+/* ---- Connect a multi-symbol panel ---- */
+function connectPanel(p) {
+  if (p.ws && p.ws.readyState <= 1) return;
+  const gran = parseInt(UI.granSelect.value, 10);
+
+  /* Reset panel state */
+  p.candles = [];
+  p.rangeStartEpoch = null;
+  p.openingRange = null;
+  p.breakout = null;
+  p.retestInfo = null;
+  p.indecisionInfo = null;
+  p.confirmInfo = null;
+  p.trade = null;
+  p.phase = "WAITING";
+  p.monitoringTrade = false;
+  p.emaFast = [];
+  p.emaSlow = [];
+  p.emaHTF = [];
+  p.atrValue = 0;
+  p.atrValues = [];
+  p.rsiValues = [];
+  p.trailingSL = null;
+  p.partialTpHit = false;
+  p.confluenceScore = 0;
+  p.connected = false;
+
+  const panelWs = new WebSocket(WS_URL);
+
+  panelWs.onopen = () => {
+    p.connected = true;
+    p.connectTime = Date.now();
+    updatePanelCardUI(p);
+    addLog(`[Multi] ${p.symbol} connected`);
+
+    panelWs.send(JSON.stringify({
+      ticks_history: p.symbol,
+      adjust_start_time: 1,
+      count: 100,
+      end: "latest",
+      granularity: gran,
+      style: "candles",
+      subscribe: 1
+    }));
+
+    /* Keepalive ping */
+    p.pingTimer = setInterval(() => {
+      if (panelWs.readyState === WebSocket.OPEN) {
+        panelWs.send(JSON.stringify({ ping: 1 }));
+      }
+    }, PING_INTERVAL_MS);
+  };
+
+  panelWs.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
+    if (msg.error) {
+      addLog(`[Multi] ${p.symbol} API error: ${msg.error.message}`);
+      return;
+    }
+
+    /* Activate this panel's state into globals */
+    _multiPanelProcessing = p.symbol;
+    activatePanel(p);
+
+    /* Historical batch */
+    if (msg.candles) {
+      candles = msg.candles.map(c => ({
+        open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
+      }));
+      if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
+      computeEMAs();
+      processAllCandles();
+    }
+
+    /* Streaming OHLC */
+    if (msg.ohlc) {
+      const o = msg.ohlc;
+      const c = {
+        open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
+      };
+
+      if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
+        candles[candles.length - 1] = c;
+      } else {
+        candles.push(c);
+        if (candles.length > MAX_CANDLE_HISTORY) {
+          const removed = candles.length - MAX_CANDLE_HISTORY;
+          candles = candles.slice(removed);
+          adjustIndicesAfterSlice(removed);
+        }
+      }
+
+      if (!rangeStartEpoch && candles.length > 0) rangeStartEpoch = candles[0].epoch;
+
+      computeEMAs();
+      computeATR();
+      computeRSI();
+      processLatestCandle();
+      monitorTradeOutcome(c);
+    }
+
+    /* Save state back to panel */
+    savePanel(p);
+    _multiPanelProcessing = null;
+
+    /* Update card UI */
+    updatePanelCardUI(p);
+    drawMiniChart(p);
+
+    /* If this panel is focused, update the main view */
+    if (focusedPanelSymbol === p.symbol) {
+      updateStateUI();
+      drawChart();
+      updateStatsUI();
+
+      /* Update live price in status bar */
+      if (UI.livePrice && p.candles.length > 0) {
+        UI.livePrice.textContent = fmt(p.candles[p.candles.length - 1].close, 4);
+      }
+    }
+  };
+
+  panelWs.onclose = () => {
+    if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+    p.connected = false;
+    p.ws = null;
+    updatePanelCardUI(p);
+    addLog(`[Multi] ${p.symbol} disconnected`);
+  };
+
+  panelWs.onerror = () => {
+    addLog(`[Multi] ${p.symbol} WebSocket error`);
+  };
+
+  p.ws = panelWs;
+}
+
+/* ---- Disconnect a multi-symbol panel ---- */
+function disconnectPanel(p) {
+  if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+  try {
+    if (p.ws && p.ws.readyState === WebSocket.OPEN) {
+      p.ws.send(JSON.stringify({ forget_all: "candles" }));
+      p.ws.send(JSON.stringify({ forget_all: "ticks" }));
+    }
+  } catch (e) { /* ignore */ }
+  if (p.ws) { p.ws.close(); p.ws = null; }
+  p.connected = false;
+  updatePanelCardUI(p);
+}
+
+/* ---- Update card badges/status ---- */
+function updatePanelCardUI(p) {
+  if (p.phaseEl) {
+    p.phaseEl.textContent = p.phase;
+    p.phaseEl.className = "ms-card-phase ms-phase-" + p.phase.toLowerCase();
+  }
+  if (p.dirEl) {
+    if (p.breakout) {
+      p.dirEl.textContent = p.breakout.dir;
+      p.dirEl.className = "ms-card-dir ms-dir-" + p.breakout.dir.toLowerCase();
+    } else {
+      p.dirEl.textContent = "--";
+      p.dirEl.className = "ms-card-dir ms-dir-none";
+    }
+  }
+  if (p.priceEl && p.candles.length > 0) {
+    p.priceEl.textContent = fmt(p.candles[p.candles.length - 1].close, 4);
+  }
+  if (p.dotEl) {
+    p.dotEl.className = "ms-card-dot " + (p.connected ? "connected" : "disconnected");
+  }
+  if (p.statusTextEl) {
+    p.statusTextEl.innerHTML = `<span class="ms-card-dot ${p.connected ? "connected" : "disconnected"}"></span> ${p.connected ? "Live" : "Offline"}`;
+  }
+}
+
+/* ---- Draw mini chart on panel canvas ---- */
+function drawMiniChart(p) {
+  const canvas = p.canvasEl;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const COLORS = getColors();
+
+  /* High-DPI */
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  if (p.candles.length < 2) {
+    ctx.fillStyle = "#64748b";
+    ctx.font = "12px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Waiting for data…", W / 2, H / 2);
+    return;
+  }
+
+  const marginLeft = 4, marginRight = 4, marginTop = 6, marginBottom = 6;
+  const chartW = W - marginLeft - marginRight;
+  const chartH = H - marginTop - marginBottom;
+
+  /* Price range */
+  let priceHigh = -Infinity, priceLow = Infinity;
+  for (const c of p.candles) {
+    if (c.high > priceHigh) priceHigh = c.high;
+    if (c.low < priceLow)  priceLow = c.low;
+  }
+  const pricePad = (priceHigh - priceLow) * 0.05;
+  priceHigh += pricePad;
+  priceLow  -= pricePad;
+  const priceRange = priceHigh - priceLow || 1;
+
+  const cW = Math.max(1.5, chartW / p.candles.length - 0.5);
+
+  function xOf(i) { return marginLeft + (i / p.candles.length) * chartW + cW / 2; }
+  function yOf(price) { return marginTop + (1 - (price - priceLow) / priceRange) * chartH; }
+
+  /* Opening range highlight */
+  if (p.openingRange) {
+    const x1 = xOf(p.openingRange.startIdx) - cW / 2;
+    const x2 = xOf(p.openingRange.endIdx) + cW / 2;
+    const y1 = yOf(p.openingRange.high);
+    const y2 = yOf(p.openingRange.low);
+    ctx.fillStyle = COLORS.rangeFill;
+    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+  }
+
+  /* Candles */
+  for (let i = 0; i < p.candles.length; i++) {
+    const c = p.candles[i];
+    const x = xOf(i);
+    const isBull = c.close >= c.open;
+    const bodyTop = yOf(Math.max(c.open, c.close));
+    const bodyBot = yOf(Math.min(c.open, c.close));
+    const bodyH = Math.max(1, bodyBot - bodyTop);
+
+    /* Wick */
+    ctx.strokeStyle = COLORS.wick;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, yOf(c.high));
+    ctx.lineTo(x, yOf(c.low));
+    ctx.stroke();
+
+    /* Body */
+    ctx.fillStyle = isBull ? COLORS.bullCandle : COLORS.bearCandle;
+    ctx.fillRect(x - cW / 2, bodyTop, cW, bodyH);
+  }
+
+  /* Trade levels */
+  if (p.trade) {
+    const drawLine = (price, color) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, yOf(price));
+      ctx.lineTo(W - marginRight, yOf(price));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    drawLine(p.trade.entry, COLORS.entryLine);
+    drawLine(p.trade.sl, COLORS.slLine);
+    if (p.trade.tp != null) drawLine(p.trade.tp, COLORS.tpLine);
+  }
+
+  /* Phase watermark */
+  if (p.phase !== "WAITING") {
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = currentTheme === "light" ? "#000" : "#fff";
+    ctx.font = "bold 18px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(p.phase, W / 2, H / 2);
+    ctx.restore();
+  }
+}
+
+/* ---- Connect all / Disconnect all ---- */
+function connectAllPanels() {
+  for (const p of multiPanels.values()) {
+    connectPanel(p);
+  }
+}
+
+function disconnectAllPanels() {
+  for (const p of multiPanels.values()) {
+    disconnectPanel(p);
+  }
+}
+
+/* ---- Add / remove a symbol panel ---- */
+function addSymbolPanel(symbol) {
+  if (multiPanels.has(symbol)) return;
+  if (multiPanels.size >= MULTI_MAX_PANELS) {
+    addLog(`[Multi] Max ${MULTI_MAX_PANELS} panels reached`);
+    return;
+  }
+  const p = createPanelState(symbol);
+  multiPanels.set(symbol, p);
+  createPanelCard(p);
+
+  /* Show the grid section */
+  const section = document.getElementById("multiSymbolSection");
+  if (section) section.style.display = "";
+
+  /* Auto-focus the first panel */
+  if (multiPanels.size === 1) focusPanel(symbol);
+
+  updateMultiSymbolCount();
+}
+
+function removeSymbolPanel(symbol) {
+  const p = multiPanels.get(symbol);
+  if (!p) return;
+  disconnectPanel(p);
+  if (p.cardEl) p.cardEl.remove();
+  multiPanels.delete(symbol);
+
+  /* Hide grid if no panels remain */
+  if (multiPanels.size === 0) {
+    const section = document.getElementById("multiSymbolSection");
+    if (section) section.style.display = "none";
+    focusedPanelSymbol = null;
+  } else if (focusedPanelSymbol === symbol) {
+    /* Focus the first remaining panel */
+    const firstKey = multiPanels.keys().next().value;
+    focusPanel(firstKey);
+  }
+
+  updateMultiSymbolCount();
+}
+
+function updateMultiSymbolCount() {
+  const el = document.getElementById("multiSymbolCount");
+  if (el) el.textContent = `${multiPanels.size} of ${MULTI_MAX_PANELS} selected`;
+}
+
+/* ---- Wire multi-symbol picker checkboxes ---- */
+function initMultiSymbolPicker() {
+  const picker = document.getElementById("multiSymbolPicker");
+  if (!picker) return;
+
+  picker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener("change", () => {
+      const sym = cb.dataset.symbol;
+      if (cb.checked) {
+        if (multiPanels.size >= MULTI_MAX_PANELS) {
+          cb.checked = false;
+          return;
+        }
+        addSymbolPanel(sym);
+      } else {
+        removeSymbolPanel(sym);
+      }
+    });
+  });
+
+  /* Wire Connect All / Disconnect All buttons */
+  const connectAllBtn = document.getElementById("connectAllBtn");
+  const disconnectAllBtn = document.getElementById("disconnectAllBtn");
+  if (connectAllBtn) connectAllBtn.addEventListener("click", connectAllPanels);
+  if (disconnectAllBtn) disconnectAllBtn.addEventListener("click", disconnectAllPanels);
+}
+
+
   initUI();
   initLoginGate();
   restoreSettings();
@@ -4360,7 +4929,13 @@ document.addEventListener("DOMContentLoaded", () => {
   updateCurrentSymbolLabel();
 
   /* Resize redraw */
-  window.addEventListener("resize", drawChart);
+  window.addEventListener("resize", () => {
+    drawChart();
+    /* Redraw all multi-symbol mini-charts */
+    for (const p of multiPanels.values()) {
+      drawMiniChart(p);
+    }
+  });
 
   /* Nav highlight */
   document.querySelectorAll(".bot-links a").forEach(link => {
@@ -4377,6 +4952,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (body) body.classList.toggle("open");
     });
   });
+
+  /* Multi-symbol picker */
+  initMultiSymbolPicker();
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();

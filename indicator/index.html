@@ -164,6 +164,33 @@
             </div>
           </section>
 
+          <!-- Multi-Symbol Picker -->
+          <section class="box">
+            <h3 class="collapsible">📊 Multi-Symbol Analysis</h3>
+            <div class="collapsible-body">
+              <p class="hint">Select symbols to analyze simultaneously (up to 6).</p>
+              <div id="multiSymbolPicker" class="multi-symbol-picker">
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ10V" /> Vol 10 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ25V" /> Vol 25 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ50V" /> Vol 50 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM1000" /> Boom 1000</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH500" /> Crash 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH1000" /> Crash 1000</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold</label>
+              </div>
+              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 6 selected</p>
+            </div>
+          </section>
+
           <!-- Risk:Reward -->
           <section class="box">
             <div class="section-header">
@@ -495,6 +522,18 @@
 
     <!-- ===== RIGHT PANEL ===== -->
     <div class="right-panel">
+
+      <!-- Multi-Symbol Grid (populated dynamically by JS) -->
+      <section id="multiSymbolSection" class="multi-symbol-section" style="display:none;">
+        <div class="multi-symbol-header">
+          <h3>📊 Multi-Symbol Analysis</h3>
+          <div class="multi-symbol-actions">
+            <button id="connectAllBtn" type="button" class="bar-btn bar-btn-connect" title="Connect All Panels">▶ All</button>
+            <button id="disconnectAllBtn" type="button" class="bar-btn bar-btn-disconnect" title="Disconnect All Panels">⏹ All</button>
+          </div>
+        </div>
+        <div id="multiSymbolGrid" class="multi-symbol-grid"></div>
+      </section>
 
       <!-- Main Chart -->
       <section class="chart-embed">
