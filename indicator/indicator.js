@@ -4428,7 +4428,7 @@ function createPanelState(symbol) {
       rsiFilterEnabled:    rec.rsi,
       volumeSpikeEnabled:  rec.volSpike.rec,
       sessionFilterEnabled: rec.session.rec,
-      sessionFilterMode:   rec.session.rec ? "london_ny" : "london_ny",
+      sessionFilterMode:   "london_ny",
       fibRetestEnabled:    rec.fib,
       RANGE_MINUTES:       rec.range.minutes,
     },
@@ -4656,7 +4656,7 @@ function connectPanel(p) {
   p.filters.rsiFilterEnabled     = rec.rsi;
   p.filters.volumeSpikeEnabled   = rec.volSpike.rec;
   p.filters.sessionFilterEnabled = rec.session.rec;
-  p.filters.sessionFilterMode    = rec.session.rec ? "london_ny" : "london_ny";
+  p.filters.sessionFilterMode    = "london_ny";
   p.filters.fibRetestEnabled     = rec.fib;
   p.filters.RANGE_MINUTES        = rec.range.minutes;
 
