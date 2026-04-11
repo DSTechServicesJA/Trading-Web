@@ -106,6 +106,11 @@ const SESSION_ASIAN    = { start: 0, end: 9 };
 const FIB_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786];
 const FIB_TOLERANCE_ATR_MULT = 0.3;
 
+/* Telegram */
+const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
+const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
+const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
+
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
  * Market types supported:
@@ -340,6 +345,11 @@ let minRRValue           = 2.0;
 /* Confluence score for current setup */
 let confluenceScore = 0;
 
+/* Telegram integration */
+let telegramBotToken  = "";
+let telegramChatId    = "";
+let telegramAutoSend  = false;
+
 /* RSI state */
 let rsiValues = [];
 
@@ -482,6 +492,13 @@ function initUI() {
   UI.loginBtn         = document.getElementById("loginBtn");
   UI.loginError       = document.getElementById("loginError");
   UI.loginToken       = document.getElementById("loginToken");
+
+  /* Telegram */
+  UI.telegramBotToken       = document.getElementById("telegramBotToken");
+  UI.telegramChatId         = document.getElementById("telegramChatId");
+  UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
+  UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
+  UI.telegramStatus         = document.getElementById("telegramStatus");
 }
 
 /* ================= HELPERS ================= */
@@ -541,6 +558,11 @@ function setPhase(newPhase) {
     playPhaseAlert(newPhase);
     sendPhaseNotification(newPhase);
   }
+  /* Auto-send Telegram on TRADE phase */
+  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend) {
+    /* Delay 500ms so drawChart() finishes rendering the trade on canvas */
+    setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+  }
 }
 
 /* ================= SOUND & NOTIFICATIONS ================= */
@@ -591,6 +613,158 @@ function requestNotificationPermission() {
   }
 }
 
+/* ================= TELEGRAM INTEGRATION ================= */
+
+/**
+ * Capture the chart canvas as a PNG Blob.
+ * Returns a Promise<Blob>.
+ */
+function captureChartScreenshot() {
+  return new Promise((resolve, reject) => {
+    const canvas = UI.canvas;
+    if (!canvas) return reject(new Error("Chart canvas not available"));
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error("Failed to capture chart screenshot"));
+    }, "image/png");
+  });
+}
+
+/**
+ * Build a formatted Telegram caption with all trade/setup info.
+ * Uses Telegram HTML parse mode for formatting.
+ */
+function buildTelegramCaption() {
+  const symbol = UI.symbolSelect
+    ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
+       ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
+       : UI.symbolSelect.value)
+    : "--";
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const dir = breakout ? breakout.dir : "--";
+  const orderType = getRecommendedOrderType() || "--";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+  let lines = [];
+  lines.push(`<b>📊 IT Guru Signal</b>`);
+  lines.push(``);
+  lines.push(`<b>Symbol:</b> ${symbol}`);
+  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+  lines.push(`<b>Phase:</b> ${phase}`);
+  lines.push(`<b>Direction:</b> ${dir === "BULL" ? "🟢 BULL (BUY)" : dir === "BEAR" ? "🔴 BEAR (SELL)" : dir}`);
+  lines.push(`<b>Order Type:</b> ${orderType}`);
+
+  if (trade) {
+    lines.push(``);
+    lines.push(`<b>📍 Entry:</b> <code>${fmt(trade.entry, 5)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmt(trade.sl, 5)}</code>`);
+    if (trade.tp != null && !pureTrailingEnabled) {
+      lines.push(`<b>🎯 TP:</b> <code>${fmt(trade.tp, 5)}</code>`);
+    }
+    if (trade.rr != null) {
+      lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
+    }
+    if (trailingSL != null && trailingStopEnabled) {
+      lines.push(`<b>Trailing SL:</b> <code>${fmt(trailingSL, 5)}</code>`);
+    }
+  }
+
+  if (openingRange) {
+    lines.push(``);
+    lines.push(`<b>Range High:</b> <code>${fmt(openingRange.high, 5)}</code>`);
+    lines.push(`<b>Range Low:</b> <code>${fmt(openingRange.low, 5)}</code>`);
+  }
+
+  lines.push(``);
+  lines.push(`<b>Confluence:</b> ${confluenceScore}/9`);
+
+  /* Active filters summary */
+  const filters = [];
+  if (emaFilterEnabled) filters.push("EMA 8/21");
+  if (htfFilterEnabled) filters.push("HTF Trend");
+  if (atrToleranceEnabled) filters.push("ATR Tol.");
+  if (trailingStopEnabled) filters.push("Trailing SL");
+  if (partialTpEnabled) filters.push("Partial TP");
+  if (falseBreakoutEnabled) filters.push("False BO");
+  if (minRREnabled) filters.push(`Min R:R ${minRRValue}`);
+  if (pureTrailingEnabled) filters.push("Pure Trail");
+  if (rsiFilterEnabled) filters.push("RSI");
+  if (volumeSpikeEnabled) filters.push("Vol. Spike");
+  if (sessionFilterEnabled) filters.push(`Session (${sessionFilterMode})`);
+  if (fibRetestEnabled) filters.push("Fib Retest");
+  if (filters.length > 0) {
+    lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a photo (Blob) with caption to Telegram via Bot API.
+ */
+async function sendTelegramPhoto(blob, caption) {
+  const token = telegramBotToken.trim();
+  const chatId = telegramChatId.trim();
+  if (!token || !chatId) {
+    throw new Error("Telegram Bot Token and Chat ID are required");
+  }
+  /* Basic format validation */
+  if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+    throw new Error("Invalid Bot Token format (expected 123456:ABC-DEF…)");
+  }
+  if (!/^-?\d+$/.test(chatId)) {
+    throw new Error("Invalid Chat ID format (expected a numeric ID)");
+  }
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("photo", blob, "chart.png");
+  form.append("caption", caption);
+  form.append("parse_mode", "HTML");
+
+  const url = `https://api.telegram.org/bot${token}/sendPhoto`;
+  const resp = await fetch(url, { method: "POST", body: form });
+  const data = await resp.json();
+  if (!data.ok) {
+    throw new Error(data.description || "Telegram API error");
+  }
+  return data;
+}
+
+/**
+ * Capture chart + build caption and send to Telegram.
+ * Shows status in the signal log and the Telegram status label.
+ */
+async function sendTelegramAlert() {
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
+  try {
+    const blob = await captureChartScreenshot();
+    const caption = buildTelegramCaption();
+    await sendTelegramPhoto(blob, caption);
+    addLog("📤 Telegram alert sent successfully");
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ Sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  /* Clear status after 5 seconds */
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
 const LS_PREFIX = "itguru_indicator_";
 
@@ -623,7 +797,10 @@ function saveSettings() {
       volumeSpikeEnabled,
       sessionFilterEnabled,
       sessionFilterMode,
-      fibRetestEnabled
+      fibRetestEnabled,
+      telegramBotToken,
+      telegramChatId,
+      telegramAutoSend
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -692,6 +869,14 @@ function restoreSettings() {
     if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
     if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
     if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
+
+    /* Telegram settings */
+    if (s.telegramBotToken != null) telegramBotToken = s.telegramBotToken;
+    if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
+    if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
+    if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
+    if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
+    if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
   } catch (e) { /* storage not available */ }
 }
 
@@ -3765,6 +3950,20 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.fibRetestToggle) {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
+  }
+
+  /* Telegram listeners */
+  if (UI.telegramBotToken) {
+    UI.telegramBotToken.addEventListener("change", () => { telegramBotToken = UI.telegramBotToken.value; saveSettings(); });
+  }
+  if (UI.telegramChatId) {
+    UI.telegramChatId.addEventListener("change", () => { telegramChatId = UI.telegramChatId.value; saveSettings(); });
+  }
+  if (UI.telegramAutoSendToggle) {
+    UI.telegramAutoSendToggle.addEventListener("change", () => { telegramAutoSend = UI.telegramAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramSendNowBtn) {
+    UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
   }
 
   /* Tool buttons */
