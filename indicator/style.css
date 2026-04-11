@@ -1261,7 +1261,8 @@ body.light-theme .bar-btn-tool {
 }
 
 /* ---- Telegram Section ---- */
-.telegram-send-btn {
+.telegram-send-btn,
+.telegram-test-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1271,14 +1272,30 @@ body.light-theme .bar-btn-tool {
   font-weight: 600;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  background: var(--primary);
   color: #fff;
   border: none;
   transition: background 0.2s, box-shadow 0.2s;
 }
+.telegram-send-btn {
+  background: var(--primary);
+}
+.telegram-test-btn {
+  background: rgba(99, 128, 255, 0.25);
+  border: 1px solid rgba(99, 128, 255, 0.35);
+  color: var(--primary);
+}
 .telegram-send-btn:hover {
   background: var(--primary-soft);
   box-shadow: 0 0 12px var(--primary-glow);
+}
+.telegram-test-btn:hover {
+  background: rgba(99, 128, 255, 0.35);
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+.telegram-btn-row {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 .telegram-status {
   min-height: 18px;
@@ -1288,3 +1305,48 @@ body.light-theme .bar-btn-tool {
 }
 .telegram-ok  { color: var(--success) !important; }
 .telegram-err { color: var(--danger)  !important; }
+
+/* Token input with show/hide toggle */
+.input-with-toggle {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.input-with-toggle input {
+  flex: 1;
+  min-width: 0;
+}
+.token-toggle-btn {
+  background: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: background 0.15s;
+}
+.token-toggle-btn:hover {
+  background: rgba(99, 128, 255, 0.1);
+}
+
+/* Remember me row */
+.remember-me-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: var(--fs-sm);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.remember-me-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+.remember-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
