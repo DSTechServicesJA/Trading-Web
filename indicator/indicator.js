@@ -406,6 +406,9 @@ let sessionFilterEnabled = false;
 let sessionFilterMode    = "london_ny";  /* london | new_york | overlap | asian | london_ny */
 let fibRetestEnabled     = false;
 
+/* Auto-apply recommended settings when symbol changes */
+let autoApplyRecommended = false;
+
 /* ================= UI REFS ================= */
 const UI = {};
 function initUI() {
@@ -477,6 +480,7 @@ function initUI() {
   UI.sessionFilterToggle = document.getElementById("sessionFilterToggle");
   UI.sessionFilterMode   = document.getElementById("sessionFilterMode");
   UI.fibRetestToggle     = document.getElementById("fibRetestToggle");
+  UI.autoApplyRecToggle  = document.getElementById("autoApplyRecToggle");
   UI.rsiDisplay          = document.getElementById("rsiDisplay");
   UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
   UI.sessionDisplay      = document.getElementById("sessionDisplay");
@@ -921,6 +925,7 @@ function saveSettings() {
       sessionFilterEnabled,
       sessionFilterMode,
       fibRetestEnabled,
+      autoApplyRecommended,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend
@@ -992,6 +997,10 @@ function restoreSettings() {
     if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
     if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
     if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
+
+    /* Auto-apply recommended */
+    if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
+    if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
 
     /* Telegram settings */
     if (s.telegramBotToken != null) {
@@ -1126,7 +1135,8 @@ function cycleSymbol(dir) {
   if (newIdx >= opts.length) newIdx = 0;
   UI.symbolSelect.selectedIndex = newIdx;
   updateCurrentSymbolLabel();
-  updateRecommendedSettings();
+  if (autoApplyRecommended) applyRecommendedSettings();
+  else updateRecommendedSettings();
   saveSettings();
   debouncedReconnect();
 }
@@ -1451,6 +1461,66 @@ function updateRecommendedSettings() {
   if (UI.recHintText) {
     UI.recHintText.innerHTML = "<strong>Why:</strong> " + rec.hint;
   }
+}
+
+/**
+ * Applies the market-type-specific recommended settings to all strategy filters,
+ * timeframe, R:R, opening range, session mode, and min R:R value.
+ * Called automatically when auto-apply is enabled and the symbol changes.
+ */
+function applyRecommendedSettings() {
+  const rec = getMarketRecommendations();
+
+  /* Timeframe */
+  if (UI.granSelect) UI.granSelect.value = rec.timeframe.gran;
+
+  /* R:R — set reward to recommended minRR (risk stays at 1) */
+  if (UI.rewardInput) UI.rewardInput.value = rec.rr.minRR;
+
+  /* Opening range */
+  RANGE_MINUTES = rec.range.minutes;
+  if (UI.rangeDuration) UI.rangeDuration.value = rec.range.minutes;
+
+  /* Boolean strategy filter toggles */
+  emaFilterEnabled     = rec.ema;
+  htfFilterEnabled     = rec.htf;
+  atrToleranceEnabled  = rec.atr;
+  trailingStopEnabled  = rec.trailing.rec;
+  partialTpEnabled     = rec.partialTp;
+  falseBreakoutEnabled = rec.falseBreakout;
+  rsiFilterEnabled     = rec.rsi;
+  volumeSpikeEnabled   = rec.volSpike.rec;
+  fibRetestEnabled     = rec.fib;
+  sessionFilterEnabled = rec.session.rec;
+
+  /* Min R:R */
+  minRREnabled = rec.minRR.rec;
+  minRRValue   = rec.rr.minRR;
+
+  /* Session mode — if recommended, default to london_ny for forex/commodity */
+  if (rec.session.rec) {
+    sessionFilterMode = "london_ny";
+    if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
+  }
+
+  /* Sync UI checkboxes */
+  if (UI.emaFilterToggle)     UI.emaFilterToggle.checked     = emaFilterEnabled;
+  if (UI.htfFilterToggle)     UI.htfFilterToggle.checked     = htfFilterEnabled;
+  if (UI.atrToleranceToggle)  UI.atrToleranceToggle.checked  = atrToleranceEnabled;
+  if (UI.trailingStopToggle)  UI.trailingStopToggle.checked  = trailingStopEnabled;
+  if (UI.partialTpToggle)     UI.partialTpToggle.checked     = partialTpEnabled;
+  if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
+  if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
+  if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
+  if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
+  if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
+  if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
+  if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
+
+  /* Persist + refresh UI */
+  saveSettings();
+  updateRecommendedSettings();
+  updateStateUI();
 }
 
 /* ================= INDICATOR STATE ================= */
@@ -4024,7 +4094,7 @@ document.addEventListener("DOMContentLoaded", () => {
   UI.disconnectBtn.addEventListener("click", disconnect);
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); updateRecommendedSettings(); debouncedReconnect(); });
+  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); if (autoApplyRecommended) applyRecommendedSettings(); else updateRecommendedSettings(); debouncedReconnect(); });
   UI.granSelect.addEventListener("change",   () => { saveSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */
@@ -4097,6 +4167,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.fibRetestToggle) {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.autoApplyRecToggle) {
+    UI.autoApplyRecToggle.addEventListener("change", () => {
+      autoApplyRecommended = UI.autoApplyRecToggle.checked;
+      saveSettings();
+      if (autoApplyRecommended) applyRecommendedSettings();
+    });
   }
 
   /* Telegram listeners – use "input" so variables sync as user types */
