@@ -1573,3 +1573,22 @@ body.light-theme .ms-card-footer {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ---- Signal Strength Gauge ---- */
+.gauge-bar {
+  height: 8px;
+  background: var(--glass-border, rgba(255,255,255,0.06));
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 2px 12px 8px 12px;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease, background 0.4s ease;
+  width: 0;
+}
+.gauge-bull     { background: var(--success, #22c55e); }
+.gauge-warning  { background: var(--warning, #eab308); }
+.gauge-bear     { background: var(--danger, #ef4444); }
+.gauge-disabled { background: var(--text-muted, #475569); }

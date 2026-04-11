@@ -34,7 +34,11 @@
      - Morning star / evening star 3-candle confirmation
      - S/R confluence check at retest level
      - False breakout invalidation
-     - Confluence score (0-9) quality gauge
+     - Confluence score (0-16) quality gauge w/ signal strength meter
+     - MACD momentum filter (12/26/9)
+     - Bollinger Bands squeeze detection (20/2σ)
+     - ADX trend strength / volatility regime (14)
+     - Stochastic oscillator momentum filter (14/3/3)
      - Body-size breakout conviction check
      - Minimum R:R gate to reject low-quality trades
      - Pure trailing stop mode (no fixed TP)
@@ -113,6 +117,28 @@ const SESSION_ASIAN    = { start: 0, end: 9 };
 /* Fibonacci retracement levels & tolerance */
 const FIB_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786];
 const FIB_TOLERANCE_ATR_MULT = 0.3;
+
+/* MACD parameters */
+const MACD_FAST = 12;
+const MACD_SLOW = 26;
+const MACD_SIGNAL_PERIOD = 9;
+
+/* Bollinger Bands */
+const BB_PERIOD = 20;
+const BB_STD_DEV = 2.0;
+const BB_SQUEEZE_THRESHOLD = 0.75;  /* bandwidth ratio below this = squeeze */
+
+/* ADX (Average Directional Index) */
+const ADX_PERIOD = 14;
+const ADX_TRENDING_THRESHOLD = 25;  /* ADX ≥ 25 = trending market */
+const ADX_RANGING_THRESHOLD = 20;   /* ADX < 20 = ranging */
+
+/* Stochastic Oscillator */
+const STOCH_K_PERIOD = 14;
+const STOCH_D_PERIOD = 3;
+const STOCH_SMOOTH = 3;
+const STOCH_OVERSOLD = 20;
+const STOCH_OVERBOUGHT = 80;
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
@@ -418,6 +444,26 @@ let sessionFilterEnabled = false;
 let sessionFilterMode    = "london_ny";  /* london | new_york | overlap | asian | london_ny */
 let fibRetestEnabled     = false;
 
+/* GainzAlgo V2 indicator state */
+let macdLine = [];
+let macdSignal = [];
+let macdHistogram = [];
+let bbUpper = [];
+let bbLower = [];
+let bbMiddle = [];
+let bbWidth = [];
+let adxValue = 0;
+let adxDiPlus = 0;
+let adxDiMinus = 0;
+let stochK = [];
+let stochD = [];
+
+/* GainzAlgo V2 filter toggles */
+let macdFilterEnabled = false;
+let bbSqueezeFilterEnabled = false;
+let adxFilterEnabled = false;
+let stochFilterEnabled = false;
+
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = false;
 
@@ -498,6 +544,19 @@ function initUI() {
   UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
   UI.sessionDisplay      = document.getElementById("sessionDisplay");
   UI.fibRetestDisplay    = document.getElementById("fibRetestDisplay");
+
+  /* GainzAlgo V2 UI refs */
+  UI.macdFilterToggle      = document.getElementById("macdFilterToggle");
+  UI.bbSqueezeFilterToggle = document.getElementById("bbSqueezeFilterToggle");
+  UI.adxFilterToggle       = document.getElementById("adxFilterToggle");
+  UI.stochFilterToggle     = document.getElementById("stochFilterToggle");
+  UI.macdDisplay           = document.getElementById("macdDisplay");
+  UI.bbSqueezeDisplay      = document.getElementById("bbSqueezeDisplay");
+  UI.adxDisplay            = document.getElementById("adxDisplay");
+  UI.stochDisplay          = document.getElementById("stochDisplay");
+  UI.volatilityRegime      = document.getElementById("volatilityRegime");
+  UI.signalStrengthGauge   = document.getElementById("signalStrengthGauge");
+  UI.signalStrengthLabel   = document.getElementById("signalStrengthLabel");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -754,7 +813,13 @@ function buildTelegramCaption() {
   }
 
   lines.push(``);
-  lines.push(`<b>Confluence:</b> ${confluenceScore}/9`);
+  lines.push(`<b>Confluence:</b> ${confluenceScore}/16`);
+  const regime = adxValue > 0 ? getVolatilityRegime() : "--";
+  lines.push(`<b>Regime:</b> ${regime}`);
+  if (breakout) {
+    const str = getSignalStrength(confluenceScore);
+    lines.push(`<b>Signal:</b> ${str.label}`);
+  }
 
   /* Active filters summary */
   const filters = [];
@@ -770,6 +835,10 @@ function buildTelegramCaption() {
   if (volumeSpikeEnabled) filters.push("Vol. Spike");
   if (sessionFilterEnabled) filters.push(`Session (${sessionFilterMode})`);
   if (fibRetestEnabled) filters.push("Fib Retest");
+  if (macdFilterEnabled) filters.push("MACD");
+  if (bbSqueezeFilterEnabled) filters.push("BB Squeeze");
+  if (adxFilterEnabled) filters.push("ADX");
+  if (stochFilterEnabled) filters.push("Stochastic");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1021,7 +1090,7 @@ function buildPanelTelegramCaption(p) {
   }
 
   lines.push(``);
-  lines.push(`<b>Confluence:</b> ${p.confluenceScore}/9`);
+  lines.push(`<b>Confluence:</b> ${p.confluenceScore}/16`);
 
   /* Active filters summary from panel's per-symbol settings */
   const f = p.filters;
@@ -1038,6 +1107,10 @@ function buildPanelTelegramCaption(p) {
   if (f.volumeSpikeEnabled) filters.push("Vol. Spike");
   if (f.sessionFilterEnabled) filters.push(`Session (${f.sessionFilterMode})`);
   if (f.fibRetestEnabled) filters.push("Fib Retest");
+  if (f.macdFilterEnabled) filters.push("MACD");
+  if (f.bbSqueezeFilterEnabled) filters.push("BB Squeeze");
+  if (f.adxFilterEnabled) filters.push("ADX");
+  if (f.stochFilterEnabled) filters.push("Stochastic");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1094,6 +1167,10 @@ function saveSettings() {
       sessionFilterEnabled,
       sessionFilterMode,
       fibRetestEnabled,
+      macdFilterEnabled,
+      bbSqueezeFilterEnabled,
+      adxFilterEnabled,
+      stochFilterEnabled,
       autoApplyRecommended,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
@@ -1166,6 +1243,16 @@ function restoreSettings() {
     if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
     if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
     if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
+
+    /* GainzAlgo V2 filter toggles */
+    if (s.macdFilterEnabled != null) macdFilterEnabled = s.macdFilterEnabled;
+    if (s.bbSqueezeFilterEnabled != null) bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
+    if (s.adxFilterEnabled != null) adxFilterEnabled = s.adxFilterEnabled;
+    if (s.stochFilterEnabled != null) stochFilterEnabled = s.stochFilterEnabled;
+    if (UI.macdFilterToggle) UI.macdFilterToggle.checked = macdFilterEnabled;
+    if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
+    if (UI.adxFilterToggle) UI.adxFilterToggle.checked = adxFilterEnabled;
+    if (UI.stochFilterToggle) UI.stochFilterToggle.checked = stochFilterEnabled;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -1247,7 +1334,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -1825,6 +1912,10 @@ function resetIndicator() {
   atrValue  = 0;
   atrValues = [];
   rsiValues = [];
+  macdLine = []; macdSignal = []; macdHistogram = [];
+  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+  adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
+  stochK = []; stochD = [];
   trailingSL   = null;
   partialTpHit = false;
   setPhase("WAITING");
@@ -1946,15 +2037,9 @@ function updateStateUI() {
   if (UI.confluenceDisplay) {
     if (breakout) {
       confluenceScore = computeConfluenceScore();
-      UI.confluenceDisplay.textContent = `${confluenceScore} / 9`;
-      /* Thresholds: ≥ 7 excellent (green), ≥ 4 moderate (yellow), < 4 weak (red) */
-      if (confluenceScore >= 7) {
-        UI.confluenceDisplay.className = "status-badge bull";
-      } else if (confluenceScore >= 4) {
-        UI.confluenceDisplay.className = "status-badge warning";
-      } else {
-        UI.confluenceDisplay.className = "status-badge bear";
-      }
+      const strength = getSignalStrength(confluenceScore);
+      UI.confluenceDisplay.textContent = `${confluenceScore} / 16`;
+      UI.confluenceDisplay.className = "status-badge " + strength.cls;
     } else {
       confluenceScore = 0;
       UI.confluenceDisplay.textContent = "--";
@@ -2024,6 +2109,84 @@ function updateStateUI() {
     } else {
       UI.fibRetestDisplay.textContent = "--";
       UI.fibRetestDisplay.className = "env-label";
+    }
+  }
+
+  /* MACD display */
+  if (UI.macdDisplay) {
+    const hist = getCurrentMACD();
+    if (hist != null) {
+      UI.macdDisplay.textContent = fmt(hist, 5);
+      UI.macdDisplay.className = "status-badge " + (hist > 0 ? "bull" : hist < 0 ? "bear" : "disabled");
+    } else {
+      UI.macdDisplay.textContent = "--";
+      UI.macdDisplay.className = "env-label";
+    }
+  }
+
+  /* Bollinger Bands squeeze display */
+  if (UI.bbSqueezeDisplay) {
+    if (bbWidth.length > 0 && bbWidth[bbWidth.length - 1] != null) {
+      const squeeze = isBBSqueeze();
+      UI.bbSqueezeDisplay.textContent = squeeze ? "SQUEEZE ⚡" : "NORMAL";
+      UI.bbSqueezeDisplay.className = "status-badge " + (squeeze ? "warning" : "disabled");
+    } else {
+      UI.bbSqueezeDisplay.textContent = "--";
+      UI.bbSqueezeDisplay.className = "env-label";
+    }
+  }
+
+  /* ADX display */
+  if (UI.adxDisplay) {
+    if (adxValue > 0) {
+      const regime = getVolatilityRegime();
+      UI.adxDisplay.textContent = `${fmt(adxValue, 1)} (${regime})`;
+      UI.adxDisplay.className = "status-badge " + (regime === "TRENDING" ? "bull" : regime === "RANGING" ? "bear" : "warning");
+    } else {
+      UI.adxDisplay.textContent = "--";
+      UI.adxDisplay.className = "env-label";
+    }
+  }
+
+  /* Stochastic display */
+  if (UI.stochDisplay) {
+    const k = getCurrentStoch();
+    if (k != null) {
+      UI.stochDisplay.textContent = fmt(k, 1);
+      if (k <= STOCH_OVERSOLD) UI.stochDisplay.className = "status-badge bull";
+      else if (k >= STOCH_OVERBOUGHT) UI.stochDisplay.className = "status-badge bear";
+      else UI.stochDisplay.className = "env-label";
+    } else {
+      UI.stochDisplay.textContent = "--";
+      UI.stochDisplay.className = "env-label";
+    }
+  }
+
+  /* Volatility Regime */
+  if (UI.volatilityRegime) {
+    if (adxValue > 0) {
+      const regime = getVolatilityRegime();
+      UI.volatilityRegime.textContent = regime;
+      UI.volatilityRegime.className = "status-badge " + (regime === "TRENDING" ? "bull" : regime === "RANGING" ? "bear" : "warning");
+    } else {
+      UI.volatilityRegime.textContent = "--";
+      UI.volatilityRegime.className = "env-label";
+    }
+  }
+
+  /* Signal Strength Gauge */
+  if (UI.signalStrengthGauge && UI.signalStrengthLabel) {
+    if (breakout) {
+      const str = getSignalStrength(confluenceScore);
+      UI.signalStrengthLabel.textContent = str.label;
+      UI.signalStrengthLabel.className = "status-badge " + str.cls;
+      UI.signalStrengthGauge.style.width = str.pct + "%";
+      UI.signalStrengthGauge.className = "gauge-fill gauge-" + str.cls;
+    } else {
+      UI.signalStrengthLabel.textContent = "--";
+      UI.signalStrengthLabel.className = "env-label";
+      UI.signalStrengthGauge.style.width = "0%";
+      UI.signalStrengthGauge.className = "gauge-fill";
     }
   }
 
@@ -2226,6 +2389,10 @@ function connect() {
       computeEMAs();
       computeATR();
       computeRSI();
+      computeMACD();
+      computeBollingerBands();
+      computeADX();
+      computeStochastic();
       processLatestCandle();
       monitorTradeOutcome(c);
       drawChart();
@@ -2402,6 +2569,200 @@ function computeRSI() {
 function getCurrentRSI() {
   if (rsiValues.length === 0) return null;
   return rsiValues[rsiValues.length - 1];
+}
+
+/* ================= MACD COMPUTATION ================= */
+function computeMACD() {
+  const closes = candles.map(c => c.close);
+  if (closes.length < MACD_SLOW) { macdLine = []; macdSignal = []; macdHistogram = []; return; }
+  const emaFastArr = computeEMA(closes, MACD_FAST);
+  const emaSlowArr = computeEMA(closes, MACD_SLOW);
+  macdLine = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (emaFastArr[i] != null && emaSlowArr[i] != null) {
+      macdLine.push(emaFastArr[i] - emaSlowArr[i]);
+    } else {
+      macdLine.push(null);
+    }
+  }
+  const validMACD = macdLine.filter(v => v != null);
+  if (validMACD.length < MACD_SIGNAL_PERIOD) { macdSignal = []; macdHistogram = []; return; }
+  macdSignal = computeEMA(macdLine.map(v => v ?? 0), MACD_SIGNAL_PERIOD);
+  /* Fix: null out signal where MACD was null */
+  for (let i = 0; i < macdLine.length; i++) {
+    if (macdLine[i] == null) macdSignal[i] = null;
+  }
+  macdHistogram = [];
+  for (let i = 0; i < macdLine.length; i++) {
+    if (macdLine[i] != null && macdSignal[i] != null) {
+      macdHistogram.push(macdLine[i] - macdSignal[i]);
+    } else {
+      macdHistogram.push(null);
+    }
+  }
+}
+
+function getCurrentMACD() {
+  if (macdHistogram.length === 0) return null;
+  return macdHistogram[macdHistogram.length - 1];
+}
+
+function isMACDAligned(dir) {
+  if (!macdFilterEnabled) return true;
+  const hist = getCurrentMACD();
+  if (hist == null) return true;
+  return dir === "BULL" ? hist > 0 : hist < 0;
+}
+
+/* ================= BOLLINGER BANDS COMPUTATION ================= */
+function computeBollingerBands() {
+  const closes = candles.map(c => c.close);
+  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+  if (closes.length < BB_PERIOD) return;
+  for (let i = 0; i < closes.length; i++) {
+    if (i < BB_PERIOD - 1) {
+      bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
+      continue;
+    }
+    const slice = closes.slice(i - BB_PERIOD + 1, i + 1);
+    const mean = slice.reduce((a, b) => a + b, 0) / BB_PERIOD;
+    const variance = slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD;
+    const stdDev = Math.sqrt(variance);
+    bbMiddle.push(mean);
+    bbUpper.push(mean + BB_STD_DEV * stdDev);
+    bbLower.push(mean - BB_STD_DEV * stdDev);
+    bbWidth.push(bbUpper[i] - bbLower[i]);
+  }
+}
+
+function isBBSqueeze() {
+  if (bbWidth.length < BB_PERIOD * 2) return false;
+  const validWidths = bbWidth.filter(w => w != null);
+  if (validWidths.length < BB_PERIOD) return false;
+  const current = validWidths[validWidths.length - 1];
+  const avgWidth = validWidths.slice(-BB_PERIOD * 2).reduce((a, b) => a + b, 0) / Math.min(validWidths.length, BB_PERIOD * 2);
+  return current < avgWidth * BB_SQUEEZE_THRESHOLD;
+}
+
+function getBBPosition() {
+  if (candles.length === 0 || bbUpper.length === 0) return null;
+  const i = candles.length - 1;
+  if (bbUpper[i] == null || bbLower[i] == null) return null;
+  const price = candles[i].close;
+  const width = bbUpper[i] - bbLower[i];
+  if (width <= 0) return null;
+  return (price - bbLower[i]) / width;  /* 0 = at lower band, 1 = at upper band */
+}
+
+/* ================= ADX COMPUTATION ================= */
+function computeADX() {
+  adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
+  if (candles.length < ADX_PERIOD * 2 + 1) return;
+  const trArr = [], dpArr = [], dmArr = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    const upMove = c.high - p.high;
+    const downMove = p.low - c.low;
+    dpArr.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    dmArr.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    trArr.push(tr);
+  }
+  /* Wilder smoothing */
+  let atr14 = 0, smoothDP = 0, smoothDM = 0;
+  for (let i = 0; i < ADX_PERIOD; i++) { atr14 += trArr[i]; smoothDP += dpArr[i]; smoothDM += dmArr[i]; }
+  const dxArr = [];
+  for (let i = ADX_PERIOD; i < trArr.length; i++) {
+    atr14 = atr14 - atr14 / ADX_PERIOD + trArr[i];
+    smoothDP = smoothDP - smoothDP / ADX_PERIOD + dpArr[i];
+    smoothDM = smoothDM - smoothDM / ADX_PERIOD + dmArr[i];
+    const diP = atr14 > 0 ? (smoothDP / atr14) * 100 : 0;
+    const diM = atr14 > 0 ? (smoothDM / atr14) * 100 : 0;
+    const diSum = diP + diM;
+    const dx = diSum > 0 ? Math.abs(diP - diM) / diSum * 100 : 0;
+    dxArr.push({ dx, diP, diM });
+  }
+  if (dxArr.length < ADX_PERIOD) return;
+  let adxSmooth = 0;
+  for (let i = 0; i < ADX_PERIOD; i++) adxSmooth += dxArr[i].dx;
+  adxSmooth /= ADX_PERIOD;
+  for (let i = ADX_PERIOD; i < dxArr.length; i++) {
+    adxSmooth = (adxSmooth * (ADX_PERIOD - 1) + dxArr[i].dx) / ADX_PERIOD;
+  }
+  adxValue = adxSmooth;
+  const last = dxArr[dxArr.length - 1];
+  adxDiPlus = last.diP;
+  adxDiMinus = last.diM;
+}
+
+function getVolatilityRegime() {
+  if (adxValue >= ADX_TRENDING_THRESHOLD) return "TRENDING";
+  if (adxValue < ADX_RANGING_THRESHOLD) return "RANGING";
+  return "TRANSITIONING";
+}
+
+function isADXFavorable() {
+  if (!adxFilterEnabled) return true;
+  return adxValue >= ADX_RANGING_THRESHOLD;  /* block signals in ranging markets */
+}
+
+/* ================= STOCHASTIC COMPUTATION ================= */
+function computeStochastic() {
+  stochK = []; stochD = [];
+  if (candles.length < STOCH_K_PERIOD + STOCH_SMOOTH) return;
+  /* Raw %K */
+  const rawK = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i < STOCH_K_PERIOD - 1) { rawK.push(null); continue; }
+    const slice = candles.slice(i - STOCH_K_PERIOD + 1, i + 1);
+    const hh = Math.max(...slice.map(c => c.high));
+    const ll = Math.min(...slice.map(c => c.low));
+    const range = hh - ll;
+    rawK.push(range > 0 ? ((candles[i].close - ll) / range) * 100 : 50);
+  }
+  /* Smooth %K with SMA */
+  for (let i = 0; i < rawK.length; i++) {
+    if (rawK[i] == null || i < STOCH_K_PERIOD - 1 + STOCH_SMOOTH - 1) { stochK.push(null); continue; }
+    let sum = 0;
+    for (let j = i - STOCH_SMOOTH + 1; j <= i; j++) sum += (rawK[j] ?? 0);
+    stochK.push(sum / STOCH_SMOOTH);
+  }
+  /* %D = SMA of %K */
+  for (let i = 0; i < stochK.length; i++) {
+    if (stochK[i] == null || i < stochK.length - 1 && stochK.filter((v, idx) => idx <= i && v != null).length < STOCH_D_PERIOD) {
+      stochD.push(null); continue;
+    }
+    const validBefore = [];
+    for (let j = Math.max(0, i - STOCH_D_PERIOD + 1); j <= i; j++) {
+      if (stochK[j] != null) validBefore.push(stochK[j]);
+    }
+    stochD.push(validBefore.length >= STOCH_D_PERIOD ? validBefore.slice(-STOCH_D_PERIOD).reduce((a, b) => a + b, 0) / STOCH_D_PERIOD : null);
+  }
+}
+
+function getCurrentStoch() {
+  if (stochK.length === 0) return null;
+  return stochK[stochK.length - 1];
+}
+
+function isStochFavorable(dir) {
+  if (!stochFilterEnabled) return true;
+  const k = getCurrentStoch();
+  if (k == null) return true;
+  /* For BULL: stoch should be coming from oversold (room to rise) */
+  if (dir === "BULL") return k <= STOCH_OVERBOUGHT;  /* not already overbought */
+  /* For BEAR: stoch should be coming from overbought (room to fall) */
+  if (dir === "BEAR") return k >= STOCH_OVERSOLD;  /* not already oversold */
+  return true;
+}
+
+/* ================= SIGNAL STRENGTH GAUGE ================= */
+function getSignalStrength(score) {
+  if (score >= 13) return { label: "EXCELLENT", cls: "bull", pct: 100 };
+  if (score >= 10) return { label: "STRONG", cls: "bull", pct: 80 };
+  if (score >= 7)  return { label: "MODERATE", cls: "warning", pct: 60 };
+  if (score >= 4)  return { label: "WEAK", cls: "bear", pct: 40 };
+  return { label: "VERY WEAK", cls: "disabled", pct: 20 };
 }
 
 /* ================= EMA TREND FILTER ================= */
@@ -3222,6 +3583,28 @@ function computeConfluenceScore() {
     }
   }
 
+  /* Factor 13 (GainzAlgo V2): MACD histogram alignment */
+  {
+    const hist = getCurrentMACD();
+    if (hist != null) {
+      if ((breakout.dir === "BULL" && hist > 0) || (breakout.dir === "BEAR" && hist < 0)) score++;
+    }
+  }
+
+  /* Factor 14 (GainzAlgo V2): Bollinger Band squeeze preceding breakout */
+  if (isBBSqueeze()) score++;
+
+  /* Factor 15 (GainzAlgo V2): ADX trending confirmation */
+  if (adxValue >= ADX_TRENDING_THRESHOLD) score++;
+
+  /* Factor 16 (GainzAlgo V2): Stochastic momentum alignment */
+  {
+    const k = getCurrentStoch();
+    if (k != null) {
+      if ((breakout.dir === "BULL" && k <= 50) || (breakout.dir === "BEAR" && k >= 50)) score++;
+    }
+  }
+
   return score;
 }
 
@@ -3242,6 +3625,10 @@ function processAllCandles() {
   rangeStartEpoch = candles[0].epoch;
   computeATR();
   computeRSI();
+  computeMACD();
+  computeBollingerBands();
+  computeADX();
+  computeStochastic();
 
   buildOpeningRange();
 
@@ -3898,7 +4285,12 @@ function recordSignal(confirmPattern) {
     rsiAtRetest: getCurrentRSI(),
     volumeSpike: breakout ? (breakout.volumeSpike != null ? breakout.volumeSpike : hasVolumeSpikeOnBreakout(breakout.candleIdx)) : null,
     session: getActiveSessionName(),
-    fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null
+    fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null,
+    macdHist: getCurrentMACD(),
+    bbSqueeze: isBBSqueeze(),
+    adx: adxValue > 0 ? +fmt(adxValue, 1) : null,
+    stochK: getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null,
+    volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null
   };
   signalHistory.push(signal);
   /* Capture chart screenshot as data URL for PDF export */
@@ -4260,6 +4652,32 @@ function drawChart() {
     }
   }
 
+    /* Bollinger Bands overlay */
+    if (bbUpper.length > 0) {
+      ctx.globalAlpha = 0.3;
+      drawEMALine(ctx, bbUpper, xOf, yOf, "#a78bfa");
+      drawEMALine(ctx, bbLower, xOf, yOf, "#a78bfa");
+      ctx.globalAlpha = 0.15;
+      drawEMALine(ctx, bbMiddle, xOf, yOf, "#a78bfa");
+      ctx.globalAlpha = 1;
+      /* Fill between bands */
+      ctx.fillStyle = "rgba(167,139,250,0.04)";
+      ctx.beginPath();
+      let bbStarted = false;
+      for (let i = 0; i < bbUpper.length; i++) {
+        if (bbUpper[i] == null) continue;
+        const x = xOf(i);
+        if (!bbStarted) { ctx.moveTo(x, yOf(bbUpper[i])); bbStarted = true; }
+        else ctx.lineTo(x, yOf(bbUpper[i]));
+      }
+      for (let i = bbLower.length - 1; i >= 0; i--) {
+        if (bbLower[i] == null) continue;
+        ctx.lineTo(xOf(i), yOf(bbLower[i]));
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
   /* ---- Trade levels: Entry / SL / TP ---- */
   if (trade) {
     drawHLine(ctx, yOf(trade.entry), marginLeft, W - marginRight, COLORS.entryLine, "ENTRY " + fmt(trade.entry, 4), W, marginRight);
@@ -4607,6 +5025,10 @@ function createPanelState(symbol) {
       sessionFilterEnabled: rec.session.rec,
       sessionFilterMode:   "london_ny",
       fibRetestEnabled:    rec.fib,
+      macdFilterEnabled: false,
+      bbSqueezeFilterEnabled: false,
+      adxFilterEnabled: false,
+      stochFilterEnabled: false,
       RANGE_MINUTES:       rec.range.minutes,
     },
     /* DOM refs for the card */
@@ -4638,6 +5060,18 @@ function activatePanel(p) {
   atrValue       = p.atrValue;
   atrValues      = p.atrValues;
   rsiValues      = p.rsiValues;
+  macdLine       = p.macdLine;
+  macdSignal     = p.macdSignal;
+  macdHistogram  = p.macdHistogram;
+  bbUpper        = p.bbUpper;
+  bbLower        = p.bbLower;
+  bbMiddle       = p.bbMiddle;
+  bbWidth        = p.bbWidth;
+  adxValue       = p.adxValue;
+  adxDiPlus      = p.adxDiPlus;
+  adxDiMinus     = p.adxDiMinus;
+  stochK         = p.stochK;
+  stochD         = p.stochD;
   trailingSL     = p.trailingSL;
   partialTpHit   = p.partialTpHit;
   confluenceScore = p.confluenceScore;
@@ -4663,6 +5097,10 @@ function activatePanel(p) {
   sessionFilterEnabled = f.sessionFilterEnabled;
   sessionFilterMode    = f.sessionFilterMode;
   fibRetestEnabled     = f.fibRetestEnabled;
+  macdFilterEnabled      = f.macdFilterEnabled;
+  bbSqueezeFilterEnabled = f.bbSqueezeFilterEnabled;
+  adxFilterEnabled       = f.adxFilterEnabled;
+  stochFilterEnabled     = f.stochFilterEnabled;
   RANGE_MINUTES        = f.RANGE_MINUTES;
 }
 
@@ -4684,6 +5122,18 @@ function savePanel(p) {
   p.atrValue       = atrValue;
   p.atrValues      = atrValues;
   p.rsiValues      = rsiValues;
+  p.macdLine      = macdLine;
+  p.macdSignal    = macdSignal;
+  p.macdHistogram = macdHistogram;
+  p.bbUpper       = bbUpper;
+  p.bbLower       = bbLower;
+  p.bbMiddle      = bbMiddle;
+  p.bbWidth       = bbWidth;
+  p.adxValue      = adxValue;
+  p.adxDiPlus     = adxDiPlus;
+  p.adxDiMinus    = adxDiMinus;
+  p.stochK        = stochK;
+  p.stochD        = stochD;
   p.trailingSL     = trailingSL;
   p.partialTpHit   = partialTpHit;
   p.confluenceScore = confluenceScore;
@@ -4708,6 +5158,10 @@ function savePanel(p) {
   p.filters.sessionFilterEnabled = sessionFilterEnabled;
   p.filters.sessionFilterMode    = sessionFilterMode;
   p.filters.fibRetestEnabled     = fibRetestEnabled;
+  p.filters.macdFilterEnabled      = macdFilterEnabled;
+  p.filters.bbSqueezeFilterEnabled = bbSqueezeFilterEnabled;
+  p.filters.adxFilterEnabled       = adxFilterEnabled;
+  p.filters.stochFilterEnabled     = stochFilterEnabled;
   p.filters.RANGE_MINUTES        = RANGE_MINUTES;
 }
 
@@ -4810,6 +5264,10 @@ function syncFilterUIFromGlobals() {
   if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
   if (UI.sessionFilterMode)   UI.sessionFilterMode.value     = sessionFilterMode;
   if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
+  if (UI.macdFilterToggle)      UI.macdFilterToggle.checked      = macdFilterEnabled;
+  if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
+  if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
+  if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
   if (UI.rangeDuration)       UI.rangeDuration.value          = RANGE_MINUTES;
   if (UI.autoResetToggle)     UI.autoResetToggle.checked     = autoResetEnabled;
 }
@@ -4835,6 +5293,10 @@ function connectPanel(p) {
   p.filters.sessionFilterEnabled = rec.session.rec;
   p.filters.sessionFilterMode    = "london_ny";
   p.filters.fibRetestEnabled     = rec.fib;
+  p.filters.macdFilterEnabled      = false;
+  p.filters.bbSqueezeFilterEnabled = false;
+  p.filters.adxFilterEnabled       = false;
+  p.filters.stochFilterEnabled     = false;
   p.filters.RANGE_MINUTES        = rec.range.minutes;
 
   /* Reset panel state */
@@ -4854,6 +5316,10 @@ function connectPanel(p) {
   p.atrValue = 0;
   p.atrValues = [];
   p.rsiValues = [];
+  p.macdLine = []; p.macdSignal = []; p.macdHistogram = [];
+  p.bbUpper = []; p.bbLower = []; p.bbMiddle = []; p.bbWidth = [];
+  p.adxValue = 0; p.adxDiPlus = 0; p.adxDiMinus = 0;
+  p.stochK = []; p.stochD = [];
   p.trailingSL = null;
   p.partialTpHit = false;
   p.confluenceScore = 0;
@@ -4930,6 +5396,10 @@ function connectPanel(p) {
       computeEMAs();
       computeATR();
       computeRSI();
+      computeMACD();
+      computeBollingerBands();
+      computeADX();
+      computeStochastic();
       processLatestCandle();
       monitorTradeOutcome(c);
     }
@@ -5328,6 +5798,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.fibRetestToggle) {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.macdFilterToggle) {
+    UI.macdFilterToggle.addEventListener("change", () => { macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.bbSqueezeFilterToggle) {
+    UI.bbSqueezeFilterToggle.addEventListener("change", () => { bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.adxFilterToggle) {
+    UI.adxFilterToggle.addEventListener("change", () => { adxFilterEnabled = UI.adxFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.stochFilterToggle) {
+    UI.stochFilterToggle.addEventListener("change", () => { stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.autoApplyRecToggle) {
     UI.autoApplyRecToggle.addEventListener("change", () => {
