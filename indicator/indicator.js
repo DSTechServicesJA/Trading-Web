@@ -184,10 +184,10 @@ function getStepRunLength() {
   for (let i = candles.length - 1; i >= 1; i--) {
     const dir = candles[i].close - candles[i - 1].close;
     if (dir > 0) {
-      if (run <= 0 && run !== 0) break;
+      if (run < 0) break;
       run++;
     } else if (dir < 0) {
-      if (run >= 0 && run !== 0) break;
+      if (run > 0) break;
       run--;
     } else {
       break;
@@ -1879,7 +1879,7 @@ function hasBreakoutConviction(candle) {
   const candleRange = candle.high - candle.low;
   const bodySize = Math.abs(candle.close - candle.open);
   const rangeOk = candleRange >= atrValue * 0.8 * tuning.breakoutConvictionMult;
-  const bodyOk = candleRange > 0 ? bodySize >= candleRange * 0.6 * tuning.breakoutConvictionMult : false;
+  const bodyOk = candleRange > 0 ? bodySize >= candleRange * 0.6 : false;
   return rangeOk && bodyOk;
 }
 
@@ -2050,13 +2050,14 @@ function detectInsideBarFalseBreakout(idx) {
     /* Check candles after the inside bar for false breakout + reversal */
     for (let j = i + 2; j <= idx; j++) {
       const breakoutCandle = candles[j];
-      /* Bullish false breakout: broke below mother.low then closed back inside */
-      if (breakoutCandle.low < mother.low && breakoutCandle.close > mother.low && breakoutCandle.close <= mother.high) {
+      const motherMid = (mother.high + mother.low) / 2;
+      /* Bullish false breakout: broke below mother.low then closed back inside upper half */
+      if (breakoutCandle.low < mother.low && breakoutCandle.close > motherMid && breakoutCandle.close <= mother.high) {
         return { detected: true, dir: "BULL", motherIdx: i,
                  desc: "Inside bar false breakout (bear trap) — bullish reversal" };
       }
-      /* Bearish false breakout: broke above mother.high then closed back inside */
-      if (breakoutCandle.high > mother.high && breakoutCandle.close < mother.high && breakoutCandle.close >= mother.low) {
+      /* Bearish false breakout: broke above mother.high then closed back inside lower half */
+      if (breakoutCandle.high > mother.high && breakoutCandle.close < motherMid && breakoutCandle.close >= mother.low) {
         return { detected: true, dir: "BEAR", motherIdx: i,
                  desc: "Inside bar false breakout (bull trap) — bearish reversal" };
       }
@@ -2313,19 +2314,12 @@ function isFalseBreakout(currentIdx) {
 
 /* ================= CONFLUENCE SCORE ================= */
 /**
- * Computes a quality score (0-12) for the current setup based on multiple factors:
- *   +1 EMA 8/21 aligned with breakout direction
- *   +1 HTF EMA 100 aligned
- *   +1 Strong breakout candle (range+body vs ATR)
- *   +1 Pin bar or inside bar at retest zone
- *   +1 S/R confluence at breakout level
- *   +1 RSI favorable at retest
- *   +1 Volume spike on breakout candle
- *   +1 Within active trading session
- *   +1 Fibonacci confluence at retest level
- *   +1 Market-type-specific signal (spike rejection / S&D zone / trendline / MA bounce)
- *   +1 Preferred direction alignment (Boom=BULL, Crash=BEAR)
- *   +1 Step run momentum or Jump impulse confirmation
+ * Computes a quality score for the current setup based on multiple factors.
+ * Base factors (0-9): EMA, HTF, breakout strength, pin/inside bar at retest,
+ * S/R confluence, RSI, volume spike, active session, Fibonacci.
+ * Market-type bonus (+1-3): spike rejection / S&D zone / trendline / MA bounce,
+ * preferred direction alignment (Boom/Crash), step run / jump impulse.
+ * Maximum possible varies by market type (9-12).
  */
 function computeConfluenceScore() {
   if (!breakout) return 0;
@@ -2874,7 +2868,7 @@ function processCandle(idx) {
         addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
         /* Log confluence score */
         confluenceScore = computeConfluenceScore();
-        addLog(`Confluence score: ${confluenceScore}/12`);
+        addLog(`Confluence score: ${confluenceScore}`);
         recordSignal(confirmPattern);
       }
     }
@@ -2887,6 +2881,7 @@ function touchesLevel(candle, level) {
   const tuning = getMarketTuning();
   let tolerance;
   if (atrToleranceEnabled && atrValue > 0) {
+    /* retestToleranceMult replaces the default 0.5 factor, not multiplied on top */
     tolerance = atrValue * 0.5 * tuning.retestToleranceMult;
   } else {
     tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE * tuning.retestToleranceMult;
