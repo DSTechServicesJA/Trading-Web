@@ -246,12 +246,7 @@
             <h3 class="collapsible">🔧 Advanced Parameters</h3>
             <div class="collapsible-body">
               <label for="rangeDuration">Opening Range (min)</label>
-              <select id="rangeDuration">
-                <option value="5">5 min</option>
-                <option value="10">10 min</option>
-                <option value="15" selected>15 min</option>
-                <option value="30">30 min</option>
-              </select>
+              <input type="number" id="rangeDuration" min="1" max="120" step="1" value="15" />
 
               <label for="touchTolerance" class="spaced-label">Level Touch Tolerance (%)</label>
               <input type="number" id="touchTolerance" min="5" max="30" step="1" value="15" />
