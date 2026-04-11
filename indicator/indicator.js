@@ -454,6 +454,29 @@ function initUI() {
   UI.recActive_session      = document.getElementById("recActive_session");
   UI.recActive_fib          = document.getElementById("recActive_fib");
 
+  /* Recommended settings dynamic "Rec" column badges */
+  UI.recRec_timeframe     = document.getElementById("recRec_timeframe");
+  UI.recRec_rr            = document.getElementById("recRec_rr");
+  UI.recRec_range         = document.getElementById("recRec_range");
+  UI.recRec_ema           = document.getElementById("recRec_ema");
+  UI.recRec_htf           = document.getElementById("recRec_htf");
+  UI.recRec_atr           = document.getElementById("recRec_atr");
+  UI.recRec_trailing      = document.getElementById("recRec_trailing");
+  UI.recRec_partialTp     = document.getElementById("recRec_partialTp");
+  UI.recRec_falseBreakout = document.getElementById("recRec_falseBreakout");
+  UI.recRec_minRR         = document.getElementById("recRec_minRR");
+  UI.recRec_rsiFilter     = document.getElementById("recRec_rsiFilter");
+  UI.recRec_volSpike      = document.getElementById("recRec_volSpike");
+  UI.recRec_session       = document.getElementById("recRec_session");
+  UI.recRec_fib           = document.getElementById("recRec_fib");
+  UI.recMarketLabel       = document.getElementById("recMarketLabel");
+  UI.recMarketSignals     = document.getElementById("recMarketSignals");
+  UI.recSignalsList       = document.getElementById("recSignalsList");
+  UI.recHintText          = document.getElementById("recHintText");
+
+  /* Market type badge */
+  UI.marketTypeBadge      = document.getElementById("marketTypeBadge");
+
   /* Login gate */
   UI.loginOverlay     = document.getElementById("loginOverlay");
   UI.loginBtn         = document.getElementById("loginBtn");
@@ -793,6 +816,7 @@ function cycleSymbol(dir) {
   if (newIdx >= opts.length) newIdx = 0;
   UI.symbolSelect.selectedIndex = newIdx;
   updateCurrentSymbolLabel();
+  updateRecommendedSettings();
   saveSettings();
   debouncedReconnect();
 }
@@ -803,7 +827,7 @@ function updateCurrentSymbolLabel() {
   UI.currentSymbolLabel.textContent = opt ? opt.text : "--";
 }
 
-/* ================= RECOMMENDED SETTINGS (DYNAMIC) ================= */
+/* ================= RECOMMENDED SETTINGS (DYNAMIC PER MARKET TYPE) ================= */
 function setRecBadge(el, isActive, matchesRec, onLabel, offLabel) {
   if (!el) return;
   el.textContent = isActive ? (onLabel || "ON ✅") : (offLabel || "OFF");
@@ -816,77 +840,306 @@ function setRecBadge(el, isActive, matchesRec, onLabel, offLabel) {
   }
 }
 
+function setRecRecBadge(el, text, cssClass) {
+  if (!el) return;
+  el.textContent = text;
+  el.className = cssClass || "status-badge bull rec-badge-rec";
+}
+
+/**
+ * Returns market-type-specific recommended settings.
+ * Each market type has different optimal configurations derived from the MD-file strategies.
+ */
+function getMarketRecommendations() {
+  const mtype = getMarketType();
+  switch (mtype) {
+    case "boom":
+      return {
+        label: "📈 Boom Index — Spike Up Strategy",
+        timeframe: { text: "1 min", gran: 60 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "10 min", minutes: 10 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        signals: [
+          "Pin bar rejection after upward spike (shooting star = exhaustion)",
+          "Engulfing pattern after spike for power shift confirmation",
+          "Inside bar false breakout (stop-hunt trap detection)",
+          "Only BULL breakouts — spikes are upward on Boom",
+          "Wider trailing stop (2× ATR) to ride spike momentum"
+        ],
+        hint: "Boom indices spike upward — trade ONLY in the spike direction (BULL). "
+            + "Pin bar rejections after spikes signal exhaustion. "
+            + "Inside bar false breakouts detect stop-hunts common on Boom. "
+            + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
+            + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
+            + "Session filter disabled — synthetic markets run 24/7."
+      };
+    case "crash":
+      return {
+        label: "📉 Crash Index — Spike Down Strategy",
+        timeframe: { text: "1 min", gran: 60 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "10 min", minutes: 10 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        signals: [
+          "Pin bar rejection after downward spike (hammer = exhaustion)",
+          "Engulfing pattern after spike for power shift confirmation",
+          "Inside bar false breakout (stop-hunt trap detection)",
+          "Only BEAR breakouts — spikes are downward on Crash",
+          "Wider trailing stop (2× ATR) to ride spike momentum"
+        ],
+        hint: "Crash indices spike downward — trade ONLY in the spike direction (BEAR). "
+            + "Pin bar rejections after spikes signal exhaustion. "
+            + "Inside bar false breakouts detect stop-hunts common on Crash. "
+            + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
+            + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
+            + "Session filter disabled — synthetic markets run 24/7."
+      };
+    case "jump":
+      return {
+        label: "🦘 Jump Index — Gap & Impulse Strategy",
+        timeframe: { text: "1–5 min", gran: 60 },
+        rr: { text: "1:3+", minRR: 3 },
+        range: { text: "10 min", minutes: 10 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Extra wide (2.5× ATR for jump volatility)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:3 ✅" },
+        rsi: false,
+        volSpike: { rec: false, note: "Jumps are inherently volatile" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        signals: [
+          "Supply/Demand zone detection — jumps create powerful S&D zones",
+          "Momentum impulse continuation after jump candle",
+          "Gap-fill retest back to jump origin level",
+          "Both BULL and BEAR breakouts — jumps go either direction",
+          "Fibonacci 50%/61% retracement of jump range"
+        ],
+        hint: "Jump indices produce sudden price jumps in either direction. "
+            + "Jumps create strong supply/demand zones where price departed rapidly — "
+            + "wait for price to return to these zones for high-probability entries. "
+            + "Momentum impulse detection confirms continuation after a jump. "
+            + "Extra-wide trailing stop (2.5× ATR) survives jump volatility. "
+            + "RSI and volume spike filters disabled — jumps break normal readings. "
+            + "Higher R:R target (1:3+) compensates for the erratic price action."
+      };
+    case "step":
+      return {
+        label: "🪜 Step Index — Trendline & MA Bounce Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2", minRR: 2 },
+        range: { text: "20 min", minutes: 20 },
+        ema: true,
+        htf: true,
+        atr: false,
+        trailing: { rec: true, note: "Tight (1× ATR for small moves)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: false, note: "Fixed steps — range is uniform" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        signals: [
+          "Trendline 3rd-touch entry — price respects trendlines cleanly",
+          "EMA 8/21 dynamic S/R bounce for pullback entries",
+          "Step momentum run detection (5+ consecutive steps)",
+          "Inside bar pattern (consolidation before next run)",
+          "Tight tolerances for precise level detection"
+        ],
+        hint: "Step Index moves in fixed increments — the cleanest price action. "
+            + "Trendline 3rd-touch strategy works best: draw trendline on 2 swing lows "
+            + "(uptrend) or highs (downtrend), enter on touch 3+. "
+            + "EMA 8/21 act as dynamic support/resistance for pullback entries. "
+            + "Step momentum runs (5+ consecutive steps) confirm strong trends. "
+            + "Volume spike filter disabled — fixed-step moves have uniform range. "
+            + "Longer opening range (20 min) captures the orderly structure. "
+            + "Tight trailing stop (1× ATR) suits the small, precise movements."
+      };
+    default:
+      return {
+        label: "⚡ " + (mtype === "forex" ? "Forex" : mtype === "commodity" ? "Commodity" : "Volatility") + " — Breakout Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "15 min", minutes: 15 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "1.5× ATR standard" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Standard 1.5× average range" },
+        session: { rec: mtype === "forex" || mtype === "commodity", note: mtype === "forex" || mtype === "commodity" ? "London+NY ✅" : "24/7 synthetic" },
+        fib: true,
+        signals: [
+          "Opening range breakout with conviction",
+          "Retest + indecision + engulfing confirmation",
+          "Pin bar and morning/evening star at retest",
+          "Inside bar breakout for clean continuation",
+          "S/R confluence and Fibonacci retracement alignment"
+        ],
+        hint: "Standard breakout strategy — EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise. "
+            + "ATR tolerance adapts retest detection to volatility. "
+            + "Trailing stop locks in profits on extended moves. "
+            + "Partial TP at 1:1 secures gains and moves SL to breakeven. "
+            + "False breakout filter prevents entering on fake-outs. "
+            + "Min R:R gate ensures every trade has at least 1:2 risk-reward. "
+            + "Confluence score (0-12) gauges overall setup quality."
+      };
+  }
+}
+
 function updateRecommendedSettings() {
-  /* Timeframe: recommended = 5 min (300s) */
+  const rec = getMarketRecommendations();
+
+  /* Update market type label */
+  if (UI.recMarketLabel) {
+    UI.recMarketLabel.textContent = rec.label;
+  }
+
+  /* Update market type badge in status bar */
+  if (UI.marketTypeBadge) {
+    const tuning = getMarketTuning();
+    UI.marketTypeBadge.textContent = tuning.label;
+    const badgeClasses = {
+      boom: "status-badge bull",
+      crash: "status-badge bear",
+      jump: "status-badge warning",
+      step: "status-badge enabled"
+    };
+    UI.marketTypeBadge.className = "chip-value " + (badgeClasses[getMarketType()] || "env-label");
+  }
+
+  /* ---- Dynamic "Rec" column ---- */
+  setRecRecBadge(UI.recRec_timeframe, rec.timeframe.text, "status-badge warning rec-badge-rec");
+  setRecRecBadge(UI.recRec_rr, rec.rr.text, "status-badge warning rec-badge-rec");
+  setRecRecBadge(UI.recRec_range, rec.range.text, "status-badge warning rec-badge-rec");
+  setRecRecBadge(UI.recRec_ema, rec.ema ? "ON ✅" : "OFF", rec.ema ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_htf, rec.htf ? "ON ✅" : "OFF", rec.htf ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_atr, rec.atr ? "ON ✅" : "OFF", rec.atr ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_trailing, rec.trailing.rec ? "ON ✅" : "OFF", rec.trailing.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_partialTp, rec.partialTp ? "ON ✅" : "OFF", rec.partialTp ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_falseBreakout, rec.falseBreakout ? "ON ✅" : "OFF", rec.falseBreakout ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_minRR, rec.minRR.value, rec.minRR.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_rsiFilter, rec.rsi ? "ON ✅" : "OFF", rec.rsi ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_volSpike, rec.volSpike.rec ? "ON ✅" : "OFF", rec.volSpike.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_session, rec.session.rec ? rec.session.note : "OFF", rec.session.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_fib, rec.fib ? "ON ✅" : "OFF", rec.fib ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+
+  /* ---- Dynamic "Active" column ---- */
+  /* Timeframe: compare against market-type recommendation */
   if (UI.recActive_timeframe && UI.granSelect) {
     const gran = parseInt(UI.granSelect.value, 10);
     UI.recActive_timeframe.textContent = GRAN_LABELS[gran] || (gran + "s");
-    if (gran === 300) {
+    if (gran === rec.timeframe.gran) {
       UI.recActive_timeframe.className = "status-badge bull rec-badge-active";
     } else {
       UI.recActive_timeframe.className = "status-badge warning rec-badge-active";
     }
   }
 
-  /* R:R: recommended = 1:2 or 1:3 */
+  /* R:R: compare against market-type recommendation */
   if (UI.recActive_rr && UI.riskInput && UI.rewardInput) {
     const risk   = parseFloat(UI.riskInput.value)   || 1;
     const reward = parseFloat(UI.rewardInput.value) || 1;
     const rr = reward / risk;
     UI.recActive_rr.textContent = `1:${reward}`;
-    if (rr >= 2) {
+    if (rr >= rec.rr.minRR) {
       UI.recActive_rr.className = "status-badge bull rec-badge-active";
     } else {
       UI.recActive_rr.className = "status-badge warning rec-badge-active";
     }
   }
 
-  /* Opening Range: recommended = 15 min */
+  /* Opening Range: compare against market-type recommendation */
   if (UI.recActive_range && UI.rangeDuration) {
     const rm = parseInt(UI.rangeDuration.value, 10) || RANGE_MINUTES;
     UI.recActive_range.textContent = rm + " min";
-    if (rm === 15) {
+    if (rm === rec.range.minutes) {
       UI.recActive_range.className = "status-badge bull rec-badge-active";
     } else {
       UI.recActive_range.className = "status-badge warning rec-badge-active";
     }
   }
 
-  /* Boolean toggle filters */
-  setRecBadge(UI.recActive_ema,           emaFilterEnabled,     true);
-  setRecBadge(UI.recActive_htf,           htfFilterEnabled,     true);
-  setRecBadge(UI.recActive_atr,           atrToleranceEnabled,  true);
-  setRecBadge(UI.recActive_trailing,      trailingStopEnabled,  true);
-  setRecBadge(UI.recActive_partialTp,     partialTpEnabled,     true);
-  setRecBadge(UI.recActive_falseBreakout, falseBreakoutEnabled, true);
-  setRecBadge(UI.recActive_rsiFilter,     rsiFilterEnabled,     true);
-  setRecBadge(UI.recActive_volSpike,      volumeSpikeEnabled,   true);
-  setRecBadge(UI.recActive_fib,           fibRetestEnabled,     true);
+  /* Boolean toggle filters — compare against market-type-specific recommendations */
+  setRecBadge(UI.recActive_ema,           emaFilterEnabled,     rec.ema);
+  setRecBadge(UI.recActive_htf,           htfFilterEnabled,     rec.htf);
+  setRecBadge(UI.recActive_atr,           atrToleranceEnabled,  rec.atr);
+  setRecBadge(UI.recActive_trailing,      trailingStopEnabled,  rec.trailing.rec);
+  setRecBadge(UI.recActive_partialTp,     partialTpEnabled,     rec.partialTp);
+  setRecBadge(UI.recActive_falseBreakout, falseBreakoutEnabled, rec.falseBreakout);
+  setRecBadge(UI.recActive_rsiFilter,     rsiFilterEnabled,     rec.rsi);
+  setRecBadge(UI.recActive_volSpike,      volumeSpikeEnabled,   rec.volSpike.rec);
+  setRecBadge(UI.recActive_fib,           fibRetestEnabled,     rec.fib);
 
-  /* Min R:R: recommended = ON with 2.0 */
+  /* Min R:R: market-type-aware */
   if (UI.recActive_minRR) {
     const on = minRREnabled;
     const val = minRRValue;
     if (on) {
       UI.recActive_minRR.textContent = `1:${val} ✅`;
-      UI.recActive_minRR.className = val >= 2 ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active";
+      UI.recActive_minRR.className = val >= rec.rr.minRR ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active";
     } else {
       UI.recActive_minRR.textContent = "OFF";
       UI.recActive_minRR.className = "status-badge disabled rec-badge-active";
     }
   }
 
-  /* Session filter: recommended = ON with london_ny */
+  /* Session filter: market-type-aware */
   if (UI.recActive_session) {
     if (sessionFilterEnabled) {
       UI.recActive_session.textContent = SESSION_MODE_LABELS[sessionFilterMode] || sessionFilterMode;
-      UI.recActive_session.className = sessionFilterMode === "london_ny"
-        ? "status-badge bull rec-badge-active"
+      UI.recActive_session.className = rec.session.rec
+        ? (sessionFilterMode === "london_ny" ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active")
         : "status-badge warning rec-badge-active";
     } else {
       UI.recActive_session.textContent = "OFF";
-      UI.recActive_session.className = "status-badge disabled rec-badge-active";
+      /* If rec says OFF (synthetic 24/7), then OFF is correct → green */
+      UI.recActive_session.className = rec.session.rec ? "status-badge disabled rec-badge-active" : "status-badge bull rec-badge-active";
     }
+  }
+
+  /* ---- Key Signals panel ---- */
+  if (UI.recMarketSignals && UI.recSignalsList) {
+    UI.recMarketSignals.style.display = "block";
+    UI.recSignalsList.innerHTML = "";
+    for (const sig of rec.signals) {
+      const li = document.createElement("li");
+      li.textContent = sig;
+      UI.recSignalsList.appendChild(li);
+    }
+  }
+
+  /* ---- Hint text ---- */
+  if (UI.recHintText) {
+    UI.recHintText.innerHTML = "<strong>Why:</strong> " + rec.hint;
   }
 }
 
@@ -3444,7 +3697,7 @@ document.addEventListener("DOMContentLoaded", () => {
   UI.disconnectBtn.addEventListener("click", disconnect);
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); debouncedReconnect(); });
+  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); updateRecommendedSettings(); debouncedReconnect(); });
   UI.granSelect.addEventListener("change",   () => { saveSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */

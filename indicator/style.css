@@ -1117,6 +1117,26 @@ button:disabled {
   font-size: 10px;
   padding: 2px 5px;
 }
+.rec-market-signals {
+  border: 1px solid var(--glass-border);
+}
+.rec-market-signals ul {
+  list-style: disc;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+.rec-market-signals ul li {
+  margin-bottom: 2px;
+}
+.rec-market-signals strong {
+  color: var(--heading);
+}
+/* Market type badge colors */
+.chip-value.status-badge.bull { color: var(--success); font-weight: 700; }
+.chip-value.status-badge.bear { color: var(--danger); font-weight: 700; }
+.chip-value.status-badge.warning { color: var(--warning); font-weight: 700; }
+.chip-value.status-badge.enabled { color: var(--primary-soft); font-weight: 700; }
 
 /* =========================================================
    LIGHT THEME
