@@ -1260,6 +1260,25 @@ body.light-theme .bar-btn-tool {
   border-color: rgba(99, 102, 241, 0.12);
 }
 
+/* ---- Multi-Symbol light theme ---- */
+body.light-theme .multi-symbol-header,
+body.light-theme .multi-symbol-grid {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+body.light-theme .ms-card {
+  background: #f8fafc;
+  border-color: rgba(0, 0, 0, 0.06);
+}
+body.light-theme .ms-card:hover {
+  border-color: var(--primary-soft);
+}
+body.light-theme .ms-card-header,
+body.light-theme .ms-card-footer {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
 /* ---- Telegram Section ---- */
 .telegram-send-btn,
 .telegram-test-btn {

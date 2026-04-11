@@ -158,6 +158,10 @@ function _deobfuscate(encoded) {
   } catch { return ""; }
 }
 
+/* Multi-panel context tracking (used throughout for context-aware processing) */
+let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
+let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
+
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
  * Market types supported:
@@ -170,7 +174,7 @@ function _deobfuscate(encoded) {
  *   "commodity"   – Gold/Silver
  */
 function getMarketType(symbol) {
-  if (!symbol) symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
+  if (!symbol) symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
@@ -588,14 +592,13 @@ function addLog(msg) {
   if (!UI.signalLog) return;
   const li = document.createElement("li");
   const now = new Date();
-  li.textContent = `[${now.toLocaleTimeString()}] ${msg}`;
+  /* Prefix with symbol when logging from a multi-panel context */
+  const prefix = _multiPanelProcessing ? `[${_multiPanelProcessing}] ` : "";
+  li.textContent = `[${now.toLocaleTimeString()}] ${prefix}${msg}`;
   UI.signalLog.prepend(li);
   while (UI.signalLog.children.length > 80) UI.signalLog.lastChild.remove();
   persistSignalLog();
 }
-
-/* Tracks whether we're inside a multi-panel WS handler (suppress main UI updates) */
-let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
 
 function setPhase(newPhase) {
   const prevPhase = phase;
@@ -646,7 +649,7 @@ function playPhaseAlert(phaseName) {
 function sendPhaseNotification(phaseName) {
   if (!notificationsEnabled || !("Notification" in window)) return;
   if (Notification.permission === "granted") {
-    const symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
+    const symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
     let body = `${symbol} moved to ${phaseName} phase`;
     /*
      * Append order-type hint for actionable phases:
@@ -1072,6 +1075,9 @@ function restoreSignalHistory() {
 
 /* ================= STATS ================= */
 function updateStatsUI() {
+  /* Skip when processing a non-focused multi-panel */
+  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
+
   if (UI.signalWins) UI.signalWins.textContent = signalWins;
   if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
   const total = signalWins + signalLosses;
@@ -1666,6 +1672,9 @@ function resetIndicator() {
 }
 
 function updateStateUI() {
+  /* Skip main sidebar updates when processing a non-focused multi-panel */
+  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
+
   if (UI.candleCount) UI.candleCount.textContent = candles.length;
   if (UI.rangeHigh)   UI.rangeHigh.textContent   = openingRange ? fmt(openingRange.high, 4) : "--";
   if (UI.rangeLow)    UI.rangeLow.textContent     = openingRange ? fmt(openingRange.low, 4) : "--";
@@ -3543,7 +3552,7 @@ function recordSignal(confirmPattern) {
   const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
   const signal = {
     time: new Date().toISOString(),
-    symbol: UI.symbolSelect.value,
+    symbol: _multiPanelProcessing || UI.symbolSelect.value,
     dir: trade.dir,
     entry: trade.entry,
     sl: trade.sl,
@@ -4220,7 +4229,6 @@ function initLoginGate() {
 
 const MULTI_MAX_PANELS = 6;
 const multiPanels = new Map();   /* symbol → panel object */
-let focusedPanelSymbol = null;   /* which panel drives the main view */
 
 /* ---- Panel state factory ---- */
 function createPanelState(symbol) {
@@ -4766,7 +4774,8 @@ function initMultiSymbolPicker() {
   if (disconnectAllBtn) disconnectAllBtn.addEventListener("click", disconnectAllPanels);
 }
 
-
+/* ================= BOOT ================= */
+document.addEventListener("DOMContentLoaded", () => {
   initUI();
   initLoginGate();
   restoreSettings();
