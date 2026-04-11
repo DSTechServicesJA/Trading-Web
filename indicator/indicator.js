@@ -585,6 +585,10 @@ function initUI() {
   UI.recActive_volSpike     = document.getElementById("recActive_volSpike");
   UI.recActive_session      = document.getElementById("recActive_session");
   UI.recActive_fib          = document.getElementById("recActive_fib");
+  UI.recActive_macd         = document.getElementById("recActive_macd");
+  UI.recActive_bbSqueeze    = document.getElementById("recActive_bbSqueeze");
+  UI.recActive_adx          = document.getElementById("recActive_adx");
+  UI.recActive_stoch        = document.getElementById("recActive_stoch");
 
   /* Recommended settings dynamic "Rec" column badges */
   UI.recRec_timeframe     = document.getElementById("recRec_timeframe");
@@ -601,6 +605,10 @@ function initUI() {
   UI.recRec_volSpike      = document.getElementById("recRec_volSpike");
   UI.recRec_session       = document.getElementById("recRec_session");
   UI.recRec_fib           = document.getElementById("recRec_fib");
+  UI.recRec_macd          = document.getElementById("recRec_macd");
+  UI.recRec_bbSqueeze     = document.getElementById("recRec_bbSqueeze");
+  UI.recRec_adx           = document.getElementById("recRec_adx");
+  UI.recRec_stoch         = document.getElementById("recRec_stoch");
   UI.recMarketLabel       = document.getElementById("recMarketLabel");
   UI.recMarketSignals     = document.getElementById("recMarketSignals");
   UI.recSignalsList       = document.getElementById("recSignalsList");
@@ -1562,18 +1570,28 @@ function getMarketRecommendations(symbol) {
         volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
         session: { rec: false, note: "24/7 synthetic" },
         fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: false,
         signals: [
           "Pin bar rejection after upward spike (shooting star = exhaustion)",
           "Engulfing pattern after spike for power shift confirmation",
           "Inside bar false breakout (stop-hunt trap detection)",
           "Only BULL breakouts — spikes are upward on Boom",
-          "Wider trailing stop (2× ATR) to ride spike momentum"
+          "Wider trailing stop (2× ATR) to ride spike momentum",
+          "MACD histogram confirms spike momentum direction",
+          "BB squeeze detects compression before spike expansion"
         ],
         hint: "Boom indices spike upward — trade ONLY in the spike direction (BULL). "
             + "Pin bar rejections after spikes signal exhaustion. "
             + "Inside bar false breakouts detect stop-hunts common on Boom. "
             + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
             + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
+            + "MACD histogram alignment confirms spike direction momentum. "
+            + "Bollinger Band squeeze detects compression before spike expansion. "
+            + "ADX confirms trending environment for spike follow-through. "
+            + "Stochastic disabled — unreliable in rapid spike markets. "
             + "Session filter disabled — synthetic markets run 24/7."
       };
     case "crash":
@@ -1593,18 +1611,28 @@ function getMarketRecommendations(symbol) {
         volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
         session: { rec: false, note: "24/7 synthetic" },
         fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: false,
         signals: [
           "Pin bar rejection after downward spike (hammer = exhaustion)",
           "Engulfing pattern after spike for power shift confirmation",
           "Inside bar false breakout (stop-hunt trap detection)",
           "Only BEAR breakouts — spikes are downward on Crash",
-          "Wider trailing stop (2× ATR) to ride spike momentum"
+          "Wider trailing stop (2× ATR) to ride spike momentum",
+          "MACD histogram confirms spike momentum direction",
+          "BB squeeze detects compression before spike expansion"
         ],
         hint: "Crash indices spike downward — trade ONLY in the spike direction (BEAR). "
             + "Pin bar rejections after spikes signal exhaustion. "
             + "Inside bar false breakouts detect stop-hunts common on Crash. "
             + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
             + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
+            + "MACD histogram alignment confirms spike direction momentum. "
+            + "Bollinger Band squeeze detects compression before spike expansion. "
+            + "ADX confirms trending environment for spike follow-through. "
+            + "Stochastic disabled — unreliable in rapid spike markets. "
             + "Session filter disabled — synthetic markets run 24/7."
       };
     case "jump":
@@ -1624,12 +1652,17 @@ function getMarketRecommendations(symbol) {
         volSpike: { rec: false, note: "Jumps are inherently volatile" },
         session: { rec: false, note: "24/7 synthetic" },
         fib: true,
+        macd: false,
+        bbSqueeze: true,
+        adx: false,
+        stoch: false,
         signals: [
           "Supply/Demand zone detection — jumps create powerful S&D zones",
           "Momentum impulse continuation after jump candle",
           "Gap-fill retest back to jump origin level",
           "Both BULL and BEAR breakouts — jumps go either direction",
-          "Fibonacci 50%/61% retracement of jump range"
+          "Fibonacci 50%/61% retracement of jump range",
+          "BB squeeze detects compression before jump release"
         ],
         hint: "Jump indices produce sudden price jumps in either direction. "
             + "Jumps create strong supply/demand zones where price departed rapidly — "
@@ -1637,6 +1670,8 @@ function getMarketRecommendations(symbol) {
             + "Momentum impulse detection confirms continuation after a jump. "
             + "Extra-wide trailing stop (2.5× ATR) survives jump volatility. "
             + "RSI and volume spike filters disabled — jumps break normal readings. "
+            + "Bollinger Band squeeze detects compression before jump release. "
+            + "MACD, ADX, and Stochastic disabled — jumps are too erratic for lagging indicators. "
             + "Higher R:R target (1:3+) compensates for the erratic price action."
       };
     case "step":
@@ -1656,12 +1691,18 @@ function getMarketRecommendations(symbol) {
         volSpike: { rec: false, note: "Fixed steps — range is uniform" },
         session: { rec: false, note: "24/7 synthetic" },
         fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
         signals: [
           "Trendline 3rd-touch entry — price respects trendlines cleanly",
           "EMA 8/21 dynamic S/R bounce for pullback entries",
           "Step momentum run detection (5+ consecutive steps)",
           "Inside bar pattern (consolidation before next run)",
-          "Tight tolerances for precise level detection"
+          "Tight tolerances for precise level detection",
+          "MACD confirms clean trend direction",
+          "Stochastic pullback entries at S/R bounces"
         ],
         hint: "Step Index moves in fixed increments — the cleanest price action. "
             + "Trendline 3rd-touch strategy works best: draw trendline on 2 swing lows "
@@ -1670,7 +1711,9 @@ function getMarketRecommendations(symbol) {
             + "Step momentum runs (5+ consecutive steps) confirm strong trends. "
             + "Volume spike filter disabled — fixed-step moves have uniform range. "
             + "Longer opening range (20 min) captures the orderly structure. "
-            + "Tight trailing stop (1× ATR) suits the small, precise movements."
+            + "Tight trailing stop (1× ATR) suits the small, precise movements. "
+            + "All V2 indicators work well — clean step action produces reliable MACD, "
+            + "BB squeeze, ADX trending, and Stochastic pullback signals."
       };
     default:
       return {
@@ -1689,12 +1732,18 @@ function getMarketRecommendations(symbol) {
         volSpike: { rec: true, note: "Standard 1.5× average range" },
         session: { rec: mtype === "forex" || mtype === "commodity", note: mtype === "forex" || mtype === "commodity" ? "London+NY ✅" : "24/7 synthetic" },
         fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
         signals: [
           "Opening range breakout with conviction",
           "Retest + indecision + engulfing confirmation",
           "Pin bar and morning/evening star at retest",
           "Inside bar breakout for clean continuation",
-          "S/R confluence and Fibonacci retracement alignment"
+          "S/R confluence and Fibonacci retracement alignment",
+          "MACD momentum confirmation at breakout",
+          "BB squeeze preceding breakout for volatility expansion"
         ],
         hint: "Standard breakout strategy — EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise. "
             + "ATR tolerance adapts retest detection to volatility. "
@@ -1702,7 +1751,11 @@ function getMarketRecommendations(symbol) {
             + "Partial TP at 1:1 secures gains and moves SL to breakeven. "
             + "False breakout filter prevents entering on fake-outs. "
             + "Min R:R gate ensures every trade has at least 1:2 risk-reward. "
-            + "Confluence score (0-12) gauges overall setup quality."
+            + "MACD histogram alignment confirms breakout momentum direction. "
+            + "Bollinger Band squeeze detects compression before breakout expansion. "
+            + "ADX trending confirmation filters out low-conviction ranges. "
+            + "Stochastic momentum alignment adds a final confluence layer. "
+            + "Confluence score (0-16) gauges overall setup quality."
       };
   }
 }
@@ -1743,6 +1796,10 @@ function updateRecommendedSettings() {
   setRecRecBadge(UI.recRec_volSpike, rec.volSpike.rec ? "ON ✅" : "OFF", rec.volSpike.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
   setRecRecBadge(UI.recRec_session, rec.session.rec ? rec.session.note : "OFF", rec.session.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
   setRecRecBadge(UI.recRec_fib, rec.fib ? "ON ✅" : "OFF", rec.fib ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_macd, rec.macd ? "ON ✅" : "OFF", rec.macd ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_bbSqueeze, rec.bbSqueeze ? "ON ✅" : "OFF", rec.bbSqueeze ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_adx, rec.adx ? "ON ✅" : "OFF", rec.adx ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
+  setRecRecBadge(UI.recRec_stoch, rec.stoch ? "ON ✅" : "OFF", rec.stoch ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
 
   /* ---- Dynamic "Active" column ---- */
   /* Timeframe: compare against market-type recommendation */
@@ -1790,6 +1847,10 @@ function updateRecommendedSettings() {
   setRecBadge(UI.recActive_rsiFilter,     rsiFilterEnabled,     rec.rsi);
   setRecBadge(UI.recActive_volSpike,      volumeSpikeEnabled,   rec.volSpike.rec);
   setRecBadge(UI.recActive_fib,           fibRetestEnabled,     rec.fib);
+  setRecBadge(UI.recActive_macd,          macdFilterEnabled,    rec.macd);
+  setRecBadge(UI.recActive_bbSqueeze,     bbSqueezeFilterEnabled, rec.bbSqueeze);
+  setRecBadge(UI.recActive_adx,           adxFilterEnabled,     rec.adx);
+  setRecBadge(UI.recActive_stoch,         stochFilterEnabled,   rec.stoch);
 
   /* Min R:R: market-type-aware */
   if (UI.recActive_minRR) {
@@ -1865,6 +1926,12 @@ function applyRecommendedSettings() {
   fibRetestEnabled     = rec.fib;
   sessionFilterEnabled = rec.session.rec;
 
+  /* GainzAlgo V2 filter toggles */
+  macdFilterEnabled      = rec.macd;
+  bbSqueezeFilterEnabled = rec.bbSqueeze;
+  adxFilterEnabled       = rec.adx;
+  stochFilterEnabled     = rec.stoch;
+
   /* Min R:R */
   minRREnabled = rec.minRR.rec;
   minRRValue   = rec.rr.minRR;
@@ -1888,6 +1955,10 @@ function applyRecommendedSettings() {
   if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
   if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
   if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
+  if (UI.macdFilterToggle)      UI.macdFilterToggle.checked      = macdFilterEnabled;
+  if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
+  if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
+  if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
 
   /* Persist + refresh UI */
   saveSettings();
@@ -5025,10 +5096,10 @@ function createPanelState(symbol) {
       sessionFilterEnabled: rec.session.rec,
       sessionFilterMode:   "london_ny",
       fibRetestEnabled:    rec.fib,
-      macdFilterEnabled: false,
-      bbSqueezeFilterEnabled: false,
-      adxFilterEnabled: false,
-      stochFilterEnabled: false,
+      macdFilterEnabled:       rec.macd,
+      bbSqueezeFilterEnabled:  rec.bbSqueeze,
+      adxFilterEnabled:        rec.adx,
+      stochFilterEnabled:      rec.stoch,
       RANGE_MINUTES:       rec.range.minutes,
     },
     /* DOM refs for the card */
@@ -5293,10 +5364,10 @@ function connectPanel(p) {
   p.filters.sessionFilterEnabled = rec.session.rec;
   p.filters.sessionFilterMode    = "london_ny";
   p.filters.fibRetestEnabled     = rec.fib;
-  p.filters.macdFilterEnabled      = false;
-  p.filters.bbSqueezeFilterEnabled = false;
-  p.filters.adxFilterEnabled       = false;
-  p.filters.stochFilterEnabled     = false;
+  p.filters.macdFilterEnabled      = rec.macd;
+  p.filters.bbSqueezeFilterEnabled = rec.bbSqueeze;
+  p.filters.adxFilterEnabled       = rec.adx;
+  p.filters.stochFilterEnabled     = rec.stoch;
   p.filters.RANGE_MINUTES        = rec.range.minutes;
 
   /* Reset panel state */
