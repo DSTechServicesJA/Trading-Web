@@ -1345,3 +1345,8 @@ body.light-theme .bar-btn-tool {
   height: 16px;
   accent-color: var(--primary);
 }
+.remember-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}

@@ -113,27 +113,42 @@ const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m
 
 /* ================= CREDENTIAL ENCRYPTION ================= */
 /**
- * Simple XOR-based obfuscation for credentials stored in localStorage.
+ * XOR-based obfuscation for credentials stored in localStorage.
  * NOT military-grade crypto – but prevents plain-text token exposure in
  * DevTools → Application → Local Storage which is the main risk vector
- * for a client-side-only app.  We derive a stable key from the LS_PREFIX
- * so each user/app instance has a unique obfuscation.
+ * for a client-side-only app.  Uses a per-install random salt stored
+ * alongside settings so each browser profile gets a unique key.
  */
-const _CRED_SALT = "itguru_cred_v1";
+const _CRED_VERSION = "v1:";
+function _getCredSalt() {
+  const key = "itguru_cred_salt";
+  let salt = localStorage.getItem(key);
+  if (!salt) {
+    const arr = new Uint8Array(24);
+    crypto.getRandomValues(arr);
+    salt = Array.from(arr, b => b.toString(36).padStart(2, "0")).join("");
+    localStorage.setItem(key, salt);
+  }
+  return salt;
+}
 function _obfuscate(plain) {
   if (!plain) return "";
-  const key = _CRED_SALT;
+  const key = _getCredSalt();
   let out = "";
   for (let i = 0; i < plain.length; i++) {
     out += String.fromCharCode(plain.charCodeAt(i) ^ key.charCodeAt(i % key.length));
   }
-  return btoa(out);                          /* Base64-encode the XOR result */
+  return _CRED_VERSION + btoa(out);          /* Prefix with version marker */
 }
 function _deobfuscate(encoded) {
   if (!encoded) return "";
   try {
-    const xored = atob(encoded);             /* Base64-decode first */
-    const key = _CRED_SALT;
+    /* Strip version prefix if present */
+    const payload = encoded.startsWith(_CRED_VERSION) ? encoded.slice(_CRED_VERSION.length) : encoded;
+    /* If no version prefix, treat as legacy plain-text */
+    if (!encoded.startsWith(_CRED_VERSION)) return encoded;
+    const xored = atob(payload);
+    const key = _getCredSalt();
     let out = "";
     for (let i = 0; i < xored.length; i++) {
       out += String.fromCharCode(xored.charCodeAt(i) ^ key.charCodeAt(i % key.length));
@@ -980,9 +995,7 @@ function restoreSettings() {
 
     /* Telegram settings */
     if (s.telegramBotToken != null) {
-      /* Support both legacy plain-text and new obfuscated format */
-      const decoded = _deobfuscate(s.telegramBotToken);
-      telegramBotToken = /^\d+:[A-Za-z0-9_-]+$/.test(decoded) ? decoded : s.telegramBotToken;
+      telegramBotToken = _deobfuscate(s.telegramBotToken);
     }
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
@@ -4089,11 +4102,11 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Telegram listeners – use "input" so variables sync as user types */
   if (UI.telegramBotToken) {
     UI.telegramBotToken.addEventListener("input", () => { telegramBotToken = UI.telegramBotToken.value; });
-    UI.telegramBotToken.addEventListener("change", () => { telegramBotToken = UI.telegramBotToken.value; saveSettings(); });
+    UI.telegramBotToken.addEventListener("change", saveSettings);
   }
   if (UI.telegramChatId) {
     UI.telegramChatId.addEventListener("input", () => { telegramChatId = UI.telegramChatId.value; });
-    UI.telegramChatId.addEventListener("change", () => { telegramChatId = UI.telegramChatId.value; saveSettings(); });
+    UI.telegramChatId.addEventListener("change", saveSettings);
   }
   if (UI.telegramAutoSendToggle) {
     UI.telegramAutoSendToggle.addEventListener("change", () => { telegramAutoSend = UI.telegramAutoSendToggle.checked; saveSettings(); });
