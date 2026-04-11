@@ -16,6 +16,7 @@
      - Auto-reconnect with exponential backoff
      - Debounced symbol/timeframe switching
      - Signal export (CSV)
+     - Signal export (PDF with chart screenshots per page)
      - Win/Loss tracking (monitors if price hit TP or SL)
      - Configurable parameters (range, tolerance, etc.)
      - Light/Dark theme toggle
@@ -1041,7 +1042,14 @@ function restoreSignalLog() {
 
 function persistSignalHistory() {
   try {
-    localStorage.setItem(LS_PREFIX + "signalHistory", JSON.stringify(signalHistory.slice(-50)));
+    /* Strip chartImage data URLs to avoid exceeding localStorage quota */
+    const stripped = signalHistory.slice(-50).map(s => {
+      if (!s.chartImage) return s;
+      const copy = Object.assign({}, s);
+      delete copy.chartImage;
+      return copy;
+    });
+    localStorage.setItem(LS_PREFIX + "signalHistory", JSON.stringify(stripped));
   } catch (e) {}
 }
 
@@ -1080,6 +1088,110 @@ function exportSignalsCSV() {
   URL.revokeObjectURL(url);
 }
 
+/* ================= PDF EXPORT (with chart screenshots) ================= */
+function exportSignalsPDF() {
+  if (signalHistory.length === 0) { alert("No signals to export."); return; }
+  if (typeof window.jspdf === "undefined") { alert("PDF library not loaded. Please check your connection."); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+
+  signalHistory.forEach((sig, idx) => {
+    if (idx > 0) doc.addPage("a4", "landscape");
+
+    /* ---- Header ---- */
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageW, 18, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`Signal ${idx + 1} / ${signalHistory.length}`, margin, 12);
+    doc.setFontSize(10);
+    doc.text(`IT Guru – Breakout Retest Indicator`, pageW - margin, 12, { align: "right" });
+
+    /* ---- Chart screenshot ---- */
+    let chartBottom = 24;
+    if (sig.chartImage) {
+      try {
+        const chartW = pageW - margin * 2;
+        const chartH = (pageH - 70);
+        doc.addImage(sig.chartImage, "PNG", margin, 22, chartW, chartH);
+        chartBottom = 22 + chartH + 4;
+      } catch (e) {
+        doc.setFontSize(9);
+        doc.setTextColor(150, 150, 150);
+        doc.text("(Chart screenshot not available)", margin, 32);
+        chartBottom = 38;
+      }
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(150, 150, 150);
+      doc.text("(No chart captured for this signal)", margin, 32);
+      chartBottom = 38;
+    }
+
+    /* ---- Trade details table ---- */
+    const detailY = Math.min(chartBottom, pageH - 40);
+    doc.setFillColor(30, 41, 59);
+    doc.rect(margin, detailY, pageW - margin * 2, 30, "F");
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    const fields = [
+      ["Time", sig.time || "--"],
+      ["Symbol", sig.symbol || "--"],
+      ["Dir", sig.dir || "--"],
+      ["Entry", sig.entry ?? "--"],
+      ["SL", sig.sl ?? "--"],
+      ["TP", sig.tp ?? "--"],
+      ["R:R", sig.rr ?? "--"],
+      ["Result", sig.result || "--"],
+      ["Confluence", sig.confluenceScore ?? "--"],
+      ["Pattern", sig.confirmPattern || "--"]
+    ];
+
+    const colW = (pageW - margin * 2) / fields.length;
+    fields.forEach(([label, val], i) => {
+      const x = margin + i * colW + 2;
+      doc.setTextColor(148, 163, 184);
+      doc.text(label, x, detailY + 8);
+      doc.setFont("helvetica", "normal");
+      const resultColor = String(val) === "WIN" ? [34, 197, 94] : String(val) === "LOSS" ? [239, 68, 68] : [255, 255, 255];
+      doc.setTextColor(...resultColor);
+      doc.text(String(val), x, detailY + 15);
+      doc.setFont("helvetica", "bold");
+    });
+
+    /* Second row of details */
+    const row2Fields = [
+      ["EMA", sig.emaAligned ?? "--"],
+      ["HTF", sig.htfTrend || "--"],
+      ["Strength", sig.breakoutStrength || "--"],
+      ["RSI", sig.rsiAtRetest ?? "--"],
+      ["Vol Spike", sig.volumeSpike ?? "--"],
+      ["Session", sig.session || "--"],
+      ["Fib", sig.fibLevel || "--"],
+      ["S/R Conf", sig.srConfluence ?? "--"],
+      ["Partial TP", sig.partialTpHit ?? "--"],
+      ["Trail SL", sig.trailingSL ?? "--"]
+    ];
+    row2Fields.forEach(([label, val], i) => {
+      const x = margin + i * colW + 2;
+      doc.setTextColor(148, 163, 184);
+      doc.text(label, x, detailY + 22);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(255, 255, 255);
+      doc.text(String(val), x, detailY + 28);
+      doc.setFont("helvetica", "bold");
+    });
+  });
+
+  doc.save(`indicator_signals_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
 /* ================= THEME ================= */
 function toggleTheme() {
   currentTheme = currentTheme === "dark" ? "light" : "dark";
@@ -1103,6 +1215,7 @@ function initKeyboardShortcuts() {
     if (e.altKey && e.key === "d") { e.preventDefault(); disconnect(); }
     if (e.altKey && e.key === "t") { e.preventDefault(); toggleTheme(); }
     if (e.altKey && e.key === "e") { e.preventDefault(); exportSignalsCSV(); }
+    if (e.altKey && e.key === "p") { e.preventDefault(); exportSignalsPDF(); }
     if (e.altKey && e.key === "n") {
       e.preventDefault();
       notificationsEnabled = !notificationsEnabled;
@@ -3445,6 +3558,10 @@ function recordSignal(confirmPattern) {
     fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null
   };
   signalHistory.push(signal);
+  /* Capture chart screenshot as data URL for PDF export */
+  try {
+    if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
+  } catch (e) { /* canvas tainted or unavailable */ }
   monitoringTrade = true;
   persistSignalHistory();
   updateStatsUI();
@@ -4211,6 +4328,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Tool buttons */
   if (UI.exportBtn) UI.exportBtn.addEventListener("click", exportSignalsCSV);
+  UI.exportPdfBtn = document.getElementById("exportPdfBtn");
+  if (UI.exportPdfBtn) UI.exportPdfBtn.addEventListener("click", exportSignalsPDF);
   if (UI.themeToggleBtn) UI.themeToggleBtn.addEventListener("click", toggleTheme);
   if (UI.soundToggleBtn) {
     UI.soundToggleBtn.textContent = soundEnabled ? "🔊 Sound ON" : "🔇 Sound OFF";

@@ -386,7 +386,8 @@
           <section class="dashboard tools-panel">
             <h3 class="dash-title">TOOLS</h3>
             <div class="tools-row">
-              <button id="exportJournalBtn" type="button" class="tool-btn">📥 Export Journal</button>
+              <button id="exportJournalBtn" type="button" class="tool-btn">📥 Export CSV</button>
+              <button id="exportPdfBtn" type="button" class="tool-btn">📄 Export PDF</button>
               <button id="themeToggleBtn" type="button" class="tool-btn">☀️ Light</button>
             </div>
             <div class="tools-row">
@@ -394,7 +395,7 @@
               <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
             </div>
             <div class="shortcut-hints">
-              <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export | Alt+N Notifications</small>
+              <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export CSV | Alt+P Export PDF | Alt+N Notifications</small>
             </div>
           </section>
 
@@ -411,6 +412,7 @@
     </div>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
   <!-- Your refactored script -->
   <script src="bot.js"></script>
 
