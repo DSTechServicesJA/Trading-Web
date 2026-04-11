@@ -86,10 +86,7 @@ const PIN_BAR_WICK_DOMINANCE = 1.5;
 /* Morning/Evening star: max body-to-range ratio for the middle "star" candle */
 const STAR_BODY_RATIO = 0.35;
 
-/* Piercing Line / Dark Cloud Cover: c2 must close past midpoint of c1 body */
-const PIERCING_MIN_PENETRATION = 0.5;
-
-/* Tweezers: matching highs/lows tolerance as fraction of ATR (or range) */
+/* Tweezers: matching highs/lows tolerance as fraction of price */
 const TWEEZERS_TOLERANCE_PCT = 0.001;  /* 0.1% of price */
 
 /* S/R confluence: ATR multiplier for tolerance, and fallback price percentage */
@@ -2691,7 +2688,8 @@ function isPiercingLine(prev, curr) {
   const prevBody = prev.close - prev.open;
   const currBody = curr.close - curr.open;
   if (prevBody >= 0 || currBody <= 0) return false;  /* prev bearish, curr bullish */
-  const prevMid = prev.open + prevBody * PIERCING_MIN_PENETRATION;  /* midpoint of prev body */
+  const prevMid = (prev.open + prev.close) / 2;      /* midpoint of prev body */
+  /* curr opens below prev low, closes above midpoint but not above prev open (not engulfing) */
   return curr.open <= prev.low && curr.close >= prevMid && curr.close < prev.open;
 }
 
@@ -2705,7 +2703,8 @@ function isDarkCloudCover(prev, curr) {
   const prevBody = prev.close - prev.open;
   const currBody = curr.close - curr.open;
   if (prevBody <= 0 || currBody >= 0) return false;  /* prev bullish, curr bearish */
-  const prevMid = prev.close - prevBody * PIERCING_MIN_PENETRATION;  /* midpoint of prev body */
+  const prevMid = (prev.open + prev.close) / 2;      /* midpoint of prev body */
+  /* curr opens above prev high, closes below midpoint but not below prev open (not engulfing) */
   return curr.open >= prev.high && curr.close <= prevMid && curr.close > prev.open;
 }
 
