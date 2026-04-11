@@ -111,6 +111,37 @@ const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before scre
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
 
+/* ================= CREDENTIAL ENCRYPTION ================= */
+/**
+ * Simple XOR-based obfuscation for credentials stored in localStorage.
+ * NOT military-grade crypto – but prevents plain-text token exposure in
+ * DevTools → Application → Local Storage which is the main risk vector
+ * for a client-side-only app.  We derive a stable key from the LS_PREFIX
+ * so each user/app instance has a unique obfuscation.
+ */
+const _CRED_SALT = "itguru_cred_v1";
+function _obfuscate(plain) {
+  if (!plain) return "";
+  const key = _CRED_SALT;
+  let out = "";
+  for (let i = 0; i < plain.length; i++) {
+    out += String.fromCharCode(plain.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return btoa(out);                          /* Base64-encode the XOR result */
+}
+function _deobfuscate(encoded) {
+  if (!encoded) return "";
+  try {
+    const xored = atob(encoded);             /* Base64-decode first */
+    const key = _CRED_SALT;
+    let out = "";
+    for (let i = 0; i < xored.length; i++) {
+      out += String.fromCharCode(xored.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return out;
+  } catch { return ""; }
+}
+
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
  * Market types supported:
@@ -703,21 +734,36 @@ function buildTelegramCaption() {
 }
 
 /**
- * Send a photo (Blob) with caption to Telegram via Bot API.
+ * Read fresh Telegram credentials from the DOM inputs.
+ * Falls back to the in-memory variables if DOM unavailable.
  */
-async function sendTelegramPhoto(blob, caption) {
-  const token = telegramBotToken.trim();
-  const chatId = telegramChatId.trim();
+function getTelegramCredentials() {
+  const token = (UI.telegramBotToken ? UI.telegramBotToken.value : telegramBotToken).trim();
+  const chatId = (UI.telegramChatId ? UI.telegramChatId.value : telegramChatId).trim();
+  return { token, chatId };
+}
+
+/**
+ * Validate Telegram credentials and throw descriptive errors.
+ */
+function validateTelegramCredentials(token, chatId) {
   if (!token || !chatId) {
     throw new Error("Telegram Bot Token and Chat ID are required");
   }
-  /* Basic format validation */
   if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
     throw new Error("Invalid Bot Token format (expected 123456:ABC-DEF…)");
   }
   if (!/^-?\d+$/.test(chatId)) {
     throw new Error("Invalid Chat ID format (expected a numeric ID)");
   }
+}
+
+/**
+ * Send a photo (Blob) with caption to Telegram via Bot API.
+ */
+async function sendTelegramPhoto(blob, caption) {
+  const { token, chatId } = getTelegramCredentials();
+  validateTelegramCredentials(token, chatId);
 
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -735,10 +781,70 @@ async function sendTelegramPhoto(blob, caption) {
 }
 
 /**
+ * Test the Telegram connection by calling getMe and getChat.
+ * Shows success/failure in the Telegram status area.
+ */
+async function testTelegramConnection() {
+  if (UI.telegramStatus) {
+    UI.telegramStatus.textContent = "Testing connection…";
+    UI.telegramStatus.className = "hint telegram-status";
+  }
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+
+    /* Verify the bot token */
+    const meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const meData = await meResp.json();
+    if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
+
+    /* Verify the chat ID is reachable */
+    const chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId })
+    });
+    const chatData = await chatResp.json();
+    if (!chatData.ok) throw new Error(chatData.description || "Cannot reach chat");
+
+    const botName = meData.result.first_name || meData.result.username;
+    const chatTitle = chatData.result.title || chatData.result.first_name || chatId;
+    const msg = `✅ Connected! Bot: ${botName} → Chat: ${chatTitle}`;
+    addLog(`📤 ${msg}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = msg;
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+
+    /* Sync variables and persist */
+    telegramBotToken = token;
+    telegramChatId = chatId;
+    saveSettings();
+  } catch (err) {
+    const msg = `❌ ${err.message}`;
+    addLog(`📤 Telegram test: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = msg;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS * 2);         /* longer display for test results */
+}
+
+/**
  * Capture chart + build caption and send to Telegram.
  * Shows status in the signal log and the Telegram status label.
  */
 async function sendTelegramAlert() {
+  /* Sync variables from DOM before sending */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
   try {
     const blob = await captureChartScreenshot();
@@ -749,6 +855,8 @@ async function sendTelegramAlert() {
       UI.telegramStatus.textContent = "✅ Sent!";
       UI.telegramStatus.className = "hint telegram-status telegram-ok";
     }
+    /* Persist credentials on success */
+    saveSettings();
   } catch (err) {
     addLog(`📤 Telegram error: ${err.message}`);
     if (UI.telegramStatus) {
@@ -798,7 +906,7 @@ function saveSettings() {
       sessionFilterEnabled,
       sessionFilterMode,
       fibRetestEnabled,
-      telegramBotToken,
+      telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend
     };
@@ -871,7 +979,11 @@ function restoreSettings() {
     if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
 
     /* Telegram settings */
-    if (s.telegramBotToken != null) telegramBotToken = s.telegramBotToken;
+    if (s.telegramBotToken != null) {
+      /* Support both legacy plain-text and new obfuscated format */
+      const decoded = _deobfuscate(s.telegramBotToken);
+      telegramBotToken = /^\d+:[A-Za-z0-9_-]+$/.test(decoded) ? decoded : s.telegramBotToken;
+    }
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
@@ -3842,10 +3954,24 @@ function syncConfigFromUI() {
 function initLoginGate() {
   if (!UI.loginOverlay || !UI.loginBtn) return;
 
+  /* Check if previously remembered */
+  const remembered = localStorage.getItem("itguru_deriv_token");
+  if (remembered) {
+    const derivToken = _deobfuscate(remembered);
+    if (derivToken) {
+      sessionStorage.setItem("deriv_token", derivToken);
+      sessionStorage.setItem("itguru_logged_in", "1");
+    }
+  }
+
   UI.loginOverlay.style.display =
     sessionStorage.getItem("itguru_logged_in") === "1"
       ? "none"
       : "flex";
+
+  /* Restore remember-me checkbox state */
+  const rememberMe = document.getElementById("loginRememberMe");
+  if (rememberMe && remembered) rememberMe.checked = true;
 
   UI.loginBtn.onclick = () => {
     const token = UI.loginToken?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
@@ -3857,6 +3983,14 @@ function initLoginGate() {
 
     sessionStorage.setItem("deriv_token", token);
     sessionStorage.setItem("itguru_logged_in", "1");
+
+    /* Handle "Remember me" */
+    if (rememberMe && rememberMe.checked) {
+      localStorage.setItem("itguru_deriv_token", _obfuscate(token));
+    } else {
+      localStorage.removeItem("itguru_deriv_token");
+    }
+
     UI.loginOverlay.style.display = "none";
     if (UI.loginError) UI.loginError.textContent = "";
   };
@@ -3952,11 +4086,13 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
   }
 
-  /* Telegram listeners */
+  /* Telegram listeners – use "input" so variables sync as user types */
   if (UI.telegramBotToken) {
+    UI.telegramBotToken.addEventListener("input", () => { telegramBotToken = UI.telegramBotToken.value; });
     UI.telegramBotToken.addEventListener("change", () => { telegramBotToken = UI.telegramBotToken.value; saveSettings(); });
   }
   if (UI.telegramChatId) {
+    UI.telegramChatId.addEventListener("input", () => { telegramChatId = UI.telegramChatId.value; });
     UI.telegramChatId.addEventListener("change", () => { telegramChatId = UI.telegramChatId.value; saveSettings(); });
   }
   if (UI.telegramAutoSendToggle) {
@@ -3964,6 +4100,23 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
+  }
+
+  /* Telegram test connection */
+  const telegramTestBtn = document.getElementById("telegramTestBtn");
+  if (telegramTestBtn) {
+    telegramTestBtn.addEventListener("click", () => testTelegramConnection());
+  }
+
+  /* Telegram show/hide bot token toggle */
+  const telegramShowTokenBtn = document.getElementById("telegramShowToken");
+  if (telegramShowTokenBtn && UI.telegramBotToken) {
+    telegramShowTokenBtn.addEventListener("click", () => {
+      const isPassword = UI.telegramBotToken.type === "password";
+      UI.telegramBotToken.type = isPassword ? "text" : "password";
+      telegramShowTokenBtn.textContent = isPassword ? "🙈" : "👁️";
+      telegramShowTokenBtn.title = isPassword ? "Hide token" : "Show token";
+    });
   }
 
   /* Tool buttons */

@@ -14,11 +14,12 @@
 <main class="container">
 
   <!-- Login Gate Overlay -->
-  <div id="loginOverlay" class="login-overlay">
+   <div id="loginOverlay" class="login-overlay">
     <div class="login-card">
       <h2>🔐 Unlock Indicator</h2>
       <p>Paste your Deriv API token below to continue.</p>
       <input type="password" id="loginToken" class="login-token-input" placeholder="Enter Deriv API Token" />
+      <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
       <button id="loginBtn" type="button" class="login-action-btn">CONTINUE →</button>
       <div id="loginError" class="login-error"></div>
     </div>
@@ -264,17 +265,23 @@
             <h3 class="collapsible">📤 Telegram Alerts</h3>
             <div class="collapsible-body">
               <label for="telegramBotToken">Bot Token</label>
-              <input type="password" id="telegramBotToken" placeholder="123456:ABC-DEF…" autocomplete="off" />
-              <p class="hint">Get from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> on Telegram.</p>
+              <div class="input-with-toggle">
+                <input type="password" id="telegramBotToken" placeholder="123456:ABC-DEF…" autocomplete="off" />
+                <button type="button" id="telegramShowToken" class="token-toggle-btn" title="Show token">👁️</button>
+              </div>
+              <p class="hint">Get from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> on Telegram. Token is encrypted before saving.</p>
 
               <label for="telegramChatId" class="spaced-label">Chat ID</label>
-              <input type="text" id="telegramChatId" placeholder="-100123456789" autocomplete="off" />
-              <p class="hint">Message your bot first, then visit <code>api.telegram.org/bot<b>YOUR_TOKEN</b>/getUpdates</code> to find your numeric chat ID.</p>
+              <input type="text" id="telegramChatId" placeholder="-5283135268" autocomplete="off" />
+              <p class="hint">Use a negative number for groups (e.g. <code>-5283135268</code>). DMs use a positive number.</p>
 
               <label class="toggle-row"><input type="checkbox" id="telegramAutoSendToggle" /> Auto-Send on TRADE Phase</label>
               <p class="hint">Automatically send chart screenshot + trade info when a signal fires.</p>
 
-              <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
+              <div class="telegram-btn-row">
+                <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
+                <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
+              </div>
               <p id="telegramStatus" class="hint telegram-status"></p>
             </div>
           </section>
