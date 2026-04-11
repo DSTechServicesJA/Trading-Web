@@ -259,6 +259,26 @@
             </div>
           </section>
 
+          <!-- Telegram Integration -->
+          <section class="box">
+            <h3 class="collapsible">📤 Telegram Alerts</h3>
+            <div class="collapsible-body">
+              <label for="telegramBotToken">Bot Token</label>
+              <input type="password" id="telegramBotToken" placeholder="123456:ABC-DEF…" autocomplete="off" />
+              <p class="hint">Get from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> on Telegram.</p>
+
+              <label for="telegramChatId" class="spaced-label">Chat ID</label>
+              <input type="text" id="telegramChatId" placeholder="-100123456789" autocomplete="off" />
+              <p class="hint">Visit <code>api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> after messaging your bot.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramAutoSendToggle" /> Auto-Send on TRADE Phase</label>
+              <p class="hint">Automatically send chart screenshot + trade info when a signal fires.</p>
+
+              <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
+              <p id="telegramStatus" class="hint telegram-status"></p>
+            </div>
+          </section>
+
         </div><!-- /tab-settings -->
 
         <!-- ===== TAB: STATE ===== -->

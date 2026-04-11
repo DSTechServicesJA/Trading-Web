@@ -1259,3 +1259,32 @@ body.light-theme .bar-btn-tool {
   background: rgba(99, 102, 241, 0.04);
   border-color: rgba(99, 102, 241, 0.12);
 }
+
+/* ---- Telegram Section ---- */
+.telegram-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-sm);
+  padding: 8px 18px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.telegram-send-btn:hover {
+  background: var(--primary-soft);
+  box-shadow: 0 0 12px var(--primary-glow);
+}
+.telegram-status {
+  min-height: 18px;
+  margin-top: var(--space-xs);
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.telegram-ok  { color: var(--success) !important; }
+.telegram-err { color: var(--danger)  !important; }
