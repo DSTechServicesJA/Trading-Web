@@ -271,6 +271,21 @@
               <label class="toggle-row"><input type="checkbox" id="fibRetestToggle" /> Fibonacci at Retest</label>
               <p class="hint">Check if retest level aligns with a Fibonacci level (23.6%–78.6%).</p>
 
+              <hr class="param-divider" />
+              <p class="param-group-title">GainzAlgo V2 Filters</p>
+
+              <label class="toggle-row"><input type="checkbox" id="macdFilterToggle" /> MACD Momentum</label>
+              <p class="hint">Require MACD histogram to align with breakout direction (12/26/9).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="bbSqueezeFilterToggle" /> BB Squeeze Detect</label>
+              <p class="hint">Bollinger Band squeeze detection — flags low-volatility compression before breakout.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="adxFilterToggle" /> ADX Trend Filter</label>
+              <p class="hint">Block signals when ADX &lt; 20 (ranging market). Only trade trending conditions.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="stochFilterToggle" /> Stochastic Filter</label>
+              <p class="hint">Confirm momentum with Stochastic (14/3/3) — avoid overbought buys / oversold sells.</p>
+
             </div>
           </section>
 
@@ -408,6 +423,35 @@
             <div class="side-row">
               <span>Fib Level</span>
               <span id="fibRetestDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>MACD Hist</span>
+              <span id="macdDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>BB Squeeze</span>
+              <span id="bbSqueezeDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>ADX(14)</span>
+              <span id="adxDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Stoch %K</span>
+              <span id="stochDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Volatility</span>
+              <span id="volatilityRegime" class="env-label">--</span>
+            </div>
+
+            <!-- Signal Strength Gauge -->
+            <div class="side-row">
+              <span>Signal Strength</span>
+              <span id="signalStrengthLabel" class="env-label">--</span>
+            </div>
+            <div class="gauge-bar">
+              <div id="signalStrengthGauge" class="gauge-fill"></div>
             </div>
 
             <hr class="param-divider" />
