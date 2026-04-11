@@ -310,17 +310,28 @@ function fmt(v, d) {
 }
 
 /**
- * Returns the recommended order type based on the current trade context.
- * - Breakout trade (no retest yet): BUY STOP / SELL STOP
- * - Pullback trade (retest detected): BUY LIMIT / SELL LIMIT
- * - No breakout yet: null
+ * Returns the recommended MT5 order type based on entry price vs current price.
+ *
+ * MT5 pending-order rules:
+ *   BUY  STOP  → entry ABOVE current price
+ *   BUY  LIMIT → entry BELOW  current price
+ *   SELL STOP  → entry BELOW  current price
+ *   SELL LIMIT → entry ABOVE  current price
+ *
+ * Returns null when there is no breakout or no price data.
  */
 function getRecommendedOrderType() {
   if (!breakout) return null;
-  if (!retestInfo) {
-    return breakout.dir === "BULL" ? "BUY STOP" : "SELL STOP";
+  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+  if (currentPrice == null) return null;
+
+  /* Use trade entry if available, otherwise fall back to breakout level */
+  const entryLevel = trade ? trade.entry : breakout.level;
+
+  if (breakout.dir === "BULL") {
+    return entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
   }
-  return breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT";
+  return entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
 }
 
 function addLog(msg) {
@@ -1704,12 +1715,35 @@ function processLatestCandle() {
 
   if (phase === "WAITING" || phase === "RANGE") {
     buildOpeningRange();
+    /* If still in WAITING/RANGE, nothing more to do */
+    if (phase === "WAITING" || phase === "RANGE") {
+      updateStateUI();
+      return;
+    }
+    /* Range just completed → process all post-range candles so we catch
+       breakouts (and subsequent phases) that formed while we were in RANGE. */
+    if (openingRange) {
+      for (let i = openingRange.endIdx + 1; i < candles.length; i++) {
+        processCandle(i);
+        if (trade) break;
+      }
+    }
     updateStateUI();
     return;
   }
 
   const idx = candles.length - 1;
-  processCandle(idx);
+
+  /* Allow multiple phase transitions on the same candle (e.g. retest candle
+     that is also indecision).  Cap the loop to avoid infinite spins. */
+  let prevPhase = phase;
+  const MAX_ADVANCES = 5;
+  for (let attempt = 0; attempt < MAX_ADVANCES; attempt++) {
+    processCandle(idx);
+    if (phase === prevPhase || phase === "TRADE") break;   /* no further advance */
+    prevPhase = phase;
+  }
+
   updateStateUI();
 }
 
@@ -1791,7 +1825,7 @@ function processCandle(idx) {
       breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
-      addLog("Next action: BUY STOP — ride the breakout momentum");
+      addLog(`Next action: ${getRecommendedOrderType() || "BUY"} — ride the breakout momentum`);
     } else if (c.close < openingRange.low) {
       /* Apply EMA filter */
       if (!isEmaAligned("BEAR")) {
@@ -1818,7 +1852,7 @@ function processCandle(idx) {
       breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
-      addLog("Next action: SELL STOP — ride the breakout momentum");
+      addLog(`Next action: ${getRecommendedOrderType() || "SELL"} — ride the breakout momentum`);
     }
     return;
   }
@@ -1859,11 +1893,7 @@ function processCandle(idx) {
       if (fibResult) {
         addLog(`✅ Fibonacci confluence: retest near ${(fibResult.ratio * 100).toFixed(1)}% level`);
       }
-      if (breakout.dir === "BULL") {
-        addLog("Pullback trade: BUY LIMIT at retest level");
-      } else {
-        addLog("Pullback trade: SELL LIMIT at retest level");
-      }
+      addLog(`Pullback trade: ${getRecommendedOrderType() || (breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT")} at retest level`);
     }
     return;
   }
