@@ -42,6 +42,10 @@
      - Volume spike on breakout (filters weak/fake breakouts)
      - Session filter (London/NY/Asian/Overlap)
      - Fibonacci at retest (S/R confluence from fib levels)
+     - Piercing line / dark cloud cover confirmation (from MD)
+     - Dragonfly / gravestone doji detection (from MD)
+     - Tweezers tops & bottoms confirmation (from MD)
+     - Reset session button (clears all stats/signals/log)
    ========================================================= */
 
 "use strict";
@@ -81,6 +85,12 @@ const PIN_BAR_WICK_DOMINANCE = 1.5;
 
 /* Morning/Evening star: max body-to-range ratio for the middle "star" candle */
 const STAR_BODY_RATIO = 0.35;
+
+/* Piercing Line / Dark Cloud Cover: c2 must close past midpoint of c1 body */
+const PIERCING_MIN_PENETRATION = 0.5;
+
+/* Tweezers: matching highs/lows tolerance as fraction of ATR (or range) */
+const TWEEZERS_TOLERANCE_PCT = 0.001;  /* 0.1% of price */
 
 /* S/R confluence: ATR multiplier for tolerance, and fallback price percentage */
 const SR_CONFLUENCE_ATR_MULT = 0.5;
@@ -423,6 +433,7 @@ function initUI() {
   UI.rewardInput    = document.getElementById("rewardInput");
   UI.connectBtn     = document.getElementById("connectBtn");
   UI.disconnectBtn  = document.getElementById("disconnectBtn");
+  UI.resetSessionBtn = document.getElementById("resetSessionBtn");
   UI.wsStatus       = document.getElementById("wsStatus");
   UI.candleCount    = document.getElementById("candleCount");
   UI.livePrice      = document.getElementById("livePrice");
@@ -1379,6 +1390,7 @@ function initKeyboardShortcuts() {
     if (e.altKey && e.key === "t") { e.preventDefault(); toggleTheme(); }
     if (e.altKey && e.key === "e") { e.preventDefault(); exportSignalsCSV(); }
     if (e.altKey && e.key === "p") { e.preventDefault(); exportSignalsPDF(); }
+    if (e.altKey && e.key === "r") { e.preventDefault(); if (confirm("Reset session? This clears all signals, stats, and log.")) resetSession(); }
     if (e.altKey && e.key === "n") {
       e.preventDefault();
       notificationsEnabled = !notificationsEnabled;
@@ -1820,6 +1832,40 @@ function resetIndicator() {
   partialTpHit = false;
   setPhase("WAITING");
   updateStateUI();
+}
+
+/**
+ * Full session reset: clears all indicator state, signal history, stats,
+ * signal log, and persisted session data. Keeps settings/filters intact.
+ * Use when the user wants to start fresh without changing symbol/timeframe.
+ */
+function resetSession() {
+  /* Reset core indicator state */
+  resetIndicator();
+
+  /* Clear signal history & stats */
+  signalHistory = [];
+  signalWins = 0;
+  signalLosses = 0;
+  updateStatsUI();
+
+  /* Clear signal log UI */
+  if (UI.signalLog) UI.signalLog.innerHTML = "";
+
+  /* Clear status bar win rate */
+  const statusBarWR = document.getElementById("statusBarWinRate");
+  if (statusBarWR) statusBarWR.textContent = "0%";
+
+  /* Clear persisted session data (keep settings) */
+  try {
+    localStorage.removeItem(LS_PREFIX + "signalLog");
+    localStorage.removeItem(LS_PREFIX + "signalHistory");
+  } catch (e) { /* storage not available */ }
+
+  /* Redraw chart (cleared state) */
+  drawChart();
+
+  addLog("Session reset — all stats and signals cleared.");
 }
 
 function updateStateUI() {
@@ -2634,6 +2680,88 @@ function isEveningStar(c1, c2, c3) {
   return c3.close <= c1MidBody;
 }
 
+/* ================= PIERCING LINE / DARK CLOUD COVER ================= */
+/**
+ * Piercing Line (bullish): 2-candle reversal at bottom.
+ *   c1 = bearish, c2 = bullish opening below c1 low, closing above midpoint of c1 body.
+ * From FOREX_MILLIONAIRE_365_DAYS: Listed among the 7 powerful reversal patterns.
+ */
+function isPiercingLine(prev, curr) {
+  if (!prev || !curr) return false;
+  const prevBody = prev.close - prev.open;
+  const currBody = curr.close - curr.open;
+  if (prevBody >= 0 || currBody <= 0) return false;  /* prev bearish, curr bullish */
+  const prevMid = prev.open + prevBody * PIERCING_MIN_PENETRATION;  /* midpoint of prev body */
+  return curr.open <= prev.low && curr.close >= prevMid && curr.close < prev.open;
+}
+
+/**
+ * Dark Cloud Cover (bearish): 2-candle reversal at top.
+ *   c1 = bullish, c2 = bearish opening above c1 high, closing below midpoint of c1 body.
+ * From FOREX_MILLIONAIRE_365_DAYS: Listed among the 7 powerful reversal patterns.
+ */
+function isDarkCloudCover(prev, curr) {
+  if (!prev || !curr) return false;
+  const prevBody = prev.close - prev.open;
+  const currBody = curr.close - curr.open;
+  if (prevBody <= 0 || currBody >= 0) return false;  /* prev bullish, curr bearish */
+  const prevMid = prev.close - prevBody * PIERCING_MIN_PENETRATION;  /* midpoint of prev body */
+  return curr.open >= prev.high && curr.close <= prevMid && curr.close > prev.open;
+}
+
+/* ================= DRAGONFLY / GRAVESTONE DOJI ================= */
+/**
+ * Dragonfly Doji: long lower shadow, no upper shadow, open ≈ close ≈ high.
+ * Bullish reversal at bottom of downtrend.
+ * From FOREX_MILLIONAIRE_365_DAYS: "Sellers pushed down, buyers pushed back up."
+ */
+function isDragonflyDoji(c) {
+  if (!c) return false;
+  const range = c.high - c.low;
+  if (range === 0) return false;
+  const body = Math.abs(c.close - c.open);
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  return (body / range < DOJI_BODY_RATIO) && (lowerWick / range > 0.6) && (upperWick / range < 0.1);
+}
+
+/**
+ * Gravestone Doji: long upper shadow, no lower shadow, open ≈ close ≈ low.
+ * Bearish reversal at top of uptrend.
+ * From FOREX_MILLIONAIRE_365_DAYS: "Buyers pushed up, sellers pushed back down."
+ */
+function isGravestoneDoji(c) {
+  if (!c) return false;
+  const range = c.high - c.low;
+  if (range === 0) return false;
+  const body = Math.abs(c.close - c.open);
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  return (body / range < DOJI_BODY_RATIO) && (upperWick / range > 0.6) && (lowerWick / range < 0.1);
+}
+
+/* ================= TWEEZERS TOPS & BOTTOMS ================= */
+/**
+ * Tweezers: Two candles with matching highs (tops) or matching lows (bottoms).
+ * From FOREX_MILLIONAIRE_365_DAYS: "Market tested level twice and was rejected."
+ *
+ * Returns "top" | "bottom" | null.
+ */
+function isTweezers(prev, curr) {
+  if (!prev || !curr) return null;
+  const tolerance = Math.max(prev.high, curr.high) * TWEEZERS_TOLERANCE_PCT;
+
+  /* Tweezers Top: matching highs, prev bullish + curr bearish */
+  if (Math.abs(prev.high - curr.high) <= tolerance) {
+    if (prev.close > prev.open && curr.close < curr.open) return "top";
+  }
+  /* Tweezers Bottom: matching lows, prev bearish + curr bullish */
+  if (Math.abs(prev.low - curr.low) <= tolerance) {
+    if (prev.close < prev.open && curr.close > curr.open) return "bottom";
+  }
+  return null;
+}
+
 /* ================= SPIKE REJECTION STRATEGY (Boom/Crash) ================= */
 /**
  * MD-file strategy: Pin Bar Rejection after Spike.
@@ -3001,17 +3129,30 @@ function computeConfluenceScore() {
   /* Factor 3: Strong breakout candle */
   if (breakout.strong) score++;
 
-  /* Factor 4: Pin bar or inside bar at retest */
+  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, or tweezers at retest */
   if (retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
-    if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc))) {
+    if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc)) ||
+        (breakout.dir === "BULL" && isDragonflyDoji(rc)) ||
+        (breakout.dir === "BEAR" && isGravestoneDoji(rc)) ||
+        (prevRC && isTweezers(prevRC, rc))) {
       score++;
     }
   }
 
   /* Factor 5: S/R confluence */
   if (hasSRConfluence(breakout.level)) score++;
+
+  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers) */
+  if (confirmInfo && confirmInfo.pattern) {
+    const p = confirmInfo.pattern;
+    if (p === "piercing line" || p === "dark cloud cover" ||
+        p === "tweezers bottom" || p === "tweezers top" ||
+        p === "dragonfly doji" || p === "gravestone doji") {
+      score++;
+    }
+  }
 
   /* Factor 6: RSI favorable at retest */
   if (rsiValues.length > 0) {
@@ -3451,6 +3592,40 @@ function processCandle(idx) {
       }
     }
 
+    /* Piercing Line / Dark Cloud Cover (2-candle reversal from MD files) */
+    if (!confirmed) {
+      if (breakout.dir === "BULL" && isPiercingLine(prev, c)) {
+        confirmed = true;
+        confirmPattern = "piercing line";
+      } else if (breakout.dir === "BEAR" && isDarkCloudCover(prev, c)) {
+        confirmed = true;
+        confirmPattern = "dark cloud cover";
+      }
+    }
+
+    /* Dragonfly / Gravestone Doji confirmation (directional doji from MD files) */
+    if (!confirmed) {
+      if (breakout.dir === "BULL" && isDragonflyDoji(c)) {
+        confirmed = true;
+        confirmPattern = "dragonfly doji";
+      } else if (breakout.dir === "BEAR" && isGravestoneDoji(c)) {
+        confirmed = true;
+        confirmPattern = "gravestone doji";
+      }
+    }
+
+    /* Tweezers Tops & Bottoms (double-test rejection from MD files) */
+    if (!confirmed) {
+      const tweezersType = isTweezers(prev, c);
+      if (tweezersType === "bottom" && breakout.dir === "BULL") {
+        confirmed = true;
+        confirmPattern = "tweezers bottom";
+      } else if (tweezersType === "top" && breakout.dir === "BEAR") {
+        confirmed = true;
+        confirmPattern = "tweezers top";
+      }
+    }
+
     /* ---- Market-type-specific confirmation patterns (from MD files) ---- */
     const mtype = getMarketType();
 
@@ -3567,6 +3742,9 @@ function isIndecision(c, idx) {
 
   /* Pin bar / hammer / shooting star at retest zone */
   if (breakout && isPinBar(c, breakout.dir)) return true;
+
+  /* Dragonfly / Gravestone doji (directional indecision from MD files) */
+  if (isDragonflyDoji(c) || isGravestoneDoji(c)) return true;
 
   /* Inside bar: current candle contained within previous candle */
   if (idx != null && idx > 0 && idx < candles.length) {
@@ -5071,6 +5249,11 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Button handlers */
   UI.connectBtn.addEventListener("click", connect);
   UI.disconnectBtn.addEventListener("click", disconnect);
+  if (UI.resetSessionBtn) {
+    UI.resetSessionBtn.addEventListener("click", () => {
+      if (confirm("Reset session? This clears all signals, stats, and log.")) resetSession();
+    });
+  }
 
   /* Debounced reconnect on symbol/timeframe change */
   UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); if (autoApplyRecommended) applyRecommendedSettings(); else updateRecommendedSettings(); debouncedReconnect(); });
