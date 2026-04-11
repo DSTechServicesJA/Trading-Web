@@ -106,6 +106,11 @@ const SESSION_ASIAN    = { start: 0, end: 9 };
 const FIB_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786];
 const FIB_TOLERANCE_ATR_MULT = 0.3;
 
+/* Telegram */
+const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
+const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
+const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
+
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
  * Market types supported:
@@ -556,7 +561,7 @@ function setPhase(newPhase) {
   /* Auto-send Telegram on TRADE phase */
   if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend) {
     /* Delay 500ms so drawChart() finishes rendering the trade on canvas */
-    setTimeout(() => sendTelegramAlert(), 500);
+    setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
   }
 }
 
@@ -636,7 +641,7 @@ function buildTelegramCaption() {
        : UI.symbolSelect.value)
     : "--";
   const gran = UI.granSelect ? UI.granSelect.value : "--";
-  const tfLabel = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" }[gran] || gran + "s";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
   const dir = breakout ? breakout.dir : "--";
   const orderType = getRecommendedOrderType() || "--";
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
@@ -706,6 +711,13 @@ async function sendTelegramPhoto(blob, caption) {
   if (!token || !chatId) {
     throw new Error("Telegram Bot Token and Chat ID are required");
   }
+  /* Basic format validation */
+  if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
+    throw new Error("Invalid Bot Token format (expected 123456:ABC-DEF…)");
+  }
+  if (!/^-?\d+$/.test(chatId)) {
+    throw new Error("Invalid Chat ID format (expected a numeric ID)");
+  }
 
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -750,7 +762,7 @@ async function sendTelegramAlert() {
       UI.telegramStatus.textContent = "";
       UI.telegramStatus.className = "hint telegram-status";
     }
-  }, 5000);
+  }, TELEGRAM_STATUS_CLEAR_MS);
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
