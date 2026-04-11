@@ -1722,6 +1722,298 @@ function isEveningStar(c1, c2, c3) {
   return c3.close <= c1MidBody;
 }
 
+/* ================= SPIKE REJECTION STRATEGY (Boom/Crash) ================= */
+/**
+ * MD-file strategy: Pin Bar Rejection after Spike.
+ * From FOREX_MILLIONAIRE_365_DAYS: "Longer tail = more powerful signal" and
+ * pin bars at key levels (S/R) are the highest-probability reversal signals.
+ *
+ * For Boom indices: after an upward spike, look for bearish pin bars
+ * (shooting stars) at the spike high → signals spike exhaustion / pullback.
+ * For Crash indices: after a downward spike, look for bullish pin bars
+ * (hammers) at the spike low → signals spike exhaustion / bounce.
+ *
+ * Returns { detected, type, dir } or null.
+ */
+function detectSpikeRejection(idx) {
+  const mtype = getMarketType();
+  if (mtype !== "boom" && mtype !== "crash") return null;
+  if (idx < 2 || idx >= candles.length) return null;
+
+  const prev = candles[idx - 1];
+  const curr = candles[idx];
+
+  /* Check if previous candle was a spike */
+  if (mtype === "boom" && isSpikeCandle(prev, "BULL")) {
+    /* After bullish spike, look for bearish pin bar (shooting star) = rejection */
+    if (isPinBar(curr, "BEAR")) {
+      return { detected: true, type: "spike_rejection_pinbar", dir: "BEAR",
+               desc: "Bearish pin bar after Boom spike — exhaustion signal" };
+    }
+    /* Or a bearish engulfing of the spike = power shift */
+    if (isBearishEngulfing(prev, curr)) {
+      return { detected: true, type: "spike_rejection_engulfing", dir: "BEAR",
+               desc: "Bearish engulfing after Boom spike — sellers taking control" };
+    }
+  }
+
+  if (mtype === "crash" && isSpikeCandle(prev, "BEAR")) {
+    /* After bearish spike, look for bullish pin bar (hammer) = rejection */
+    if (isPinBar(curr, "BULL")) {
+      return { detected: true, type: "spike_rejection_pinbar", dir: "BULL",
+               desc: "Bullish pin bar after Crash spike — exhaustion signal" };
+    }
+    /* Or a bullish engulfing of the spike = power shift */
+    if (isBullishEngulfing(prev, curr)) {
+      return { detected: true, type: "spike_rejection_engulfing", dir: "BULL",
+               desc: "Bullish engulfing after Crash spike — buyers taking control" };
+    }
+  }
+
+  return null;
+}
+
+/* ================= INSIDE BAR FALSE BREAKOUT (Boom/Crash) ================= */
+/**
+ * MD-file strategy: Inside Bar False Breakout.
+ * From FOREX_MILLIONAIRE_365_DAYS: "One of the most powerful price action strategies"
+ * and "Banks and institutions use stop-hunting strategies to create liquidity."
+ *
+ * Detects when price breaks out of an inside bar pattern then quickly reverses
+ * back inside the mother bar range — a trap/stop-hunt signal.
+ * Especially powerful on Boom/Crash where spikes create false breakouts.
+ *
+ * Returns { detected, dir, motherIdx } or null.
+ */
+function detectInsideBarFalseBreakout(idx) {
+  if (idx < 3 || idx >= candles.length) return null;
+
+  /* Look back up to 3 candles for an inside bar + false breakout sequence */
+  for (let i = idx - 2; i >= Math.max(0, idx - 4); i--) {
+    const mother = candles[i];
+    const child = candles[i + 1];
+    if (!isInsideBar(mother, child)) continue;
+
+    /* Check candles after the inside bar for false breakout + reversal */
+    for (let j = i + 2; j <= idx; j++) {
+      const breakoutCandle = candles[j];
+      /* Bullish false breakout: broke below mother.low then closed back inside */
+      if (breakoutCandle.low < mother.low && breakoutCandle.close > mother.low && breakoutCandle.close <= mother.high) {
+        return { detected: true, dir: "BULL", motherIdx: i,
+                 desc: "Inside bar false breakout (bear trap) — bullish reversal" };
+      }
+      /* Bearish false breakout: broke above mother.high then closed back inside */
+      if (breakoutCandle.high > mother.high && breakoutCandle.close < mother.high && breakoutCandle.close >= mother.low) {
+        return { detected: true, dir: "BEAR", motherIdx: i,
+                 desc: "Inside bar false breakout (bull trap) — bearish reversal" };
+      }
+    }
+  }
+  return null;
+}
+
+/* ================= SUPPLY/DEMAND ZONE DETECTION (Jump Indices) ================= */
+/**
+ * MD-file strategy: Supply & Demand Zones.
+ * From FOREX_MILLIONAIRE_365_DAYS: Quality S&D zones have
+ * "Quick, strong departure from zone" — exactly what Jump candles produce.
+ *
+ * Scans recent candles for zones where price departed rapidly (jump candle),
+ * then checks if current price has returned to that zone.
+ * Returns { zone, type } or null.
+ */
+const SD_ZONE_LOOKBACK = 30;
+const SD_ZONE_TOUCH_TOLERANCE = 0.5; /* ATR multiplier for zone proximity */
+
+function detectSupplyDemandZone(idx) {
+  if (idx < 2 || idx >= candles.length || atrValue <= 0) return null;
+  const currentPrice = candles[idx].close;
+  const tolerance = atrValue * SD_ZONE_TOUCH_TOLERANCE;
+  const lookbackStart = Math.max(0, idx - SD_ZONE_LOOKBACK);
+
+  for (let i = lookbackStart; i < idx - 1; i++) {
+    if (!isJumpCandle(i)) continue;
+    const jumpC = candles[i];
+    const body = jumpC.close - jumpC.open;
+
+    if (body > 0) {
+      /* Bullish jump → created a demand zone at the jump's low area */
+      const demandZoneTop = Math.min(jumpC.open, jumpC.close);
+      const demandZoneBot = jumpC.low;
+      if (currentPrice >= demandZoneBot - tolerance && currentPrice <= demandZoneTop + tolerance) {
+        return { zone: { top: demandZoneTop, bottom: demandZoneBot }, type: "demand",
+                 desc: "Price returning to demand zone from bullish jump — buy opportunity" };
+      }
+    } else if (body < 0) {
+      /* Bearish jump → created a supply zone at the jump's high area */
+      const supplyZoneBot = Math.max(jumpC.open, jumpC.close);
+      const supplyZoneTop = jumpC.high;
+      if (currentPrice >= supplyZoneBot - tolerance && currentPrice <= supplyZoneTop + tolerance) {
+        return { zone: { top: supplyZoneTop, bottom: supplyZoneBot }, type: "supply",
+                 desc: "Price returning to supply zone from bearish jump — sell opportunity" };
+      }
+    }
+  }
+  return null;
+}
+
+/* ================= MOMENTUM IMPULSE DETECTION (Jump Indices) ================= */
+/**
+ * MD-file strategy: Momentum / Impulsive Move.
+ * From FOREX_MILLIONAIRE_365_DAYS: "Best place to buy is at beginning of impulsive move."
+ *
+ * Detects the start of an impulsive move by looking for:
+ * 1. A jump/gap candle (the impulse trigger)
+ * 2. Followed by continuation in the same direction (momentum confirmation)
+ * Returns { dir, strength } or null.
+ */
+function detectMomentumImpulse(idx) {
+  if (idx < 3 || idx >= candles.length) return null;
+
+  /* Check if the previous 2-3 candles show impulse pattern */
+  for (let start = idx - 2; start >= Math.max(0, idx - 3); start--) {
+    if (!isJumpCandle(start)) continue;
+    const jumpDir = candles[start].close > candles[start].open ? "BULL" : "BEAR";
+
+    /* Check subsequent candles continue in the same direction */
+    let continuation = 0;
+    for (let j = start + 1; j <= idx; j++) {
+      const dir = candles[j].close > candles[j].open ? "BULL" : "BEAR";
+      if (dir === jumpDir) continuation++;
+    }
+
+    if (continuation >= 1) {
+      return { dir: jumpDir, strength: continuation,
+               desc: `Momentum impulse ${jumpDir} — ${continuation + 1} candles in same direction after jump` };
+    }
+  }
+  return null;
+}
+
+/* ================= TRENDLINE TOUCH (Step Index) ================= */
+/**
+ * MD-file strategy: Trendline Third-Touch Entry.
+ * From TRENDLINE_TRADING_STRATEGY: "You enter on point 3, 4, 5 after the pullback"
+ * and "Only wait for the third touch before considering trendline valid."
+ *
+ * For Step Index's orderly movement, we detect swing lows (uptrend) or
+ * swing highs (downtrend) that align on a trendline, and count touches.
+ * Returns { dir, touches, slope } or null when ≥ 3 touches found.
+ */
+const TRENDLINE_MIN_TOUCHES = 3;
+const TRENDLINE_TOLERANCE_ATR = 0.3;
+
+function detectTrendlineTouch(idx) {
+  if (idx < 10 || idx >= candles.length || atrValue <= 0) return null;
+  const tolerance = atrValue * TRENDLINE_TOLERANCE_ATR;
+  const lookback = Math.max(0, idx - 40);
+
+  /* Collect recent swing lows for uptrend trendline */
+  const swingLows = [];
+  for (let i = lookback + SWING_NEIGHBOR_BARS; i <= idx - SWING_NEIGHBOR_BARS; i++) {
+    if (isTrueSwingLow(i)) swingLows.push({ idx: i, price: candles[i].low });
+  }
+
+  /* Collect recent swing highs for downtrend trendline */
+  const swingHighs = [];
+  for (let i = lookback + SWING_NEIGHBOR_BARS; i <= idx - SWING_NEIGHBOR_BARS; i++) {
+    if (isTrueSwingHigh(i)) swingHighs.push({ idx: i, price: candles[i].high });
+  }
+
+  /* Check ascending trendline (connect swing lows) — bullish */
+  if (swingLows.length >= 2) {
+    const first = swingLows[0];
+    const last = swingLows[swingLows.length - 1];
+    if (last.idx !== first.idx) {
+      const slope = (last.price - first.price) / (last.idx - first.idx);
+      if (slope > 0) {
+        let touches = 0;
+        for (const sw of swingLows) {
+          const expected = first.price + slope * (sw.idx - first.idx);
+          if (Math.abs(sw.price - expected) <= tolerance) touches++;
+        }
+        /* Check if current candle is near the trendline */
+        const expectedNow = first.price + slope * (idx - first.idx);
+        const currentLow = candles[idx].low;
+        if (touches >= TRENDLINE_MIN_TOUCHES && Math.abs(currentLow - expectedNow) <= tolerance) {
+          return { dir: "BULL", touches, slope,
+                   desc: `Ascending trendline touch #${touches} — buy on pullback to support` };
+        }
+      }
+    }
+  }
+
+  /* Check descending trendline (connect swing highs) — bearish */
+  if (swingHighs.length >= 2) {
+    const first = swingHighs[0];
+    const last = swingHighs[swingHighs.length - 1];
+    if (last.idx !== first.idx) {
+      const slope = (last.price - first.price) / (last.idx - first.idx);
+      if (slope < 0) {
+        let touches = 0;
+        for (const sw of swingHighs) {
+          const expected = first.price + slope * (sw.idx - first.idx);
+          if (Math.abs(sw.price - expected) <= tolerance) touches++;
+        }
+        const expectedNow = first.price + slope * (idx - first.idx);
+        const currentHigh = candles[idx].high;
+        if (touches >= TRENDLINE_MIN_TOUCHES && Math.abs(currentHigh - expectedNow) <= tolerance) {
+          return { dir: "BEAR", touches, slope,
+                   desc: `Descending trendline touch #${touches} — sell on pullback to resistance` };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/* ================= DYNAMIC MA SUPPORT/RESISTANCE (Step Index) ================= */
+/**
+ * MD-file strategy: Moving Average (8 & 21 SMA) as Dynamic S/R.
+ * From FOREX_MILLIONAIRE_365_DAYS: MA acts as "dynamic support" (uptrend) or
+ * "dynamic resistance" (downtrend). "Very important factor of confluence."
+ *
+ * Checks if price is bouncing off EMA 8 or EMA 21.
+ * Returns { level, ema, dir } or null.
+ */
+function detectMABounce(idx) {
+  if (idx < 1 || idx >= candles.length) return null;
+  if (emaFast.length <= idx || emaSlow.length <= idx) return null;
+  const fast = emaFast[idx];
+  const slow = emaSlow[idx];
+  if (fast == null || slow == null) return null;
+
+  const c = candles[idx];
+  const tolerance = atrValue > 0 ? atrValue * 0.3 : (c.high - c.low) * 0.5;
+
+  /* In uptrend (fast > slow): look for price bouncing off EMA as support */
+  if (fast > slow) {
+    if (c.low <= fast + tolerance && c.close > fast) {
+      return { level: fast, ema: "EMA8", dir: "BULL",
+               desc: "Price bouncing off EMA 8 support — bullish continuation" };
+    }
+    if (c.low <= slow + tolerance && c.close > slow) {
+      return { level: slow, ema: "EMA21", dir: "BULL",
+               desc: "Price bouncing off EMA 21 support — bullish continuation" };
+    }
+  }
+
+  /* In downtrend (fast < slow): look for price rejected by EMA as resistance */
+  if (fast < slow) {
+    if (c.high >= fast - tolerance && c.close < fast) {
+      return { level: fast, ema: "EMA8", dir: "BEAR",
+               desc: "Price rejected at EMA 8 resistance — bearish continuation" };
+    }
+    if (c.high >= slow - tolerance && c.close < slow) {
+      return { level: slow, ema: "EMA21", dir: "BEAR",
+               desc: "Price rejected at EMA 21 resistance — bearish continuation" };
+    }
+  }
+
+  return null;
+}
+
 /* ================= S/R CONFLUENCE CHECK ================= */
 /**
  * Checks if the breakout level coincides with a recent swing high or swing low,
@@ -1768,7 +2060,7 @@ function isFalseBreakout(currentIdx) {
 
 /* ================= CONFLUENCE SCORE ================= */
 /**
- * Computes a quality score (0-9) for the current setup based on multiple factors:
+ * Computes a quality score (0-12) for the current setup based on multiple factors:
  *   +1 EMA 8/21 aligned with breakout direction
  *   +1 HTF EMA 100 aligned
  *   +1 Strong breakout candle (range+body vs ATR)
@@ -1778,6 +2070,9 @@ function isFalseBreakout(currentIdx) {
  *   +1 Volume spike on breakout candle
  *   +1 Within active trading session
  *   +1 Fibonacci confluence at retest level
+ *   +1 Market-type-specific signal (spike rejection / S&D zone / trendline / MA bounce)
+ *   +1 Preferred direction alignment (Boom=BULL, Crash=BEAR)
+ *   +1 Step run momentum or Jump impulse confirmation
  */
 function computeConfluenceScore() {
   if (!breakout) return 0;
@@ -1833,6 +2128,53 @@ function computeConfluenceScore() {
 
   /* Factor 9: Fibonacci confluence at retest level */
   if (hasFibConfluence(breakout.level)) score++;
+
+  /* Factor 10: Market-type-specific signal confluence */
+  const mtype = getMarketType();
+  const lastIdx = candles.length - 1;
+
+  if (mtype === "boom" || mtype === "crash") {
+    /* Spike rejection or inside bar false breakout at current position */
+    const spikeRej = detectSpikeRejection(lastIdx);
+    const ibFalse = detectInsideBarFalseBreakout(lastIdx);
+    if ((spikeRej && spikeRej.dir === breakout.dir) || (ibFalse && ibFalse.dir === breakout.dir)) {
+      score++;
+    }
+  } else if (mtype === "jump") {
+    const sdZone = detectSupplyDemandZone(lastIdx);
+    const impulse = detectMomentumImpulse(lastIdx);
+    if ((sdZone && ((sdZone.type === "demand" && breakout.dir === "BULL") ||
+                    (sdZone.type === "supply" && breakout.dir === "BEAR"))) ||
+        (impulse && impulse.dir === breakout.dir)) {
+      score++;
+    }
+  } else if (mtype === "step") {
+    const tlTouch = detectTrendlineTouch(lastIdx);
+    const maBounce = detectMABounce(lastIdx);
+    if ((tlTouch && tlTouch.dir === breakout.dir) || (maBounce && maBounce.dir === breakout.dir)) {
+      score++;
+    }
+  }
+
+  /* Factor 11: Preferred direction alignment for Boom/Crash */
+  const tuning = getMarketTuning();
+  if (tuning.preferredDir && tuning.preferredDir === breakout.dir) {
+    score++;
+  }
+
+  /* Factor 12: Step run momentum or Jump impulse confirmation */
+  if (mtype === "step") {
+    const run = getStepRunLength();
+    if ((breakout.dir === "BULL" && run >= STEP_RUN_THRESHOLD) ||
+        (breakout.dir === "BEAR" && run <= -STEP_RUN_THRESHOLD)) {
+      score++;
+    }
+  } else if (mtype === "jump") {
+    const impulse = detectMomentumImpulse(lastIdx);
+    if (impulse && impulse.dir === breakout.dir && impulse.strength >= 2) {
+      score++;
+    }
+  }
 
   return score;
 }
@@ -1955,13 +2297,87 @@ function buildOpeningRange() {
   }
 }
 
+/* ================= MARKET-TYPE LOGGING HELPERS ================= */
+/**
+ * Logs market-type-specific context when a breakout is detected.
+ * Provides traders with actionable insights based on the instrument type.
+ */
+function logMarketTypeContext(idx, dir) {
+  const mtype = getMarketType();
+  const tuning = getMarketTuning();
+
+  if (mtype === "boom") {
+    if (dir === "BULL") {
+      addLog(`📈 BOOM INDEX: Breakout aligned with spike direction — high probability`);
+    }
+    if (isSpikeCandle(candles[idx], dir)) {
+      addLog(`⚡ Spike candle detected — characteristic Boom upward spike`);
+    }
+  } else if (mtype === "crash") {
+    if (dir === "BEAR") {
+      addLog(`📉 CRASH INDEX: Breakout aligned with spike direction — high probability`);
+    }
+    if (isSpikeCandle(candles[idx], dir)) {
+      addLog(`⚡ Spike candle detected — characteristic Crash downward spike`);
+    }
+  } else if (mtype === "jump") {
+    if (isJumpCandle(idx)) {
+      addLog(`🦘 JUMP INDEX: Jump/gap candle detected — watch for momentum continuation`);
+    }
+    const sdZone = detectSupplyDemandZone(idx);
+    if (sdZone) {
+      addLog(`📍 ${sdZone.desc}`);
+    }
+  } else if (mtype === "step") {
+    const run = getStepRunLength();
+    if (Math.abs(run) >= STEP_RUN_THRESHOLD) {
+      addLog(`🪜 STEP INDEX: ${Math.abs(run)}-step momentum run ${run > 0 ? "UP" : "DOWN"}`);
+    }
+    const tlTouch = detectTrendlineTouch(idx);
+    if (tlTouch) {
+      addLog(`📐 ${tlTouch.desc}`);
+    }
+  }
+}
+
+/**
+ * Logs market-type-specific signals at retest for extra context.
+ */
+function logMarketTypeSignals(idx) {
+  const mtype = getMarketType();
+
+  if (mtype === "boom" || mtype === "crash") {
+    const spikeRej = detectSpikeRejection(idx);
+    if (spikeRej) addLog(`✅ ${spikeRej.desc}`);
+    const ibFalse = detectInsideBarFalseBreakout(idx);
+    if (ibFalse) addLog(`✅ ${ibFalse.desc}`);
+  } else if (mtype === "jump") {
+    const sdZone = detectSupplyDemandZone(idx);
+    if (sdZone) addLog(`✅ ${sdZone.desc}`);
+    const impulse = detectMomentumImpulse(idx);
+    if (impulse) addLog(`✅ ${impulse.desc}`);
+  } else if (mtype === "step") {
+    const maBounce = detectMABounce(idx);
+    if (maBounce) addLog(`✅ ${maBounce.desc}`);
+    const tlTouch = detectTrendlineTouch(idx);
+    if (tlTouch) addLog(`✅ ${tlTouch.desc}`);
+  }
+}
+
 function processCandle(idx) {
   if (!openingRange) return;
   const c = candles[idx];
+  const tuning = getMarketTuning();
 
   /* PHASE: looking for breakout */
   if (!breakout) {
+    /* Market-type direction filter: Boom prefers BULL, Crash prefers BEAR.
+       Counter-trend breakouts on spike markets are much less reliable. */
     if (c.close > openingRange.high) {
+      if (tuning.preferredDir === "BEAR") {
+        addLog(`Bullish breakout at #${idx} BLOCKED — Crash index prefers BEAR direction`);
+        return;
+      }
       /* Apply EMA filter */
       if (!isEmaAligned("BULL")) {
         addLog(`Bullish breakout at #${idx} BLOCKED by EMA filter (EMA8 < EMA21)`);
@@ -1988,8 +2404,14 @@ function processCandle(idx) {
       breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
+      /* Log market-type-specific context */
+      logMarketTypeContext(idx, "BULL");
       addLog(`Next action: ${getRecommendedOrderType() || "BUY"} — ride the breakout momentum`);
     } else if (c.close < openingRange.low) {
+      if (tuning.preferredDir === "BULL") {
+        addLog(`Bearish breakout at #${idx} BLOCKED — Boom index prefers BULL direction`);
+        return;
+      }
       /* Apply EMA filter */
       if (!isEmaAligned("BEAR")) {
         addLog(`Bearish breakout at #${idx} BLOCKED by EMA filter (EMA8 > EMA21)`);
@@ -2015,6 +2437,7 @@ function processCandle(idx) {
       breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
+      logMarketTypeContext(idx, "BEAR");
       addLog(`Next action: ${getRecommendedOrderType() || "SELL"} — ride the breakout momentum`);
     }
     return;
@@ -2056,6 +2479,8 @@ function processCandle(idx) {
       if (fibResult) {
         addLog(`✅ Fibonacci confluence: retest near ${(fibResult.ratio * 100).toFixed(1)}% level`);
       }
+      /* Log market-type-specific signals at retest */
+      logMarketTypeSignals(idx);
       addLog(`Pullback trade: ${getRecommendedOrderType() || (breakout.dir === "BULL" ? "BUY LIMIT" : "SELL LIMIT")} at retest level`);
     }
     return;
@@ -2081,7 +2506,7 @@ function processCandle(idx) {
     return;
   }
 
-  /* PHASE: looking for confirmation (engulfing / morning-evening star / inside bar breakout) */
+  /* PHASE: looking for confirmation (engulfing / morning-evening star / inside bar breakout / market-type patterns) */
   if (!confirmInfo) {
     if (idx <= indecisionInfo.candleIdx) return;
     const prev = candles[idx - 1];
@@ -2120,6 +2545,74 @@ function processCandle(idx) {
       }
     }
 
+    /* ---- Market-type-specific confirmation patterns (from MD files) ---- */
+    const mtype = getMarketType();
+
+    /* Boom/Crash: Spike rejection (pin bar or engulfing after spike) confirms reversal.
+       From FOREX_MILLIONAIRE_365_DAYS: Pin bar + key level = high probability. */
+    if (!confirmed && (mtype === "boom" || mtype === "crash")) {
+      const spikeRej = detectSpikeRejection(idx);
+      if (spikeRej && spikeRej.dir === breakout.dir) {
+        confirmed = true;
+        confirmPattern = spikeRej.type === "spike_rejection_pinbar"
+          ? "spike rejection pin bar" : "spike rejection engulfing";
+      }
+      /* Inside bar false breakout (stop-hunt trap) as confirmation */
+      if (!confirmed) {
+        const ibFalse = detectInsideBarFalseBreakout(idx);
+        if (ibFalse && ibFalse.dir === breakout.dir) {
+          confirmed = true;
+          confirmPattern = "inside bar false breakout (trap)";
+        }
+      }
+    }
+
+    /* Jump: Momentum impulse or S&D zone return as confirmation.
+       From FOREX_MILLIONAIRE_365_DAYS: "Best place to buy is at beginning of impulsive move." */
+    if (!confirmed && mtype === "jump") {
+      const impulse = detectMomentumImpulse(idx);
+      if (impulse && impulse.dir === breakout.dir) {
+        confirmed = true;
+        confirmPattern = "momentum impulse";
+      }
+      if (!confirmed) {
+        const sdZone = detectSupplyDemandZone(idx);
+        if (sdZone) {
+          if ((sdZone.type === "demand" && breakout.dir === "BULL") ||
+              (sdZone.type === "supply" && breakout.dir === "BEAR")) {
+            confirmed = true;
+            confirmPattern = sdZone.type + " zone return";
+          }
+        }
+      }
+    }
+
+    /* Step: Trendline touch or MA bounce as confirmation.
+       From TRENDLINE_TRADING_STRATEGY: "Enter on point 3, 4, 5 after pullback." */
+    if (!confirmed && mtype === "step") {
+      const tlTouch = detectTrendlineTouch(idx);
+      if (tlTouch && tlTouch.dir === breakout.dir) {
+        confirmed = true;
+        confirmPattern = `trendline touch #${tlTouch.touches}`;
+      }
+      if (!confirmed) {
+        const maBounce = detectMABounce(idx);
+        if (maBounce && maBounce.dir === breakout.dir) {
+          confirmed = true;
+          confirmPattern = `${maBounce.ema} bounce`;
+        }
+      }
+      /* Step run momentum confirmation */
+      if (!confirmed) {
+        const run = getStepRunLength();
+        if ((breakout.dir === "BULL" && run >= STEP_RUN_THRESHOLD) ||
+            (breakout.dir === "BEAR" && run <= -STEP_RUN_THRESHOLD)) {
+          confirmed = true;
+          confirmPattern = `step momentum run (${Math.abs(run)} steps)`;
+        }
+      }
+    }
+
     if (confirmed) {
       confirmInfo = { candleIdx: idx, pattern: confirmPattern };
       buildTrade(c, idx);
@@ -2128,7 +2621,7 @@ function processCandle(idx) {
         addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
         /* Log confluence score */
         confluenceScore = computeConfluenceScore();
-        addLog(`Confluence score: ${confluenceScore}/9`);
+        addLog(`Confluence score: ${confluenceScore}/12`);
         recordSignal(confirmPattern);
       }
     }
