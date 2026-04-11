@@ -616,12 +616,21 @@ function setPhase(newPhase) {
   /* Play alert on meaningful phase transitions */
   if (prevPhase !== newPhase && newPhase !== "WAITING") {
     playPhaseAlert(newPhase);
+    /* Send browser notification for focused panel or single mode */
     if (isFocusedOrSingle) sendPhaseNotification(newPhase);
+    /* Also send notification for non-focused panels reaching TRADE (actionable) */
+    if (!isFocusedOrSingle && newPhase === "TRADE") sendPhaseNotification(newPhase);
   }
-  /* Auto-send Telegram on TRADE phase */
-  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend && isFocusedOrSingle) {
-    /* Delay 500ms so drawChart() finishes rendering the trade on canvas */
-    setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+  /* Auto-send Telegram on TRADE phase — for ALL panels, not just focused */
+  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend) {
+    if (_multiPanelProcessing) {
+      /* Multi-panel: use panel-specific Telegram send (mini-chart + panel state) */
+      const panelSymbol = _multiPanelProcessing;
+      setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
+    } else {
+      /* Single-symbol mode: use main chart as before */
+      setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+    }
   }
 }
 
@@ -900,6 +909,148 @@ async function sendTelegramAlert() {
       UI.telegramStatus.className = "hint telegram-status";
     }
   }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Send Telegram alert for a specific multi-panel symbol.
+ * Activates the panel's state, captures its mini-chart screenshot,
+ * builds a caption using the panel's data, and sends to Telegram.
+ */
+async function sendPanelTelegramAlert(symbol) {
+  const p = multiPanels.get(symbol);
+  if (!p) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Build caption from panel state (without touching globals) */
+  const caption = buildPanelTelegramCaption(p);
+
+  /* Capture screenshot from the panel's mini-chart canvas */
+  let blob;
+  try {
+    blob = await capturePanelScreenshot(p);
+  } catch (err) {
+    addLog(`📤 [${symbol}] Telegram screenshot error: ${err.message}`);
+    return;
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
+  try {
+    await sendTelegramPhoto(blob, caption);
+    addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 [${symbol}] Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ ${getSymbolLabel(symbol)}: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  /* Clear status */
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Build Telegram caption from a panel's saved state (no globals needed).
+ */
+function buildPanelTelegramCaption(p) {
+  const symLabel = getSymbolLabel(p.symbol);
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const dir = p.breakout ? p.breakout.dir : "--";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+  /* Compute recommended order type from panel state */
+  let orderType = "--";
+  if (p.breakout && p.candles.length > 0) {
+    const currentPrice = p.candles[p.candles.length - 1].close;
+    const entryLevel = p.trade ? p.trade.entry : p.breakout.level;
+    if (p.breakout.dir === "BULL") {
+      orderType = entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
+    } else {
+      orderType = entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
+    }
+  }
+
+  let lines = [];
+  lines.push(`<b>📊 IT Guru Signal</b>`);
+  lines.push(``);
+  lines.push(`<b>Symbol:</b> ${symLabel}`);
+  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+  lines.push(`<b>Phase:</b> ${p.phase}`);
+  lines.push(`<b>Direction:</b> ${dir === "BULL" ? "🟢 BULL (BUY)" : dir === "BEAR" ? "🔴 BEAR (SELL)" : dir}`);
+  lines.push(`<b>Order Type:</b> ${orderType}`);
+
+  if (p.trade) {
+    lines.push(``);
+    lines.push(`<b>📍 Entry:</b> <code>${fmt(p.trade.entry, 5)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmt(p.trade.sl, 5)}</code>`);
+    if (p.trade.tp != null && !p.filters.pureTrailingEnabled) {
+      lines.push(`<b>🎯 TP:</b> <code>${fmt(p.trade.tp, 5)}</code>`);
+    }
+    if (p.trade.rr != null) {
+      lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
+    }
+    if (p.trailingSL != null && p.filters.trailingStopEnabled) {
+      lines.push(`<b>Trailing SL:</b> <code>${fmt(p.trailingSL, 5)}</code>`);
+    }
+  }
+
+  if (p.openingRange) {
+    lines.push(``);
+    lines.push(`<b>Range High:</b> <code>${fmt(p.openingRange.high, 5)}</code>`);
+    lines.push(`<b>Range Low:</b> <code>${fmt(p.openingRange.low, 5)}</code>`);
+  }
+
+  lines.push(``);
+  lines.push(`<b>Confluence:</b> ${p.confluenceScore}/9`);
+
+  /* Active filters summary from panel's per-symbol settings */
+  const f = p.filters;
+  const filters = [];
+  if (f.emaFilterEnabled) filters.push("EMA 8/21");
+  if (f.htfFilterEnabled) filters.push("HTF Trend");
+  if (f.atrToleranceEnabled) filters.push("ATR Tol.");
+  if (f.trailingStopEnabled) filters.push("Trailing SL");
+  if (f.partialTpEnabled) filters.push("Partial TP");
+  if (f.falseBreakoutEnabled) filters.push("False BO");
+  if (f.minRREnabled) filters.push(`Min R:R ${f.minRRValue}`);
+  if (f.pureTrailingEnabled) filters.push("Pure Trail");
+  if (f.rsiFilterEnabled) filters.push("RSI");
+  if (f.volumeSpikeEnabled) filters.push("Vol. Spike");
+  if (f.sessionFilterEnabled) filters.push(`Session (${f.sessionFilterMode})`);
+  if (f.fibRetestEnabled) filters.push("Fib Retest");
+  if (filters.length > 0) {
+    lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Capture screenshot from a panel's mini-chart canvas.
+ */
+function capturePanelScreenshot(p) {
+  return new Promise((resolve, reject) => {
+    const canvas = p.canvasEl;
+    if (!canvas) return reject(new Error("Panel chart canvas not available"));
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error("Failed to capture panel chart screenshot"));
+    }, "image/png");
+  });
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -1295,8 +1446,8 @@ function setRecRecBadge(el, text, cssClass) {
  * Returns market-type-specific recommended settings.
  * Each market type has different optimal configurations derived from the MD-file strategies.
  */
-function getMarketRecommendations() {
-  const mtype = getMarketType();
+function getMarketRecommendations(symbol) {
+  const mtype = getMarketType(symbol);
   switch (mtype) {
     case "boom":
       return {
@@ -4232,6 +4383,8 @@ const multiPanels = new Map();   /* symbol → panel object */
 
 /* ---- Panel state factory ---- */
 function createPanelState(symbol) {
+  /* Compute per-symbol recommended settings using market type */
+  const rec = getMarketRecommendations(symbol);
   return {
     symbol,
     ws: null,
@@ -4260,6 +4413,25 @@ function createPanelState(symbol) {
     connectTime: null,
     pingTimer: null,
     connected: false,
+    /* Per-panel recommended filter settings (auto-applied from market type) */
+    filters: {
+      autoResetEnabled:    true,
+      emaFilterEnabled:    rec.ema,
+      htfFilterEnabled:    rec.htf,
+      atrToleranceEnabled: rec.atr,
+      trailingStopEnabled: rec.trailing.rec,
+      partialTpEnabled:    rec.partialTp,
+      falseBreakoutEnabled: rec.falseBreakout,
+      minRREnabled:        rec.minRR.rec,
+      minRRValue:          rec.rr.minRR,
+      pureTrailingEnabled: false,
+      rsiFilterEnabled:    rec.rsi,
+      volumeSpikeEnabled:  rec.volSpike.rec,
+      sessionFilterEnabled: rec.session.rec,
+      sessionFilterMode:   rec.session.rec ? "london_ny" : "london_ny",
+      fibRetestEnabled:    rec.fib,
+      RANGE_MINUTES:       rec.range.minutes,
+    },
     /* DOM refs for the card */
     cardEl: null,
     canvasEl: null,
@@ -4267,6 +4439,7 @@ function createPanelState(symbol) {
     dirEl: null,
     priceEl: null,
     dotEl: null,
+    actionEl: null,
   };
 }
 
@@ -4295,6 +4468,25 @@ function activatePanel(p) {
   signalWins     = p.signalWins;
   signalLosses   = p.signalLosses;
   ws             = p.ws;
+
+  /* Activate per-panel filter settings into globals */
+  const f = p.filters;
+  autoResetEnabled     = f.autoResetEnabled;
+  emaFilterEnabled     = f.emaFilterEnabled;
+  htfFilterEnabled     = f.htfFilterEnabled;
+  atrToleranceEnabled  = f.atrToleranceEnabled;
+  trailingStopEnabled  = f.trailingStopEnabled;
+  partialTpEnabled     = f.partialTpEnabled;
+  falseBreakoutEnabled = f.falseBreakoutEnabled;
+  minRREnabled         = f.minRREnabled;
+  minRRValue           = f.minRRValue;
+  pureTrailingEnabled  = f.pureTrailingEnabled;
+  rsiFilterEnabled     = f.rsiFilterEnabled;
+  volumeSpikeEnabled   = f.volumeSpikeEnabled;
+  sessionFilterEnabled = f.sessionFilterEnabled;
+  sessionFilterMode    = f.sessionFilterMode;
+  fibRetestEnabled     = f.fibRetestEnabled;
+  RANGE_MINUTES        = f.RANGE_MINUTES;
 }
 
 /* ---- Copy globals → panel state (save) ---- */
@@ -4322,6 +4514,24 @@ function savePanel(p) {
   p.signalWins     = signalWins;
   p.signalLosses   = signalLosses;
   p.ws             = ws;
+
+  /* Save current filter state back to panel */
+  p.filters.autoResetEnabled     = autoResetEnabled;
+  p.filters.emaFilterEnabled     = emaFilterEnabled;
+  p.filters.htfFilterEnabled     = htfFilterEnabled;
+  p.filters.atrToleranceEnabled  = atrToleranceEnabled;
+  p.filters.trailingStopEnabled  = trailingStopEnabled;
+  p.filters.partialTpEnabled     = partialTpEnabled;
+  p.filters.falseBreakoutEnabled = falseBreakoutEnabled;
+  p.filters.minRREnabled         = minRREnabled;
+  p.filters.minRRValue           = minRRValue;
+  p.filters.pureTrailingEnabled  = pureTrailingEnabled;
+  p.filters.rsiFilterEnabled     = rsiFilterEnabled;
+  p.filters.volumeSpikeEnabled   = volumeSpikeEnabled;
+  p.filters.sessionFilterEnabled = sessionFilterEnabled;
+  p.filters.sessionFilterMode    = sessionFilterMode;
+  p.filters.fibRetestEnabled     = fibRetestEnabled;
+  p.filters.RANGE_MINUTES        = RANGE_MINUTES;
 }
 
 /* ---- Get display name for a symbol ---- */
@@ -4355,6 +4565,7 @@ function createPanelCard(p) {
     <canvas class="ms-card-canvas" width="520" height="280"></canvas>
     <div class="ms-card-footer">
       <span class="ms-card-price">--</span>
+      <span class="ms-card-action"></span>
       <span class="ms-card-status"><span class="ms-card-dot disconnected"></span> Offline</span>
     </div>
   `;
@@ -4366,6 +4577,7 @@ function createPanelCard(p) {
   p.priceEl  = card.querySelector(".ms-card-price");
   p.dotEl    = card.querySelector(".ms-card-dot");
   p.statusTextEl = card.querySelector(".ms-card-status");
+  p.actionEl = card.querySelector(".ms-card-action");
 
   /* Click to focus */
   card.addEventListener("click", () => focusPanel(p.symbol));
@@ -4383,7 +4595,7 @@ function focusPanel(symbol) {
   document.querySelectorAll(".ms-card").forEach(c => c.classList.remove("ms-card-active"));
   if (p.cardEl) p.cardEl.classList.add("ms-card-active");
 
-  /* Activate panel state in globals */
+  /* Activate panel state in globals (includes filter settings) */
   activatePanel(p);
 
   /* Sync the symbol dropdown to match */
@@ -4392,17 +4604,61 @@ function focusPanel(symbol) {
     updateCurrentSymbolLabel();
   }
 
+  /* Sync filter checkbox UI to this panel's filter settings */
+  syncFilterUIFromGlobals();
+
   /* Redraw main chart and sidebar */
+  updateRecommendedSettings();
   updateStateUI();
   drawChart();
   updateStatsUI();
 }
 
+/**
+ * Sync all filter checkbox / input UI elements from current global filter variables.
+ * Called when focusing a panel to reflect that panel's per-symbol settings.
+ */
+function syncFilterUIFromGlobals() {
+  if (UI.emaFilterToggle)     UI.emaFilterToggle.checked     = emaFilterEnabled;
+  if (UI.htfFilterToggle)     UI.htfFilterToggle.checked     = htfFilterEnabled;
+  if (UI.atrToleranceToggle)  UI.atrToleranceToggle.checked  = atrToleranceEnabled;
+  if (UI.trailingStopToggle)  UI.trailingStopToggle.checked  = trailingStopEnabled;
+  if (UI.partialTpToggle)     UI.partialTpToggle.checked     = partialTpEnabled;
+  if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
+  if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
+  if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
+  if (UI.pureTrailingToggle)  UI.pureTrailingToggle.checked  = pureTrailingEnabled;
+  if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
+  if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
+  if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
+  if (UI.sessionFilterMode)   UI.sessionFilterMode.value     = sessionFilterMode;
+  if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
+  if (UI.rangeDuration)       UI.rangeDuration.value          = RANGE_MINUTES;
+  if (UI.autoResetToggle)     UI.autoResetToggle.checked     = autoResetEnabled;
+}
+
 /* ---- Connect a multi-symbol panel ---- */
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
-  /* All panels share the same timeframe for consistent cross-symbol comparison */
-  const gran = parseInt(UI.granSelect.value, 10);
+  /* Use per-symbol recommended timeframe from market type recommendations */
+  const rec = getMarketRecommendations(p.symbol);
+  const gran = rec.timeframe.gran;
+
+  /* Re-apply recommended filters for this symbol's market type */
+  p.filters.emaFilterEnabled     = rec.ema;
+  p.filters.htfFilterEnabled     = rec.htf;
+  p.filters.atrToleranceEnabled  = rec.atr;
+  p.filters.trailingStopEnabled  = rec.trailing.rec;
+  p.filters.partialTpEnabled     = rec.partialTp;
+  p.filters.falseBreakoutEnabled = rec.falseBreakout;
+  p.filters.minRREnabled         = rec.minRR.rec;
+  p.filters.minRRValue           = rec.rr.minRR;
+  p.filters.rsiFilterEnabled     = rec.rsi;
+  p.filters.volumeSpikeEnabled   = rec.volSpike.rec;
+  p.filters.sessionFilterEnabled = rec.session.rec;
+  p.filters.sessionFilterMode    = rec.session.rec ? "london_ny" : "london_ny";
+  p.filters.fibRetestEnabled     = rec.fib;
+  p.filters.RANGE_MINUTES        = rec.range.minutes;
 
   /* Reset panel state */
   p.candles = [];
@@ -4575,6 +4831,32 @@ function updatePanelCardUI(p) {
   if (p.statusTextEl) {
     p.statusTextEl.innerHTML = `<span class="ms-card-dot ${p.connected ? "connected" : "disconnected"}"></span> ${p.connected ? "Live" : "Offline"}`;
   }
+  /* Recommended action badge — show order type when a trade setup is active */
+  if (p.actionEl) {
+    const orderType = getPanelOrderType(p);
+    if (orderType) {
+      p.actionEl.textContent = orderType;
+      const isBuy = orderType.startsWith("BUY");
+      p.actionEl.className = "ms-card-action ms-action-" + (isBuy ? "buy" : "sell");
+    } else {
+      p.actionEl.textContent = "";
+      p.actionEl.className = "ms-card-action";
+    }
+  }
+}
+
+/**
+ * Compute recommended MT5 order type for a panel from its saved state.
+ */
+function getPanelOrderType(p) {
+  if (!p.breakout) return null;
+  const currentPrice = p.candles.length > 0 ? p.candles[p.candles.length - 1].close : null;
+  if (currentPrice == null) return null;
+  const entryLevel = p.trade ? p.trade.entry : p.breakout.level;
+  if (p.breakout.dir === "BULL") {
+    return entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
+  }
+  return entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
 }
 
 /* ---- Draw mini chart on panel canvas ---- */

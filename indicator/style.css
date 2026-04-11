@@ -1520,6 +1520,24 @@ body.light-theme .ms-card-footer {
 .ms-card-dot.connected { background: var(--success); }
 .ms-card-dot.disconnected { background: var(--danger); }
 
+/* Action badge (recommended order type) */
+.ms-card-action {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ms-action-buy {
+  background: rgba(34,197,94,0.2);
+  color: var(--success);
+}
+.ms-action-sell {
+  background: rgba(239,68,68,0.2);
+  color: var(--danger);
+}
+
 /* Phase badge colours (reusing existing palette) */
 .ms-phase-waiting    { background: var(--bg-card-hover); color: var(--text-soft); }
 .ms-phase-range      { background: rgba(245,158,11,0.2); color: var(--warning); }
