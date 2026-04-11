@@ -226,6 +226,15 @@ h1 .badge {
   color: var(--primary-soft);
   box-shadow: none;
 }
+.bar-btn-reset {
+  background: linear-gradient(135deg, var(--warning), #d97706);
+  color: #fff;
+  border-color: transparent;
+}
+.bar-btn-reset:hover {
+  background: linear-gradient(135deg, #fbbf24, var(--warning));
+  box-shadow: 0 2px 8px rgba(245,158,11,0.3);
+}
 
 /* Status bar live price styling */
 .status-chip .price {
