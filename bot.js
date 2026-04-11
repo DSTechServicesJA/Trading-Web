@@ -33,6 +33,9 @@ updatePayoutEdgeUI();
   // Wire export button
   const exportBtn = document.getElementById("exportJournalBtn");
   if (exportBtn) exportBtn.addEventListener("click", exportJournalCSV);
+  // Wire PDF export button
+  const exportPdfBtn = document.getElementById("exportPdfBtn");
+  if (exportPdfBtn) exportPdfBtn.addEventListener("click", exportJournalPDF);
   // Wire theme toggle
   const themeBtn = document.getElementById("themeToggleBtn");
   if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
@@ -1266,14 +1269,15 @@ function logToJournal(entry) {
     detail: lastConfluenceDetail ? JSON.stringify(lastConfluenceDetail) : "",
     balance: balanceEl?.textContent || "N/A",
     trendDirection: trendDirection,
-    rsi: rsi
+    rsi: rsi,
+    chartImage: chartCanvas ? chartCanvas.toDataURL("image/png") : null
   });
   if (tradeJournal.length > 500) tradeJournal.shift();
 }
 
 function exportJournalCSV() {
   if (tradeJournal.length === 0) { alert("No trades to export."); return; }
-  const headers = Object.keys(tradeJournal[0]);
+  const headers = Object.keys(tradeJournal[0]).filter(h => h !== "chartImage");
   const rows = tradeJournal.map(row => headers.map(h => {
     let v = row[h];
     if (typeof v === "string") v = v.replace(/"/g, '""');
@@ -1287,6 +1291,91 @@ function exportJournalCSV() {
   a.download = `trade_journal_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// --- PDF Export (with chart screenshots per page) ---
+function exportJournalPDF() {
+  if (tradeJournal.length === 0) { alert("No trades to export."); return; }
+  if (typeof window.jspdf === "undefined") { alert("PDF library not loaded. Please check your connection."); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 10;
+
+  tradeJournal.forEach((trade, idx) => {
+    if (idx > 0) doc.addPage("a4", "landscape");
+
+    /* ---- Header ---- */
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageW, 18, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`Trade ${idx + 1} / ${tradeJournal.length}`, margin, 12);
+    doc.setFontSize(10);
+    doc.text("IT Guru – Trading Bot Journal", pageW - margin, 12, { align: "right" });
+
+    /* ---- Chart screenshot ---- */
+    let chartBottom = 24;
+    if (trade.chartImage) {
+      try {
+        const chartW = pageW - margin * 2;
+        const chartH = (pageH - 70);
+        doc.addImage(trade.chartImage, "PNG", margin, 22, chartW, chartH);
+        chartBottom = 22 + chartH + 4;
+      } catch (e) {
+        doc.setFontSize(9);
+        doc.setTextColor(150, 150, 150);
+        doc.text("(Chart screenshot not available)", margin, 32);
+        chartBottom = 38;
+      }
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(150, 150, 150);
+      doc.text("(No chart captured for this trade)", margin, 32);
+      chartBottom = 38;
+    }
+
+    /* ---- Trade details table ---- */
+    const detailY = Math.min(chartBottom, pageH - 28);
+    doc.setFillColor(30, 41, 59);
+    doc.rect(margin, detailY, pageW - margin * 2, 20, "F");
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+
+    const profitVal = parseFloat(trade.profit) || 0;
+    const fields = [
+      ["Time", trade.time || "--"],
+      ["Symbol", trade.symbol || "--"],
+      ["Mode", trade.mode || "--"],
+      ["Pattern", trade.pattern || "--"],
+      ["Side", trade.side || "--"],
+      ["Stake", trade.stake ?? "--"],
+      ["Profit", profitVal.toFixed(2)],
+      ["Balance", trade.balance || "--"],
+      ["Trend", trade.trendDirection || "--"],
+      ["RSI", trade.rsi ?? "--"],
+      ["Confluence", trade.confluence ?? "--"]
+    ];
+
+    const colW = (pageW - margin * 2) / fields.length;
+    fields.forEach(([label, val], i) => {
+      const x = margin + i * colW + 2;
+      doc.setTextColor(148, 163, 184);
+      doc.text(label, x, detailY + 7);
+      doc.setFont("helvetica", "normal");
+      const isProfit = label === "Profit";
+      const color = isProfit ? (profitVal >= 0 ? [34, 197, 94] : [239, 68, 68]) : [255, 255, 255];
+      doc.setTextColor(...color);
+      doc.text(String(val), x, detailY + 14);
+      doc.setFont("helvetica", "bold");
+    });
+  });
+
+  doc.save(`trade_journal_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // --- #20: Session Comparison ---
@@ -1391,10 +1480,15 @@ function initKeyboardShortcuts() {
       e.preventDefault();
       toggleTheme();
     }
-    // Alt + E = Export journal
+    // Alt + E = Export journal CSV
     if (e.altKey && e.key === "e") {
       e.preventDefault();
       exportJournalCSV();
+    }
+    // Alt + P = Export journal PDF
+    if (e.altKey && e.key === "p") {
+      e.preventDefault();
+      exportJournalPDF();
     }
     // Alt + N = Toggle notifications
     if (e.altKey && e.key === "n") {

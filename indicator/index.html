@@ -44,7 +44,8 @@
     <div class="status-bar-right">
       <button id="connectBtn" type="button" class="bar-btn bar-btn-connect" title="Connect">▶</button>
       <button id="disconnectBtn" type="button" class="bar-btn bar-btn-disconnect" title="Disconnect" disabled>⏹</button>
-      <button id="exportSignalsBtn" type="button" class="bar-btn bar-btn-tool" title="Export Signals">📥</button>
+      <button id="exportSignalsBtn" type="button" class="bar-btn bar-btn-tool" title="Export Signals CSV">📥</button>
+      <button id="exportPdfBtn" type="button" class="bar-btn bar-btn-tool" title="Export Signals PDF with Charts">📄</button>
       <button id="themeToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Theme">☀️</button>
       <button id="soundToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Sound">🔊</button>
       <button id="notifToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Notifications">🔕</button>
@@ -59,7 +60,7 @@
       <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
     </ul>
     <div class="shortcut-hints">
-      <small>Alt+C Connect · Alt+D Disconnect · Alt+T Theme · Alt+E Export · Alt+N Notifications</small>
+      <small>Alt+C Connect · Alt+D Disconnect · Alt+T Theme · Alt+E Export CSV · Alt+P Export PDF · Alt+N Notifications</small>
     </div>
   </nav>
 
@@ -545,6 +546,7 @@
 
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
 <script src="indicator.js"></script>
 <script>
   /* Mobile panel toggle */
