@@ -106,6 +106,165 @@ const SESSION_ASIAN    = { start: 0, end: 9 };
 const FIB_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786];
 const FIB_TOLERANCE_ATR_MULT = 0.3;
 
+/* ================= MARKET TYPE DETECTION & TUNING ================= */
+/**
+ * Market types supported:
+ *   "volatility"  – standard/1s volatility indices (R_xx, 1HZxxV)
+ *   "boom"        – Boom indices (spike UP direction)
+ *   "crash"       – Crash indices (spike DOWN direction)
+ *   "jump"        – Jump indices (sudden jumps in either direction)
+ *   "step"        – Step Index (fixed-increment moves)
+ *   "forex"       – Forex pairs
+ *   "commodity"   – Gold/Silver
+ */
+function getMarketType(symbol) {
+  if (!symbol) symbol = UI.symbolSelect ? UI.symbolSelect.value : "";
+  if (/^BOOM/i.test(symbol))  return "boom";
+  if (/^CRASH/i.test(symbol)) return "crash";
+  if (/^JD/i.test(symbol))    return "jump";
+  if (/^stpRNG/i.test(symbol)) return "step";
+  if (/^1HZ/i.test(symbol) || /^R_/i.test(symbol)) return "volatility";
+  if (/^frxX/i.test(symbol))  return "commodity";
+  if (/^frx/i.test(symbol))   return "forex";
+  return "volatility";
+}
+
+/**
+ * Spike detection for Boom/Crash indices.
+ * Boom indices produce large upward spikes; Crash produce downward spikes.
+ * A spike candle has a range ≥ SPIKE_RANGE_MULT × ATR and the body is strongly
+ * directional (body ≥ 70% of range in the expected direction).
+ */
+const SPIKE_RANGE_MULT = 2.0;
+const SPIKE_BODY_PCT   = 0.70;
+
+function isSpikeCandle(candle, expectedDir) {
+  if (atrValue <= 0) return false;
+  const range = candle.high - candle.low;
+  if (range < atrValue * SPIKE_RANGE_MULT) return false;
+  const body = candle.close - candle.open;
+  const absBody = Math.abs(body);
+  if (absBody < range * SPIKE_BODY_PCT) return false;
+  if (expectedDir === "BULL") return body > 0;
+  if (expectedDir === "BEAR") return body < 0;
+  return true;
+}
+
+/**
+ * Jump detection for Jump indices.
+ * Jumps are sudden price discontinuities — a candle whose open differs from
+ * the previous close by ≥ JUMP_GAP_ATR_MULT × ATR, or whose range is
+ * extremely large relative to recent candles.
+ */
+const JUMP_GAP_ATR_MULT   = 1.0;
+const JUMP_RANGE_ATR_MULT = 2.5;
+
+function isJumpCandle(idx) {
+  if (idx < 1 || idx >= candles.length || atrValue <= 0) return false;
+  const c = candles[idx];
+  const prev = candles[idx - 1];
+  const gap = Math.abs(c.open - prev.close);
+  if (gap >= atrValue * JUMP_GAP_ATR_MULT) return true;
+  const range = c.high - c.low;
+  return range >= atrValue * JUMP_RANGE_ATR_MULT;
+}
+
+/**
+ * Step Index strategy helpers.
+ * Step Index moves in fixed increments, so we look for consecutive steps
+ * in the same direction (momentum runs) and mean-reversion after extended runs.
+ * Returns the run length (positive = up steps, negative = down steps).
+ */
+const STEP_RUN_THRESHOLD = 5;   /* consecutive steps to confirm a trend */
+const STEP_REVERSAL_BARS = 3;   /* bars of reversal to confirm mean reversion */
+
+function getStepRunLength() {
+  if (candles.length < 3) return 0;
+  let run = 0;
+  for (let i = candles.length - 1; i >= 1; i--) {
+    const dir = candles[i].close - candles[i - 1].close;
+    if (dir > 0) {
+      if (run <= 0 && run !== 0) break;
+      run++;
+    } else if (dir < 0) {
+      if (run >= 0 && run !== 0) break;
+      run--;
+    } else {
+      break;
+    }
+  }
+  return run;
+}
+
+/**
+ * Returns market-type-specific tuning overrides.
+ * These affect breakout conviction, tolerance, and trade management.
+ */
+function getMarketTuning() {
+  const mtype = getMarketType();
+  switch (mtype) {
+    case "boom":
+      return {
+        /* Boom: directional spikes UP — look for bullish breakouts primarily */
+        preferredDir: "BULL",
+        breakoutConvictionMult: 0.6,    /* lower conviction threshold (spikes are erratic) */
+        volumeSpikeMult: 2.0,           /* require stronger volume spike */
+        retestToleranceMult: 0.7,       /* tighter retest (price retraces quickly) */
+        trailingATRMult: 2.0,           /* wider trailing for spike momentum */
+        rangeDurationMult: 1.0,
+        spikeAware: true,
+        label: "Boom"
+      };
+    case "crash":
+      return {
+        /* Crash: directional spikes DOWN — look for bearish breakouts primarily */
+        preferredDir: "BEAR",
+        breakoutConvictionMult: 0.6,
+        volumeSpikeMult: 2.0,
+        retestToleranceMult: 0.7,
+        trailingATRMult: 2.0,
+        rangeDurationMult: 1.0,
+        spikeAware: true,
+        label: "Crash"
+      };
+    case "jump":
+      return {
+        /* Jump: sudden both-direction jumps — widen tolerance, quick entries */
+        preferredDir: null,
+        breakoutConvictionMult: 0.5,    /* jumps are instant, body may not fill range */
+        volumeSpikeMult: 1.2,           /* lower bar for volume (jumps are inherently volatile) */
+        retestToleranceMult: 1.2,       /* wider retest tolerance for gap fills */
+        trailingATRMult: 2.5,           /* wider trailing to survive jump volatility */
+        rangeDurationMult: 0.67,        /* shorter opening range (10 min for jumps) */
+        spikeAware: false,
+        label: "Jump"
+      };
+    case "step":
+      return {
+        /* Step: fixed increments — tight tolerances, momentum runs */
+        preferredDir: null,
+        breakoutConvictionMult: 0.4,    /* small bodies are normal */
+        volumeSpikeMult: 1.0,           /* volume spike not meaningful */
+        retestToleranceMult: 0.5,       /* very tight retest (precise levels) */
+        trailingATRMult: 1.0,           /* tight trailing for small moves */
+        rangeDurationMult: 1.5,         /* longer range to capture structure */
+        spikeAware: false,
+        label: "Step"
+      };
+    default:
+      return {
+        preferredDir: null,
+        breakoutConvictionMult: 1.0,
+        volumeSpikeMult: 1.0,
+        retestToleranceMult: 1.0,
+        trailingATRMult: 1.0,
+        rangeDurationMult: 1.0,
+        spikeAware: false,
+        label: mtype.charAt(0).toUpperCase() + mtype.slice(1)
+      };
+  }
+}
+
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
@@ -1370,8 +1529,10 @@ function hasVolumeSpikeOnBreakout(candleIdx) {
   if (count === 0) return true;
   const avgRange = sumRange / count;
   if (avgRange <= 0) return true;
+  const tuning = getMarketTuning();
+  const effectiveMult = VOLUME_SPIKE_MULT * tuning.volumeSpikeMult;
   const breakoutRange = candles[candleIdx].high - candles[candleIdx].low;
-  return breakoutRange >= avgRange * VOLUME_SPIKE_MULT;
+  return breakoutRange >= avgRange * effectiveMult;
 }
 
 /* ================= SESSION FILTER ================= */
@@ -1461,10 +1622,11 @@ function hasFibConfluence(level) {
  */
 function hasBreakoutConviction(candle) {
   if (atrValue <= 0) return true;
+  const tuning = getMarketTuning();
   const candleRange = candle.high - candle.low;
   const bodySize = Math.abs(candle.close - candle.open);
-  const rangeOk = candleRange >= atrValue * 0.8;
-  const bodyOk = candleRange > 0 ? bodySize >= candleRange * 0.6 : false;
+  const rangeOk = candleRange >= atrValue * 0.8 * tuning.breakoutConvictionMult;
+  const bodyOk = candleRange > 0 ? bodySize >= candleRange * 0.6 * tuning.breakoutConvictionMult : false;
   return rangeOk && bodyOk;
 }
 
@@ -1976,11 +2138,12 @@ function processCandle(idx) {
 
 /* ---- Level touch detection (with optional ATR-based tolerance) ---- */
 function touchesLevel(candle, level) {
+  const tuning = getMarketTuning();
   let tolerance;
   if (atrToleranceEnabled && atrValue > 0) {
-    tolerance = atrValue * 0.5;  /* half ATR as tolerance */
+    tolerance = atrValue * 0.5 * tuning.retestToleranceMult;
   } else {
-    tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE;
+    tolerance = (candle.high - candle.low) * LEVEL_TOUCH_TOLERANCE * tuning.retestToleranceMult;
   }
   return candle.low - tolerance <= level && candle.high + tolerance >= level;
 }
