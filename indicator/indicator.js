@@ -50,6 +50,8 @@
      - Dragonfly / gravestone doji detection (from MD)
      - Tweezers tops & bottoms confirmation (from MD)
      - Reset session button (clears all stats/signals/log)
+     - Scalping mode (from MD: shorter range, tighter SL/TP, quick
+       profits, max-candle timeout — for 1min/5min chart trading)
    ========================================================= */
 
 "use strict";
@@ -139,6 +141,14 @@ const STOCH_D_PERIOD = 3;
 const STOCH_SMOOTH = 3;
 const STOCH_OVERSOLD = 20;
 const STOCH_OVERBOUGHT = 80;
+
+/* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
+   larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
+const SCALP_RANGE_MINUTES       = 5;     /* shorter opening range for quick setups */
+const SCALP_TRAILING_ATR_MULT   = 0.75;  /* tighter trailing stop (half the normal 1.5×) */
+const SCALP_RR_TARGET           = 1.0;   /* quick 1:1 R:R target instead of larger swings */
+const SCALP_LOOKBACK            = 10;    /* tighter swing lookback for closer SL */
+const SCALP_MAX_CANDLES         = 15;    /* auto-timeout: close trade monitoring after N candles */
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
@@ -464,6 +474,9 @@ let bbSqueezeFilterEnabled = false;
 let adxFilterEnabled = false;
 let stochFilterEnabled = false;
 
+/* Scalping mode (from MD: quick 5-10 pip profits on 1min/5min charts) */
+let scalpingModeEnabled = false;
+
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = false;
 
@@ -557,6 +570,9 @@ function initUI() {
   UI.volatilityRegime      = document.getElementById("volatilityRegime");
   UI.signalStrengthGauge   = document.getElementById("signalStrengthGauge");
   UI.signalStrengthLabel   = document.getElementById("signalStrengthLabel");
+
+  /* Scalping mode */
+  UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -847,6 +863,7 @@ function buildTelegramCaption() {
   if (bbSqueezeFilterEnabled) filters.push("BB Squeeze");
   if (adxFilterEnabled) filters.push("ADX");
   if (stochFilterEnabled) filters.push("Stochastic");
+  if (scalpingModeEnabled) filters.push("Scalping");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1119,6 +1136,7 @@ function buildPanelTelegramCaption(p) {
   if (f.bbSqueezeFilterEnabled) filters.push("BB Squeeze");
   if (f.adxFilterEnabled) filters.push("ADX");
   if (f.stochFilterEnabled) filters.push("Stochastic");
+  if (f.scalpingModeEnabled) filters.push("Scalping");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1179,6 +1197,7 @@ function saveSettings() {
       bbSqueezeFilterEnabled,
       adxFilterEnabled,
       stochFilterEnabled,
+      scalpingModeEnabled,
       autoApplyRecommended,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
@@ -1262,6 +1281,10 @@ function restoreSettings() {
     if (UI.adxFilterToggle) UI.adxFilterToggle.checked = adxFilterEnabled;
     if (UI.stochFilterToggle) UI.stochFilterToggle.checked = stochFilterEnabled;
 
+    /* Scalping mode */
+    if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
+    if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
+
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
     if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
@@ -1342,7 +1365,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -1755,7 +1778,9 @@ function getMarketRecommendations(symbol) {
             + "Bollinger Band squeeze detects compression before breakout expansion. "
             + "ADX trending confirmation filters out low-conviction ranges. "
             + "Stochastic momentum alignment adds a final confluence layer. "
-            + "Confluence score (0-16) gauges overall setup quality."
+            + "Confluence score (0-16) gauges overall setup quality. "
+            + "Scalping mode adapts the strategy for quick 5-10 pip profits on short timeframes "
+            + "(shorter opening range, tighter SL, quick TP, candle timeout)."
       };
   }
 }
@@ -3778,7 +3803,9 @@ function resetForNextSetup() {
 function buildOpeningRange() {
   if (!rangeStartEpoch || candles.length === 0) return;
 
-  const rangeEndEpoch = rangeStartEpoch + RANGE_MINUTES * 60;
+  /* Scalping mode uses a shorter opening range (from MD: 5min) */
+  const effectiveRangeMin = scalpingModeEnabled ? SCALP_RANGE_MINUTES : RANGE_MINUTES;
+  const rangeEndEpoch = rangeStartEpoch + effectiveRangeMin * 60;
   let high = -Infinity, low = Infinity;
   let startIdx = 0, endIdx = 0;
 
@@ -4235,7 +4262,8 @@ function buildTrade(confirmCandle, confirmIdx) {
   const rewardVal = parseFloat(UI.rewardInput.value);
   const riskUnits  = (!isNaN(riskVal) && riskVal > 0) ? riskVal : 1;
   const rewardUnits = (!isNaN(rewardVal) && rewardVal > 0) ? rewardVal : 1;
-  const rr = rewardUnits / riskUnits;
+  /* Scalping mode: cap R:R at SCALP_RR_TARGET for quick profits (from MD: 5-10 pip profits) */
+  const rr = scalpingModeEnabled ? Math.min(rewardUnits / riskUnits, SCALP_RR_TARGET) : rewardUnits / riskUnits;
 
   if (breakout.dir === "BULL") {
     const entry = confirmCandle.close;
@@ -4250,7 +4278,7 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BULL", rr: actualRR };
+    trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx };
   } else {
     const entry = confirmCandle.close;
     const sl = findSwingHigh(confirmIdx);
@@ -4264,7 +4292,11 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR };
+    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx };
+  }
+
+  if (scalpingModeEnabled) {
+    addLog(`⚡ SCALPING MODE — quick TP at R:R ${fmt(rr, 1)}, max ${SCALP_MAX_CANDLES} candles`);
   }
 
   /* Reset trailing/partial state for new trade */
@@ -4300,7 +4332,9 @@ function isTrueSwingHigh(idx) {
 }
 
 function findSwingLow(upToIdx) {
-  const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
+  /* Scalping mode uses tighter lookback for closer SL (from MD: minimize risk) */
+  const effectiveLookback = scalpingModeEnabled ? SCALP_LOOKBACK : SWING_LOOKBACK_PERIOD;
+  const lookback = Math.max(0, upToIdx - effectiveLookback);
 
   /* Try true swing point first (scan from most recent backwards) */
   for (let i = upToIdx - SWING_NEIGHBOR_BARS; i >= lookback + SWING_NEIGHBOR_BARS; i--) {
@@ -4316,7 +4350,9 @@ function findSwingLow(upToIdx) {
 }
 
 function findSwingHigh(upToIdx) {
-  const lookback = Math.max(0, upToIdx - SWING_LOOKBACK_PERIOD);
+  /* Scalping mode uses tighter lookback for closer SL (from MD: minimize risk) */
+  const effectiveLookback = scalpingModeEnabled ? SCALP_LOOKBACK : SWING_LOOKBACK_PERIOD;
+  const lookback = Math.max(0, upToIdx - effectiveLookback);
 
   /* Try true swing point first (scan from most recent backwards) */
   for (let i = upToIdx - SWING_NEIGHBOR_BARS; i >= lookback + SWING_NEIGHBOR_BARS; i--) {
@@ -4361,7 +4397,8 @@ function recordSignal(confirmPattern) {
     bbSqueeze: isBBSqueeze(),
     adx: adxValue > 0 ? +fmt(adxValue, 1) : null,
     stochK: getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null,
-    volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null
+    volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null,
+    scalpingMode: scalpingModeEnabled
   };
   signalHistory.push(signal);
   /* Capture chart screenshot as data URL for PDF export */
@@ -4404,18 +4441,39 @@ function monitorTradeOutcome(candle) {
 
   /* ---- Trailing stop (ATR-based) ---- */
   if (trailingStopEnabled && atrValue > 0) {
+    /* Scalping mode uses a tighter trailing stop (from MD: take profit quickly / move SL tighter) */
+    const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : TRAILING_STOP_ATR_MULT;
     if (trade.dir === "BULL") {
-      const newTrail = candle.high - atrValue * TRAILING_STOP_ATR_MULT;
+      const newTrail = candle.high - atrValue * trailMult;
       if (trailingSL == null || newTrail > effectiveSL) {
         trailingSL = newTrail;
       }
     } else {
-      const newTrail = candle.low + atrValue * TRAILING_STOP_ATR_MULT;
+      const newTrail = candle.low + atrValue * trailMult;
       if (trailingSL == null || newTrail < effectiveSL) {
         trailingSL = newTrail;
       }
     }
     pending.trailingSL = trailingSL;
+  }
+
+  /* ---- Scalping max-candle timeout ---- */
+  if (trade.scalpingMode && trade.entryIdx != null) {
+    const candlesSinceEntry = candles.length - 1 - trade.entryIdx;
+    if (candlesSinceEntry >= SCALP_MAX_CANDLES) {
+      /* Time-based exit: close at current price (market close) */
+      const exitPrice = candle.close;
+      const inProfit = (trade.dir === "BULL" && exitPrice > trade.entry) ||
+                       (trade.dir === "BEAR" && exitPrice < trade.entry);
+      pending.result = inProfit ? "WIN" : "LOSS";
+      if (inProfit) signalWins++; else signalLosses++;
+      addLog(`⏱ Scalp TIMEOUT (${SCALP_MAX_CANDLES} candles) — exit at ${fmt(exitPrice, 4)} → ${pending.result}`);
+      monitoringTrade = false;
+      persistSignalHistory();
+      updateStatsUI();
+      playPhaseAlert(inProfit ? "TRADE" : "RANGE");
+      return;
+    }
   }
 
   /* ---- Check SL / TP outcome ---- */
@@ -4604,7 +4662,8 @@ function drawChart() {
 
     ctx.fillStyle = borderColor;
     ctx.font = "bold 10px Arial";
-    ctx.fillText(`${RANGE_MINUTES}-MIN RANGE`, x1 + 4, y1 - 4);
+    const rangeLabel = scalpingModeEnabled ? `${SCALP_RANGE_MINUTES}-MIN SCALP RANGE` : `${RANGE_MINUTES}-MIN RANGE`;
+    ctx.fillText(rangeLabel, x1 + 4, y1 - 4);
   }
 
   /* ---- Breakout candle box ---- */
@@ -5100,6 +5159,7 @@ function createPanelState(symbol) {
       bbSqueezeFilterEnabled:  rec.bbSqueeze,
       adxFilterEnabled:        rec.adx,
       stochFilterEnabled:      rec.stoch,
+      scalpingModeEnabled:     false,
       RANGE_MINUTES:       rec.range.minutes,
     },
     /* DOM refs for the card */
@@ -5172,6 +5232,7 @@ function activatePanel(p) {
   bbSqueezeFilterEnabled = f.bbSqueezeFilterEnabled;
   adxFilterEnabled       = f.adxFilterEnabled;
   stochFilterEnabled     = f.stochFilterEnabled;
+  scalpingModeEnabled    = f.scalpingModeEnabled;
   RANGE_MINUTES        = f.RANGE_MINUTES;
 }
 
@@ -5233,6 +5294,7 @@ function savePanel(p) {
   p.filters.bbSqueezeFilterEnabled = bbSqueezeFilterEnabled;
   p.filters.adxFilterEnabled       = adxFilterEnabled;
   p.filters.stochFilterEnabled     = stochFilterEnabled;
+  p.filters.scalpingModeEnabled    = scalpingModeEnabled;
   p.filters.RANGE_MINUTES        = RANGE_MINUTES;
 }
 
@@ -5339,6 +5401,7 @@ function syncFilterUIFromGlobals() {
   if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
   if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
   if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
+  if (UI.scalpingModeToggle)    UI.scalpingModeToggle.checked    = scalpingModeEnabled;
   if (UI.rangeDuration)       UI.rangeDuration.value          = RANGE_MINUTES;
   if (UI.autoResetToggle)     UI.autoResetToggle.checked     = autoResetEnabled;
 }
@@ -5368,6 +5431,7 @@ function connectPanel(p) {
   p.filters.bbSqueezeFilterEnabled = rec.bbSqueeze;
   p.filters.adxFilterEnabled       = rec.adx;
   p.filters.stochFilterEnabled     = rec.stoch;
+  p.filters.scalpingModeEnabled    = false;
   p.filters.RANGE_MINUTES        = rec.range.minutes;
 
   /* Reset panel state */
@@ -5881,6 +5945,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.stochFilterToggle) {
     UI.stochFilterToggle.addEventListener("change", () => { stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.scalpingModeToggle) {
+    UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.autoApplyRecToggle) {
     UI.autoApplyRecToggle.addEventListener("change", () => {
