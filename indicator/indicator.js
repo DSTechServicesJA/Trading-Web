@@ -3804,7 +3804,7 @@ function buildOpeningRange() {
   if (!rangeStartEpoch || candles.length === 0) return;
 
   /* Scalping mode uses a shorter opening range (from MD: 5min) */
-  const effectiveRangeMin = scalpingModeEnabled ? Math.min(RANGE_MINUTES, SCALP_RANGE_MINUTES) : RANGE_MINUTES;
+  const effectiveRangeMin = scalpingModeEnabled ? SCALP_RANGE_MINUTES : RANGE_MINUTES;
   const rangeEndEpoch = rangeStartEpoch + effectiveRangeMin * 60;
   let high = -Infinity, low = Infinity;
   let startIdx = 0, endIdx = 0;
@@ -4662,7 +4662,7 @@ function drawChart() {
 
     ctx.fillStyle = borderColor;
     ctx.font = "bold 10px Arial";
-    const rangeLabel = scalpingModeEnabled ? `${Math.min(RANGE_MINUTES, SCALP_RANGE_MINUTES)}-MIN SCALP RANGE` : `${RANGE_MINUTES}-MIN RANGE`;
+    const rangeLabel = scalpingModeEnabled ? `${SCALP_RANGE_MINUTES}-MIN SCALP RANGE` : `${RANGE_MINUTES}-MIN RANGE`;
     ctx.fillText(rangeLabel, x1 + 4, y1 - 4);
   }
 
