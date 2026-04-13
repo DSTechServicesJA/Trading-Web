@@ -590,8 +590,10 @@ function getSymbolSpecs(symbol) {
   if (SYMBOL_SPECS[symbol]) return SYMBOL_SPECS[symbol];
   /* Auto-detect unknown symbols by market type */
   const mt = getMarketType(symbol);
-  if (mt === "forex")     return { type: "forex",     pipSize: 0.0001, contractSize: 100000, quoteCur: "USD" };
-  if (mt === "commodity") return { type: "forex",     pipSize: 0.01,   contractSize: 100,    quoteCur: "USD" };
+  if (mt === "forex")     return { type: "forex", pipSize: 0.0001, contractSize: 100000, quoteCur: "USD" };
+  if (mt === "commodity") return { type: "forex", pipSize: 0.01,   contractSize: 100,    quoteCur: "USD" };
+  /* ↑ commodity uses type:"forex" intentionally — same lot-size math applies;
+       the SYMBOL_SPECS table already covers all known commodities with accurate specs */
   return { type: "synthetic" };
 }
 
@@ -624,6 +626,7 @@ function getPipValuePerLot(symbol, currentPrice) {
  */
 function calcPositionMetrics(tradeObj) {
   if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
+  if (tradeObj.entry == null || tradeObj.sl == null) return null;
 
   const dollarRisk   = accountSize * (riskPercent / 100);
   const dollarReward = dollarRisk * (tradeObj.rr || 0);
