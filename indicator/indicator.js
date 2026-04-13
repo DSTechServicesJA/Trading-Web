@@ -2483,8 +2483,10 @@ function connect() {
   const gran   = parseInt(UI.granSelect.value, 10);
 
   ws = new WebSocket(WS_URL);
+  const thisWs = ws; /* capture reference to detect stale handlers */
 
   ws.onopen = () => {
+    if (thisWs !== ws) return; /* stale connection */
     UI.wsStatus.textContent = "CONNECTED";
     UI.wsStatus.className = "status-badge enabled";
     UI.connectBtn.disabled = true;
@@ -2494,7 +2496,7 @@ function connect() {
     startPing();
     addLog(`Connected – subscribing to ${symbol} (${gran}s candles)`);
 
-    ws.send(JSON.stringify({
+    thisWs.send(JSON.stringify({
       ticks_history: symbol,
       adjust_start_time: 1,
       count: 100,
@@ -2506,6 +2508,7 @@ function connect() {
   };
 
   ws.onmessage = (evt) => {
+    if (thisWs !== ws) return; /* stale connection */
     const msg = JSON.parse(evt.data);
 
     /* Ignore ping/pong responses */
@@ -2564,6 +2567,7 @@ function connect() {
   };
 
   ws.onclose = () => {
+    if (thisWs !== ws) return; /* stale connection – don't touch current state */
     stopPing();
     stopCandleCountdown();
     UI.wsStatus.textContent = "DISCONNECTED";
@@ -2583,6 +2587,7 @@ function connect() {
   };
 
   ws.onerror = (evt) => {
+    if (thisWs !== ws) return; /* stale connection */
     addLog("WebSocket error: " + (evt.message || "connection failed"));
   };
 }
@@ -2593,15 +2598,22 @@ function disconnect() {
   stopPing();
   stopCandleCountdown();
 
-  /* Clean up active subscriptions before closing */
-  try {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ forget_all: "candles" }));
-      ws.send(JSON.stringify({ forget_all: "ticks" }));
-    }
-  } catch (e) { /* ignore send errors during teardown */ }
+  if (ws) {
+    /* Detach handlers so the closing socket can't interfere with future state */
+    const dyingWs = ws;
+    ws = null;
+    dyingWs.onopen = dyingWs.onmessage = dyingWs.onclose = dyingWs.onerror = null;
 
-  if (ws) { ws.close(); ws = null; }
+    /* Clean up active subscriptions before closing */
+    try {
+      if (dyingWs.readyState === WebSocket.OPEN) {
+        dyingWs.send(JSON.stringify({ forget_all: "candles" }));
+        dyingWs.send(JSON.stringify({ forget_all: "ticks" }));
+      }
+    } catch (e) { /* ignore send errors during teardown */ }
+
+    dyingWs.close();
+  }
 }
 
 function scheduleReconnect() {
@@ -5533,6 +5545,7 @@ function connectPanel(p) {
   const panelWs = new WebSocket(WS_URL);
 
   panelWs.onopen = () => {
+    if (p.ws !== panelWs) return; /* stale connection */
     p.connected = true;
     p.connectTime = Date.now();
     updatePanelCardUI(p);
@@ -5557,6 +5570,7 @@ function connectPanel(p) {
   };
 
   panelWs.onmessage = (evt) => {
+    if (p.ws !== panelWs) return; /* stale connection */
     const msg = JSON.parse(evt.data);
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
     if (msg.error) {
@@ -5631,6 +5645,7 @@ function connectPanel(p) {
   };
 
   panelWs.onclose = () => {
+    if (p.ws !== panelWs) return; /* stale connection – don't touch panel state */
     if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
     p.connected = false;
     p.ws = null;
@@ -5639,6 +5654,7 @@ function connectPanel(p) {
   };
 
   panelWs.onerror = () => {
+    if (p.ws !== panelWs) return; /* stale connection */
     addLog(`[Multi] ${p.symbol} WebSocket error`);
   };
 
@@ -5648,13 +5664,18 @@ function connectPanel(p) {
 /* ---- Disconnect a multi-symbol panel ---- */
 function disconnectPanel(p) {
   if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
-  try {
-    if (p.ws && p.ws.readyState === WebSocket.OPEN) {
-      p.ws.send(JSON.stringify({ forget_all: "candles" }));
-      p.ws.send(JSON.stringify({ forget_all: "ticks" }));
-    }
-  } catch (e) { /* ignore */ }
-  if (p.ws) { p.ws.close(); p.ws = null; }
+  if (p.ws) {
+    const dyingWs = p.ws;
+    p.ws = null;
+    dyingWs.onopen = dyingWs.onmessage = dyingWs.onclose = dyingWs.onerror = null;
+    try {
+      if (dyingWs.readyState === WebSocket.OPEN) {
+        dyingWs.send(JSON.stringify({ forget_all: "candles" }));
+        dyingWs.send(JSON.stringify({ forget_all: "ticks" }));
+      }
+    } catch (e) { /* ignore */ }
+    dyingWs.close();
+  }
   p.connected = false;
   updatePanelCardUI(p);
 }
