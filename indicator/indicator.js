@@ -672,6 +672,7 @@ let confluenceScore = 0;
 let telegramBotToken  = "";
 let telegramChatId    = "";
 let telegramAutoSend  = false;
+let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -908,6 +909,7 @@ function initUI() {
   UI.telegramBotToken       = document.getElementById("telegramBotToken");
   UI.telegramChatId         = document.getElementById("telegramChatId");
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
+  UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -1496,6 +1498,7 @@ function saveSettings() {
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
+      telegramScalpAutoSend,
       accountSize,
       riskPercent
     };
@@ -1597,9 +1600,11 @@ function restoreSettings() {
     }
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
+    if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
+    if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -3562,6 +3567,11 @@ function processLiveScalp() {
   /* Browser notification */
   sendScalpNotification(scalp);
 
+  /* Telegram alert (delayed to let canvas redraw first) */
+  if (telegramScalpAutoSend) {
+    setTimeout(() => sendTelegramScalpAlert(scalp), CHART_RENDER_DELAY_MS);
+  }
+
   /* Update UI */
   renderScalpAlerts();
   showScalpBanner(scalp);
@@ -3597,6 +3607,102 @@ function sendScalpNotification(scalp) {
   const symbol = getActiveSymbol() || "--";
   const body = `⚡ ${scalp.dir} SCALP — ${symbol} @ ${fmt(scalp.entry, 4)}\nConfluence: ${scalp.conf}/7\n${scalp.reasons.slice(0, 3).join(" · ")}`;
   new Notification("IT Guru: Live Scalp Alert!", { body, icon: NOTIF_ICON });
+}
+
+/**
+ * Build a formatted Telegram caption for a live scalp alert.
+ * Uses Telegram HTML parse mode.
+ */
+function buildScalpTelegramCaption(scalp) {
+  const symbol = scalp.symbol || getActiveSymbol() || "--";
+  const symLabel = getSymbolLabel ? getSymbolLabel(symbol) : symbol;
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const ts = new Date(scalp.epoch * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const dirEmoji = scalp.dir === "BULL" ? "🟢" : "🔴";
+  const dirLabel = scalp.dir === "BULL" ? "BUY" : "SELL";
+
+  const lines = [];
+  lines.push(`<b>⚡ Live Scalp Alert</b>`);
+  lines.push(``);
+  lines.push(`<b>Symbol:</b> ${symLabel}`);
+  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+  lines.push(`<b>Direction:</b> ${dirEmoji} ${scalp.dir} (${dirLabel})`);
+  lines.push(``);
+  lines.push(`<b>📍 Entry:</b> <code>${fmt(scalp.entry, 5)}</code>`);
+  lines.push(`<b>🛑 SL:</b> <code>${fmt(scalp.sl, 5)}</code>`);
+  lines.push(`<b>🎯 TP:</b> <code>${fmt(scalp.tp, 5)}</code>`);
+  if (scalp.rr != null) {
+    lines.push(`<b>R:R:</b> 1:${fmt(scalp.rr, 1)}`);
+  }
+  lines.push(``);
+  lines.push(`<b>Confluence:</b> ${scalp.conf}/7`);
+  lines.push(`<b>Reasons:</b> ${scalp.reasons.join(", ")}`);
+
+  /* Position sizing if available */
+  if (accountSize > 0 && riskPercent > 0 && scalp.entry != null && scalp.sl != null) {
+    const tradeObj = { entry: scalp.entry, sl: scalp.sl, tp: scalp.tp, rr: scalp.rr || 0, symbol };
+    const m = calcPositionMetrics(tradeObj);
+    if (m) {
+      lines.push(``);
+      lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+      if (scalp.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+      if (m.isSynthetic) {
+        lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
+      } else {
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+      }
+    }
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a live scalp alert to Telegram with chart screenshot.
+ */
+async function sendTelegramScalpAlert(scalp) {
+  if (!telegramScalpAutoSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Check credentials are available */
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Scalp Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending scalp…";
+  try {
+    const blob = await captureChartScreenshot();
+    const caption = buildScalpTelegramCaption(scalp);
+    await sendTelegramPhoto(blob, caption);
+    addLog("📤 Scalp Telegram alert sent successfully");
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ Scalp sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 Scalp Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ Scalp: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
 }
 
 function renderScalpAlerts() {
@@ -7288,6 +7394,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramAutoSendToggle) {
     UI.telegramAutoSendToggle.addEventListener("change", () => { telegramAutoSend = UI.telegramAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramScalpAutoSendToggle) {
+    UI.telegramScalpAutoSendToggle.addEventListener("change", () => { telegramScalpAutoSend = UI.telegramScalpAutoSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
