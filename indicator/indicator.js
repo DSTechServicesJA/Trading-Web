@@ -59,6 +59,7 @@
 /* ================= CONFIG ================= */
 const APP_ID  = 120128;
 const WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+const DERIV_TOKEN_KEY = "deriv_token";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
 /* Tuning defaults (user-configurable via UI) */
@@ -2879,7 +2880,7 @@ function connect() {
     startPing();
 
     /* Authorize with stored Deriv token first to bind live account */
-    const token = sessionStorage.getItem("deriv_token") || "";
+    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
     if (token) {
       addLog("Authorizing with Deriv account…");
       thisWs.send(JSON.stringify({ authorize: token }));
@@ -5899,7 +5900,7 @@ function initLoginGate() {
   if (remembered) {
     const derivToken = _deobfuscate(remembered);
     if (derivToken) {
-      sessionStorage.setItem("deriv_token", derivToken);
+      sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
       sessionStorage.setItem("itguru_logged_in", "1");
     }
   }
@@ -5914,14 +5915,14 @@ function initLoginGate() {
   if (rememberMe && remembered) rememberMe.checked = true;
 
   UI.loginBtn.onclick = () => {
-    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
 
     if (!token) {
       if (UI.loginError) UI.loginError.textContent = "Enter Deriv API token to continue";
       return;
     }
 
-    sessionStorage.setItem("deriv_token", token);
+    sessionStorage.setItem(DERIV_TOKEN_KEY, token);
     sessionStorage.setItem("itguru_logged_in", "1");
 
     /* Handle "Remember me" */
@@ -6319,7 +6320,7 @@ function connectPanel(p) {
     addLog(`[Multi] ${p.symbol} connected`);
 
     /* Authorize with stored Deriv token to bind live account */
-    const token = sessionStorage.getItem("deriv_token") || "";
+    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
     if (token) {
       panelWs.send(JSON.stringify({ authorize: token }));
     } else {
