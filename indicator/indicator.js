@@ -1313,6 +1313,12 @@ async function sendTelegramAlert() {
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
   if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
 
+  /* In multi-panel mode, delegate to the panel-specific sender
+     so the chart screenshot and caption always match the focused panel */
+  if (focusedPanelSymbol && multiPanels.has(focusedPanelSymbol)) {
+    return sendPanelTelegramAlert(focusedPanelSymbol);
+  }
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
   try {
     const blob = await captureChartScreenshot();
@@ -1492,8 +1498,14 @@ function buildPanelTelegramCaption(p) {
  */
 function capturePanelScreenshot(p) {
   const snap = _snapshotChartGlobals();
+  /* Also snapshot the symbol dropdown so the chart watermark matches this panel */
+  const prevSymbolValue = UI.symbolSelect ? UI.symbolSelect.value : null;
   activatePanel(p);
-  return _renderChartToBlob().finally(() => _restoreChartGlobals(snap));
+  if (UI.symbolSelect) UI.symbolSelect.value = p.symbol;
+  return _renderChartToBlob().finally(() => {
+    _restoreChartGlobals(snap);
+    if (UI.symbolSelect && prevSymbolValue !== null) UI.symbolSelect.value = prevSymbolValue;
+  });
 }
 
 /* ---- Snapshot / restore globals that activatePanel touches ---- */
@@ -3899,7 +3911,13 @@ async function sendTelegramScalpAlert(scalp) {
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending scalp…";
   try {
-    const blob = await captureChartScreenshot();
+    /* In multi-panel mode, capture the correct panel's chart (not whatever is currently in globals) */
+    let blob;
+    if (scalp.symbol && multiPanels.has(scalp.symbol)) {
+      blob = await capturePanelScreenshot(multiPanels.get(scalp.symbol));
+    } else {
+      blob = await captureChartScreenshot();
+    }
     const caption = buildScalpTelegramCaption(scalp);
     await sendTelegramPhoto(blob, caption);
     addLog("📤 Scalp Telegram alert sent successfully");
