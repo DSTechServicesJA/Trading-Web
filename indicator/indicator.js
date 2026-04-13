@@ -2487,6 +2487,7 @@ function resetSession() {
   liveScalpHistory = [];
   lastScalpCandleIdx = -999;
   renderScalpAlerts();
+  updateScalpStatsUI();
   if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
 
   /* Clear signal log UI */
@@ -3574,6 +3575,7 @@ function processLiveScalp() {
 
   /* Update UI */
   renderScalpAlerts();
+  updateScalpStatsUI();
   showScalpBanner(scalp);
 
   /* Log to signal log */
