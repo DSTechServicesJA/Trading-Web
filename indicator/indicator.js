@@ -5083,7 +5083,7 @@ function drawChart() {
     ctx.fillText(cpText, W - marginRight + 4, chartMouseY + 3);
 
     /* Find nearest candle index */
-    const hoveredIdx = Math.round(((chartMouseX - marginLeft) / chartW) * candles.length - 0.5);
+    const hoveredIdx = Math.min(candles.length - 1, Math.max(0, Math.round(((chartMouseX - marginLeft) / chartW) * (candles.length - 1))));
     if (hoveredIdx >= 0 && hoveredIdx < candles.length) {
       const hc = candles[hoveredIdx];
 
