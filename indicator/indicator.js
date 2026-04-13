@@ -831,6 +831,14 @@ function initUI() {
   UI.scalpAlertBannerText  = document.getElementById("scalpAlertBannerText");
   UI.scalpAlertCount       = document.getElementById("scalpAlertCount");
 
+  /* Live Scalp Stats */
+  UI.scalpStatsTotal       = document.getElementById("scalpStatsTotal");
+  UI.scalpStatsBull        = document.getElementById("scalpStatsBull");
+  UI.scalpStatsBear        = document.getElementById("scalpStatsBear");
+  UI.scalpStatsAvgConf     = document.getElementById("scalpStatsAvgConf");
+  UI.scalpStatsBestConf    = document.getElementById("scalpStatsBestConf");
+  UI.scalpStatsLastTime    = document.getElementById("scalpStatsLastTime");
+
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
   UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
@@ -1660,6 +1668,28 @@ function updateStatsUI() {
   const total = signalWins + signalLosses;
   if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
   if (UI.signalCount) UI.signalCount.textContent = signalHistory.length;
+  updateScalpStatsUI();
+}
+
+/* ---- Live Scalp Stats ---- */
+function updateScalpStatsUI() {
+  /* Skip when processing a non-focused multi-panel */
+  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
+
+  const h = liveScalpHistory;
+  const total = h.length;
+  const bulls = h.filter(s => s.dir === "BULL").length;
+  const bears = h.filter(s => s.dir === "BEAR").length;
+  const avgConf = total > 0 ? (h.reduce((sum, s) => sum + s.conf, 0) / total).toFixed(1) : "0";
+  const bestConf = total > 0 ? Math.max(...h.map(s => s.conf)) : 0;
+  const lastTime = total > 0 ? new Date(h[0].epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--";
+
+  if (UI.scalpStatsTotal)    UI.scalpStatsTotal.textContent    = total;
+  if (UI.scalpStatsBull)     UI.scalpStatsBull.textContent     = bulls;
+  if (UI.scalpStatsBear)     UI.scalpStatsBear.textContent     = bears;
+  if (UI.scalpStatsAvgConf)  UI.scalpStatsAvgConf.textContent  = avgConf + "/7";
+  if (UI.scalpStatsBestConf) UI.scalpStatsBestConf.textContent = bestConf + "/7";
+  if (UI.scalpStatsLastTime) UI.scalpStatsLastTime.textContent = lastTime;
 }
 
 /* ================= EXPORT ================= */
@@ -3509,7 +3539,7 @@ function detectLiveScalp() {
   const sl = dir === "BULL" ? entry - slDist : entry + slDist;
   const tp = dir === "BULL" ? entry + tpDist : entry - tpDist;
 
-  return { dir, conf, reasons, entry, sl, tp, epoch: c.epoch, candleIdx: idx };
+  return { dir, conf, reasons, entry, sl, tp, epoch: c.epoch, candleIdx: idx, symbol: getActiveSymbol() };
 }
 
 /**
@@ -3537,7 +3567,7 @@ function processLiveScalp() {
   showScalpBanner(scalp);
 
   /* Log to signal log */
-  const symbol = UI.symbolSelect ? UI.symbolSelect.value : "--";
+  const symbol = getActiveSymbol() || "--";
   addLog(`⚡ SCALP ${scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(scalp.entry, 4)} | Confluence ${scalp.conf}/7 | ${scalp.reasons.join(", ")}`);
 }
 
@@ -3564,7 +3594,7 @@ function playScalpAlert(dir) {
 function sendScalpNotification(scalp) {
   if (!notificationsEnabled || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
-  const symbol = UI.symbolSelect ? UI.symbolSelect.value : "--";
+  const symbol = getActiveSymbol() || "--";
   const body = `⚡ ${scalp.dir} SCALP — ${symbol} @ ${fmt(scalp.entry, 4)}\nConfluence: ${scalp.conf}/7\n${scalp.reasons.slice(0, 3).join(" · ")}`;
   new Notification("IT Guru: Live Scalp Alert!", { body, icon: NOTIF_ICON });
 }
@@ -3580,6 +3610,7 @@ function renderScalpAlerts() {
     const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     li.innerHTML =
       `<span class="scalp-dir">${s.dir === "BULL" ? "▲ BUY" : "▼ SELL"}</span>` +
+      (s.symbol ? `<span class="scalp-symbol">${s.symbol}</span>` : "") +
       `<span class="scalp-price">@ ${fmt(s.entry, 4)}</span>` +
       `<span class="scalp-conf">${s.conf}/7</span>` +
       `<span class="scalp-time">${ts}</span>` +
@@ -3592,7 +3623,8 @@ function renderScalpAlerts() {
 
 function showScalpBanner(scalp) {
   if (!UI.scalpAlertBanner) return;
-  const symbol = UI.symbolSelect ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]?.text || UI.symbolSelect.value) : "--";
+  const symRaw = getActiveSymbol() || "--";
+  const symbol = UI.symbolSelect ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]?.text || symRaw) : symRaw;
   const dirLabel = scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL";
   UI.scalpAlertBannerText.textContent = `⚡ SCALP ${dirLabel}  ${symbol}  @ ${fmt(scalp.entry, 4)}  —  Conf ${scalp.conf}/7  —  ${scalp.reasons.slice(0, 3).join(" · ")}`;
   UI.scalpAlertBanner.className = "scalp-banner scalp-banner-show " + (scalp.dir === "BULL" ? "scalp-banner-bull" : "scalp-banner-bear");
@@ -6312,6 +6344,8 @@ function createPanelState(symbol) {
     signalHistory: [],
     signalWins: 0,
     signalLosses: 0,
+    liveScalpHistory: [],
+    lastScalpCandleIdx: -999,
     connectTime: null,
     pingTimer: null,
     connected: false,
@@ -6386,6 +6420,8 @@ function activatePanel(p) {
   signalHistory  = p.signalHistory;
   signalWins     = p.signalWins;
   signalLosses   = p.signalLosses;
+  liveScalpHistory  = p.liveScalpHistory;
+  lastScalpCandleIdx = p.lastScalpCandleIdx;
   ws             = p.ws;
 
   /* Activate per-panel filter settings into globals */
@@ -6449,6 +6485,8 @@ function savePanel(p) {
   p.signalHistory  = signalHistory;
   p.signalWins     = signalWins;
   p.signalLosses   = signalLosses;
+  p.liveScalpHistory  = liveScalpHistory;
+  p.lastScalpCandleIdx = lastScalpCandleIdx;
   p.ws             = ws;
 
   /* Save current filter state back to panel */
@@ -6553,6 +6591,7 @@ function focusPanel(symbol) {
   updateStateUI();
   drawChart();
   updateStatsUI();
+  renderScalpAlerts();
 }
 
 /**
@@ -6635,6 +6674,8 @@ function connectPanel(p) {
   p.trailingSL = null;
   p.partialTpHit = false;
   p.confluenceScore = 0;
+  p.liveScalpHistory = [];
+  p.lastScalpCandleIdx = -999;
   p.connected = false;
 
   const panelWs = new WebSocket(WS_URL);
@@ -6724,6 +6765,7 @@ function connectPanel(p) {
       computeADX();
       computeStochastic();
       processLatestCandle();
+      processLiveScalp();
       monitorTradeOutcome(c);
     }
 
