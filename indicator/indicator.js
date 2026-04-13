@@ -709,6 +709,14 @@ let scalpingModeEnabled = false;
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = false;
 
+/* ================= LIVE SCALP SCANNER ================= */
+let liveScalpEnabled = false;       /* master toggle */
+let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
+let liveScalpHistory = [];          /* recent scalp alerts: { dir, price, sl, tp, conf, reasons[], epoch, candleIdx } */
+const LIVE_SCALP_MAX_HISTORY = 30;
+const LIVE_SCALP_COOLDOWN_CANDLES = 3;  /* min candles between consecutive scalp alerts */
+let lastScalpCandleIdx = -999;
+
 /* ================= UI REFS ================= */
 const UI = {};
 function initUI() {
@@ -814,6 +822,14 @@ function initUI() {
 
   /* Scalping mode */
   UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
+
+  /* Live Scalp Scanner */
+  UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
+  UI.liveScalpMinConf      = document.getElementById("liveScalpMinConf");
+  UI.scalpAlertList        = document.getElementById("scalpAlertList");
+  UI.scalpAlertBanner      = document.getElementById("scalpAlertBanner");
+  UI.scalpAlertBannerText  = document.getElementById("scalpAlertBannerText");
+  UI.scalpAlertCount       = document.getElementById("scalpAlertCount");
 
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
@@ -1118,6 +1134,7 @@ function buildTelegramCaption() {
   if (adxFilterEnabled) filters.push("ADX");
   if (stochFilterEnabled) filters.push("Stochastic");
   if (scalpingModeEnabled) filters.push("Scalping");
+  if (liveScalpEnabled) filters.push("Live Scalp Scanner");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1466,6 +1483,8 @@ function saveSettings() {
       stochFilterEnabled,
       scalpingModeEnabled,
       autoApplyRecommended,
+      liveScalpEnabled,
+      liveScalpMinConf,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
@@ -1553,6 +1572,12 @@ function restoreSettings() {
     /* Scalping mode */
     if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
     if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
+
+    /* Live Scalp Scanner */
+    if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
+    if (s.liveScalpMinConf != null) liveScalpMinConf = s.liveScalpMinConf;
+    if (UI.liveScalpToggle) UI.liveScalpToggle.checked = liveScalpEnabled;
+    if (UI.liveScalpMinConf) UI.liveScalpMinConf.value = liveScalpMinConf;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -2423,6 +2448,12 @@ function resetSession() {
   signalLosses = 0;
   updateStatsUI();
 
+  /* Clear live scalp history */
+  liveScalpHistory = [];
+  lastScalpCandleIdx = -999;
+  renderScalpAlerts();
+  if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
+
   /* Clear signal log UI */
   if (UI.signalLog) UI.signalLog.innerHTML = "";
 
@@ -2967,6 +2998,7 @@ function connect() {
       computeADX();
       computeStochastic();
       processLatestCandle();
+      processLiveScalp();
       monitorTradeOutcome(c);
       drawChart();
     }
@@ -3347,6 +3379,228 @@ function getSignalStrength(score) {
   if (score >= 7)  return { label: "MODERATE", cls: "warning", pct: 60 };
   if (score >= 4)  return { label: "WEAK", cls: "bear", pct: 40 };
   return { label: "VERY WEAK", cls: "disabled", pct: 20 };
+}
+
+/* ================= LIVE SCALP SCANNER ================= */
+/**
+ * Scans the latest candles for high-probability scalp setups using multi-
+ * indicator confluence.  Runs on every candle update when liveScalpEnabled
+ * is true.  A scalp is "legit" when >= liveScalpMinConf conditions agree.
+ *
+ * Confluence criteria (max 7):
+ *   1. EMA Momentum   – EMA 8 > EMA 21 (BULL) or EMA 8 < EMA 21 (BEAR)
+ *   2. RSI Zone        – RSI ≤ 40 bounce rising → BULL;
+ *                        RSI ≥ 60 reject falling → BEAR
+ *   3. MACD Momentum   – MACD histogram positive & growing (BULL) or negative & growing (BEAR),
+ *                        OR histogram just flipped sign
+ *   4. Stochastic Cross – %K crosses %D upward from < 25 (BULL) or downward from > 75 (BEAR)
+ *   5. Bollinger Bounce – Price touches/pierces lower band then closes inside (BULL),
+ *                        or upper band bounce (BEAR)
+ *   6. Candle Pattern   – Bullish/bearish engulfing, pin bar, or doji reversal at EMAs
+ *   7. ADX Trend        – ADX ≥ 20 confirms enough directional movement for a scalp
+ *
+ * Returns null or { dir, conf, reasons[], entry, sl, tp }
+ */
+function detectLiveScalp() {
+  if (!liveScalpEnabled) return null;
+  const len = candles.length;
+  if (len < 3) return null;
+
+  const idx = len - 1;
+  const c   = candles[idx];
+  const p   = candles[idx - 1];  /* previous candle */
+
+  /* Enforce cooldown – don't spam alerts on consecutive candles */
+  if (idx - lastScalpCandleIdx < LIVE_SCALP_COOLDOWN_CANDLES) return null;
+
+  /* ---- Gather indicator values at current candle ---- */
+  const emaF = emaFast.length > idx ? emaFast[idx] : null;
+  const emaS = emaSlow.length > idx ? emaSlow[idx] : null;
+  const rsiVal  = rsiValues.length > idx ? rsiValues[idx] : null;
+  const rsiPrev = rsiValues.length > idx - 1 && idx > 0 ? rsiValues[idx - 1] : null;
+  const macdH   = macdHistogram.length > idx ? macdHistogram[idx] : null;
+  const macdHP  = macdHistogram.length > idx - 1 && idx > 0 ? macdHistogram[idx - 1] : null;
+  const sK      = stochK.length > idx ? stochK[idx] : null;
+  const sKP     = stochK.length > idx - 1 && idx > 0 ? stochK[idx - 1] : null;
+  const sD      = stochD.length > idx ? stochD[idx] : null;
+  const sDP     = stochD.length > idx - 1 && idx > 0 ? stochD[idx - 1] : null;
+  const bbUp    = bbUpper.length > idx ? bbUpper[idx] : null;
+  const bbLo    = bbLower.length > idx ? bbLower[idx] : null;
+  const atrVal  = atrValue;
+
+  /* ---- Score BULL and BEAR separately, pick the stronger ---- */
+  const bullReasons = [];
+  const bearReasons = [];
+
+  /* 1. EMA Momentum */
+  if (emaF != null && emaS != null) {
+    if (emaF > emaS && c.close > emaF) bullReasons.push("EMA 8>21 ✓");
+    if (emaF < emaS && c.close < emaF) bearReasons.push("EMA 8<21 ✓");
+  }
+
+  /* 2. RSI Zone (reversal-based for scalps) */
+  if (rsiVal != null && rsiPrev != null) {
+    if (rsiVal <= 40 && rsiVal > rsiPrev) bullReasons.push(`RSI ${rsiVal.toFixed(0)} bounce ✓`);
+    if (rsiVal >= 60 && rsiVal < rsiPrev) bearReasons.push(`RSI ${rsiVal.toFixed(0)} reject ✓`);
+  }
+
+  /* 3. MACD Momentum (one point max — flip is strongest, then growing momentum) */
+  if (macdH != null && macdHP != null) {
+    if (macdH > 0 && macdHP <= 0) bullReasons.push("MACD flip +ve ✓");
+    else if (macdH > 0 && macdH > macdHP) bullReasons.push("MACD momentum ↑ ✓");
+    if (macdH < 0 && macdHP >= 0) bearReasons.push("MACD flip −ve ✓");
+    else if (macdH < 0 && macdH < macdHP) bearReasons.push("MACD momentum ↓ ✓");
+  }
+
+  /* 4. Stochastic cross in extreme zone */
+  if (sK != null && sD != null && sKP != null && sDP != null) {
+    if (sKP <= sDP && sK > sD && sK < 30) bullReasons.push(`Stoch cross ↑ ${sK.toFixed(0)} ✓`);
+    if (sKP >= sDP && sK < sD && sK > 70) bearReasons.push(`Stoch cross ↓ ${sK.toFixed(0)} ✓`);
+  }
+
+  /* 5. Bollinger Band bounce */
+  if (bbLo != null && bbUp != null) {
+    if (p.low <= bbLo && c.close > bbLo) bullReasons.push("BB lower bounce ✓");
+    if (p.high >= bbUp && c.close < bbUp) bearReasons.push("BB upper bounce ✓");
+  }
+
+  /* 6. Candle pattern at/near EMA or recent S/R */
+  const body = Math.abs(c.close - c.open);
+  const range = c.high - c.low;
+  const pBody = Math.abs(p.close - p.open);
+  if (range > 0) {
+    const isBullEngulf = c.close > c.open && p.close < p.open && body > pBody * 1.1 && c.close > p.open;
+    const isBearEngulf = c.close < c.open && p.close > p.open && body > pBody * 1.1 && c.close < p.open;
+    const isPinBarBull = c.close > c.open && (c.open - c.low) > body * 2 && (c.high - c.close) < body * 0.5;
+    const isPinBarBear = c.close < c.open && (c.high - c.open) > body * 2 && (c.close - c.low) < body * 0.5;
+
+    if (isBullEngulf) bullReasons.push("Bullish engulfing ✓");
+    if (isBearEngulf) bearReasons.push("Bearish engulfing ✓");
+    if (isPinBarBull) bullReasons.push("Bull pin bar ✓");
+    if (isPinBarBear) bearReasons.push("Bear pin bar ✓");
+  }
+
+  /* 7. ADX trend strength (shared — benefits whichever side has momentum) */
+  if (adxValue >= ADX_RANGING_THRESHOLD) {
+    if (adxDiPlus > adxDiMinus) bullReasons.push(`ADX ${adxValue.toFixed(0)} DI+ ✓`);
+    if (adxDiMinus > adxDiPlus) bearReasons.push(`ADX ${adxValue.toFixed(0)} DI− ✓`);
+  }
+
+  /* ---- Pick dominant direction ---- */
+  const bullConf = bullReasons.length;
+  const bearConf = bearReasons.length;
+  const minConf  = liveScalpMinConf;
+
+  let dir, conf, reasons;
+  if (bullConf >= minConf && bullConf >= bearConf) {
+    dir = "BULL"; conf = bullConf; reasons = bullReasons;
+  } else if (bearConf >= minConf) {
+    dir = "BEAR"; conf = bearConf; reasons = bearReasons;
+  } else {
+    return null;  /* not enough confluence */
+  }
+
+  /* ---- Compute entry / SL / TP using ATR ---- */
+  const entry = c.close;
+  const atr = atrVal > 0 ? atrVal : range;
+  const slDist = atr * 0.75;  /* tight scalp SL: 0.75× ATR */
+  const tpDist = atr * 1.0;   /* quick TP: 1× ATR → 1.33:1 R:R (1.0/0.75) */
+
+  const sl = dir === "BULL" ? entry - slDist : entry + slDist;
+  const tp = dir === "BULL" ? entry + tpDist : entry - tpDist;
+
+  return { dir, conf, reasons, entry, sl, tp, epoch: c.epoch, candleIdx: idx };
+}
+
+/**
+ * Run the live scalp scanner and handle alerting.
+ * Called from the main tick processing pipeline.
+ */
+function processLiveScalp() {
+  const scalp = detectLiveScalp();
+  if (!scalp) return;
+
+  lastScalpCandleIdx = scalp.candleIdx;
+
+  /* Store in history */
+  liveScalpHistory.unshift(scalp);
+  if (liveScalpHistory.length > LIVE_SCALP_MAX_HISTORY) liveScalpHistory.pop();
+
+  /* Audio alert — distinct double-beep for scalps */
+  playScalpAlert(scalp.dir);
+
+  /* Browser notification */
+  sendScalpNotification(scalp);
+
+  /* Update UI */
+  renderScalpAlerts();
+  showScalpBanner(scalp);
+
+  /* Log to signal log */
+  const symbol = UI.symbolSelect ? UI.symbolSelect.value : "--";
+  addLog(`⚡ SCALP ${scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(scalp.entry, 4)} | Confluence ${scalp.conf}/7 | ${scalp.reasons.join(", ")}`);
+}
+
+function playScalpAlert(dir) {
+  if (!soundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const freq = dir === "BULL" ? 1000 : 800;
+    /* Double beep for urgency */
+    for (let i = 0; i < 2; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.value = 0.15;
+      osc.start(ctx.currentTime + i * 0.2);
+      osc.stop(ctx.currentTime + i * 0.2 + 0.12);
+    }
+  } catch (e) { /* audio not available */ }
+}
+
+function sendScalpNotification(scalp) {
+  if (!notificationsEnabled || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  const symbol = UI.symbolSelect ? UI.symbolSelect.value : "--";
+  const body = `⚡ ${scalp.dir} SCALP — ${symbol} @ ${fmt(scalp.entry, 4)}\nConfluence: ${scalp.conf}/7\n${scalp.reasons.slice(0, 3).join(" · ")}`;
+  new Notification("IT Guru: Live Scalp Alert!", { body, icon: NOTIF_ICON });
+}
+
+function renderScalpAlerts() {
+  if (!UI.scalpAlertList) return;
+  UI.scalpAlertList.innerHTML = "";
+  const toShow = liveScalpHistory.slice(0, 15);
+  for (const s of toShow) {
+    const li = document.createElement("li");
+    li.className = "scalp-alert-item " + (s.dir === "BULL" ? "scalp-bull" : "scalp-bear");
+    const t = new Date(s.epoch * 1000);
+    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    li.innerHTML =
+      `<span class="scalp-dir">${s.dir === "BULL" ? "▲ BUY" : "▼ SELL"}</span>` +
+      `<span class="scalp-price">@ ${fmt(s.entry, 4)}</span>` +
+      `<span class="scalp-conf">${s.conf}/7</span>` +
+      `<span class="scalp-time">${ts}</span>` +
+      `<div class="scalp-reasons">${s.reasons.join(" · ")}</div>` +
+      `<div class="scalp-levels">SL: ${fmt(s.sl, 4)} &nbsp;|&nbsp; TP: ${fmt(s.tp, 4)}</div>`;
+    UI.scalpAlertList.appendChild(li);
+  }
+  if (UI.scalpAlertCount) UI.scalpAlertCount.textContent = liveScalpHistory.length;
+}
+
+function showScalpBanner(scalp) {
+  if (!UI.scalpAlertBanner) return;
+  const symbol = UI.symbolSelect ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]?.text || UI.symbolSelect.value) : "--";
+  const dirLabel = scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL";
+  UI.scalpAlertBannerText.textContent = `⚡ SCALP ${dirLabel}  ${symbol}  @ ${fmt(scalp.entry, 4)}  —  Conf ${scalp.conf}/7  —  ${scalp.reasons.slice(0, 3).join(" · ")}`;
+  UI.scalpAlertBanner.className = "scalp-banner scalp-banner-show " + (scalp.dir === "BULL" ? "scalp-banner-bull" : "scalp-banner-bear");
+  /* Auto-hide after 12 seconds */
+  clearTimeout(UI.scalpAlertBanner._hideTimer);
+  UI.scalpAlertBanner._hideTimer = setTimeout(() => {
+    if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
+  }, 12000);
 }
 
 /* ================= EMA TREND FILTER ================= */
@@ -5691,6 +5945,79 @@ function drawChart() {
     ctx.restore();
   }
 
+  /* ---- Live Scalp Markers on Chart ---- */
+  if (liveScalpEnabled && liveScalpHistory.length > 0) {
+    for (const s of liveScalpHistory) {
+      /* Only draw scalps that fall within the visible candle range */
+      if (s.candleIdx < 0 || s.candleIdx >= candles.length) continue;
+      const sx = xOf(s.candleIdx);
+      const sy = yOf(s.entry);
+      const sc = candles[s.candleIdx];
+      if (!sc) continue;
+
+      const isBull = s.dir === "BULL";
+      const arrowColor = isBull ? "#22c55e" : "#ef4444";
+      const arrowY = isBull ? yOf(sc.low) + 14 : yOf(sc.high) - 14;
+
+      /* Arrow marker */
+      ctx.save();
+      ctx.font = "bold 16px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = arrowColor;
+      ctx.shadowColor = arrowColor;
+      ctx.shadowBlur = 6;
+      ctx.fillText(isBull ? "▲" : "▼", sx, arrowY);
+      ctx.shadowBlur = 0;
+
+      /* Small confluence badge above/below the arrow */
+      const badgeY = isBull ? arrowY + 12 : arrowY - 8;
+      ctx.font = "bold 9px Arial";
+      ctx.globalAlpha = 0.9;
+      const badgeText = `${s.conf}/7`;
+      const btw = ctx.measureText(badgeText).width + 6;
+      ctx.fillStyle = arrowColor;
+      const bx = sx - btw / 2;
+      const by = badgeY - 4;
+      /* Rounded rect */
+      ctx.beginPath();
+      ctx.moveTo(bx + 3, by);
+      ctx.lineTo(bx + btw - 3, by);
+      ctx.quadraticCurveTo(bx + btw, by, bx + btw, by + 3);
+      ctx.lineTo(bx + btw, by + 10);
+      ctx.quadraticCurveTo(bx + btw, by + 13, bx + btw - 3, by + 13);
+      ctx.lineTo(bx + 3, by + 13);
+      ctx.quadraticCurveTo(bx, by + 13, bx, by + 10);
+      ctx.lineTo(bx, by + 3);
+      ctx.quadraticCurveTo(bx, by, bx + 3, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.fillText(badgeText, sx, badgeY + 6);
+      ctx.globalAlpha = 1;
+
+      /* Dashed SL/TP level lines (short, local to the scalp candle) */
+      const lineStartX = Math.max(marginLeft, sx - candleW * 4);
+      const lineEndX   = Math.min(W - marginRight, sx + candleW * 4);
+      ctx.setLineDash([2, 2]);
+      ctx.lineWidth = 1;
+      /* SL */
+      ctx.strokeStyle = "rgba(239,68,68,0.5)";
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, yOf(s.sl));
+      ctx.lineTo(lineEndX, yOf(s.sl));
+      ctx.stroke();
+      /* TP */
+      ctx.strokeStyle = "rgba(34,197,94,0.5)";
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, yOf(s.tp));
+      ctx.lineTo(lineEndX, yOf(s.tp));
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.restore();
+    }
+  }
+
   /* ---- Crosshair + OHLC tooltip ---- */
   if (chartMouseActive && chartMouseX >= marginLeft && chartMouseX <= W - marginRight
       && chartMouseY >= marginTop && chartMouseY <= marginTop + chartH) {
@@ -6883,6 +7210,22 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  /* Live Scalp Scanner listeners */
+  if (UI.liveScalpToggle) {
+    UI.liveScalpToggle.addEventListener("change", () => {
+      liveScalpEnabled = UI.liveScalpToggle.checked;
+      saveSettings();
+      if (!liveScalpEnabled && UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
+      drawChart();
+    });
+  }
+  if (UI.liveScalpMinConf) {
+    UI.liveScalpMinConf.addEventListener("change", () => {
+      liveScalpMinConf = Math.max(1, Math.min(7, parseInt(UI.liveScalpMinConf.value, 10) || 3));
+      UI.liveScalpMinConf.value = liveScalpMinConf;
+      saveSettings();
+    });
   }
   if (UI.autoApplyRecToggle) {
     UI.autoApplyRecToggle.addEventListener("change", () => {
