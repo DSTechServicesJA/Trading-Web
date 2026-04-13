@@ -1673,14 +1673,19 @@ function restoreSignalHistory() {
 
 /* ================= STATS ================= */
 function updateStatsUI() {
-  /* Skip when processing a non-focused multi-panel */
-  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
+  /* For focused-panel-specific stats, skip non-focused panels */
+  const isFocusedOrSingle = !_multiPanelProcessing || _multiPanelProcessing === focusedPanelSymbol;
 
-  if (UI.signalWins) UI.signalWins.textContent = signalWins;
-  if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
-  const total = signalWins + signalLosses;
-  if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
-  if (UI.signalCount) UI.signalCount.textContent = signalHistory.length;
+  if (isFocusedOrSingle) {
+    if (UI.signalWins) UI.signalWins.textContent = signalWins;
+    if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
+    const total = signalWins + signalLosses;
+    if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
+  }
+
+  /* Always update aggregated signal count and banners (across all panels) */
+  const allSignals = getAggregatedSignalHistory();
+  if (UI.signalCount) UI.signalCount.textContent = allSignals.length;
   updateScalpStatsUI();
   renderSignalBanner();
   renderScalpTickerBanner();
@@ -1691,7 +1696,10 @@ function renderSignalBanner() {
   if (!UI.signalBannerTrack) return;
   UI.signalBannerTrack.innerHTML = "";
 
-  if (signalHistory.length === 0) {
+  /* Aggregate signals from ALL panels (multi-symbol) or global (single) */
+  const allSignals = getAggregatedSignalHistory();
+
+  if (allSignals.length === 0) {
     const empty = document.createElement("span");
     empty.className = "signal-banner-empty";
     empty.textContent = "No signals yet — waiting for breakout setups…";
@@ -1699,8 +1707,8 @@ function renderSignalBanner() {
     return;
   }
 
-  /* Render newest first */
-  const signals = signalHistory.slice().reverse();
+  /* Render newest first (aggregated list is already newest-first) */
+  const signals = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
   for (const s of signals) {
     const card = document.createElement("div");
     const resultLower = (s.result || "PENDING").toLowerCase();
@@ -1741,7 +1749,10 @@ function renderScalpTickerBanner() {
   if (!UI.scalpTickerTrack) return;
   UI.scalpTickerTrack.innerHTML = "";
 
-  if (liveScalpHistory.length === 0) {
+  /* Aggregate scalp signals from ALL panels (multi-symbol) or global (single) */
+  const allScalps = getAggregatedScalpHistory();
+
+  if (allScalps.length === 0) {
     const empty = document.createElement("span");
     empty.className = "scalp-ticker-empty";
     empty.textContent = "No scalp signals yet — scanner active…";
@@ -1749,9 +1760,9 @@ function renderScalpTickerBanner() {
     return;
   }
 
-  /* Render newest first (liveScalpHistory is already newest-first via unshift) */
-  for (let i = 0; i < liveScalpHistory.length; i++) {
-    const s = liveScalpHistory[i];
+  /* Render newest first (aggregated list is already newest-first) */
+  for (let i = 0; i < allScalps.length; i++) {
+    const s = allScalps[i];
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
     card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}`;
@@ -1787,10 +1798,9 @@ function renderScalpTickerBanner() {
 
 /* ---- Live Scalp Stats ---- */
 function updateScalpStatsUI() {
-  /* Skip when processing a non-focused multi-panel */
-  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
+  /* Scalp stats now use aggregated data from all panels — no panel-focus guard needed */
 
-  const h = liveScalpHistory;  /* newest-first (unshift in processLiveScalp) */
+  const h = getAggregatedScalpHistory();  /* newest-first, aggregated across all panels */
   const total = h.length;
   const bulls = h.filter(s => s.dir === "BULL").length;
   const bears = h.filter(s => s.dir === "BEAR").length;
@@ -1808,9 +1818,10 @@ function updateScalpStatsUI() {
 
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
-  if (signalHistory.length === 0) { alert("No signals to export."); return; }
+  const allSignals = getAggregatedSignalHistory();
+  if (allSignals.length === 0) { alert("No signals to export."); return; }
   const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode"];
-  const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
+  const rows = allSignals.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -1823,7 +1834,8 @@ function exportSignalsCSV() {
 
 /* ================= PDF EXPORT (with chart screenshots) ================= */
 function exportSignalsPDF() {
-  if (signalHistory.length === 0) { alert("No signals to export."); return; }
+  const allSignals = getAggregatedSignalHistory();
+  if (allSignals.length === 0) { alert("No signals to export."); return; }
   if (typeof window.jspdf === "undefined") { alert("PDF library not loaded. Please check your connection."); return; }
 
   const { jsPDF } = window.jspdf;
@@ -1832,7 +1844,7 @@ function exportSignalsPDF() {
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 10;
 
-  signalHistory.forEach((sig, idx) => {
+  allSignals.forEach((sig, idx) => {
     if (idx > 0) doc.addPage("a4", "landscape");
 
     /* ---- Header ---- */
@@ -1841,7 +1853,7 @@ function exportSignalsPDF() {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
     doc.setTextColor(255, 255, 255);
-    doc.text(`Signal ${idx + 1} / ${signalHistory.length}`, margin, 12);
+    doc.text(`Signal ${idx + 1} / ${allSignals.length}`, margin, 12);
     doc.setFontSize(10);
     doc.text(`IT Guru – Breakout Retest Indicator`, pageW - margin, 12, { align: "right" });
 
@@ -6543,6 +6555,40 @@ function initLoginGate() {
 const MULTI_MAX_PANELS = 90;
 const multiPanels = new Map();   /* symbol → panel object */
 
+/* ---- Aggregate signals from ALL panels (+ single-mode globals) ---- */
+function getAggregatedSignalHistory() {
+  if (multiPanels.size === 0) return signalHistory;   /* single-symbol mode */
+  const all = [];
+  for (const p of multiPanels.values()) {
+    for (const s of p.signalHistory) all.push(s);
+  }
+  /* Sort newest-first by time string (ISO) */
+  all.sort((a, b) => (b.time || "").localeCompare(a.time || ""));
+  return all;
+}
+
+function getAggregatedScalpHistory() {
+  if (multiPanels.size === 0) return liveScalpHistory;   /* single-symbol mode */
+  const all = [];
+  for (const p of multiPanels.values()) {
+    for (const s of p.liveScalpHistory) all.push(s);
+  }
+  /* Sort newest-first by epoch */
+  all.sort((a, b) => (b.epoch || 0) - (a.epoch || 0));
+  return all;
+}
+
+/* Lightweight banner-only update — safe to call from any panel context */
+function updateSignalBanners() {
+  renderSignalBanner();
+  renderScalpTickerBanner();
+  /* Aggregated signal count */
+  if (UI.signalCount) {
+    const agg = getAggregatedSignalHistory();
+    UI.signalCount.textContent = agg.length;
+  }
+}
+
 /* ---- Panel state factory ---- */
 function createPanelState(symbol) {
   /* Compute per-symbol recommended settings using market type */
@@ -7016,6 +7062,9 @@ function connectPanel(p) {
       if (UI.livePrice && p.candles.length > 0) {
         UI.livePrice.textContent = fmt(p.candles[p.candles.length - 1].close, 4);
       }
+    } else {
+      /* Non-focused panel: still update aggregated signal banners */
+      updateSignalBanners();
     }
   };
 
