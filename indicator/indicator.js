@@ -421,6 +421,11 @@ let candleCountdownInterval = null;
 let soundEnabled = true;
 let notificationsEnabled = false;
 
+/* Chart interaction state */
+let chartMouseX = -1;
+let chartMouseY = -1;
+let chartMouseActive = false;
+
 /* Theme */
 let currentTheme = "dark";
 
@@ -5044,6 +5049,115 @@ function drawChart() {
     ctx.fillText(sigText, sigX + 10, sigY + sigH / 2 + 4);
     ctx.restore();
   }
+
+  /* ---- Crosshair + OHLC tooltip ---- */
+  if (chartMouseActive && chartMouseX >= marginLeft && chartMouseX <= W - marginRight
+      && chartMouseY >= marginTop && chartMouseY <= marginTop + chartH) {
+
+    /* Vertical crosshair line */
+    ctx.strokeStyle = COLORS.crosshairText;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(chartMouseX, marginTop);
+    ctx.lineTo(chartMouseX, marginTop + chartH);
+    ctx.stroke();
+
+    /* Horizontal crosshair line */
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, chartMouseY);
+    ctx.lineTo(W - marginRight, chartMouseY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    /* Price label on right axis at crosshair Y */
+    const crossPrice = priceLow + (1 - (chartMouseY - marginTop) / chartH) * priceRange;
+    const cpText = fmt(crossPrice, 4);
+    ctx.font = "bold 10px Arial";
+    const cpTW = ctx.measureText(cpText).width + 8;
+    ctx.fillStyle = currentTheme === "light" ? "#334155" : "#e2e8f0";
+    ctx.fillRect(W - marginRight, chartMouseY - 7, cpTW + 2, 14);
+    ctx.fillStyle = currentTheme === "light" ? "#fff" : "#0f172a";
+    ctx.fillText(cpText, W - marginRight + 4, chartMouseY + 3);
+
+    /* Find nearest candle index */
+    const hoveredIdx = Math.round(((chartMouseX - marginLeft) / chartW) * candles.length - 0.5);
+    if (hoveredIdx >= 0 && hoveredIdx < candles.length) {
+      const hc = candles[hoveredIdx];
+
+      /* Highlight hovered candle with vertical bar */
+      const hx = xOf(hoveredIdx);
+      ctx.fillStyle = currentTheme === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.04)";
+      ctx.fillRect(hx - candleW / 2 - 2, marginTop, candleW + 4, chartH);
+
+      /* OHLC tooltip box */
+      const isBull = hc.close >= hc.open;
+      const d = new Date(hc.epoch * 1000);
+      const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const dateStr = d.toLocaleDateString([], { month: "short", day: "numeric" });
+      const lines = [
+        `${dateStr}  ${timeStr}`,
+        `O: ${fmt(hc.open, 4)}`,
+        `H: ${fmt(hc.high, 4)}`,
+        `L: ${fmt(hc.low, 4)}`,
+        `C: ${fmt(hc.close, 4)}`
+      ];
+
+      ctx.font = "11px 'JetBrains Mono', monospace";
+      const lineH = 16;
+      const tooltipPad = 8;
+      let maxLineW = 0;
+      for (const l of lines) {
+        const lw = ctx.measureText(l).width;
+        if (lw > maxLineW) maxLineW = lw;
+      }
+      const tooltipW = maxLineW + tooltipPad * 2;
+      const tooltipH = lines.length * lineH + tooltipPad * 2;
+
+      /* Position tooltip - flip side if near edge */
+      let tx = chartMouseX + 14;
+      let ty = chartMouseY - tooltipH / 2;
+      if (tx + tooltipW > W - marginRight) tx = chartMouseX - tooltipW - 14;
+      if (ty < marginTop) ty = marginTop;
+      if (ty + tooltipH > marginTop + chartH) ty = marginTop + chartH - tooltipH;
+
+      /* Draw tooltip background */
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = currentTheme === "light" ? "#fff" : "#1e293b";
+      ctx.beginPath();
+      const tr = 4;
+      ctx.moveTo(tx + tr, ty);
+      ctx.lineTo(tx + tooltipW - tr, ty);
+      ctx.quadraticCurveTo(tx + tooltipW, ty, tx + tooltipW, ty + tr);
+      ctx.lineTo(tx + tooltipW, ty + tooltipH - tr);
+      ctx.quadraticCurveTo(tx + tooltipW, ty + tooltipH, tx + tooltipW - tr, ty + tooltipH);
+      ctx.lineTo(tx + tr, ty + tooltipH);
+      ctx.quadraticCurveTo(tx, ty + tooltipH, tx, ty + tooltipH - tr);
+      ctx.lineTo(tx, ty + tr);
+      ctx.quadraticCurveTo(tx, ty, tx + tr, ty);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = isBull ? "#22c55e" : "#ef4444";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      /* Draw tooltip text */
+      ctx.fillStyle = currentTheme === "light" ? "#334155" : "#cbd5e1";
+      ctx.textAlign = "left";
+      for (let li = 0; li < lines.length; li++) {
+        /* First line (date) in muted color, OHLC in theme color */
+        if (li === 0) {
+          ctx.fillStyle = currentTheme === "light" ? "#94a3b8" : "#64748b";
+        } else {
+          ctx.fillStyle = currentTheme === "light" ? "#334155" : "#cbd5e1";
+        }
+        ctx.fillText(lines[li], tx + tooltipPad, ty + tooltipPad + (li + 1) * lineH - 3);
+      }
+    }
+  }
 }
 
 function drawEMALine(ctx, emaData, xOf, yOf, color) {
@@ -5070,6 +5184,7 @@ function drawGrid(ctx, ml, mt, cw, ch, pLow, pHigh, W, COLORS) {
   ctx.font = "10px Arial";
   ctx.textAlign = "right";
 
+  /* Horizontal price grid */
   for (let i = 0; i <= steps; i++) {
     const y = mt + (i / steps) * ch;
     const price = pHigh - (i / steps) * (pHigh - pLow);
@@ -5079,6 +5194,18 @@ function drawGrid(ctx, ml, mt, cw, ch, pLow, pHigh, W, COLORS) {
     ctx.stroke();
     ctx.fillText(fmt(price, 4), W - 4, y + 3);
   }
+
+  /* Vertical time grid (4 evenly-spaced lines) */
+  const vSteps = 4;
+  ctx.textAlign = "center";
+  for (let i = 1; i < vSteps; i++) {
+    const x = ml + (i / vSteps) * cw;
+    ctx.beginPath();
+    ctx.moveTo(x, mt);
+    ctx.lineTo(x, mt + ch);
+    ctx.stroke();
+  }
+
   ctx.textAlign = "left";
 }
 
@@ -5185,7 +5312,7 @@ function initLoginGate() {
  *     and sidebar detail panels update to show that panel's data.
  */
 
-const MULTI_MAX_PANELS = 6;
+const MULTI_MAX_PANELS = 27;
 const multiPanels = new Map();   /* symbol → panel object */
 
 /* ---- Panel state factory ---- */
@@ -5813,6 +5940,17 @@ function drawMiniChart(p) {
     ctx.fillRect(x - cW / 2, bodyTop, cW, bodyH);
   }
 
+  /* EMA overlays (compact) */
+  if (p.emaFast && p.emaFast.length > 0) {
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.7;
+    drawMiniEMALine(ctx, p.emaFast, xOf, yOf, COLORS.emaFast);
+    drawMiniEMALine(ctx, p.emaSlow, xOf, yOf, COLORS.emaSlow);
+    ctx.globalAlpha = 0.4;
+    drawMiniEMALine(ctx, p.emaHTF, xOf, yOf, COLORS.emaHTF);
+    ctx.globalAlpha = 1;
+  }
+
   /* Trade levels */
   if (p.trade) {
     const drawLine = (price, color) => {
@@ -5841,6 +5979,21 @@ function drawMiniChart(p) {
     ctx.fillText(p.phase, W / 2, H / 2);
     ctx.restore();
   }
+}
+
+function drawMiniEMALine(ctx, emaData, xOf, yOf, color) {
+  if (!emaData || emaData.length === 0) return;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i < emaData.length; i++) {
+    if (emaData[i] == null) continue;
+    const x = xOf(i);
+    const y = yOf(emaData[i]);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
 }
 
 /* ---- Connect all / Disconnect all ---- */
@@ -5912,11 +6065,6 @@ function initMultiSymbolPicker() {
     cb.addEventListener("change", () => {
       const sym = cb.dataset.symbol;
       if (cb.checked) {
-        if (multiPanels.size >= MULTI_MAX_PANELS) {
-          cb.checked = false;
-          addLog(`[Multi] Max ${MULTI_MAX_PANELS} panels reached — deselect one first`);
-          return;
-        }
         addSymbolPanel(sym);
       } else {
         removeSymbolPanel(sym);
@@ -5929,6 +6077,34 @@ function initMultiSymbolPicker() {
   const disconnectAllBtn = document.getElementById("disconnectAllBtn");
   if (connectAllBtn) connectAllBtn.addEventListener("click", connectAllPanels);
   if (disconnectAllBtn) disconnectAllBtn.addEventListener("click", disconnectAllPanels);
+
+  /* Wire Select All / Deselect All buttons */
+  const selectAllBtn = document.getElementById("selectAllSymbols");
+  const deselectAllBtn = document.getElementById("deselectAllSymbols");
+  if (selectAllBtn) {
+    selectAllBtn.addEventListener("click", () => {
+      const picker = document.getElementById("multiSymbolPicker");
+      if (!picker) return;
+      picker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (!cb.checked) {
+          cb.checked = true;
+          addSymbolPanel(cb.dataset.symbol);
+        }
+      });
+    });
+  }
+  if (deselectAllBtn) {
+    deselectAllBtn.addEventListener("click", () => {
+      const picker = document.getElementById("multiSymbolPicker");
+      if (!picker) return;
+      picker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (cb.checked) {
+          cb.checked = false;
+          removeSymbolPanel(cb.dataset.symbol);
+        }
+      });
+    });
+  }
 }
 
 /* ================= BOOT ================= */
@@ -6131,6 +6307,24 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.prevSymbolBtn) UI.prevSymbolBtn.addEventListener("click", () => cycleSymbol(-1));
   if (UI.nextSymbolBtn) UI.nextSymbolBtn.addEventListener("click", () => cycleSymbol(1));
   updateCurrentSymbolLabel();
+
+  /* ---- Chart crosshair + OHLC tooltip mouse tracking ---- */
+  if (UI.canvas) {
+    UI.canvas.style.cursor = "crosshair";
+    UI.canvas.addEventListener("mousemove", (e) => {
+      const rect = UI.canvas.getBoundingClientRect();
+      chartMouseX = e.clientX - rect.left;
+      chartMouseY = e.clientY - rect.top;
+      chartMouseActive = true;
+      drawChart();
+    });
+    UI.canvas.addEventListener("mouseleave", () => {
+      chartMouseActive = false;
+      chartMouseX = -1;
+      chartMouseY = -1;
+      drawChart();
+    });
+  }
 
   /* Resize redraw */
   window.addEventListener("resize", () => {

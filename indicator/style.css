@@ -1421,6 +1421,29 @@ body.light-theme .ms-card-footer {
   cursor: pointer;
   transition: background 0.15s;
 }
+.btn-xs {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-xs:hover { background: var(--bg-card-hover); }
+.ms-group-label {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-soft);
+  padding: 6px 0 2px;
+  border-bottom: 1px solid var(--glass-border);
+  margin-top: 4px;
+}
+.ms-group-label:first-child { margin-top: 0; }
 .ms-check:hover { background: var(--bg-card-hover); }
 .ms-check input[type="checkbox"] {
   width: 14px; height: 14px;

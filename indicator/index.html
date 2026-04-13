@@ -169,26 +169,63 @@
           <section class="box">
             <h3 class="collapsible">📊 Multi-Symbol Analysis</h3>
             <div class="collapsible-body">
-              <p class="hint">Select symbols to analyze simultaneously (up to 6).</p>
+              <p class="hint">Select symbols to analyze simultaneously.</p>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <button id="selectAllSymbols" class="btn btn-xs">Select All</button>
+                <button id="deselectAllSymbols" class="btn btn-xs">Deselect All</button>
+              </div>
               <div id="multiSymbolPicker" class="multi-symbol-picker">
+                <div class="ms-group-label">Volatility (1s)</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ10V" /> Vol 10 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ15V" /> Vol 15 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ25V" /> Vol 25 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ30V" /> Vol 30 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ50V" /> Vol 50 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ90V" /> Vol 90 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <div class="ms-group-label">Volatility (Std)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_10" /> Vol 10 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_25" /> Vol 25 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_50" /> Vol 50 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <div class="ms-group-label">Boom Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM300N" /> Boom 300</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM600N" /> Boom 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM900N" /> Boom 900</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="BOOM1000" /> Boom 1000</label>
+                <div class="ms-group-label">Crash Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH300N" /> Crash 300</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="CRASH500" /> Crash 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH600N" /> Crash 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH900N" /> Crash 900</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="CRASH1000" /> Crash 1000</label>
+                <div class="ms-group-label">Jump Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD10" /> Jump 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD25" /> Jump 25</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD50" /> Jump 50</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD100" /> Jump 100</label>
+                <div class="ms-group-label">Step Index</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
+                <div class="ms-group-label">Forex</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
-                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDJPY" /> USD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCHF" /> USD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDUSD" /> AUD/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCAD" /> USD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDUSD" /> NZD/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURGBP" /> EUR/GBP</label>
+                <div class="ms-group-label">Commodities</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold (XAU)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAGUSD" /> Silver (XAG)</label>
               </div>
-              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 6 selected</p>
+              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 27 selected</p>
             </div>
           </section>
 
