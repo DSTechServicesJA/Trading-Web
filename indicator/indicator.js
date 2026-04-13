@@ -844,6 +844,10 @@ function initUI() {
   UI.signalBanner      = document.getElementById("signalBanner");
   UI.signalBannerTrack = document.getElementById("signalBannerTrack");
 
+  /* Live Scalp Ticker Banner */
+  UI.scalpTickerBanner = document.getElementById("scalpTickerBanner");
+  UI.scalpTickerTrack  = document.getElementById("scalpTickerTrack");
+
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
   UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
@@ -1679,6 +1683,7 @@ function updateStatsUI() {
   if (UI.signalCount) UI.signalCount.textContent = signalHistory.length;
   updateScalpStatsUI();
   renderSignalBanner();
+  renderScalpTickerBanner();
 }
 
 /* ---- Live Signal Ticker Banner ---- */
@@ -1729,6 +1734,55 @@ function renderSignalBanner() {
 
   /* Auto-scroll to show the newest signal (leftmost) */
   UI.signalBannerTrack.scrollLeft = 0;
+}
+
+/* ---- Live Scalp Ticker Banner ---- */
+function renderScalpTickerBanner() {
+  if (!UI.scalpTickerTrack) return;
+  UI.scalpTickerTrack.innerHTML = "";
+
+  if (liveScalpHistory.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "scalp-ticker-empty";
+    empty.textContent = "No scalp signals yet — scanner active…";
+    UI.scalpTickerTrack.appendChild(empty);
+    return;
+  }
+
+  /* Render newest first (liveScalpHistory is already newest-first via unshift) */
+  for (let i = 0; i < liveScalpHistory.length; i++) {
+    const s = liveScalpHistory[i];
+    const card = document.createElement("div");
+    const isBull = s.dir === "BULL";
+    card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}`;
+
+    const dirLabel = isBull ? "▲" : "▼";
+    const dirClass = isBull ? "bull" : "bear";
+    const t = new Date(s.epoch * 1000);
+    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const sym = s.symbol || getActiveSymbol() || "--";
+    const entryStr = fmt(s.entry, 4);
+    const slStr = fmt(s.sl, 4);
+    const tpStr = fmt(s.tp, 4);
+    const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
+    const reasonsStr = s.reasons.slice(0, 2).join(" · ");
+
+    const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
+    card.appendChild(mkSpan("scalp-card-dir " + dirClass, dirLabel));
+    card.appendChild(mkSpan("scalp-card-symbol", sym));
+    card.appendChild(mkSpan("scalp-card-price", "@ " + entryStr));
+    card.appendChild(mkSpan("scalp-card-levels", "SL " + slStr + " · TP " + tpStr));
+    card.appendChild(mkSpan("scalp-card-rr", rrStr));
+    card.appendChild(mkSpan("scalp-card-conf", s.conf + "/7"));
+    card.appendChild(mkSpan("scalp-card-time", ts));
+    if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
+
+    card.title = `⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
+    UI.scalpTickerTrack.appendChild(card);
+  }
+
+  /* Auto-scroll to show the newest scalp (leftmost) */
+  UI.scalpTickerTrack.scrollLeft = 0;
 }
 
 /* ---- Live Scalp Stats ---- */
@@ -2543,6 +2597,7 @@ function resetSession() {
   lastScalpCandleIdx = -999;
   renderScalpAlerts();
   updateScalpStatsUI();
+  renderScalpTickerBanner();
   if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
 
   /* Clear signal log UI */
@@ -3127,6 +3182,7 @@ function disconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   stopPing();
   stopCandleCountdown();
+  stopUptimeTimer();
   updateAccountBadge(null);
 
   if (ws) {
@@ -3145,6 +3201,14 @@ function disconnect() {
 
     dyingWs.close();
   }
+
+  /* Update UI so the connect button is re-enabled (onclose won't fire
+     because handlers were detached above) */
+  UI.wsStatus.textContent = "DISCONNECTED";
+  UI.wsStatus.className = "status-badge disabled";
+  UI.connectBtn.disabled = false;
+  UI.disconnectBtn.disabled = true;
+  addLog("Disconnected");
 }
 
 function scheduleReconnect() {
@@ -3632,6 +3696,7 @@ function processLiveScalp() {
   renderScalpAlerts();
   updateScalpStatsUI();
   showScalpBanner(scalp);
+  renderScalpTickerBanner();
 
   /* Log to signal log */
   const symbol = getActiveSymbol() || "--";
@@ -6755,6 +6820,7 @@ function focusPanel(symbol) {
   drawChart();
   updateStatsUI();
   renderScalpAlerts();
+  renderScalpTickerBanner();
 }
 
 /**

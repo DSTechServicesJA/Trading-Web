@@ -1936,3 +1936,95 @@ body.light-theme .ms-card-footer {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.5; }
 }
+
+/* ================================================================
+   LIVE SCALP TICKER BANNER
+   ================================================================ */
+.scalp-ticker-banner {
+  border-color: rgba(250,204,21,0.18);
+}
+.scalp-ticker-label {
+  color: var(--warning-soft, #facc15) !important;
+  border-right-color: rgba(250,204,21,0.25) !important;
+}
+
+/* Individual scalp card in the ticker */
+.scalp-card {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid rgba(250,204,21,0.12);
+  background: rgba(250,204,21,0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: default;
+}
+.scalp-card:hover {
+  border-color: rgba(250,204,21,0.3);
+  box-shadow: 0 0 12px rgba(250,204,21,0.1);
+}
+.scalp-card.scalp-card-bull {
+  border-color: rgba(34,197,94,0.2);
+  background: rgba(34,197,94,0.04);
+}
+.scalp-card.scalp-card-bear {
+  border-color: rgba(244,63,94,0.2);
+  background: rgba(244,63,94,0.04);
+}
+
+.scalp-card-dir {
+  font-weight: 800;
+  font-size: var(--fs-sm);
+}
+.scalp-card-dir.bull { color: var(--success-soft); }
+.scalp-card-dir.bear { color: var(--danger-soft); }
+
+.scalp-card-symbol {
+  color: var(--heading);
+  font-weight: 700;
+}
+.scalp-card-price { color: var(--text-soft); }
+.scalp-card-levels { color: var(--text-muted); font-size: 10px; }
+.scalp-card-rr { color: var(--cyan, #22d3ee); }
+.scalp-card-time { color: var(--text-muted); font-size: 10px; }
+
+.scalp-card-conf {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(250,204,21,0.12);
+  color: var(--warning-soft, #facc15);
+  border: 1px solid rgba(250,204,21,0.25);
+}
+.scalp-card-reasons {
+  color: var(--text-muted);
+  font-size: 10px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* New scalp entrance animation */
+.scalp-card-new {
+  animation: scalpCardFlash 1.5s ease-out;
+}
+@keyframes scalpCardFlash {
+  0%   { box-shadow: 0 0 16px rgba(250,204,21,0.5); }
+  100% { box-shadow: none; }
+}
+
+.scalp-ticker-empty {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  padding: 4px 0;
+}
