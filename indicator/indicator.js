@@ -1707,7 +1707,8 @@ function renderSignalBanner() {
     return;
   }
 
-  /* Render newest first (aggregated list is already newest-first) */
+  /* Newest first: multi-panel aggregated list is already sorted newest-first;
+     single-symbol signalHistory is stored oldest-first so we reverse it */
   const signals = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
   for (const s of signals) {
     const card = document.createElement("div");
@@ -6562,8 +6563,8 @@ function getAggregatedSignalHistory() {
   for (const p of multiPanels.values()) {
     for (const s of p.signalHistory) all.push(s);
   }
-  /* Sort newest-first by time string (ISO) */
-  all.sort((a, b) => (b.time || "").localeCompare(a.time || ""));
+  /* Sort newest-first by ISO time string (lexicographic comparison) */
+  all.sort((a, b) => (b.time || "") > (a.time || "") ? 1 : (b.time || "") < (a.time || "") ? -1 : 0);
   return all;
 }
 
