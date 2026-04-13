@@ -1055,54 +1055,55 @@ function requestNotificationPermission() {
 /* ================= TELEGRAM INTEGRATION ================= */
 
 /**
+ * Shared helper: render drawChart() on a high-res offscreen canvas and
+ * return a Promise<Blob>.  Sets up canvas, mocks DPR, swaps UI refs,
+ * calls drawChart(), then restores everything.
+ */
+function _renderChartToBlob() {
+  return new Promise((resolve, reject) => {
+    const EW = TELEGRAM_EXPORT_WIDTH;
+    const EH = TELEGRAM_EXPORT_HEIGHT;
+
+    const offscreen = document.createElement("canvas");
+    offscreen.width  = EW;
+    offscreen.height = EH;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return reject(new Error("Canvas context unavailable"));
+
+    offscreen.getBoundingClientRect = () => ({
+      x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
+      width: EW, height: EH, toJSON() { return this; }
+    });
+
+    const origCanvas = UI.canvas;
+    const origCtx    = UI.ctx;
+    const origDpr    = window.devicePixelRatio;
+
+    Object.defineProperty(window, "devicePixelRatio",
+      { value: 1, writable: true, configurable: true });
+    UI.canvas = offscreen;
+    UI.ctx    = offCtx;
+
+    try { drawChart(); } finally {
+      UI.canvas = origCanvas;
+      UI.ctx    = origCtx;
+      Object.defineProperty(window, "devicePixelRatio",
+        { value: origDpr, writable: true, configurable: true });
+    }
+
+    offscreen.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error("Failed to capture chart screenshot"));
+    }, "image/png");
+  });
+}
+
+/**
  * Render the full main chart at high resolution on an offscreen canvas
  * and return a PNG Blob — used for crisp Telegram screenshots.
  */
 function captureChartScreenshot() {
-  return new Promise((resolve, reject) => {
-    try {
-      const EW = TELEGRAM_EXPORT_WIDTH;
-      const EH = TELEGRAM_EXPORT_HEIGHT;
-
-      /* Create offscreen canvas */
-      const offscreen = document.createElement("canvas");
-      offscreen.width  = EW;
-      offscreen.height = EH;
-      const offCtx = offscreen.getContext("2d");
-      if (!offCtx) return reject(new Error("Canvas context unavailable"));
-
-      /* Mock getBoundingClientRect so drawChart() uses export dimensions */
-      offscreen.getBoundingClientRect = () => ({
-        x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
-        width: EW, height: EH, toJSON() { return this; }
-      });
-
-      /* Save originals */
-      const origCanvas = UI.canvas;
-      const origCtx    = UI.ctx;
-      const origDpr    = window.devicePixelRatio;
-
-      /* Force dpr=1 so logical size = pixel size = export size */
-      Object.defineProperty(window, "devicePixelRatio",
-        { value: 1, writable: true, configurable: true });
-      UI.canvas = offscreen;
-      UI.ctx    = offCtx;
-
-      try { drawChart(); } finally {
-        UI.canvas = origCanvas;
-        UI.ctx    = origCtx;
-        Object.defineProperty(window, "devicePixelRatio",
-          { value: origDpr, writable: true, configurable: true });
-      }
-
-      offscreen.toBlob(blob => {
-        if (blob) resolve(blob);
-        else reject(new Error("Failed to capture chart screenshot"));
-      }, "image/png");
-    } catch (err) {
-      reject(err);
-    }
-  });
+  return _renderChartToBlob();
 }
 
 /**
@@ -1490,58 +1491,9 @@ function buildPanelTelegramCaption(p) {
  * on a 1920×1080 offscreen canvas, then restores the previous state.
  */
 function capturePanelScreenshot(p) {
-  return new Promise((resolve, reject) => {
-    try {
-      const EW = TELEGRAM_EXPORT_WIDTH;
-      const EH = TELEGRAM_EXPORT_HEIGHT;
-
-      /* ---- Snapshot current globals before we overwrite them ---- */
-      const snap = _snapshotChartGlobals();
-
-      /* ---- Activate panel data into globals ---- */
-      activatePanel(p);
-
-      /* ---- Create offscreen canvas ---- */
-      const offscreen = document.createElement("canvas");
-      offscreen.width  = EW;
-      offscreen.height = EH;
-      const offCtx = offscreen.getContext("2d");
-      if (!offCtx) {
-        _restoreChartGlobals(snap);
-        return reject(new Error("Canvas context unavailable"));
-      }
-
-      offscreen.getBoundingClientRect = () => ({
-        x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
-        width: EW, height: EH, toJSON() { return this; }
-      });
-
-      const origCanvas = UI.canvas;
-      const origCtx    = UI.ctx;
-      const origDpr    = window.devicePixelRatio;
-
-      Object.defineProperty(window, "devicePixelRatio",
-        { value: 1, writable: true, configurable: true });
-      UI.canvas = offscreen;
-      UI.ctx    = offCtx;
-
-      try { drawChart(); } finally {
-        UI.canvas = origCanvas;
-        UI.ctx    = origCtx;
-        Object.defineProperty(window, "devicePixelRatio",
-          { value: origDpr, writable: true, configurable: true });
-        /* ---- Restore previous globals ---- */
-        _restoreChartGlobals(snap);
-      }
-
-      offscreen.toBlob(blob => {
-        if (blob) resolve(blob);
-        else reject(new Error("Failed to capture panel chart screenshot"));
-      }, "image/png");
-    } catch (err) {
-      reject(err);
-    }
-  });
+  const snap = _snapshotChartGlobals();
+  activatePanel(p);
+  return _renderChartToBlob().finally(() => _restoreChartGlobals(snap));
 }
 
 /* ---- Snapshot / restore globals that activatePanel touches ---- */
