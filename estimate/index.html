@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D&amp;S IT Services — Estimate System</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ═══ Header with Logo ═══ -->
+  <header class="header">
+    <div class="header-inner">
+      <img src="logo.png" alt="D&amp;S IT Services Logo" class="header-logo" />
+      <div>
+        <h1>D&amp;S IT Services Limited</h1>
+        <p>International Product Estimate System (JMD)</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ═══ Settings Card (collapsed by default) ═══ -->
+    <div class="no-print" style="margin-bottom:0.75rem;text-align:right;">
+      <button id="toggleSettingsBtn" class="toggle-settings-btn">⚙ Show Settings</button>
+    </div>
+
+    <section id="settingsPanel" class="card hidden no-print">
+      <div class="card-header">
+        <span class="icon">⚙</span> System Settings
+      </div>
+      <div class="card-body">
+        <div class="settings-grid">
+          <div class="field">
+            <label for="exchangeRate">USD Exchange Rate (JMD)</label>
+            <input type="number" id="exchangeRate" step="0.01" min="0" />
+            <span class="input-note">Current JMD per 1 USD</span>
+          </div>
+          <div class="field">
+            <label for="customsPercent">Customs Rate (%)</label>
+            <input type="number" id="customsPercent" step="0.1" min="0" max="100" />
+          </div>
+          <div class="field">
+            <label for="customsThreshold">Customs USD Threshold</label>
+            <input type="number" id="customsThreshold" step="0.01" min="0" />
+            <span class="input-note">Items above this USD value incur customs</span>
+          </div>
+          <div class="field">
+            <label for="profitMargin">Profit Margin (%)</label>
+            <input type="number" id="profitMargin" step="0.1" min="0" max="100" />
+          </div>
+          <div class="field">
+            <label for="supplierGctRate">Supplier GCT (%)</label>
+            <input type="number" id="supplierGctRate" step="0.1" min="0" max="100" />
+            <span class="input-note">GCT added to original price by supplier</span>
+          </div>
+          <div class="field">
+            <label for="govGctRate">Government GCT (%)</label>
+            <input type="number" id="govGctRate" step="0.1" min="0" max="100" />
+            <span class="input-note">Government GCT applied on subtotal</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Add Items Card ═══ -->
+    <section class="card no-print">
+      <div class="card-header">
+        <span class="icon">💲</span> Add Items to Estimate
+      </div>
+      <div class="card-body">
+        <div class="item-input-row">
+          <div class="field" style="flex:2;min-width:160px;">
+            <label for="itemName">Item Name</label>
+            <input type="text" id="itemName" placeholder="e.g. Laptop Charger" />
+          </div>
+          <div class="field" style="flex:1;min-width:100px;">
+            <label for="itemQty">Qty</label>
+            <input type="number" id="itemQty" min="1" value="1" />
+          </div>
+          <div class="field" style="flex:1;min-width:120px;">
+            <label for="itemPrice">Unit Price (USD)</label>
+            <input type="number" id="itemPrice" step="0.01" min="0" placeholder="e.g. 70.00" autofocus />
+          </div>
+          <div class="field" style="align-self:flex-end;">
+            <button id="addItemBtn" class="btn btn-primary">+ Add</button>
+          </div>
+        </div>
+
+        <!-- Items Table -->
+        <div id="itemsTableWrap" class="hidden" style="margin-top:1rem;">
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th style="text-align:center;">Qty</th>
+                <th style="text-align:right;">Unit (USD)</th>
+                <th style="text-align:right;">Line Total (USD)</th>
+                <th class="no-print" style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="itemsBody"></tbody>
+          </table>
+        </div>
+
+        <div class="btn-group" style="margin-top:1rem;">
+          <button id="calculateBtn" class="btn btn-primary">📊 Generate Estimate</button>
+          <button id="clearBtn" class="btn btn-secondary">✕ Clear All</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Results Card ═══ -->
+    <section id="resultsCard" class="card hidden">
+      <div class="card-header">
+        <span class="icon">📋</span> Estimate Breakdown
+        <button id="saveEstimateBtn" class="toggle-settings-btn no-print" style="margin-left:auto;color:#fff;border-color:rgba(255,255,255,0.4);">💾 Save</button>
+        <button id="printBtn" class="toggle-settings-btn no-print" style="color:#fff;border-color:rgba(255,255,255,0.4);">🖨 Print</button>
+      </div>
+      <div class="card-body" style="padding:0;">
+
+        <!-- Per-item breakdown -->
+        <div id="perItemResults"></div>
+
+        <!-- Grand totals -->
+        <table class="results-table" id="grandTotalTable">
+          <thead>
+            <tr>
+              <th colspan="2" style="text-align:center;font-size:0.9rem;">Grand Totals</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Total Original (USD)</td>
+              <td id="resTotalUSD">—</td>
+            </tr>
+            <tr>
+              <td>Total JMD Price</td>
+              <td id="resTotalJMD">—</td>
+            </tr>
+            <tr>
+              <td>Total Profit</td>
+              <td id="resTotalProfit">—</td>
+            </tr>
+            <tr>
+              <td>Total Supplier GCT <span style="color:var(--text-muted);font-size:0.8em;">(15%)</span></td>
+              <td id="resTotalSupplierGCT">—</td>
+            </tr>
+            <tr class="row-highlight">
+              <td>Subtotal (JMD)</td>
+              <td id="resTotalSubtotal">—</td>
+            </tr>
+            <tr>
+              <td>Total Gov. GCT <span style="color:var(--text-muted);font-size:0.8em;">(15% of subtotal)</span></td>
+              <td id="resTotalGovGCT">—</td>
+            </tr>
+            <tr>
+              <td>Total Customs</td>
+              <td id="resTotalCustoms">—</td>
+            </tr>
+            <tr class="row-final">
+              <td>Final Balance (JMD)</td>
+              <td id="resGrandTotal">—</td>
+            </tr>
+            <tr>
+              <td>Final USD Cost <span style="color:var(--text-muted);font-size:0.8em;">(Balance ÷ Rate)</span></td>
+              <td id="resGrandUSD">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══ Saved Estimates ═══ -->
+    <section class="card no-print">
+      <div class="card-header">
+        <span class="icon">📁</span> Saved Estimates
+      </div>
+      <div class="card-body">
+        <div id="savedEstimatesList">
+          <p class="empty-msg">No saved estimates yet.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer no-print">
+    &copy; 2026 D&amp;S IT Services Limited &mdash; Estimate System v2.0
+  </footer>
+
+  <script src="js/db.js"></script>
+  <script src="js/calculator.js"></script>
+</body>
+</html>
