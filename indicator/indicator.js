@@ -3127,6 +3127,7 @@ function disconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   stopPing();
   stopCandleCountdown();
+  stopUptimeTimer();
   updateAccountBadge(null);
 
   if (ws) {
@@ -3145,6 +3146,14 @@ function disconnect() {
 
     dyingWs.close();
   }
+
+  /* Update UI so the connect button is re-enabled (onclose won't fire
+     because handlers were detached above) */
+  UI.wsStatus.textContent = "DISCONNECTED";
+  UI.wsStatus.className = "status-badge disabled";
+  UI.connectBtn.disabled = false;
+  UI.disconnectBtn.disabled = true;
+  addLog("Disconnected");
 }
 
 function scheduleReconnect() {
