@@ -3389,14 +3389,15 @@ function getSignalStrength(score) {
  *
  * Confluence criteria (max 7):
  *   1. EMA Momentum   – EMA 8 > EMA 21 (BULL) or EMA 8 < EMA 21 (BEAR)
- *   2. RSI Zone        – RSI ≤ 35 coming from oversold → BULL bounce;
- *                        RSI ≥ 65 coming from overbought → BEAR fade
- *   3. MACD Cross      – MACD histogram just flipped positive (BULL) or negative (BEAR)
+ *   2. RSI Zone        – RSI ≤ 40 bounce rising → BULL;
+ *                        RSI ≥ 60 reject falling → BEAR
+ *   3. MACD Momentum   – MACD histogram positive & growing (BULL) or negative & growing (BEAR),
+ *                        OR histogram just flipped sign
  *   4. Stochastic Cross – %K crosses %D upward from < 25 (BULL) or downward from > 75 (BEAR)
  *   5. Bollinger Bounce – Price touches/pierces lower band then closes inside (BULL),
  *                        or upper band bounce (BEAR)
  *   6. Candle Pattern   – Bullish/bearish engulfing, pin bar, or doji reversal at EMAs
- *   7. ADX Trend        – ADX > 20 confirms enough directional movement for a scalp
+ *   7. ADX Trend        – ADX ≥ 20 confirms enough directional movement for a scalp
  *
  * Returns null or { dir, conf, reasons[], entry, sl, tp }
  */
@@ -3443,13 +3444,12 @@ function detectLiveScalp() {
     if (rsiVal >= 60 && rsiVal < rsiPrev) bearReasons.push(`RSI ${rsiVal.toFixed(0)} reject ✓`);
   }
 
-  /* 3. MACD Histogram flip */
+  /* 3. MACD Momentum (one point max — flip is strongest, then growing momentum) */
   if (macdH != null && macdHP != null) {
     if (macdH > 0 && macdHP <= 0) bullReasons.push("MACD flip +ve ✓");
+    else if (macdH > 0 && macdH > macdHP) bullReasons.push("MACD momentum ↑ ✓");
     if (macdH < 0 && macdHP >= 0) bearReasons.push("MACD flip −ve ✓");
-    /* Also count growing momentum (same side, increasing magnitude) */
-    if (macdH > 0 && macdH > macdHP) bullReasons.push("MACD momentum ↑ ✓");
-    if (macdH < 0 && macdH < macdHP) bearReasons.push("MACD momentum ↓ ✓");
+    else if (macdH < 0 && macdH < macdHP) bearReasons.push("MACD momentum ↓ ✓");
   }
 
   /* 4. Stochastic cross in extreme zone */
@@ -3504,7 +3504,7 @@ function detectLiveScalp() {
   const entry = c.close;
   const atr = atrVal > 0 ? atrVal : range;
   const slDist = atr * 0.75;  /* tight scalp SL: 0.75× ATR */
-  const tpDist = atr * 1.0;   /* quick TP: 1× ATR (≈ 1.3:1 R:R) */
+  const tpDist = atr * 1.0;   /* quick TP: 1× ATR → 1.33:1 R:R (1.0/0.75) */
 
   const sl = dir === "BULL" ? entry - slDist : entry + slDist;
   const tp = dir === "BULL" ? entry + tpDist : entry - tpDist;
