@@ -174,6 +174,9 @@ function fetchStakingLimits(sym) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve(null);
 
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+
     const handler = (e) => {
       const d = JSON.parse(e.data);
       if (d.msg_type !== "contracts_for") return;
@@ -182,7 +185,7 @@ function fetchStakingLimits(sym) {
       const contracts = d.contracts_for?.available ?? [];
       if (!contracts.length) {
         console.warn(`No contracts found for ${sym}`);
-        resolve(null);
+        done(null);
         return;
       }
 
@@ -190,8 +193,10 @@ function fetchStakingLimits(sym) {
       let minStake = Infinity;
       let maxStake = 0;
       for (const c of contracts) {
-        if (c.min_stake != null) minStake = Math.min(minStake, Number(c.min_stake));
-        if (c.max_stake != null) maxStake = Math.max(maxStake, Number(c.max_stake));
+        const mn = Number(c.min_stake);
+        const mx = Number(c.max_stake);
+        if (Number.isFinite(mn) && mn > 0) minStake = Math.min(minStake, mn);
+        if (Number.isFinite(mx) && mx > 0) maxStake = Math.max(maxStake, mx);
       }
       if (!Number.isFinite(minStake) || minStake <= 0) minStake = DEFAULT_MIN_STAKE;
       if (!Number.isFinite(maxStake) || maxStake <= 0) maxStake = 50000;
@@ -202,16 +207,23 @@ function fetchStakingLimits(sym) {
       // Re-sync stake settings now that we have real limits
       syncStakeSettings(true);
 
-      resolve(symbolStakingLimits[sym]);
+      done(symbolStakingLimits[sym]);
     };
 
     ws.addEventListener("message", handler);
-    ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "basic" }));
+    try {
+      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "basic" }));
+    } catch (err) {
+      console.warn("contracts_for send failed:", err);
+      ws.removeEventListener("message", handler);
+      done(null);
+      return;
+    }
 
     // Timeout: don't block forever if API doesn't respond
     setTimeout(() => {
       ws.removeEventListener("message", handler);
-      if (!symbolStakingLimits[sym]) resolve(null);
+      done(null);
     }, 10000);
   });
 }
