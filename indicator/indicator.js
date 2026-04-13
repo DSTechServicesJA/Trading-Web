@@ -154,6 +154,8 @@ const SCALP_MAX_CANDLES         = 15;    /* auto-timeout: close trade monitoring
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
+const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
+const TELEGRAM_EXPORT_HEIGHT      = 1080;  /* high-res export height for Telegram screenshots */
 const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
 
 /* ================= SYMBOL SPECIFICATIONS (pip size / contract size / pip value) ================= */
@@ -169,8 +171,9 @@ const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m
  * the current price: pipValue = contractSize × pipSize / currentPrice.
  *
  * Synthetic indices (Volatility, Boom, Crash, Jump, Step, DEX, DriftSwitch,
- * DailyReset) are stake-based on Deriv — "lot size" does not apply.
- * For synthetics we simply display the $ risk (= stake) amount.
+ * DailyReset) use the Deriv MT5 server — lot size applies.
+ *   contractSize = 1 for most synthetics (PnL = priceMove × lots × contractSize).
+ *   lotSize = dollarRisk / (|entry − SL| × contractSize).
  */
 const SYMBOL_SPECS = (() => {
   const s = {};
@@ -228,7 +231,7 @@ const SYMBOL_SPECS = (() => {
   fx("frxXPTUSD", "USD", 0.01,   100);    /* Platinum:  100 oz / lot */
   fx("frxXPDUSD", "USD", 0.01,   100);    /* Palladium: 100 oz / lot */
 
-  /* ---------- Synthetics (stake-based on Deriv — no lot concept) ---------- */
+  /* ---------- Synthetics (Deriv MT5 — lot-size applies, contractSize = 1) --- */
   const syntheticSymbols = [
     "1HZ10V","1HZ15V","1HZ25V","1HZ30V","1HZ50V","1HZ75V","1HZ90V",
     "1HZ100V","1HZ150V","1HZ200V","1HZ250V","1HZ300V",
@@ -241,7 +244,7 @@ const SYMBOL_SPECS = (() => {
     "DEX600DN","DEX600UP","DEX900DN","DEX900UP","DEX1500DN","DEX1500UP",
     "DSI10","DSI20","DSI30"
   ];
-  syntheticSymbols.forEach(sym => { s[sym] = { type: "synthetic" }; });
+  syntheticSymbols.forEach(sym => { s[sym] = { type: "synthetic", contractSize: 1 }; });
 
   return s;
 })();
@@ -622,9 +625,8 @@ function getPipValuePerLot(symbol, currentPrice) {
  *   lotSize  = dollarRisk / (pipsAtRisk × pipValuePerStdLot)
  *   pips     = |entry – SL| / pipSize
  *
- * For synthetics (Deriv stake-based):
- *   stake    = dollarRisk  (your max loss = your stake)
- *   lotSize  = 0  (not applicable)
+ * For synthetics (Deriv MT5):
+ *   lotSize  = dollarRisk / (|entry – SL| × contractSize)
  */
 function calcPositionMetrics(tradeObj) {
   if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
@@ -648,19 +650,21 @@ function calcPositionMetrics(tradeObj) {
       lotSize:     Math.round(lotSize * 100) / 100,   /* round to 0.01 lots */
       pips:        Math.round(pips * 10) / 10,         /* round to 0.1 pips */
       pipValue:    Math.round(pipVal * 100) / 100,
-      stake:       0,
       isSynthetic: false
     };
   }
 
-  /* ---- Synthetic indices: stake = dollarRisk ---- */
+  /* ---- Synthetic indices (Deriv MT5): lot-size calculation ---- */
+  const contractSz = specs.contractSize || 1;
+  const lotSize    = (riskDist > 0 && contractSz > 0)
+                     ? dollarRisk / (riskDist * contractSz)
+                     : 0;
   return {
     dollarRisk,
     dollarReward,
-    lotSize:     0,
+    lotSize:     Math.round(lotSize * 100) / 100,   /* round to 0.01 lots */
     pips:        0,
     pipValue:    0,
-    stake:       Math.round(dollarRisk * 100) / 100,
     isSynthetic: true
   };
 }
@@ -1051,18 +1055,55 @@ function requestNotificationPermission() {
 /* ================= TELEGRAM INTEGRATION ================= */
 
 /**
- * Capture the chart canvas as a PNG Blob.
- * Returns a Promise<Blob>.
+ * Shared helper: render drawChart() on a high-res offscreen canvas and
+ * return a Promise<Blob>.  Sets up canvas, mocks DPR, swaps UI refs,
+ * calls drawChart(), then restores everything.
  */
-function captureChartScreenshot() {
+function _renderChartToBlob() {
   return new Promise((resolve, reject) => {
-    const canvas = UI.canvas;
-    if (!canvas) return reject(new Error("Chart canvas not available"));
-    canvas.toBlob(blob => {
+    const EW = TELEGRAM_EXPORT_WIDTH;
+    const EH = TELEGRAM_EXPORT_HEIGHT;
+
+    const offscreen = document.createElement("canvas");
+    offscreen.width  = EW;
+    offscreen.height = EH;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return reject(new Error("Canvas context unavailable"));
+
+    offscreen.getBoundingClientRect = () => ({
+      x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
+      width: EW, height: EH, toJSON() { return this; }
+    });
+
+    const origCanvas = UI.canvas;
+    const origCtx    = UI.ctx;
+    const origDpr    = window.devicePixelRatio;
+
+    Object.defineProperty(window, "devicePixelRatio",
+      { value: 1, writable: true, configurable: true });
+    UI.canvas = offscreen;
+    UI.ctx    = offCtx;
+
+    try { drawChart(); } finally {
+      UI.canvas = origCanvas;
+      UI.ctx    = origCtx;
+      Object.defineProperty(window, "devicePixelRatio",
+        { value: origDpr, writable: true, configurable: true });
+    }
+
+    offscreen.toBlob(blob => {
       if (blob) resolve(blob);
       else reject(new Error("Failed to capture chart screenshot"));
     }, "image/png");
   });
+}
+
+/**
+ * Render the full main chart at high resolution on an offscreen canvas
+ * and return a PNG Blob — used for crisp Telegram screenshots.
+ */
+function captureChartScreenshot() {
+  return _renderChartToBlob();
 }
 
 /**
@@ -1105,10 +1146,8 @@ function buildTelegramCaption() {
       if (m) {
         lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
         if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        if (m.isSynthetic) {
-          lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
-        } else {
-          lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        if (!m.isSynthetic) {
           lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
         }
       }
@@ -1397,10 +1436,8 @@ function buildPanelTelegramCaption(p) {
       if (m) {
         lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
         if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        if (m.isSynthetic) {
-          lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
-        } else {
-          lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        if (!m.isSynthetic) {
           lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
         }
       }
@@ -1449,17 +1486,66 @@ function buildPanelTelegramCaption(p) {
 }
 
 /**
- * Capture screenshot from a panel's mini-chart canvas.
+ * Capture a full high-res chart for a multi-symbol panel.
+ * Temporarily activates the panel data into globals, renders drawChart()
+ * on a 1920×1080 offscreen canvas, then restores the previous state.
  */
 function capturePanelScreenshot(p) {
-  return new Promise((resolve, reject) => {
-    const canvas = p.canvasEl;
-    if (!canvas) return reject(new Error("Panel chart canvas not available"));
-    canvas.toBlob(blob => {
-      if (blob) resolve(blob);
-      else reject(new Error("Failed to capture panel chart screenshot"));
-    }, "image/png");
-  });
+  const snap = _snapshotChartGlobals();
+  activatePanel(p);
+  return _renderChartToBlob().finally(() => _restoreChartGlobals(snap));
+}
+
+/* ---- Snapshot / restore globals that activatePanel touches ---- */
+function _snapshotChartGlobals() {
+  return {
+    candles, rangeStartEpoch, openingRange, breakout,
+    retestInfo, indecisionInfo, confirmInfo, trade, phase,
+    monitoringTrade, emaFast, emaSlow, emaHTF,
+    atrValue, atrValues, rsiValues,
+    macdLine, macdSignal, macdHistogram,
+    bbUpper, bbLower, bbMiddle, bbWidth,
+    adxValue, adxDiPlus, adxDiMinus, stochK, stochD,
+    trailingSL, partialTpHit, confluenceScore,
+    signalHistory, signalWins, signalLosses,
+    liveScalpHistory, lastScalpCandleIdx, ws,
+    autoResetEnabled, emaFilterEnabled, htfFilterEnabled,
+    atrToleranceEnabled, trailingStopEnabled, partialTpEnabled,
+    falseBreakoutEnabled, minRREnabled, minRRValue, pureTrailingEnabled,
+    rsiFilterEnabled, volumeSpikeEnabled, sessionFilterEnabled,
+    sessionFilterMode, fibRetestEnabled,
+    macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
+    stochFilterEnabled, scalpingModeEnabled, RANGE_MINUTES
+  };
+}
+function _restoreChartGlobals(s) {
+  candles = s.candles; rangeStartEpoch = s.rangeStartEpoch;
+  openingRange = s.openingRange; breakout = s.breakout;
+  retestInfo = s.retestInfo; indecisionInfo = s.indecisionInfo;
+  confirmInfo = s.confirmInfo; trade = s.trade; phase = s.phase;
+  monitoringTrade = s.monitoringTrade;
+  emaFast = s.emaFast; emaSlow = s.emaSlow; emaHTF = s.emaHTF;
+  atrValue = s.atrValue; atrValues = s.atrValues; rsiValues = s.rsiValues;
+  macdLine = s.macdLine; macdSignal = s.macdSignal; macdHistogram = s.macdHistogram;
+  bbUpper = s.bbUpper; bbLower = s.bbLower; bbMiddle = s.bbMiddle; bbWidth = s.bbWidth;
+  adxValue = s.adxValue; adxDiPlus = s.adxDiPlus; adxDiMinus = s.adxDiMinus;
+  stochK = s.stochK; stochD = s.stochD;
+  trailingSL = s.trailingSL; partialTpHit = s.partialTpHit;
+  confluenceScore = s.confluenceScore;
+  signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses;
+  liveScalpHistory = s.liveScalpHistory; lastScalpCandleIdx = s.lastScalpCandleIdx;
+  ws = s.ws;
+  autoResetEnabled = s.autoResetEnabled; emaFilterEnabled = s.emaFilterEnabled;
+  htfFilterEnabled = s.htfFilterEnabled; atrToleranceEnabled = s.atrToleranceEnabled;
+  trailingStopEnabled = s.trailingStopEnabled; partialTpEnabled = s.partialTpEnabled;
+  falseBreakoutEnabled = s.falseBreakoutEnabled; minRREnabled = s.minRREnabled;
+  minRRValue = s.minRRValue; pureTrailingEnabled = s.pureTrailingEnabled;
+  rsiFilterEnabled = s.rsiFilterEnabled; volumeSpikeEnabled = s.volumeSpikeEnabled;
+  sessionFilterEnabled = s.sessionFilterEnabled; sessionFilterMode = s.sessionFilterMode;
+  fibRetestEnabled = s.fibRetestEnabled;
+  macdFilterEnabled = s.macdFilterEnabled; bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
+  adxFilterEnabled = s.adxFilterEnabled; stochFilterEnabled = s.stochFilterEnabled;
+  scalpingModeEnabled = s.scalpingModeEnabled; RANGE_MINUTES = s.RANGE_MINUTES;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -2896,12 +2982,10 @@ function updateStateUI() {
     if (acctActive) {
       if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(m.dollarRisk, 2)}`;
       if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(m.dollarReward, 2)}` : "TRAILING";
-      /* Dynamic label & value: Lot Size for forex, Stake for synthetics */
-      if (UI.positionSizeLabel) UI.positionSizeLabel.textContent = m.isSynthetic ? "Stake" : "Lot Size";
+      /* Always show Lot Size (MT5) */
+      if (UI.positionSizeLabel) UI.positionSizeLabel.textContent = "Lot Size";
       if (UI.positionSize) {
-        UI.positionSize.textContent = m.isSynthetic
-          ? `$${fmt(m.stake, 2)}`
-          : fmt(m.lotSize, 2);
+        UI.positionSize.textContent = fmt(m.lotSize, 2);
       }
       if (!m.isSynthetic && UI.pipsValue) {
         UI.pipsValue.textContent = `${fmt(m.pips, 1)} pips`;
@@ -3782,10 +3866,8 @@ function buildScalpTelegramCaption(scalp) {
       lines.push(``);
       lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
       if (scalp.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-      if (m.isSynthetic) {
-        lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
-      } else {
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      if (!m.isSynthetic) {
         lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
       }
     }
@@ -5640,13 +5722,13 @@ function recordSignal(confirmPattern) {
     pipsAtRisk: null,
     stake: null
   };
-  /* Populate lot-size / stake fields from account sizing */
+  /* Populate lot-size fields from account sizing */
   if (accountSize > 0 && riskPercent > 0) {
     const pm = calcPositionMetrics(trade);
     if (pm) {
-      signal.lotSize    = pm.isSynthetic ? null : pm.lotSize;
+      signal.lotSize    = pm.lotSize;
       signal.pipsAtRisk = pm.isSynthetic ? null : pm.pips;
-      signal.stake      = pm.isSynthetic ? pm.stake : null;
+      signal.stake      = null;  /* deprecated — using lot size for MT5 */
     }
   }
   signalHistory.push(signal);
@@ -6104,7 +6186,7 @@ function drawChart() {
       const m = calcPositionMetrics(trade);
       if (m) {
         rrLabel += m.isSynthetic
-          ? `  ($${fmt(m.dollarRisk, 2)} risk)`
+          ? `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)} | ${fmt(m.lotSize, 2)} lots)`
           : `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)} | ${fmt(m.lotSize, 2)} lots | ${fmt(m.pips, 1)} pips)`;
       }
     }
