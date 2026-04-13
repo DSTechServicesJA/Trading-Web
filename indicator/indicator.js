@@ -840,6 +840,10 @@ function initUI() {
   UI.scalpStatsBestConf    = document.getElementById("scalpStatsBestConf");
   UI.scalpStatsLastTime    = document.getElementById("scalpStatsLastTime");
 
+  /* Live Signal Ticker Banner */
+  UI.signalBanner      = document.getElementById("signalBanner");
+  UI.signalBannerTrack = document.getElementById("signalBannerTrack");
+
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
   UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
@@ -1674,6 +1678,57 @@ function updateStatsUI() {
   if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
   if (UI.signalCount) UI.signalCount.textContent = signalHistory.length;
   updateScalpStatsUI();
+  renderSignalBanner();
+}
+
+/* ---- Live Signal Ticker Banner ---- */
+function renderSignalBanner() {
+  if (!UI.signalBannerTrack) return;
+  UI.signalBannerTrack.innerHTML = "";
+
+  if (signalHistory.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "signal-banner-empty";
+    empty.textContent = "No signals yet — waiting for breakout setups…";
+    UI.signalBannerTrack.appendChild(empty);
+    return;
+  }
+
+  /* Render newest first */
+  const signals = signalHistory.slice().reverse();
+  for (const s of signals) {
+    const card = document.createElement("div");
+    const resultLower = (s.result || "PENDING").toLowerCase();
+    card.className = "signal-card" + (resultLower === "win" ? " signal-card-win" : resultLower === "loss" ? " signal-card-loss" : "");
+
+    const isBull = s.dir === "BULL";
+    const dirLabel = isBull ? "▲" : "▼";
+    const dirClass = isBull ? "bull" : "bear";
+    const t = new Date(s.time);
+    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const sym = s.symbol || "--";
+    const entryStr = s.entry != null ? fmt(s.entry, 4) : "--";
+    const slStr = s.sl != null ? fmt(s.sl, 4) : "--";
+    const tpStr = s.tp != null ? fmt(s.tp, 4) : "--";
+    const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
+    const confStr = s.confluenceScore != null ? s.confluenceScore + "/16" : "";
+
+    card.innerHTML =
+      `<span class="signal-card-dir ${dirClass}">${dirLabel}</span>` +
+      `<span class="signal-card-symbol">${sym}</span>` +
+      `<span class="signal-card-price">@ ${entryStr}</span>` +
+      `<span class="signal-card-levels">SL ${slStr} · TP ${tpStr}</span>` +
+      `<span class="signal-card-rr">${rrStr}</span>` +
+      (confStr ? `<span class="signal-card-conf">⚡${confStr}</span>` : "") +
+      `<span class="signal-card-time">${ts}</span>` +
+      `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
+
+    card.title = `${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
+    UI.signalBannerTrack.appendChild(card);
+  }
+
+  /* Auto-scroll to show the newest signal (leftmost) */
+  UI.signalBannerTrack.scrollLeft = 0;
 }
 
 /* ---- Live Scalp Stats ---- */

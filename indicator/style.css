@@ -1804,3 +1804,135 @@ body.light-theme .ms-card-footer {
   color: var(--text-muted);
   font-size: 10px;
 }
+
+/* ================================================================
+   LIVE SIGNAL TICKER BANNER
+   ================================================================ */
+.signal-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-sm);
+  box-shadow: var(--shadow-card);
+  min-height: 42px;
+  overflow: hidden;
+}
+.signal-banner-label {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--primary-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-right: var(--space-sm);
+  border-right: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+.signal-banner-track {
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.25) transparent;
+  padding: 2px 0;
+}
+.signal-banner-track::-webkit-scrollbar { height: 4px; }
+.signal-banner-track::-webkit-scrollbar-track { background: transparent; }
+.signal-banner-track::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 4px; }
+
+/* ---- Individual signal card ---- */
+.signal-card {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid rgba(99,128,255,0.1);
+  background: rgba(99,102,241,0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: default;
+}
+.signal-card:hover {
+  border-color: rgba(99,128,255,0.2);
+  box-shadow: 0 0 12px var(--glass-glow);
+}
+
+/* Direction arrows */
+.signal-card-dir {
+  font-weight: 800;
+  font-size: var(--fs-sm);
+}
+.signal-card-dir.bull { color: var(--success-soft); }
+.signal-card-dir.bear { color: var(--danger-soft); }
+
+/* Symbol chip */
+.signal-card-symbol {
+  color: var(--heading);
+  font-weight: 700;
+}
+
+/* Price / level text */
+.signal-card-price { color: var(--text-soft); }
+.signal-card-levels { color: var(--text-muted); font-size: 10px; }
+.signal-card-rr { color: var(--cyan); }
+.signal-card-time { color: var(--text-muted); font-size: 10px; }
+.signal-card-conf { color: var(--warning-soft); font-size: 10px; }
+
+/* Result badge */
+.signal-card-result {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.signal-card-result.pending {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning-soft);
+  border: 1px solid rgba(245,158,11,0.3);
+  animation: signalPendingPulse 2s ease-in-out infinite;
+}
+.signal-card-result.win {
+  background: rgba(16,185,129,0.15);
+  color: var(--success-soft);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.signal-card-result.loss {
+  background: rgba(244,63,94,0.15);
+  color: var(--danger-soft);
+  border: 1px solid rgba(244,63,94,0.3);
+}
+
+/* Card border tint by result */
+.signal-card.signal-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
+.signal-card.signal-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }
+
+/* Empty state */
+.signal-banner-empty {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+@keyframes signalPendingPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
