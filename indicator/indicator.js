@@ -224,7 +224,7 @@ function getMarketType(symbol) {
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^(stpRNG|STP\d)/i.test(symbol)) return "step";
+  if (/^stpRNG/i.test(symbol)) return "step";
   if (/^(RDBULL|RDBEAR)/i.test(symbol)) return "dailyreset";
   if (/^DEX/i.test(symbol))   return "dex";
   if (/^DSI/i.test(symbol))   return "driftswitch";
