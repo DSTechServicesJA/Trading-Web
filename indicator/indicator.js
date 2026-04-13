@@ -440,6 +440,19 @@ let minRRValue           = 2.0;
 let accountSize          = 0;     /* 0 = disabled / not entered */
 let riskPercent          = 1.0;   /* default 1% risk per trade */
 
+/**
+ * Calculate account-based position metrics from trade data.
+ * Returns null if accountSize or riskPercent is not set.
+ */
+function calcPositionMetrics(tradeObj) {
+  if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
+  const dollarRisk   = accountSize * (riskPercent / 100);
+  const dollarReward = dollarRisk * (tradeObj.rr || 0);
+  const riskDist     = Math.abs(tradeObj.entry - tradeObj.sl);
+  const lotSize      = riskDist > 0 ? dollarRisk / riskDist : 0;
+  return { dollarRisk, dollarReward, lotSize };
+}
+
 /* Confluence score for current setup */
 let confluenceScore = 0;
 
@@ -838,13 +851,12 @@ function buildTelegramCaption() {
       lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
     }
     if (accountSize > 0 && riskPercent > 0) {
-      const dollarRiskAmt  = accountSize * (riskPercent / 100);
-      const dollarRewardAmt = dollarRiskAmt * (trade.rr || 0);
-      const riskDist = Math.abs(trade.entry - trade.sl);
-      const lotSize = riskDist > 0 ? dollarRiskAmt / riskDist : 0;
-      lines.push(`<b>💰 $ Risk:</b> $${fmt(dollarRiskAmt, 2)}`);
-      if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(dollarRewardAmt, 2)}`);
-      lines.push(`<b>📦 Lot Size:</b> ${fmt(lotSize, 2)}`);
+      const m = calcPositionMetrics(trade);
+      if (m) {
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      }
     }
     if (trailingSL != null && trailingStopEnabled) {
       lines.push(`<b>Trailing SL:</b> <code>${fmt(trailingSL, 5)}</code>`);
@@ -1125,13 +1137,12 @@ function buildPanelTelegramCaption(p) {
       lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
     }
     if (accountSize > 0 && riskPercent > 0) {
-      const dollarRiskAmt  = accountSize * (riskPercent / 100);
-      const dollarRewardAmt = dollarRiskAmt * (p.trade.rr || 0);
-      const riskDist = Math.abs(p.trade.entry - p.trade.sl);
-      const lotSize = riskDist > 0 ? dollarRiskAmt / riskDist : 0;
-      lines.push(`<b>💰 $ Risk:</b> $${fmt(dollarRiskAmt, 2)}`);
-      if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(dollarRewardAmt, 2)}`);
-      lines.push(`<b>📦 Lot Size:</b> ${fmt(lotSize, 2)}`);
+      const m = calcPositionMetrics(p.trade);
+      if (m) {
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      }
     }
     if (p.trailingSL != null && p.filters.trailingStopEnabled) {
       lines.push(`<b>Trailing SL:</b> <code>${fmt(p.trailingSL, 5)}</code>`);
@@ -2345,18 +2356,15 @@ function updateStateUI() {
     if (UI.rrDisplay) UI.rrDisplay.textContent  = `1 : ${fmt(trade.rr, 1)}`;
 
     /* Account-based $ Risk / $ Reward / Position Size */
-    const acctActive = accountSize > 0 && riskPercent > 0;
+    const m = calcPositionMetrics(trade);
+    const acctActive = m != null;
     if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = acctActive ? "" : "none";
     if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = acctActive ? "" : "none";
     if (UI.positionSizeCard) UI.positionSizeCard.style.display = acctActive ? "" : "none";
     if (acctActive) {
-      const dollarRiskAmt  = accountSize * (riskPercent / 100);
-      const dollarRewardAmt = dollarRiskAmt * trade.rr;
-      const riskDist = Math.abs(trade.entry - trade.sl);
-      const lotSize = riskDist > 0 ? dollarRiskAmt / riskDist : 0;
-      if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(dollarRiskAmt, 2)}`;
-      if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(dollarRewardAmt, 2)}` : "TRAILING";
-      if (UI.positionSize) UI.positionSize.textContent = fmt(lotSize, 2);
+      if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(m.dollarRisk, 2)}`;
+      if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(m.dollarReward, 2)}` : "TRAILING";
+      if (UI.positionSize) UI.positionSize.textContent = fmt(m.lotSize, 2);
     }
   } else {
     if (UI.entryPrice) UI.entryPrice.textContent = "--";
@@ -4911,9 +4919,9 @@ function drawChart() {
     ctx.font = "bold 12px Arial";
     ctx.textAlign = "right";
     let rrLabel = pureTrailingEnabled ? "PURE TRAILING" : `R:R  1 : ${fmt(trade.rr, 1)}`;
-    if (!pureTrailingEnabled && accountSize > 0 && riskPercent > 0) {
-      const dollarRiskAmt = accountSize * (riskPercent / 100);
-      rrLabel += `  ($${fmt(dollarRiskAmt, 2)} → $${fmt(dollarRiskAmt * trade.rr, 2)})`;
+    if (!pureTrailingEnabled) {
+      const m = calcPositionMetrics(trade);
+      if (m) rrLabel += `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)})`;
     }
     ctx.fillText(rrLabel, W - marginRight - 6, entryY - 6);
     ctx.textAlign = "left";
@@ -5952,7 +5960,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.riskPercentInput) {
     UI.riskPercentInput.addEventListener("input", () => {
       const v = parseFloat(UI.riskPercentInput.value);
-      if (!isNaN(v) && v > 0) riskPercent = v;
+      riskPercent = (!isNaN(v) && v > 0) ? v : 0;
       saveSettings();
       updateStateUI();
     });
