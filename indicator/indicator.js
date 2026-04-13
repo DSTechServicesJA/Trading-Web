@@ -3534,7 +3534,7 @@ function detectSpikeRejection(idx) {
     const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
     if (/UP$/i.test(sym)) checkBullSpike = true;
     else if (/DN$/i.test(sym)) checkBearSpike = true;
-    else { checkBullSpike = true; checkBearSpike = true; }  /* unknown variant: check both */
+    else { checkBullSpike = true; checkBearSpike = true; }  /* unknown DEX variant: check both directions */
   }
 
   /* Check if previous candle was a spike */
@@ -4027,19 +4027,12 @@ function computeConfluenceScore() {
     }
   }
 
-  /* Factor 11: Preferred direction alignment for Boom/Crash/DEX/DailyReset */
+  /* Factor 11: Preferred direction alignment for Boom/Crash/DEX/DriftSwitch */
   const tuning = getMarketTuning();
   if (tuning.preferredDir && tuning.preferredDir === breakout.dir) {
     score++;
   }
-  /* Daily Reset direction preference (not in tuning.preferredDir which is null) */
-  if (mtype === "dailyreset") {
-    const drPref = getDailyResetPreferredDir();
-    if (drPref && drPref === breakout.dir) {
-      score++;
-    }
-  }
-  /* DEX direction preference from UP/DN variant */
+  /* DEX direction preference from UP/DN variant (not in tuning.preferredDir which is null) */
   if (mtype === "dex") {
     const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
     if ((/UP$/i.test(sym) && breakout.dir === "BULL") ||
