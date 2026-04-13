@@ -3460,7 +3460,47 @@ function isTweezers(prev, curr) {
   return null;
 }
 
-/* ================= SPIKE REJECTION STRATEGY (Boom/Crash) ================= */
+/* ================= RAILWAY TRACK (2-Candle Reversal) ================= */
+/**
+ * Railway Track: Two consecutive candles of nearly equal body length but
+ * opposite direction — a sharp reversal signal.
+ * From TRENDLINE_TRADING_STRATEGY.md: Listed as the 7th powerful reversal
+ * candlestick pattern alongside doji, engulfing, piercing/dark cloud,
+ * harami, hammer/shooting star, and spinning top.
+ *
+ * Bullish Railway Track: bearish candle followed by bullish candle of similar size.
+ * Bearish Railway Track: bullish candle followed by bearish candle of similar size.
+ * Bodies must be ≥ 60% of each candle's range (strong conviction candles)
+ * and body sizes within 30% of each other.
+ *
+ * Returns "bull" | "bear" | null.
+ */
+const RAILWAY_BODY_RANGE_MIN = 0.6;   /* min body/range ratio for each candle */
+const RAILWAY_BODY_SIZE_TOL  = 0.30;  /* max difference ratio between body sizes */
+
+function isRailwayTrack(prev, curr) {
+  if (!prev || !curr) return null;
+  const prevRange = prev.high - prev.low;
+  const currRange = curr.high - curr.low;
+  if (prevRange === 0 || currRange === 0) return null;
+  const prevBody = prev.close - prev.open;          /* signed */
+  const currBody = curr.close - curr.open;          /* signed */
+  const absPrevBody = Math.abs(prevBody);
+  const absCurrBody = Math.abs(currBody);
+  /* Both candles must have strong bodies */
+  if (absPrevBody / prevRange < RAILWAY_BODY_RANGE_MIN) return null;
+  if (absCurrBody / currRange < RAILWAY_BODY_RANGE_MIN) return null;
+  /* Opposite direction */
+  if (prevBody * currBody >= 0) return null;         /* same sign = not opposite */
+  /* Similar body size (within tolerance) */
+  const maxBody = Math.max(absPrevBody, absCurrBody);
+  if (maxBody === 0) return null;
+  if (Math.abs(absPrevBody - absCurrBody) / maxBody > RAILWAY_BODY_SIZE_TOL) return null;
+  /* Bullish: prev bearish, curr bullish; Bearish: prev bullish, curr bearish */
+  return currBody > 0 ? "bull" : "bear";
+}
+
+/* ================= SPIKE REJECTION STRATEGY (Boom/Crash/DEX) ================= */
 /**
  * MD-file strategy: Pin Bar Rejection after Spike.
  * From FOREX_MILLIONAIRE_365_DAYS: "Longer tail = more powerful signal" and
@@ -3470,41 +3510,59 @@ function isTweezers(prev, curr) {
  * (shooting stars) at the spike high → signals spike exhaustion / pullback.
  * For Crash indices: after a downward spike, look for bullish pin bars
  * (hammers) at the spike low → signals spike exhaustion / bounce.
+ * For DEX indices: same spike-aware logic — UP variants spike up, DN spike down.
  *
  * Returns { detected, type, dir } or null.
  */
 function detectSpikeRejection(idx) {
   const mtype = getMarketType();
-  if (mtype !== "boom" && mtype !== "crash") return null;
+  if (mtype !== "boom" && mtype !== "crash" && mtype !== "dex") return null;
   if (idx < 2 || idx >= candles.length) return null;
 
   const prev = candles[idx - 1];
   const curr = candles[idx];
 
+  /* Determine spike direction based on market type */
+  let checkBullSpike = false;
+  let checkBearSpike = false;
+  if (mtype === "boom") {
+    checkBullSpike = true;
+  } else if (mtype === "crash") {
+    checkBearSpike = true;
+  } else if (mtype === "dex") {
+    /* DEX UP variants spike up, DEX DN variants spike down */
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    if (/UP$/i.test(sym)) checkBullSpike = true;
+    else if (/DN$/i.test(sym)) checkBearSpike = true;
+    else { checkBullSpike = true; checkBearSpike = true; }  /* unknown variant: check both */
+  }
+
   /* Check if previous candle was a spike */
-  if (mtype === "boom" && isSpikeCandle(prev, "BULL")) {
+  if (checkBullSpike && isSpikeCandle(prev, "BULL")) {
+    const label = mtype === "dex" ? "DEX UP" : "Boom";
     /* After bullish spike, look for bearish pin bar (shooting star) = rejection */
     if (isPinBar(curr, "BEAR")) {
       return { detected: true, type: "spike_rejection_pinbar", dir: "BEAR",
-               desc: "Bearish pin bar after Boom spike — exhaustion signal" };
+               desc: `Bearish pin bar after ${label} spike — exhaustion signal` };
     }
     /* Or a bearish engulfing of the spike = power shift */
     if (isBearishEngulfing(prev, curr)) {
       return { detected: true, type: "spike_rejection_engulfing", dir: "BEAR",
-               desc: "Bearish engulfing after Boom spike — sellers taking control" };
+               desc: `Bearish engulfing after ${label} spike — sellers taking control` };
     }
   }
 
-  if (mtype === "crash" && isSpikeCandle(prev, "BEAR")) {
+  if (checkBearSpike && isSpikeCandle(prev, "BEAR")) {
+    const label = mtype === "dex" ? "DEX DN" : "Crash";
     /* After bearish spike, look for bullish pin bar (hammer) = rejection */
     if (isPinBar(curr, "BULL")) {
       return { detected: true, type: "spike_rejection_pinbar", dir: "BULL",
-               desc: "Bullish pin bar after Crash spike — exhaustion signal" };
+               desc: `Bullish pin bar after ${label} spike — exhaustion signal` };
     }
     /* Or a bullish engulfing of the spike = power shift */
     if (isBullishEngulfing(prev, curr)) {
       return { detected: true, type: "spike_rejection_engulfing", dir: "BULL",
-               desc: "Bullish engulfing after Crash spike — buyers taking control" };
+               desc: `Bullish engulfing after ${label} spike — buyers taking control` };
     }
   }
 
@@ -3548,6 +3606,60 @@ function detectInsideBarFalseBreakout(idx) {
       }
     }
   }
+  return null;
+}
+
+/* ================= DRIFT SWITCH REGIME DETECTION ================= */
+/**
+ * Drift Switch indices alternate between bullish, bearish, and sideways regimes.
+ * Detect the current regime via EMA 8/21 crossover:
+ *   - EMA 8 > EMA 21 → bullish regime
+ *   - EMA 8 < EMA 21 → bearish regime
+ * Also detect recent regime switches (crossover in last N candles).
+ *
+ * Returns { regime, recentSwitch, desc } or null if insufficient data.
+ */
+const DRIFT_SWITCH_LOOKBACK = 10; /* candles to check for recent EMA crossover */
+
+function detectDriftSwitchRegime() {
+  if (emaFast.length < 2 || emaSlow.length < 2) return null;
+  const lastFast = emaFast[emaFast.length - 1];
+  const lastSlow = emaSlow[emaSlow.length - 1];
+  if (lastFast == null || lastSlow == null) return null;
+
+  const regime = lastFast > lastSlow ? "BULL" : lastFast < lastSlow ? "BEAR" : "FLAT";
+
+  /* Check for recent EMA crossover (regime switch) */
+  let recentSwitch = false;
+  const checkLen = Math.min(DRIFT_SWITCH_LOOKBACK, emaFast.length - 1, emaSlow.length - 1);
+  for (let i = 1; i <= checkLen; i++) {
+    const fi = emaFast[emaFast.length - 1 - i];
+    const si = emaSlow[emaSlow.length - 1 - i];
+    if (fi == null || si == null) continue;
+    /* Previous was opposite? → crossover happened */
+    if ((regime === "BULL" && fi < si) || (regime === "BEAR" && fi > si)) {
+      recentSwitch = true;
+      break;
+    }
+  }
+
+  const desc = recentSwitch
+    ? `Drift Switch regime switch to ${regime} detected (EMA 8/${regime === "BULL" ? ">" : "<"} EMA 21 crossover)`
+    : `Drift Switch in ${regime} regime (EMA 8 ${regime === "BULL" ? ">" : "<"} EMA 21)`;
+  return { regime, recentSwitch, desc };
+}
+
+/* ================= DAILY RESET PREFERRED DIRECTION ================= */
+/**
+ * Daily Reset indices have a natural trend direction:
+ *   - RDBULL → trending BULL (up)
+ *   - RDBEAR → trending BEAR (down)
+ * Returns "BULL" | "BEAR" | null.
+ */
+function getDailyResetPreferredDir() {
+  const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  if (/^RDBULL/i.test(sym)) return "BULL";
+  if (/^RDBEAR/i.test(sym)) return "BEAR";
   return null;
 }
 
@@ -3827,14 +3939,15 @@ function computeConfluenceScore() {
   /* Factor 3: Strong breakout candle */
   if (breakout.strong) score++;
 
-  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, or tweezers at retest */
+  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, tweezers, or railway track at retest */
   if (retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
     if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc)) ||
         (breakout.dir === "BULL" && isDragonflyDoji(rc)) ||
         (breakout.dir === "BEAR" && isGravestoneDoji(rc)) ||
-        (prevRC && isTweezers(prevRC, rc))) {
+        (prevRC && isTweezers(prevRC, rc)) ||
+        (prevRC && isRailwayTrack(prevRC, rc))) {
       score++;
     }
   }
@@ -3842,12 +3955,13 @@ function computeConfluenceScore() {
   /* Factor 5: S/R confluence */
   if (hasSRConfluence(breakout.level)) score++;
 
-  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers) */
+  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers, railway track) */
   if (confirmInfo && confirmInfo.pattern) {
     const p = confirmInfo.pattern;
     if (p === "piercing line" || p === "dark cloud cover" ||
         p === "tweezers bottom" || p === "tweezers top" ||
-        p === "dragonfly doji" || p === "gravestone doji") {
+        p === "dragonfly doji" || p === "gravestone doji" ||
+        p === "railway track (bullish)" || p === "railway track (bearish)") {
       score++;
     }
   }
@@ -3878,7 +3992,7 @@ function computeConfluenceScore() {
   const mtype = getMarketType();
   const lastIdx = candles.length - 1;
 
-  if (mtype === "boom" || mtype === "crash") {
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") {
     /* Spike rejection or inside bar false breakout at current position */
     const spikeRej = detectSpikeRejection(lastIdx);
     const ibFalse = detectInsideBarFalseBreakout(lastIdx);
@@ -3899,12 +4013,46 @@ function computeConfluenceScore() {
     if ((tlTouch && tlTouch.dir === breakout.dir) || (maBounce && maBounce.dir === breakout.dir)) {
       score++;
     }
+  } else if (mtype === "dailyreset") {
+    /* Daily Reset: breakout aligned with natural trend direction (RDBULL→BULL, RDBEAR→BEAR) */
+    const drPref = getDailyResetPreferredDir();
+    if (drPref && drPref === breakout.dir) {
+      score++;
+    }
+  } else if (mtype === "driftswitch") {
+    /* Drift Switch: breakout aligned with current EMA crossover regime */
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.regime === breakout.dir) {
+      score++;
+    }
   }
 
-  /* Factor 11: Preferred direction alignment for Boom/Crash */
+  /* Factor 11: Preferred direction alignment for Boom/Crash/DEX/DailyReset */
   const tuning = getMarketTuning();
   if (tuning.preferredDir && tuning.preferredDir === breakout.dir) {
     score++;
+  }
+  /* Daily Reset direction preference (not in tuning.preferredDir which is null) */
+  if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref && drPref === breakout.dir) {
+      score++;
+    }
+  }
+  /* DEX direction preference from UP/DN variant */
+  if (mtype === "dex") {
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    if ((/UP$/i.test(sym) && breakout.dir === "BULL") ||
+        (/DN$/i.test(sym) && breakout.dir === "BEAR")) {
+      score++;
+    }
+  }
+  /* Drift Switch: recent regime switch bonus (fresh crossover = strong signal) */
+  if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.recentSwitch && dsRegime.regime === breakout.dir) {
+      score++;
+    }
   }
 
   /* Factor 12: Step run momentum or Jump impulse confirmation */
@@ -4123,7 +4271,26 @@ function logMarketTypeContext(idx, dir) {
       addLog(`⚡ DEX spike candle detected — news-event-like impulse`);
     }
   } else if (mtype === "driftswitch") {
-    addLog(`🔄 DRIFT SWITCH: Breakout ${dir} — confirm regime alignment before entry`);
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime) {
+      addLog(`🔄 ${dsRegime.desc}`);
+      if (dsRegime.regime === dir) {
+        addLog(`✅ DRIFT SWITCH: Breakout ${dir} aligned with ${dsRegime.regime} regime`);
+      } else {
+        addLog(`⚠ DRIFT SWITCH: Breakout ${dir} against ${dsRegime.regime} regime — caution`);
+      }
+    } else {
+      addLog(`🔄 DRIFT SWITCH: Breakout ${dir} — confirm regime alignment before entry`);
+    }
+  } else if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref) {
+      if (drPref === dir) {
+        addLog(`📅 DAILY RESET: Breakout ${dir} aligned with natural trend — high probability`);
+      } else {
+        addLog(`⚠ DAILY RESET: Breakout ${dir} against natural ${drPref} trend — counter-trend, caution`);
+      }
+    }
   }
 }
 
@@ -4148,6 +4315,21 @@ function logMarketTypeSignals(idx) {
     if (maBounce) addLog(`✅ ${maBounce.desc}`);
     const tlTouch = detectTrendlineTouch(idx);
     if (tlTouch) addLog(`✅ ${tlTouch.desc}`);
+  } else if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref) {
+      addLog(`📅 Daily Reset natural trend: ${drPref} — ${drPref === (breakout ? breakout.dir : "") ? "aligned ✅" : "counter-trend ⚠"}`);
+    }
+  } else if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime) {
+      addLog(`🔄 ${dsRegime.desc}`);
+      if (breakout && dsRegime.regime === breakout.dir) {
+        addLog(`✅ Breakout aligned with Drift Switch ${dsRegime.regime} regime`);
+      } else if (breakout) {
+        addLog(`⚠ Breakout AGAINST Drift Switch ${dsRegime.regime} regime — caution`);
+      }
+    }
   }
 }
 
@@ -4366,12 +4548,24 @@ function processCandle(idx) {
       }
     }
 
+    /* Railway Track (sharp 2-candle reversal from TRENDLINE_TRADING_STRATEGY.md) */
+    if (!confirmed) {
+      const rtType = isRailwayTrack(prev, c);
+      if (rtType === "bull" && breakout.dir === "BULL") {
+        confirmed = true;
+        confirmPattern = "railway track (bullish)";
+      } else if (rtType === "bear" && breakout.dir === "BEAR") {
+        confirmed = true;
+        confirmPattern = "railway track (bearish)";
+      }
+    }
+
     /* ---- Market-type-specific confirmation patterns (from MD files) ---- */
     const mtype = getMarketType();
 
-    /* Boom/Crash: Spike rejection (pin bar or engulfing after spike) confirms reversal.
+    /* Boom/Crash/DEX: Spike rejection (pin bar or engulfing after spike) confirms reversal.
        From FOREX_MILLIONAIRE_365_DAYS: Pin bar + key level = high probability. */
-    if (!confirmed && (mtype === "boom" || mtype === "crash")) {
+    if (!confirmed && (mtype === "boom" || mtype === "crash" || mtype === "dex")) {
       const spikeRej = detectSpikeRejection(idx);
       if (spikeRej && spikeRej.dir === breakout.dir) {
         confirmed = true;
@@ -4431,6 +4625,26 @@ function processCandle(idx) {
           confirmed = true;
           confirmPattern = `step momentum run (${Math.abs(run)} steps)`;
         }
+      }
+    }
+
+    /* Drift Switch: EMA crossover regime alignment as confirmation */
+    if (!confirmed && mtype === "driftswitch") {
+      const dsRegime = detectDriftSwitchRegime();
+      if (dsRegime && dsRegime.regime === breakout.dir) {
+        confirmed = true;
+        confirmPattern = dsRegime.recentSwitch
+          ? `drift switch regime switch (${dsRegime.regime})`
+          : `drift switch regime aligned (${dsRegime.regime})`;
+      }
+    }
+
+    /* Daily Reset: natural trend alignment as confirmation */
+    if (!confirmed && mtype === "dailyreset") {
+      const drPref = getDailyResetPreferredDir();
+      if (drPref && drPref === breakout.dir) {
+        confirmed = true;
+        confirmPattern = `daily reset trend aligned (${drPref})`;
       }
     }
 
