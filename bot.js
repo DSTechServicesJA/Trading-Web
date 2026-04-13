@@ -153,6 +153,81 @@ let TUNING = SYMBOL_TUNING[CURRENT_SYMBOL];
 const PREFERRED_SYMBOL = CURRENT_SYMBOL;
 const FALLBACK_SYMBOL  = "R_75";
 
+// ================= PER-SYMBOL STAKING LIMITS (from contracts_for API) =================
+const symbolStakingLimits = {};   // { symbol: { min: Number, max: Number } }
+const DEFAULT_MIN_STAKE = 0.35;   // fallback if API hasn't responded yet
+
+function getSymbolMinStake(sym) {
+  return symbolStakingLimits[sym]?.min ?? DEFAULT_MIN_STAKE;
+}
+
+function getSymbolMaxStake(sym) {
+  return symbolStakingLimits[sym]?.max ?? 50000;
+}
+
+/**
+ * Fetch staking limits for a symbol via Deriv contracts_for API.
+ * Caches the result so we only call once per symbol.
+ */
+function fetchStakingLimits(sym) {
+  if (symbolStakingLimits[sym]) return Promise.resolve(symbolStakingLimits[sym]);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+
+    const handler = (e) => {
+      const d = JSON.parse(e.data);
+      if (d.msg_type !== "contracts_for") return;
+      ws.removeEventListener("message", handler);
+
+      const contracts = d.contracts_for?.available ?? [];
+      if (!contracts.length) {
+        console.warn(`No contracts found for ${sym}`);
+        done(null);
+        return;
+      }
+
+      // Find the tightest min and widest max across all relevant contract types
+      let minStake = Infinity;
+      let maxStake = 0;
+      for (const c of contracts) {
+        const mn = Number(c.min_stake);
+        const mx = Number(c.max_stake);
+        if (Number.isFinite(mn) && mn > 0) minStake = Math.min(minStake, mn);
+        if (Number.isFinite(mx) && mx > 0) maxStake = Math.max(maxStake, mx);
+      }
+      if (!Number.isFinite(minStake) || minStake <= 0) minStake = DEFAULT_MIN_STAKE;
+      if (!Number.isFinite(maxStake) || maxStake <= 0) maxStake = 50000;
+
+      symbolStakingLimits[sym] = { min: minStake, max: maxStake };
+      console.log(`📏 Staking limits for ${sym}: min=${minStake}, max=${maxStake}`);
+
+      // Re-sync stake settings now that we have real limits
+      syncStakeSettings(true);
+
+      done(symbolStakingLimits[sym]);
+    };
+
+    ws.addEventListener("message", handler);
+    try {
+      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "basic" }));
+    } catch (err) {
+      console.warn("contracts_for send failed:", err);
+      ws.removeEventListener("message", handler);
+      done(null);
+      return;
+    }
+
+    // Timeout: don't block forever if API doesn't respond
+    setTimeout(() => {
+      ws.removeEventListener("message", handler);
+      done(null);
+    }, 10000);
+  });
+}
+
 const stopLossInput   = document.getElementById("stopLoss");
 //const BASE_STAKE = 0.35;
 //const MAX_STAKE  = 0.90;
@@ -1665,9 +1740,10 @@ function riskAdjustedStake(balanceStr) {
   const bal = parseFloat(balanceStr);
   if (!bal || bal <= 0) return BASE_STAKE;
 
+  const minStake = getSymbolMinStake(CURRENT_SYMBOL);
   const maxRisk = bal * RISK_PER_TRADE_PCT;
-  // Clamp between BASE_STAKE and MAX_STAKE, but never exceed 2% of balance
-  return roundStake(clamp(maxRisk, BASE_STAKE, MAX_STAKE));
+  // Clamp between symbol-aware BASE_STAKE floor and MAX_STAKE, never exceed 2% of balance
+  return roundStake(clamp(maxRisk, Math.max(BASE_STAKE, minStake), MAX_STAKE));
 }
 
 const LIVE_MIN_TRADES = 30;
@@ -2072,7 +2148,7 @@ function syncStakeSettings(force = false) {
 
   const base = parseFloat(baseInput.value);
   const max  = parseFloat(maxInput.value);
-  const MIN_STAKE = 0.35;
+  const MIN_STAKE = getSymbolMinStake(CURRENT_SYMBOL);
 
   if (isNaN(base) || isNaN(max)) return;
 
@@ -2661,6 +2737,9 @@ function applySymbolTuning(sym) {
   updateSymbolSpeedBadge(sym);
   updateMarketSignalBySymbol(sym);
   setLiveViewSymbol(sym);
+
+  // Fetch real staking limits for this symbol (async, re-syncs stake on arrival)
+  fetchStakingLimits(sym);
 
   console.log("🔁 Symbol switched:", sym);
 }
@@ -3339,7 +3418,8 @@ function placeTrade() {
   // #9: Consecutive Loss Scaling
   scaleAfterLosses();
   currentStake = roundStake(currentStake * consecutiveLossScale);
-  if (currentStake < BASE_STAKE) currentStake = BASE_STAKE;
+  const symbolMin = getSymbolMinStake(CURRENT_SYMBOL);
+  if (currentStake < Math.max(BASE_STAKE, symbolMin)) currentStake = Math.max(BASE_STAKE, symbolMin);
 
   // Risk check: enforce positive expectancy
   if (currentStake > BASE_STAKE * 1.6) {
@@ -3374,9 +3454,14 @@ function placeTrade() {
     return;
   }
 
+  // Enforce per-symbol staking limits on final amount
+  const finalAmount = roundStake(
+    clamp(currentStake, getSymbolMinStake(symbol), getSymbolMaxStake(symbol))
+  );
+
   ws.send(JSON.stringify({
     proposal: 1,
-    amount: roundStake(currentStake),
+    amount: finalAmount,
     basis: "stake",
     contract_type: currentSide,
     currency: "USD",
@@ -3710,6 +3795,14 @@ function connectWS() {
 
     if (d.error) {
       const msg = d.error.message || "Unknown error";
+      const errType = d.msg_type || "";
+
+      // contracts_for errors are non-fatal — just log & continue with defaults
+      if (errType === "contracts_for") {
+        console.warn("contracts_for error (using default stakes):", msg);
+        return;
+      }
+
       setStatus(msg, "#ef4444");
       tradeInProgress = false;
 
