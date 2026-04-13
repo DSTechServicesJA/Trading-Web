@@ -1676,7 +1676,7 @@ function updateScalpStatsUI() {
   /* Skip when processing a non-focused multi-panel */
   if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
 
-  const h = liveScalpHistory;
+  const h = liveScalpHistory;  /* newest-first (unshift in processLiveScalp) */
   const total = h.length;
   const bulls = h.filter(s => s.dir === "BULL").length;
   const bears = h.filter(s => s.dir === "BEAR").length;
