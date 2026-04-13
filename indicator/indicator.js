@@ -213,15 +213,21 @@ let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
  *   "crash"       – Crash indices (spike DOWN direction)
  *   "jump"        – Jump indices (sudden jumps in either direction)
  *   "step"        – Step Index (fixed-increment moves)
+ *   "dailyreset"  – Daily Reset indices (Bull/Bear market trends)
+ *   "dex"         – DEX indices (news-event spike simulation)
+ *   "driftswitch" – Drift Switch indices (regime-switching trends)
  *   "forex"       – Forex pairs
- *   "commodity"   – Gold/Silver
+ *   "commodity"   – Gold/Silver/Platinum/Palladium
  */
 function getMarketType(symbol) {
   if (!symbol) symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^stpRNG/i.test(symbol)) return "step";
+  if (/^(stpRNG|STP\d)/i.test(symbol)) return "step";
+  if (/^(RDBULL|RDBEAR)/i.test(symbol)) return "dailyreset";
+  if (/^DEX/i.test(symbol))   return "dex";
+  if (/^DSI/i.test(symbol))   return "driftswitch";
   if (/^1HZ/i.test(symbol) || /^R_/i.test(symbol)) return "volatility";
   if (/^frxX/i.test(symbol))  return "commodity";
   if (/^frx/i.test(symbol))   return "forex";
@@ -349,6 +355,42 @@ function getMarketTuning() {
         rangeDurationMult: 1.5,         /* longer range to capture structure */
         spikeAware: false,
         label: "Step"
+      };
+    case "dailyreset":
+      return {
+        /* Daily Reset: one-directional daily trends that reset — follow the trend */
+        preferredDir: null,
+        breakoutConvictionMult: 1.2,    /* require stronger conviction (many false breaks) */
+        volumeSpikeMult: 1.5,           /* moderate volume filter for real breakouts */
+        retestToleranceMult: 0.8,       /* moderately tight retest */
+        trailingATRMult: 1.5,           /* standard trailing */
+        rangeDurationMult: 1.5,         /* longer range to capture structure */
+        spikeAware: false,
+        label: "Daily Reset"
+      };
+    case "dex":
+      return {
+        /* DEX: news-event spike simulation — spike-aware like Boom/Crash */
+        preferredDir: null,             /* UP/DN variant determines direction in strategy */
+        breakoutConvictionMult: 0.7,    /* spikes produce erratic candles */
+        volumeSpikeMult: 1.8,           /* strong volume filter for genuine spikes */
+        retestToleranceMult: 0.8,       /* tighter retest (fast-moving) */
+        trailingATRMult: 2.0,           /* wider trailing for spike momentum */
+        rangeDurationMult: 1.0,
+        spikeAware: true,
+        label: "DEX"
+      };
+    case "driftswitch":
+      return {
+        /* Drift Switch: regime-switching trends — follow the current regime */
+        preferredDir: null,
+        breakoutConvictionMult: 0.8,    /* trends are smooth within regime */
+        volumeSpikeMult: 1.0,           /* volume not as meaningful */
+        retestToleranceMult: 1.0,       /* standard retest */
+        trailingATRMult: 1.5,           /* standard trailing */
+        rangeDurationMult: 1.0,
+        spikeAware: false,
+        label: "Drift Switch"
       };
     default:
       return {
@@ -1792,6 +1834,117 @@ function getMarketRecommendations(symbol) {
             + "All V2 indicators work well — clean step action produces reliable MACD, "
             + "BB squeeze, ADX trending, and Stochastic pullback signals."
       };
+    case "dailyreset":
+      return {
+        label: "📅 Daily Reset — Trend Follow Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "20 min", minutes: 20 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Standard (1.5× ATR)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Confirms genuine breakout vs noise" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Bull Market trends upward, Bear Market trends downward — resets daily",
+          "Trade in the natural direction: BULL for Bull Market, BEAR for Bear Market",
+          "EMA alignment confirms daily trend direction",
+          "MACD histogram confirms momentum in the trending direction",
+          "ADX confirms trending environment",
+          "Pullback entries using pin bar / engulfing at EMA support"
+        ],
+        hint: "Daily Reset indices trend in one direction and reset daily. "
+            + "Bull Market trends upward, Bear Market trends downward. "
+            + "Trade in the natural trend direction for highest probability. "
+            + "EMA alignment and ADX confirm the trending regime. "
+            + "Use pullback entries at EMA support/resistance. "
+            + "All standard indicators work well in these smooth trending conditions."
+      };
+    case "dex":
+      return {
+        label: "📰 DEX Index — News Spike Strategy",
+        timeframe: { text: "1–5 min", gran: 60 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "10 min", minutes: 10 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Strong (1.8× mult for spike confirmation)" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: false,
+        signals: [
+          "DEX UP variants spike upward, DEX DN variants spike downward",
+          "Spike-aware: uses same logic as Boom/Crash for spike detection",
+          "Pin bar rejection after spike signals exhaustion",
+          "Engulfing pattern after spike for power shift confirmation",
+          "Volume spike filter confirms genuine spikes vs small noise",
+          "BB squeeze detects compression before spike expansion"
+        ],
+        hint: "DEX indices simulate news-event spikes. UP variants spike upward, DN variants spike downward. "
+            + "Similar to Boom/Crash but with news-event-like frequency. "
+            + "Trade in the spike direction for highest probability. "
+            + "Wide trailing stop (2× ATR) captures extended spike momentum. "
+            + "Strong volume spike filter separates real spikes from noise. "
+            + "Stochastic disabled — unreliable in rapid spike markets. "
+            + "Session filter disabled — synthetic markets run 24/7."
+      };
+    case "driftswitch":
+      return {
+        label: "🔄 Drift Switch — Regime Trend Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2", minRR: 2 },
+        range: { text: "15 min", minutes: 15 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Standard (1.5× ATR)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: false, note: "Smooth regime shifts — volume not meaningful" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Regime switches between bullish, bearish, and sideways every 10/20/30 min",
+          "EMA crossover confirms regime change direction",
+          "ADX rising confirms new trending regime has started",
+          "MACD histogram shift confirms momentum change",
+          "Pin bar at regime transition marks reversal entry",
+          "All indicators work well within a stable regime"
+        ],
+        hint: "Drift Switch indices alternate between bullish, bearish, and sideways regimes "
+            + "at regular intervals (10, 20, or 30 minutes depending on DSI variant). "
+            + "EMA crossovers are highly reliable here — they confirm regime direction. "
+            + "ADX confirms when a new trending regime has started (rising ADX). "
+            + "MACD histogram shifts align with regime changes. "
+            + "Trade in the direction of the current regime — avoid sideways regimes. "
+            + "Volume spike filter disabled — regime transitions are smooth, not spiked. "
+            + "All standard indicators produce reliable signals within a stable regime."
+      };
     default:
       return {
         label: "⚡ " + (mtype === "forex" ? "Forex" : mtype === "commodity" ? "Commodity" : "Volatility") + " — Breakout Strategy",
@@ -1855,7 +2008,11 @@ function updateRecommendedSettings() {
       boom: "status-badge bull",
       crash: "status-badge bear",
       jump: "status-badge warning",
-      step: "status-badge enabled"
+      step: "status-badge enabled",
+      rangebreak: "status-badge enabled",
+      dailyreset: "status-badge enabled",
+      dex: "status-badge warning",
+      driftswitch: "status-badge enabled"
     };
     UI.marketTypeBadge.className = "chip-value " + (badgeClasses[getMarketType()] || "env-label");
   }
@@ -3303,7 +3460,47 @@ function isTweezers(prev, curr) {
   return null;
 }
 
-/* ================= SPIKE REJECTION STRATEGY (Boom/Crash) ================= */
+/* ================= RAILWAY TRACK (2-Candle Reversal) ================= */
+/**
+ * Railway Track: Two consecutive candles of nearly equal body length but
+ * opposite direction — a sharp reversal signal.
+ * From TRENDLINE_TRADING_STRATEGY.md: Listed as the 7th powerful reversal
+ * candlestick pattern alongside doji, engulfing, piercing/dark cloud,
+ * harami, hammer/shooting star, and spinning top.
+ *
+ * Bullish Railway Track: bearish candle followed by bullish candle of similar size.
+ * Bearish Railway Track: bullish candle followed by bearish candle of similar size.
+ * Bodies must be ≥ 60% of each candle's range (strong conviction candles)
+ * and body sizes within 30% of each other.
+ *
+ * Returns "bull" | "bear" | null.
+ */
+const RAILWAY_BODY_RANGE_MIN = 0.6;   /* min body/range ratio for each candle */
+const RAILWAY_BODY_SIZE_TOL  = 0.30;  /* max difference ratio between body sizes */
+
+function isRailwayTrack(prev, curr) {
+  if (!prev || !curr) return null;
+  const prevRange = prev.high - prev.low;
+  const currRange = curr.high - curr.low;
+  if (prevRange === 0 || currRange === 0) return null;
+  const prevBody = prev.close - prev.open;          /* signed */
+  const currBody = curr.close - curr.open;          /* signed */
+  const absPrevBody = Math.abs(prevBody);
+  const absCurrBody = Math.abs(currBody);
+  /* Both candles must have strong bodies */
+  if (absPrevBody / prevRange < RAILWAY_BODY_RANGE_MIN) return null;
+  if (absCurrBody / currRange < RAILWAY_BODY_RANGE_MIN) return null;
+  /* Opposite direction */
+  if (prevBody * currBody >= 0) return null;         /* same sign = not opposite */
+  /* Similar body size (within tolerance) */
+  const maxBody = Math.max(absPrevBody, absCurrBody);
+  if (maxBody === 0) return null;
+  if (Math.abs(absPrevBody - absCurrBody) / maxBody > RAILWAY_BODY_SIZE_TOL) return null;
+  /* Bullish: prev bearish, curr bullish; Bearish: prev bullish, curr bearish */
+  return currBody > 0 ? "bull" : "bear";
+}
+
+/* ================= SPIKE REJECTION STRATEGY (Boom/Crash/DEX) ================= */
 /**
  * MD-file strategy: Pin Bar Rejection after Spike.
  * From FOREX_MILLIONAIRE_365_DAYS: "Longer tail = more powerful signal" and
@@ -3313,41 +3510,59 @@ function isTweezers(prev, curr) {
  * (shooting stars) at the spike high → signals spike exhaustion / pullback.
  * For Crash indices: after a downward spike, look for bullish pin bars
  * (hammers) at the spike low → signals spike exhaustion / bounce.
+ * For DEX indices: same spike-aware logic — UP variants spike up, DN spike down.
  *
  * Returns { detected, type, dir } or null.
  */
 function detectSpikeRejection(idx) {
   const mtype = getMarketType();
-  if (mtype !== "boom" && mtype !== "crash") return null;
+  if (mtype !== "boom" && mtype !== "crash" && mtype !== "dex") return null;
   if (idx < 2 || idx >= candles.length) return null;
 
   const prev = candles[idx - 1];
   const curr = candles[idx];
 
+  /* Determine spike direction based on market type */
+  let checkBullSpike = false;
+  let checkBearSpike = false;
+  if (mtype === "boom") {
+    checkBullSpike = true;
+  } else if (mtype === "crash") {
+    checkBearSpike = true;
+  } else if (mtype === "dex") {
+    /* DEX UP variants spike up, DEX DN variants spike down */
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    if (/UP$/i.test(sym)) checkBullSpike = true;
+    else if (/DN$/i.test(sym)) checkBearSpike = true;
+    else { checkBullSpike = true; checkBearSpike = true; }  /* unknown DEX variant: check both directions */
+  }
+
   /* Check if previous candle was a spike */
-  if (mtype === "boom" && isSpikeCandle(prev, "BULL")) {
+  if (checkBullSpike && isSpikeCandle(prev, "BULL")) {
+    const label = mtype === "dex" ? "DEX UP" : "Boom";
     /* After bullish spike, look for bearish pin bar (shooting star) = rejection */
     if (isPinBar(curr, "BEAR")) {
       return { detected: true, type: "spike_rejection_pinbar", dir: "BEAR",
-               desc: "Bearish pin bar after Boom spike — exhaustion signal" };
+               desc: `Bearish pin bar after ${label} spike — exhaustion signal` };
     }
     /* Or a bearish engulfing of the spike = power shift */
     if (isBearishEngulfing(prev, curr)) {
       return { detected: true, type: "spike_rejection_engulfing", dir: "BEAR",
-               desc: "Bearish engulfing after Boom spike — sellers taking control" };
+               desc: `Bearish engulfing after ${label} spike — sellers taking control` };
     }
   }
 
-  if (mtype === "crash" && isSpikeCandle(prev, "BEAR")) {
+  if (checkBearSpike && isSpikeCandle(prev, "BEAR")) {
+    const label = mtype === "dex" ? "DEX DN" : "Crash";
     /* After bearish spike, look for bullish pin bar (hammer) = rejection */
     if (isPinBar(curr, "BULL")) {
       return { detected: true, type: "spike_rejection_pinbar", dir: "BULL",
-               desc: "Bullish pin bar after Crash spike — exhaustion signal" };
+               desc: `Bullish pin bar after ${label} spike — exhaustion signal` };
     }
     /* Or a bullish engulfing of the spike = power shift */
     if (isBullishEngulfing(prev, curr)) {
       return { detected: true, type: "spike_rejection_engulfing", dir: "BULL",
-               desc: "Bullish engulfing after Crash spike — buyers taking control" };
+               desc: `Bullish engulfing after ${label} spike — buyers taking control` };
     }
   }
 
@@ -3391,6 +3606,60 @@ function detectInsideBarFalseBreakout(idx) {
       }
     }
   }
+  return null;
+}
+
+/* ================= DRIFT SWITCH REGIME DETECTION ================= */
+/**
+ * Drift Switch indices alternate between bullish, bearish, and sideways regimes.
+ * Detect the current regime via EMA 8/21 crossover:
+ *   - EMA 8 > EMA 21 → bullish regime
+ *   - EMA 8 < EMA 21 → bearish regime
+ * Also detect recent regime switches (crossover in last N candles).
+ *
+ * Returns { regime, recentSwitch, desc } or null if insufficient data.
+ */
+const DRIFT_SWITCH_LOOKBACK = 10; /* candles to check for recent EMA crossover */
+
+function detectDriftSwitchRegime() {
+  if (emaFast.length < 2 || emaSlow.length < 2) return null;
+  const lastFast = emaFast[emaFast.length - 1];
+  const lastSlow = emaSlow[emaSlow.length - 1];
+  if (lastFast == null || lastSlow == null) return null;
+
+  const regime = lastFast > lastSlow ? "BULL" : lastFast < lastSlow ? "BEAR" : "FLAT";
+
+  /* Check for recent EMA crossover (regime switch) */
+  let recentSwitch = false;
+  const checkLen = Math.min(DRIFT_SWITCH_LOOKBACK, emaFast.length - 1, emaSlow.length - 1);
+  for (let i = 1; i <= checkLen; i++) {
+    const fi = emaFast[emaFast.length - 1 - i];
+    const si = emaSlow[emaSlow.length - 1 - i];
+    if (fi == null || si == null) continue;
+    /* Previous was opposite? → crossover happened */
+    if ((regime === "BULL" && fi < si) || (regime === "BEAR" && fi > si)) {
+      recentSwitch = true;
+      break;
+    }
+  }
+
+  const desc = recentSwitch
+    ? `Drift Switch regime switch to ${regime} detected (EMA 8/${regime === "BULL" ? ">" : "<"} EMA 21 crossover)`
+    : `Drift Switch in ${regime} regime (EMA 8 ${regime === "BULL" ? ">" : "<"} EMA 21)`;
+  return { regime, recentSwitch, desc };
+}
+
+/* ================= DAILY RESET PREFERRED DIRECTION ================= */
+/**
+ * Daily Reset indices have a natural trend direction:
+ *   - RDBULL → trending BULL (up)
+ *   - RDBEAR → trending BEAR (down)
+ * Returns "BULL" | "BEAR" | null.
+ */
+function getDailyResetPreferredDir() {
+  const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  if (/^RDBULL/i.test(sym)) return "BULL";
+  if (/^RDBEAR/i.test(sym)) return "BEAR";
   return null;
 }
 
@@ -3670,14 +3939,15 @@ function computeConfluenceScore() {
   /* Factor 3: Strong breakout candle */
   if (breakout.strong) score++;
 
-  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, or tweezers at retest */
+  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, tweezers, or railway track at retest */
   if (retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
     if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc)) ||
         (breakout.dir === "BULL" && isDragonflyDoji(rc)) ||
         (breakout.dir === "BEAR" && isGravestoneDoji(rc)) ||
-        (prevRC && isTweezers(prevRC, rc))) {
+        (prevRC && isTweezers(prevRC, rc)) ||
+        (prevRC && isRailwayTrack(prevRC, rc))) {
       score++;
     }
   }
@@ -3685,12 +3955,13 @@ function computeConfluenceScore() {
   /* Factor 5: S/R confluence */
   if (hasSRConfluence(breakout.level)) score++;
 
-  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers) */
+  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers, railway track) */
   if (confirmInfo && confirmInfo.pattern) {
     const p = confirmInfo.pattern;
     if (p === "piercing line" || p === "dark cloud cover" ||
         p === "tweezers bottom" || p === "tweezers top" ||
-        p === "dragonfly doji" || p === "gravestone doji") {
+        p === "dragonfly doji" || p === "gravestone doji" ||
+        p === "railway track (bullish)" || p === "railway track (bearish)") {
       score++;
     }
   }
@@ -3721,7 +3992,7 @@ function computeConfluenceScore() {
   const mtype = getMarketType();
   const lastIdx = candles.length - 1;
 
-  if (mtype === "boom" || mtype === "crash") {
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") {
     /* Spike rejection or inside bar false breakout at current position */
     const spikeRej = detectSpikeRejection(lastIdx);
     const ibFalse = detectInsideBarFalseBreakout(lastIdx);
@@ -3742,12 +4013,39 @@ function computeConfluenceScore() {
     if ((tlTouch && tlTouch.dir === breakout.dir) || (maBounce && maBounce.dir === breakout.dir)) {
       score++;
     }
+  } else if (mtype === "dailyreset") {
+    /* Daily Reset: breakout aligned with natural trend direction (RDBULL→BULL, RDBEAR→BEAR) */
+    const drPref = getDailyResetPreferredDir();
+    if (drPref && drPref === breakout.dir) {
+      score++;
+    }
+  } else if (mtype === "driftswitch") {
+    /* Drift Switch: breakout aligned with current EMA crossover regime */
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.regime === breakout.dir) {
+      score++;
+    }
   }
 
-  /* Factor 11: Preferred direction alignment for Boom/Crash */
+  /* Factor 11: Preferred direction alignment for Boom/Crash/DEX/DriftSwitch */
   const tuning = getMarketTuning();
   if (tuning.preferredDir && tuning.preferredDir === breakout.dir) {
     score++;
+  }
+  /* DEX direction preference from UP/DN variant (not in tuning.preferredDir which is null) */
+  if (mtype === "dex") {
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    if ((/UP$/i.test(sym) && breakout.dir === "BULL") ||
+        (/DN$/i.test(sym) && breakout.dir === "BEAR")) {
+      score++;
+    }
+  }
+  /* Drift Switch: recent regime switch bonus (fresh crossover = strong signal) */
+  if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.recentSwitch && dsRegime.regime === breakout.dir) {
+      score++;
+    }
   }
 
   /* Factor 12: Step run momentum or Jump impulse confirmation */
@@ -3953,6 +4251,39 @@ function logMarketTypeContext(idx, dir) {
     if (tlTouch) {
       addLog(`📐 ${tlTouch.desc}`);
     }
+  } else if (mtype === "dex") {
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    const isDexUp = /UP$/i.test(sym);
+    const isDexDn = /DN$/i.test(sym);
+    if (isDexUp && dir === "BULL") {
+      addLog(`📰 DEX UP: Breakout aligned with spike-up direction — high probability`);
+    } else if (isDexDn && dir === "BEAR") {
+      addLog(`📰 DEX DN: Breakout aligned with spike-down direction — high probability`);
+    }
+    if (isSpikeCandle(candles[idx], dir)) {
+      addLog(`⚡ DEX spike candle detected — news-event-like impulse`);
+    }
+  } else if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime) {
+      addLog(`🔄 ${dsRegime.desc}`);
+      if (dsRegime.regime === dir) {
+        addLog(`✅ DRIFT SWITCH: Breakout ${dir} aligned with ${dsRegime.regime} regime`);
+      } else {
+        addLog(`⚠ DRIFT SWITCH: Breakout ${dir} against ${dsRegime.regime} regime — caution`);
+      }
+    } else {
+      addLog(`🔄 DRIFT SWITCH: Breakout ${dir} — confirm regime alignment before entry`);
+    }
+  } else if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref) {
+      if (drPref === dir) {
+        addLog(`📅 DAILY RESET: Breakout ${dir} aligned with natural trend — high probability`);
+      } else {
+        addLog(`⚠ DAILY RESET: Breakout ${dir} against natural ${drPref} trend — counter-trend, caution`);
+      }
+    }
   }
 }
 
@@ -3962,7 +4293,7 @@ function logMarketTypeContext(idx, dir) {
 function logMarketTypeSignals(idx) {
   const mtype = getMarketType();
 
-  if (mtype === "boom" || mtype === "crash") {
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") {
     const spikeRej = detectSpikeRejection(idx);
     if (spikeRej) addLog(`✅ ${spikeRej.desc}`);
     const ibFalse = detectInsideBarFalseBreakout(idx);
@@ -3977,6 +4308,21 @@ function logMarketTypeSignals(idx) {
     if (maBounce) addLog(`✅ ${maBounce.desc}`);
     const tlTouch = detectTrendlineTouch(idx);
     if (tlTouch) addLog(`✅ ${tlTouch.desc}`);
+  } else if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref) {
+      addLog(`📅 Daily Reset natural trend: ${drPref} — ${drPref === (breakout ? breakout.dir : "") ? "aligned ✅" : "counter-trend ⚠"}`);
+    }
+  } else if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime) {
+      addLog(`🔄 ${dsRegime.desc}`);
+      if (breakout && dsRegime.regime === breakout.dir) {
+        addLog(`✅ Breakout aligned with Drift Switch ${dsRegime.regime} regime`);
+      } else if (breakout) {
+        addLog(`⚠ Breakout AGAINST Drift Switch ${dsRegime.regime} regime — caution`);
+      }
+    }
   }
 }
 
@@ -4195,12 +4541,24 @@ function processCandle(idx) {
       }
     }
 
+    /* Railway Track (sharp 2-candle reversal from TRENDLINE_TRADING_STRATEGY.md) */
+    if (!confirmed) {
+      const rtType = isRailwayTrack(prev, c);
+      if (rtType === "bull" && breakout.dir === "BULL") {
+        confirmed = true;
+        confirmPattern = "railway track (bullish)";
+      } else if (rtType === "bear" && breakout.dir === "BEAR") {
+        confirmed = true;
+        confirmPattern = "railway track (bearish)";
+      }
+    }
+
     /* ---- Market-type-specific confirmation patterns (from MD files) ---- */
     const mtype = getMarketType();
 
-    /* Boom/Crash: Spike rejection (pin bar or engulfing after spike) confirms reversal.
+    /* Boom/Crash/DEX: Spike rejection (pin bar or engulfing after spike) confirms reversal.
        From FOREX_MILLIONAIRE_365_DAYS: Pin bar + key level = high probability. */
-    if (!confirmed && (mtype === "boom" || mtype === "crash")) {
+    if (!confirmed && (mtype === "boom" || mtype === "crash" || mtype === "dex")) {
       const spikeRej = detectSpikeRejection(idx);
       if (spikeRej && spikeRej.dir === breakout.dir) {
         confirmed = true;
@@ -4260,6 +4618,26 @@ function processCandle(idx) {
           confirmed = true;
           confirmPattern = `step momentum run (${Math.abs(run)} steps)`;
         }
+      }
+    }
+
+    /* Drift Switch: EMA crossover regime alignment as confirmation */
+    if (!confirmed && mtype === "driftswitch") {
+      const dsRegime = detectDriftSwitchRegime();
+      if (dsRegime && dsRegime.regime === breakout.dir) {
+        confirmed = true;
+        confirmPattern = dsRegime.recentSwitch
+          ? `drift switch regime switch (${dsRegime.regime})`
+          : `drift switch regime aligned (${dsRegime.regime})`;
+      }
+    }
+
+    /* Daily Reset: natural trend alignment as confirmation */
+    if (!confirmed && mtype === "dailyreset") {
+      const drPref = getDailyResetPreferredDir();
+      if (drPref && drPref === breakout.dir) {
+        confirmed = true;
+        confirmPattern = `daily reset trend aligned (${drPref})`;
       }
     }
 
@@ -5312,7 +5690,7 @@ function initLoginGate() {
  *     and sidebar detail panels update to show that panel's data.
  */
 
-const MULTI_MAX_PANELS = 27;
+const MULTI_MAX_PANELS = 90;
 const multiPanels = new Map();   /* symbol → panel object */
 
 /* ---- Panel state factory ---- */
