@@ -155,6 +155,96 @@ const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before scre
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
 
+/* ================= SYMBOL SPECIFICATIONS (pip size / contract size / pip value) ================= */
+/**
+ * Accurate per-symbol data for lot-size & risk calculations.
+ *   type          – "forex" | "commodity" | "synthetic"
+ *   pipSize       – smallest meaningful price increment (1 pip)
+ *   contractSize  – units per standard lot (forex = 100 000, gold = 100 oz …)
+ *   quoteCur      – ISO quote currency (used to determine if pip value is fixed)
+ *
+ * For forex pairs quoted in USD the pip value per standard lot is a fixed $10.
+ * For other quote currencies the pip value is calculated dynamically from
+ * the current price: pipValue = contractSize × pipSize / currentPrice.
+ *
+ * Synthetic indices (Volatility, Boom, Crash, Jump, Step, DEX, DriftSwitch,
+ * DailyReset) are stake-based on Deriv — "lot size" does not apply.
+ * For synthetics we simply display the $ risk (= stake) amount.
+ */
+const SYMBOL_SPECS = (() => {
+  const s = {};
+
+  /* Helper – define a forex / commodity symbol */
+  function fx(sym, quoteCur, pipSz, contractSz) {
+    s[sym] = { type: "forex", pipSize: pipSz, contractSize: contractSz, quoteCur };
+  }
+
+  /* ---------- Forex Majors ---------- */
+  fx("frxEURUSD", "USD", 0.0001, 100000);
+  fx("frxGBPUSD", "USD", 0.0001, 100000);
+  fx("frxAUDUSD", "USD", 0.0001, 100000);
+  fx("frxNZDUSD", "USD", 0.0001, 100000);
+  fx("frxUSDJPY", "JPY", 0.01,   100000);
+  fx("frxUSDCAD", "CAD", 0.0001, 100000);
+  fx("frxUSDCHF", "CHF", 0.0001, 100000);
+
+  /* ---------- Forex Crosses ---------- */
+  fx("frxEURGBP", "GBP", 0.0001, 100000);
+  fx("frxEURJPY", "JPY", 0.01,   100000);
+  fx("frxEURAUD", "AUD", 0.0001, 100000);
+  fx("frxEURCAD", "CAD", 0.0001, 100000);
+  fx("frxEURCHF", "CHF", 0.0001, 100000);
+  fx("frxEURNZD", "NZD", 0.0001, 100000);
+  fx("frxGBPJPY", "JPY", 0.01,   100000);
+  fx("frxGBPAUD", "AUD", 0.0001, 100000);
+  fx("frxGBPCAD", "CAD", 0.0001, 100000);
+  fx("frxGBPCHF", "CHF", 0.0001, 100000);
+  fx("frxGBPNZD", "NZD", 0.0001, 100000);
+  fx("frxAUDJPY", "JPY", 0.01,   100000);
+  fx("frxAUDNZD", "NZD", 0.0001, 100000);
+  fx("frxAUDCAD", "CAD", 0.0001, 100000);
+  fx("frxAUDCHF", "CHF", 0.0001, 100000);
+  fx("frxNZDJPY", "JPY", 0.01,   100000);
+  fx("frxNZDCAD", "CAD", 0.0001, 100000);
+  fx("frxNZDCHF", "CHF", 0.0001, 100000);
+  fx("frxCADJPY", "JPY", 0.01,   100000);
+  fx("frxCADCHF", "CHF", 0.0001, 100000);
+  fx("frxCHFJPY", "JPY", 0.01,   100000);
+
+  /* ---------- Forex Exotics ---------- */
+  fx("frxUSDMXN", "MXN", 0.0001, 100000);
+  fx("frxUSDNOK", "NOK", 0.0001, 100000);
+  fx("frxUSDSEK", "SEK", 0.0001, 100000);
+  fx("frxUSDSGD", "SGD", 0.0001, 100000);
+  fx("frxUSDZAR", "ZAR", 0.0001, 100000);
+  fx("frxUSDPLN", "PLN", 0.0001, 100000);
+  fx("frxUSDTRY", "TRY", 0.0001, 100000);
+  fx("frxUSDHKD", "HKD", 0.0001, 100000);
+
+  /* ---------- Commodities ---------- */
+  fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:      100 oz / lot, pip = $0.01 */
+  fx("frxXAGUSD", "USD", 0.001,  5000);   /* Silver:   5000 oz / lot, pip = $0.001 */
+  fx("frxXPTUSD", "USD", 0.01,   100);    /* Platinum:  100 oz / lot */
+  fx("frxXPDUSD", "USD", 0.01,   100);    /* Palladium: 100 oz / lot */
+
+  /* ---------- Synthetics (stake-based on Deriv — no lot concept) ---------- */
+  const syntheticSymbols = [
+    "1HZ10V","1HZ15V","1HZ25V","1HZ30V","1HZ50V","1HZ75V","1HZ90V",
+    "1HZ100V","1HZ150V","1HZ200V","1HZ250V","1HZ300V",
+    "R_10","R_25","R_50","R_75","R_100",
+    "BOOM300N","BOOM500","BOOM600","BOOM900","BOOM1000",
+    "CRASH300N","CRASH500","CRASH600","CRASH900","CRASH1000",
+    "JD10","JD25","JD50","JD75","JD100",
+    "stpRNG","stpRNG2","stpRNG3","stpRNG4","stpRNG5",
+    "RDBULL","RDBEAR",
+    "DEX600DN","DEX600UP","DEX900DN","DEX900UP","DEX1500DN","DEX1500UP",
+    "DSI10","DSI20","DSI30"
+  ];
+  syntheticSymbols.forEach(sym => { s[sym] = { type: "synthetic" }; });
+
+  return s;
+})();
+
 /* ================= CREDENTIAL ENCRYPTION ================= */
 /**
  * XOR-based obfuscation for credentials stored in localStorage.
@@ -487,17 +577,90 @@ let minRRValue           = 2.0;
 let accountSize          = 0;     /* 0 = disabled / not entered */
 let riskPercent          = 1.0;   /* default 1% risk per trade */
 
+/* ---- Symbol spec helpers ---- */
+
+/** Return the active symbol from the UI or multi-panel context. */
+function getActiveSymbol() {
+  return _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+}
+
+/** Look up pip / contract specs for a symbol. Falls back to sensible defaults. */
+function getSymbolSpecs(symbol) {
+  if (!symbol) symbol = getActiveSymbol();
+  if (SYMBOL_SPECS[symbol]) return SYMBOL_SPECS[symbol];
+  /* Auto-detect unknown symbols by market type */
+  const mt = getMarketType(symbol);
+  if (mt === "forex")     return { type: "forex", pipSize: 0.0001, contractSize: 100000, quoteCur: "USD" };
+  if (mt === "commodity") return { type: "forex", pipSize: 0.01,   contractSize: 100,    quoteCur: "USD" };
+  /* ↑ commodity uses type:"forex" intentionally — same lot-size math applies;
+       the SYMBOL_SPECS table already covers all known commodities with accurate specs */
+  return { type: "synthetic" };
+}
+
+/**
+ * Pip value per 1 standard lot in USD for a given symbol.
+ *
+ * USD-quoted pairs   → fixed:  contractSize × pipSize  (always $10 for 100 k forex)
+ * Non-USD-quoted     → dynamic: contractSize × pipSize / currentPrice
+ *                      (converts quote-currency value to approximate USD via the pair's price)
+ */
+function getPipValuePerLot(symbol, currentPrice) {
+  const sp = getSymbolSpecs(symbol);
+  if (sp.type === "synthetic") return 0;            /* not applicable */
+  if (sp.quoteCur === "USD") return sp.contractSize * sp.pipSize;  /* exact */
+  if (!currentPrice || currentPrice <= 0) return 0; /* can't compute */
+  return sp.contractSize * sp.pipSize / currentPrice;
+}
+
 /**
  * Calculate account-based position metrics from trade data.
  * Returns null if accountSize or riskPercent is not set.
+ *
+ * For forex / commodities:
+ *   lotSize  = dollarRisk / (pipsAtRisk × pipValuePerStdLot)
+ *   pips     = |entry – SL| / pipSize
+ *
+ * For synthetics (Deriv stake-based):
+ *   stake    = dollarRisk  (your max loss = your stake)
+ *   lotSize  = 0  (not applicable)
  */
 function calcPositionMetrics(tradeObj) {
   if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
+  if (tradeObj.entry == null || tradeObj.sl == null) return null;
+
   const dollarRisk   = accountSize * (riskPercent / 100);
   const dollarReward = dollarRisk * (tradeObj.rr || 0);
   const riskDist     = Math.abs(tradeObj.entry - tradeObj.sl);
-  const lotSize      = riskDist > 0 ? dollarRisk / riskDist : 0;
-  return { dollarRisk, dollarReward, lotSize };
+
+  const symbol = tradeObj.symbol || getActiveSymbol();
+  const specs  = getSymbolSpecs(symbol);
+
+  if (specs.type === "forex") {
+    /* ---- Forex / Commodity lot-size calculation ---- */
+    const pips    = specs.pipSize > 0 ? riskDist / specs.pipSize : 0;
+    const pipVal  = getPipValuePerLot(symbol, tradeObj.entry);
+    const lotSize = (pips > 0 && pipVal > 0) ? dollarRisk / (pips * pipVal) : 0;
+    return {
+      dollarRisk,
+      dollarReward,
+      lotSize:     Math.round(lotSize * 100) / 100,   /* round to 0.01 lots */
+      pips:        Math.round(pips * 10) / 10,         /* round to 0.1 pips */
+      pipValue:    Math.round(pipVal * 100) / 100,
+      stake:       0,
+      isSynthetic: false
+    };
+  }
+
+  /* ---- Synthetic indices: stake = dollarRisk ---- */
+  return {
+    dollarRisk,
+    dollarReward,
+    lotSize:     0,
+    pips:        0,
+    pipValue:    0,
+    stake:       Math.round(dollarRisk * 100) / 100,
+    isSynthetic: true
+  };
 }
 
 /* Confluence score for current setup */
@@ -574,6 +737,9 @@ function initUI() {
   UI.dollarRiskCard   = document.getElementById("dollarRiskCard");
   UI.dollarRewardCard = document.getElementById("dollarRewardCard");
   UI.positionSizeCard = document.getElementById("positionSizeCard");
+  UI.positionSizeLabel = document.getElementById("positionSizeLabel");
+  UI.pipsCard         = document.getElementById("pipsCard");
+  UI.pipsValue        = document.getElementById("pipsValue");
   UI.accountSizeInput = document.getElementById("accountSizeInput");
   UI.riskPercentInput = document.getElementById("riskPercentInput");
   UI.signalLog      = document.getElementById("signalLog");
@@ -902,7 +1068,12 @@ function buildTelegramCaption() {
       if (m) {
         lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
         if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        if (m.isSynthetic) {
+          lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
+        } else {
+          lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+        }
       }
     }
     if (trailingSL != null && trailingStopEnabled) {
@@ -1188,7 +1359,12 @@ function buildPanelTelegramCaption(p) {
       if (m) {
         lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
         if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        if (m.isSynthetic) {
+          lines.push(`<b>📦 Stake:</b> $${fmt(m.stake, 2)}`);
+        } else {
+          lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+        }
       }
     }
     if (p.trailingSL != null && p.filters.trailingStopEnabled) {
@@ -1461,7 +1637,7 @@ function updateStatsUI() {
 /* ================= EXPORT ================= */
 function exportSignalsCSV() {
   if (signalHistory.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode"];
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode"];
   const rows = signalHistory.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -2523,10 +2699,20 @@ function updateStateUI() {
     if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = acctActive ? "" : "none";
     if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = acctActive ? "" : "none";
     if (UI.positionSizeCard) UI.positionSizeCard.style.display = acctActive ? "" : "none";
+    if (UI.pipsCard) UI.pipsCard.style.display = (acctActive && !m.isSynthetic) ? "" : "none";
     if (acctActive) {
       if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(m.dollarRisk, 2)}`;
       if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(m.dollarReward, 2)}` : "TRAILING";
-      if (UI.positionSize) UI.positionSize.textContent = fmt(m.lotSize, 2);
+      /* Dynamic label & value: Lot Size for forex, Stake for synthetics */
+      if (UI.positionSizeLabel) UI.positionSizeLabel.textContent = m.isSynthetic ? "Stake" : "Lot Size";
+      if (UI.positionSize) {
+        UI.positionSize.textContent = m.isSynthetic
+          ? `$${fmt(m.stake, 2)}`
+          : fmt(m.lotSize, 2);
+      }
+      if (!m.isSynthetic && UI.pipsValue) {
+        UI.pipsValue.textContent = `${fmt(m.pips, 1)} pips`;
+      }
     }
   } else {
     if (UI.entryPrice) UI.entryPrice.textContent = "--";
@@ -2537,9 +2723,11 @@ function updateStateUI() {
     if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = "none";
     if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = "none";
     if (UI.positionSizeCard) UI.positionSizeCard.style.display = "none";
+    if (UI.pipsCard) UI.pipsCard.style.display = "none";
     if (UI.dollarRisk) UI.dollarRisk.textContent = "--";
     if (UI.dollarReward) UI.dollarReward.textContent = "--";
     if (UI.positionSize) UI.positionSize.textContent = "--";
+    if (UI.pipsValue) UI.pipsValue.textContent = "--";
   }
 
   /* Update recommended settings active state */
@@ -4741,7 +4929,7 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx };
+    trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
   } else {
     const entry = confirmCandle.close;
     const sl = findSwingHigh(confirmIdx);
@@ -4755,7 +4943,7 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx };
+    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
   }
 
   if (scalpingModeEnabled) {
@@ -4861,8 +5049,21 @@ function recordSignal(confirmPattern) {
     adx: adxValue > 0 ? +fmt(adxValue, 1) : null,
     stochK: getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null,
     volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null,
-    scalpingMode: scalpingModeEnabled
+    scalpingMode: scalpingModeEnabled,
+    /* Account-based position sizing data */
+    lotSize: null,
+    pipsAtRisk: null,
+    stake: null
   };
+  /* Populate lot-size / stake fields from account sizing */
+  if (accountSize > 0 && riskPercent > 0) {
+    const pm = calcPositionMetrics(trade);
+    if (pm) {
+      signal.lotSize    = pm.isSynthetic ? null : pm.lotSize;
+      signal.pipsAtRisk = pm.isSynthetic ? null : pm.pips;
+      signal.stake      = pm.isSynthetic ? pm.stake : null;
+    }
+  }
   signalHistory.push(signal);
   /* Capture chart screenshot as data URL for PDF export */
   try {
@@ -5316,7 +5517,11 @@ function drawChart() {
     let rrLabel = pureTrailingEnabled ? "PURE TRAILING" : `R:R  1 : ${fmt(trade.rr, 1)}`;
     if (!pureTrailingEnabled) {
       const m = calcPositionMetrics(trade);
-      if (m) rrLabel += `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)})`;
+      if (m) {
+        rrLabel += m.isSynthetic
+          ? `  ($${fmt(m.dollarRisk, 2)} risk)`
+          : `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)} | ${fmt(m.lotSize, 2)} lots | ${fmt(m.pips, 1)} pips)`;
+      }
     }
     ctx.fillText(rrLabel, W - marginRight - 6, entryY - 6);
     ctx.textAlign = "left";
