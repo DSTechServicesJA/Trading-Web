@@ -213,7 +213,7 @@ let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
  *   "crash"       – Crash indices (spike DOWN direction)
  *   "jump"        – Jump indices (sudden jumps in either direction)
  *   "step"        – Step Index (fixed-increment moves)
- *   "rangebreak"  – Range Break indices (range-bound with breakouts)
+ *   "dailyreset"  – Daily Reset indices (Bull/Bear market trends)
  *   "dex"         – DEX indices (news-event spike simulation)
  *   "driftswitch" – Drift Switch indices (regime-switching trends)
  *   "forex"       – Forex pairs
@@ -224,8 +224,8 @@ function getMarketType(symbol) {
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^stpRNG|^STP\d/i.test(symbol)) return "step";
-  if (/^RDBULL|^RDBEAR/i.test(symbol)) return "rangebreak";
+  if (/^(stpRNG|STP\d)/i.test(symbol)) return "step";
+  if (/^(RDBULL|RDBEAR)/i.test(symbol)) return "dailyreset";
   if (/^DEX/i.test(symbol))   return "dex";
   if (/^DSI/i.test(symbol))   return "driftswitch";
   if (/^1HZ/i.test(symbol) || /^R_/i.test(symbol)) return "volatility";
@@ -356,17 +356,17 @@ function getMarketTuning() {
         spikeAware: false,
         label: "Step"
       };
-    case "rangebreak":
+    case "dailyreset":
       return {
-        /* Range Break: range-bound with periodic breakouts — wait for breakouts */
+        /* Daily Reset: one-directional daily trends that reset — follow the trend */
         preferredDir: null,
         breakoutConvictionMult: 1.2,    /* require stronger conviction (many false breaks) */
         volumeSpikeMult: 1.5,           /* moderate volume filter for real breakouts */
         retestToleranceMult: 0.8,       /* moderately tight retest */
         trailingATRMult: 1.5,           /* standard trailing */
-        rangeDurationMult: 1.5,         /* longer range — price ranges for extended periods */
+        rangeDurationMult: 1.5,         /* longer range to capture structure */
         spikeAware: false,
-        label: "Range Break"
+        label: "Daily Reset"
       };
     case "dex":
       return {
@@ -1834,9 +1834,9 @@ function getMarketRecommendations(symbol) {
             + "All V2 indicators work well — clean step action produces reliable MACD, "
             + "BB squeeze, ADX trending, and Stochastic pullback signals."
       };
-    case "rangebreak":
+    case "dailyreset":
       return {
-        label: "📦 Range Break Index — Breakout Capture Strategy",
+        label: "📅 Daily Reset — Trend Follow Strategy",
         timeframe: { text: "5 min", gran: 300 },
         rr: { text: "1:2–1:3", minRR: 2 },
         range: { text: "20 min", minutes: 20 },
@@ -1848,7 +1848,7 @@ function getMarketRecommendations(symbol) {
         falseBreakout: true,
         minRR: { rec: true, value: "1:2 ✅" },
         rsi: true,
-        volSpike: { rec: true, note: "Confirms genuine breakout vs range noise" },
+        volSpike: { rec: true, note: "Confirms genuine breakout vs noise" },
         session: { rec: false, note: "24/7 synthetic" },
         fib: true,
         macd: true,
@@ -1856,20 +1856,19 @@ function getMarketRecommendations(symbol) {
         adx: true,
         stoch: true,
         signals: [
-          "Price ranges for extended periods then breaks out to new range",
-          "Higher conviction required — many false breakouts in ranging periods",
-          "Bollinger Band squeeze detects compression before range break",
-          "Volume spike confirms genuine breakout vs noise",
-          "Longer opening range (20 min) captures the range structure",
-          "Engulfing + pin bar confirmation at range boundaries"
+          "Bull Market trends upward, Bear Market trends downward — resets daily",
+          "Trade in the natural direction: BULL for Bull Market, BEAR for Bear Market",
+          "EMA alignment confirms daily trend direction",
+          "MACD histogram confirms momentum in the trending direction",
+          "ADX confirms trending environment",
+          "Pullback entries using pin bar / engulfing at EMA support"
         ],
-        hint: "Range Break indices range-bound most of the time, then break to a new range. "
-            + "Wait for clear breakouts with volume confirmation. "
-            + "False breakout filter is critical — many candles poke outside the range briefly. "
-            + "BB squeeze detection is highly effective here — compression precedes the break. "
-            + "Longer opening range (20 min) captures the price structure. "
-            + "Higher breakout conviction threshold filters out weak probes. "
-            + "All standard indicators work well during the breakout phase."
+        hint: "Daily Reset indices trend in one direction and reset daily. "
+            + "Bull Market trends upward, Bear Market trends downward. "
+            + "Trade in the natural trend direction for highest probability. "
+            + "EMA alignment and ADX confirm the trending regime. "
+            + "Use pullback entries at EMA support/resistance. "
+            + "All standard indicators work well in these smooth trending conditions."
       };
     case "dex":
       return {
@@ -2011,6 +2010,7 @@ function updateRecommendedSettings() {
       jump: "status-badge warning",
       step: "status-badge enabled",
       rangebreak: "status-badge enabled",
+      dailyreset: "status-badge enabled",
       dex: "status-badge warning",
       driftswitch: "status-badge enabled"
     };
