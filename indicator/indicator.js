@@ -1754,7 +1754,7 @@ function renderScalpTickerBanner() {
     const s = liveScalpHistory[i];
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
-    card.className = "scalp-card " + (isBull ? "scalp-card-bull" : "scalp-card-bear") + (i === 0 ? " scalp-card-new" : "");
+    card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}`;
 
     const dirLabel = isBull ? "▲" : "▼";
     const dirClass = isBull ? "bull" : "bear";
@@ -1767,15 +1767,15 @@ function renderScalpTickerBanner() {
     const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
     const reasonsStr = s.reasons.slice(0, 2).join(" · ");
 
-    card.innerHTML =
-      `<span class="scalp-card-dir ${dirClass}">${dirLabel}</span>` +
-      `<span class="scalp-card-symbol">${sym}</span>` +
-      `<span class="scalp-card-price">@ ${entryStr}</span>` +
-      `<span class="scalp-card-levels">SL ${slStr} · TP ${tpStr}</span>` +
-      `<span class="scalp-card-rr">${rrStr}</span>` +
-      `<span class="scalp-card-conf">${s.conf}/7</span>` +
-      `<span class="scalp-card-time">${ts}</span>` +
-      (reasonsStr ? `<span class="scalp-card-reasons">${reasonsStr}</span>` : "");
+    const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
+    card.appendChild(mkSpan("scalp-card-dir " + dirClass, dirLabel));
+    card.appendChild(mkSpan("scalp-card-symbol", sym));
+    card.appendChild(mkSpan("scalp-card-price", "@ " + entryStr));
+    card.appendChild(mkSpan("scalp-card-levels", "SL " + slStr + " · TP " + tpStr));
+    card.appendChild(mkSpan("scalp-card-rr", rrStr));
+    card.appendChild(mkSpan("scalp-card-conf", s.conf + "/7"));
+    card.appendChild(mkSpan("scalp-card-time", ts));
+    if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
 
     card.title = `⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
     UI.scalpTickerTrack.appendChild(card);
