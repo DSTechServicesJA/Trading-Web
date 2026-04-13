@@ -59,6 +59,7 @@
 /* ================= CONFIG ================= */
 const APP_ID  = 120128;
 const WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+const DERIV_TOKEN_KEY = "deriv_token";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
 /* Tuning defaults (user-configurable via UI) */
@@ -512,6 +513,7 @@ let reconnectDebounceTimer = null;
 const RECONNECT_DEBOUNCE_MS = 400;
 
 /* ================= STATE ================= */
+let authorized    = false;
 let ws            = null;
 let candles       = [];
 let rangeStartEpoch = null;
@@ -718,6 +720,7 @@ function initUI() {
   UI.disconnectBtn  = document.getElementById("disconnectBtn");
   UI.resetSessionBtn = document.getElementById("resetSessionBtn");
   UI.wsStatus       = document.getElementById("wsStatus");
+  UI.accountTypeBadge = document.getElementById("accountTypeBadge");
   UI.candleCount    = document.getElementById("candleCount");
   UI.livePrice      = document.getElementById("livePrice");
   UI.phaseLabel     = document.getElementById("phaseLabel");
@@ -2822,6 +2825,37 @@ function stopPing() {
   }
 }
 
+/* ================= ACCOUNT / AUTH HELPERS ================= */
+
+/** Send a candles subscription request on a WebSocket */
+function subscribeCandles(socket, symbol, gran) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({
+    ticks_history: symbol,
+    adjust_start_time: 1,
+    count: 100,
+    end: "latest",
+    granularity: gran,
+    style: "candles",
+    subscribe: 1
+  }));
+}
+
+/** Update the account type badge in the status bar */
+function updateAccountBadge(acct) {
+  if (!UI.accountTypeBadge) return;
+  if (!acct) {
+    UI.accountTypeBadge.textContent = "NO AUTH";
+    UI.accountTypeBadge.className = "status-badge disabled";
+    UI.accountTypeBadge.title = "Not authorized – using public data feed";
+    return;
+  }
+  const isReal = !acct.is_virtual;
+  UI.accountTypeBadge.textContent = isReal ? `REAL (${acct.currency})` : `DEMO (${acct.currency})`;
+  UI.accountTypeBadge.className = isReal ? "status-badge enabled" : "status-badge caution";
+  UI.accountTypeBadge.title = `${acct.loginid} – Balance: ${acct.currency} ${acct.balance}`;
+}
+
 /* ================= WEBSOCKET ================= */
 function connect() {
   if (ws && ws.readyState <= 1) return;
@@ -2844,17 +2878,17 @@ function connect() {
     reconnectAttempts = 0;
     startUptimeTimer();
     startPing();
-    addLog(`Connected – subscribing to ${symbol} (${gran}s candles)`);
 
-    thisWs.send(JSON.stringify({
-      ticks_history: symbol,
-      adjust_start_time: 1,
-      count: 100,
-      end: "latest",
-      granularity: gran,
-      style: "candles",
-      subscribe: 1
-    }));
+    /* Authorize with stored Deriv token first to bind live account */
+    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
+    if (token) {
+      addLog("Authorizing with Deriv account…");
+      thisWs.send(JSON.stringify({ authorize: token }));
+    } else {
+      /* No token – subscribe directly (unauthenticated public feed) */
+      addLog(`Connected – subscribing to ${symbol} (${gran}s candles)`);
+      subscribeCandles(thisWs, symbol, gran);
+    }
   };
 
   ws.onmessage = (evt) => {
@@ -2866,6 +2900,28 @@ function connect() {
 
     if (msg.error) {
       addLog("API error: " + msg.error.message);
+      /* If authorization fails, still subscribe to public market data */
+      if (msg.msg_type === "authorize") {
+        addLog("⚠ Authorization failed – using public data feed");
+        authorized = false;
+        updateAccountBadge(null);
+        subscribeCandles(thisWs, symbol, gran);
+      }
+      return;
+    }
+
+    /* Authorize response – verify account type, then subscribe to candles */
+    if (msg.msg_type === "authorize") {
+      authorized = true;
+      const acct = msg.authorize;
+      const isReal = !acct.is_virtual;
+      updateAccountBadge(acct);
+      addLog(`✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
+      if (!isReal) {
+        addLog("⚠ Demo account detected – switch to a real account token for live market data");
+      }
+      addLog(`Subscribing to ${symbol} (${gran}s candles)`);
+      subscribeCandles(thisWs, symbol, gran);
       return;
     }
 
@@ -2944,9 +3000,11 @@ function connect() {
 
 function disconnect() {
   intentionalClose = true;
+  authorized = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   stopPing();
   stopCandleCountdown();
+  updateAccountBadge(null);
 
   if (ws) {
     /* Detach handlers so the closing socket can't interfere with future state */
@@ -5842,7 +5900,7 @@ function initLoginGate() {
   if (remembered) {
     const derivToken = _deobfuscate(remembered);
     if (derivToken) {
-      sessionStorage.setItem("deriv_token", derivToken);
+      sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
       sessionStorage.setItem("itguru_logged_in", "1");
     }
   }
@@ -5857,14 +5915,14 @@ function initLoginGate() {
   if (rememberMe && remembered) rememberMe.checked = true;
 
   UI.loginBtn.onclick = () => {
-    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
 
     if (!token) {
       if (UI.loginError) UI.loginError.textContent = "Enter Deriv API token to continue";
       return;
     }
 
-    sessionStorage.setItem("deriv_token", token);
+    sessionStorage.setItem(DERIV_TOKEN_KEY, token);
     sessionStorage.setItem("itguru_logged_in", "1");
 
     /* Handle "Remember me" */
@@ -6261,15 +6319,13 @@ function connectPanel(p) {
     updatePanelCardUI(p);
     addLog(`[Multi] ${p.symbol} connected`);
 
-    panelWs.send(JSON.stringify({
-      ticks_history: p.symbol,
-      adjust_start_time: 1,
-      count: 100,
-      end: "latest",
-      granularity: gran,
-      style: "candles",
-      subscribe: 1
-    }));
+    /* Authorize with stored Deriv token to bind live account */
+    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
+    if (token) {
+      panelWs.send(JSON.stringify({ authorize: token }));
+    } else {
+      subscribeCandles(panelWs, p.symbol, gran);
+    }
 
     /* Keepalive ping */
     p.pingTimer = setInterval(() => {
@@ -6285,6 +6341,17 @@ function connectPanel(p) {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
     if (msg.error) {
       addLog(`[Multi] ${p.symbol} API error: ${msg.error.message}`);
+      /* If panel auth fails, still subscribe to data */
+      if (msg.msg_type === "authorize") {
+        subscribeCandles(panelWs, p.symbol, gran);
+      }
+      return;
+    }
+
+    /* Authorize response – subscribe to candles after successful auth */
+    if (msg.msg_type === "authorize") {
+      addLog(`[Multi] ${p.symbol} authorized as ${msg.authorize.loginid}`);
+      subscribeCandles(panelWs, p.symbol, gran);
       return;
     }
 
