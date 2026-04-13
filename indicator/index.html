@@ -103,6 +103,10 @@
                 <option value="1HZ75V" selected>Volatility 75 (1s)</option>
                 <option value="1HZ90V">Volatility 90 (1s)</option>
                 <option value="1HZ100V">Volatility 100 (1s)</option>
+                <option value="1HZ150V">Volatility 150 (1s)</option>
+                <option value="1HZ200V">Volatility 200 (1s)</option>
+                <option value="1HZ250V">Volatility 250 (1s)</option>
+                <option value="1HZ300V">Volatility 300 (1s)</option>
               </optgroup>
               <optgroup label="VOLATILITY (STANDARD)">
                 <option value="R_10">Volatility 10 Index</option>
@@ -110,6 +114,9 @@
                 <option value="R_50">Volatility 50 Index</option>
                 <option value="R_75">Volatility 75 Index</option>
                 <option value="R_100">Volatility 100 Index</option>
+                <option value="R_150">Volatility 150 Index</option>
+                <option value="R_200">Volatility 200 Index</option>
+                <option value="R_250">Volatility 250 Index</option>
               </optgroup>
               <optgroup label="BOOM INDICES">
                 <option value="BOOM300N">Boom 300 Index</option>
@@ -132,10 +139,30 @@
                 <option value="JD75">Jump 75 Index</option>
                 <option value="JD100">Jump 100 Index</option>
               </optgroup>
-              <optgroup label="STEP INDEX">
+              <optgroup label="STEP INDICES">
                 <option value="stpRNG">Step Index</option>
+                <option value="STP2">Step Index 200</option>
+                <option value="STP3">Step Index 300</option>
+                <option value="STP5">Step Index 500</option>
               </optgroup>
-              <optgroup label="FOREX">
+              <optgroup label="RANGE BREAK INDICES">
+                <option value="RDBULL">Range Break 100</option>
+                <option value="RDBEAR">Range Break 200</option>
+              </optgroup>
+              <optgroup label="DEX INDICES">
+                <option value="DEX600DN">DEX 600 Down</option>
+                <option value="DEX600UP">DEX 600 Up</option>
+                <option value="DEX900DN">DEX 900 Down</option>
+                <option value="DEX900UP">DEX 900 Up</option>
+                <option value="DEX1500DN">DEX 1500 Down</option>
+                <option value="DEX1500UP">DEX 1500 Up</option>
+              </optgroup>
+              <optgroup label="DRIFT SWITCH INDICES">
+                <option value="DSI10">Drift Switch 10</option>
+                <option value="DSI20">Drift Switch 20</option>
+                <option value="DSI30">Drift Switch 30</option>
+              </optgroup>
+              <optgroup label="FOREX MAJORS">
                 <option value="frxEURUSD">EUR / USD</option>
                 <option value="frxGBPUSD">GBP / USD</option>
                 <option value="frxUSDJPY">USD / JPY</option>
@@ -143,13 +170,45 @@
                 <option value="frxAUDUSD">AUD / USD</option>
                 <option value="frxUSDCAD">USD / CAD</option>
                 <option value="frxNZDUSD">NZD / USD</option>
-                <option value="frxGBPJPY">GBP / JPY</option>
-                <option value="frxEURJPY">EUR / JPY</option>
+              </optgroup>
+              <optgroup label="FOREX CROSSES">
                 <option value="frxEURGBP">EUR / GBP</option>
+                <option value="frxEURJPY">EUR / JPY</option>
+                <option value="frxEURAUD">EUR / AUD</option>
+                <option value="frxEURCAD">EUR / CAD</option>
+                <option value="frxEURCHF">EUR / CHF</option>
+                <option value="frxEURNZD">EUR / NZD</option>
+                <option value="frxGBPJPY">GBP / JPY</option>
+                <option value="frxGBPAUD">GBP / AUD</option>
+                <option value="frxGBPCAD">GBP / CAD</option>
+                <option value="frxGBPCHF">GBP / CHF</option>
+                <option value="frxGBPNZD">GBP / NZD</option>
+                <option value="frxAUDJPY">AUD / JPY</option>
+                <option value="frxAUDNZD">AUD / NZD</option>
+                <option value="frxAUDCAD">AUD / CAD</option>
+                <option value="frxAUDCHF">AUD / CHF</option>
+                <option value="frxNZDJPY">NZD / JPY</option>
+                <option value="frxNZDCAD">NZD / CAD</option>
+                <option value="frxNZDCHF">NZD / CHF</option>
+                <option value="frxCADJPY">CAD / JPY</option>
+                <option value="frxCADCHF">CAD / CHF</option>
+                <option value="frxCHFJPY">CHF / JPY</option>
+              </optgroup>
+              <optgroup label="FOREX EXOTICS">
+                <option value="frxUSDMXN">USD / MXN</option>
+                <option value="frxUSDNOK">USD / NOK</option>
+                <option value="frxUSDSEK">USD / SEK</option>
+                <option value="frxUSDSGD">USD / SGD</option>
+                <option value="frxUSDZAR">USD / ZAR</option>
+                <option value="frxUSDPLN">USD / PLN</option>
+                <option value="frxUSDTRY">USD / TRY</option>
+                <option value="frxUSDHKD">USD / HKD</option>
               </optgroup>
               <optgroup label="COMMODITIES">
                 <option value="frxXAUUSD">Gold / USD (XAU/USD)</option>
                 <option value="frxXAGUSD">Silver / USD (XAG/USD)</option>
+                <option value="frxXPTUSD">Platinum / USD (XPT/USD)</option>
+                <option value="frxXPDUSD">Palladium / USD (XPD/USD)</option>
               </optgroup>
             </select>
             <div style="margin-top:10px;">
@@ -184,12 +243,19 @@
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ90V" /> Vol 90 (1s)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ150V" /> Vol 150 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ200V" /> Vol 200 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ250V" /> Vol 250 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ300V" /> Vol 300 (1s)</label>
                 <div class="ms-group-label">Volatility (Std)</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_10" /> Vol 10 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_25" /> Vol 25 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_50" /> Vol 50 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_150" /> Vol 150 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_200" /> Vol 200 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_250" /> Vol 250 Std</label>
                 <div class="ms-group-label">Boom Indices</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="BOOM300N" /> Boom 300</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
@@ -208,9 +274,26 @@
                 <label class="ms-check"><input type="checkbox" data-symbol="JD50" /> Jump 50</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="JD100" /> Jump 100</label>
-                <div class="ms-group-label">Step Index</div>
+                <div class="ms-group-label">Step Indices</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
-                <div class="ms-group-label">Forex</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="STP2" /> Step 200</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="STP3" /> Step 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="STP5" /> Step 500</label>
+                <div class="ms-group-label">Range Break</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBULL" /> Range Break 100</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBEAR" /> Range Break 200</label>
+                <div class="ms-group-label">DEX Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600DN" /> DEX 600 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600UP" /> DEX 600 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900DN" /> DEX 900 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900UP" /> DEX 900 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500DN" /> DEX 1500 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500UP" /> DEX 1500 Up</label>
+                <div class="ms-group-label">Drift Switch</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI10" /> Drift Switch 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI20" /> Drift Switch 20</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI30" /> Drift Switch 30</label>
+                <div class="ms-group-label">Forex Majors</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxUSDJPY" /> USD/JPY</label>
@@ -218,14 +301,44 @@
                 <label class="ms-check"><input type="checkbox" data-symbol="frxAUDUSD" /> AUD/USD</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCAD" /> USD/CAD</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxNZDUSD" /> NZD/USD</label>
-                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
-                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <div class="ms-group-label">Forex Crosses</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxEURGBP" /> EUR/GBP</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURAUD" /> EUR/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCAD" /> EUR/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCHF" /> EUR/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURNZD" /> EUR/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPAUD" /> GBP/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCAD" /> GBP/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCHF" /> GBP/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPNZD" /> GBP/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDJPY" /> AUD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDNZD" /> AUD/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCAD" /> AUD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCHF" /> AUD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDJPY" /> NZD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCAD" /> NZD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCHF" /> NZD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADJPY" /> CAD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADCHF" /> CAD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCHFJPY" /> CHF/JPY</label>
+                <div class="ms-group-label">Forex Exotics</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDMXN" /> USD/MXN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDNOK" /> USD/NOK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSEK" /> USD/SEK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSGD" /> USD/SGD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDZAR" /> USD/ZAR</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDPLN" /> USD/PLN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDTRY" /> USD/TRY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDHKD" /> USD/HKD</label>
                 <div class="ms-group-label">Commodities</div>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold (XAU)</label>
                 <label class="ms-check"><input type="checkbox" data-symbol="frxXAGUSD" /> Silver (XAG)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPTUSD" /> Platinum (XPT)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPDUSD" /> Palladium (XPD)</label>
               </div>
-              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 27 selected</p>
+              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 90 selected</p>
             </div>
           </section>
 

@@ -213,15 +213,21 @@ let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
  *   "crash"       – Crash indices (spike DOWN direction)
  *   "jump"        – Jump indices (sudden jumps in either direction)
  *   "step"        – Step Index (fixed-increment moves)
+ *   "rangebreak"  – Range Break indices (range-bound with breakouts)
+ *   "dex"         – DEX indices (news-event spike simulation)
+ *   "driftswitch" – Drift Switch indices (regime-switching trends)
  *   "forex"       – Forex pairs
- *   "commodity"   – Gold/Silver
+ *   "commodity"   – Gold/Silver/Platinum/Palladium
  */
 function getMarketType(symbol) {
   if (!symbol) symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^stpRNG/i.test(symbol)) return "step";
+  if (/^stpRNG|^STP\d/i.test(symbol)) return "step";
+  if (/^RDBULL|^RDBEAR/i.test(symbol)) return "rangebreak";
+  if (/^DEX/i.test(symbol))   return "dex";
+  if (/^DSI/i.test(symbol))   return "driftswitch";
   if (/^1HZ/i.test(symbol) || /^R_/i.test(symbol)) return "volatility";
   if (/^frxX/i.test(symbol))  return "commodity";
   if (/^frx/i.test(symbol))   return "forex";
@@ -349,6 +355,42 @@ function getMarketTuning() {
         rangeDurationMult: 1.5,         /* longer range to capture structure */
         spikeAware: false,
         label: "Step"
+      };
+    case "rangebreak":
+      return {
+        /* Range Break: range-bound with periodic breakouts — wait for breakouts */
+        preferredDir: null,
+        breakoutConvictionMult: 1.2,    /* require stronger conviction (many false breaks) */
+        volumeSpikeMult: 1.5,           /* moderate volume filter for real breakouts */
+        retestToleranceMult: 0.8,       /* moderately tight retest */
+        trailingATRMult: 1.5,           /* standard trailing */
+        rangeDurationMult: 1.5,         /* longer range — price ranges for extended periods */
+        spikeAware: false,
+        label: "Range Break"
+      };
+    case "dex":
+      return {
+        /* DEX: news-event spike simulation — spike-aware like Boom/Crash */
+        preferredDir: null,             /* UP/DN variant determines direction in strategy */
+        breakoutConvictionMult: 0.7,    /* spikes produce erratic candles */
+        volumeSpikeMult: 1.8,           /* strong volume filter for genuine spikes */
+        retestToleranceMult: 0.8,       /* tighter retest (fast-moving) */
+        trailingATRMult: 2.0,           /* wider trailing for spike momentum */
+        rangeDurationMult: 1.0,
+        spikeAware: true,
+        label: "DEX"
+      };
+    case "driftswitch":
+      return {
+        /* Drift Switch: regime-switching trends — follow the current regime */
+        preferredDir: null,
+        breakoutConvictionMult: 0.8,    /* trends are smooth within regime */
+        volumeSpikeMult: 1.0,           /* volume not as meaningful */
+        retestToleranceMult: 1.0,       /* standard retest */
+        trailingATRMult: 1.5,           /* standard trailing */
+        rangeDurationMult: 1.0,
+        spikeAware: false,
+        label: "Drift Switch"
       };
     default:
       return {
@@ -1792,6 +1834,118 @@ function getMarketRecommendations(symbol) {
             + "All V2 indicators work well — clean step action produces reliable MACD, "
             + "BB squeeze, ADX trending, and Stochastic pullback signals."
       };
+    case "rangebreak":
+      return {
+        label: "📦 Range Break Index — Breakout Capture Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "20 min", minutes: 20 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Standard (1.5× ATR)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Confirms genuine breakout vs range noise" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Price ranges for extended periods then breaks out to new range",
+          "Higher conviction required — many false breakouts in ranging periods",
+          "Bollinger Band squeeze detects compression before range break",
+          "Volume spike confirms genuine breakout vs noise",
+          "Longer opening range (20 min) captures the range structure",
+          "Engulfing + pin bar confirmation at range boundaries"
+        ],
+        hint: "Range Break indices range-bound most of the time, then break to a new range. "
+            + "Wait for clear breakouts with volume confirmation. "
+            + "False breakout filter is critical — many candles poke outside the range briefly. "
+            + "BB squeeze detection is highly effective here — compression precedes the break. "
+            + "Longer opening range (20 min) captures the price structure. "
+            + "Higher breakout conviction threshold filters out weak probes. "
+            + "All standard indicators work well during the breakout phase."
+      };
+    case "dex":
+      return {
+        label: "📰 DEX Index — News Spike Strategy",
+        timeframe: { text: "1–5 min", gran: 60 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "10 min", minutes: 10 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Strong (1.8× mult for spike confirmation)" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: false,
+        signals: [
+          "DEX UP variants spike upward, DEX DN variants spike downward",
+          "Spike-aware: uses same logic as Boom/Crash for spike detection",
+          "Pin bar rejection after spike signals exhaustion",
+          "Engulfing pattern after spike for power shift confirmation",
+          "Volume spike filter confirms genuine spikes vs small noise",
+          "BB squeeze detects compression before spike expansion"
+        ],
+        hint: "DEX indices simulate news-event spikes. UP variants spike upward, DN variants spike downward. "
+            + "Similar to Boom/Crash but with news-event-like frequency. "
+            + "Trade in the spike direction for highest probability. "
+            + "Wide trailing stop (2× ATR) captures extended spike momentum. "
+            + "Strong volume spike filter separates real spikes from noise. "
+            + "Stochastic disabled — unreliable in rapid spike markets. "
+            + "Session filter disabled — synthetic markets run 24/7."
+      };
+    case "driftswitch":
+      return {
+        label: "🔄 Drift Switch — Regime Trend Strategy",
+        timeframe: { text: "5 min", gran: 300 },
+        rr: { text: "1:2", minRR: 2 },
+        range: { text: "15 min", minutes: 15 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "Standard (1.5× ATR)" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: false, note: "Smooth regime shifts — volume not meaningful" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Regime switches between bullish, bearish, and sideways every 10/20/30 min",
+          "EMA crossover confirms regime change direction",
+          "ADX rising confirms new trending regime has started",
+          "MACD histogram shift confirms momentum change",
+          "Pin bar at regime transition marks reversal entry",
+          "All indicators work well within a stable regime"
+        ],
+        hint: "Drift Switch indices alternate between bullish, bearish, and sideways regimes "
+            + "at regular intervals (10, 20, or 30 minutes depending on DSI variant). "
+            + "EMA crossovers are highly reliable here — they confirm regime direction. "
+            + "ADX confirms when a new trending regime has started (rising ADX). "
+            + "MACD histogram shifts align with regime changes. "
+            + "Trade in the direction of the current regime — avoid sideways regimes. "
+            + "Volume spike filter disabled — regime transitions are smooth, not spiked. "
+            + "All standard indicators produce reliable signals within a stable regime."
+      };
     default:
       return {
         label: "⚡ " + (mtype === "forex" ? "Forex" : mtype === "commodity" ? "Commodity" : "Volatility") + " — Breakout Strategy",
@@ -1855,7 +2009,10 @@ function updateRecommendedSettings() {
       boom: "status-badge bull",
       crash: "status-badge bear",
       jump: "status-badge warning",
-      step: "status-badge enabled"
+      step: "status-badge enabled",
+      rangebreak: "status-badge enabled",
+      dex: "status-badge warning",
+      driftswitch: "status-badge enabled"
     };
     UI.marketTypeBadge.className = "chip-value " + (badgeClasses[getMarketType()] || "env-label");
   }
@@ -3953,6 +4110,20 @@ function logMarketTypeContext(idx, dir) {
     if (tlTouch) {
       addLog(`📐 ${tlTouch.desc}`);
     }
+  } else if (mtype === "dex") {
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    const isDexUp = /UP$/i.test(sym);
+    const isDexDn = /DN$/i.test(sym);
+    if (isDexUp && dir === "BULL") {
+      addLog(`📰 DEX UP: Breakout aligned with spike-up direction — high probability`);
+    } else if (isDexDn && dir === "BEAR") {
+      addLog(`📰 DEX DN: Breakout aligned with spike-down direction — high probability`);
+    }
+    if (isSpikeCandle(candles[idx], dir)) {
+      addLog(`⚡ DEX spike candle detected — news-event-like impulse`);
+    }
+  } else if (mtype === "driftswitch") {
+    addLog(`🔄 DRIFT SWITCH: Breakout ${dir} — confirm regime alignment before entry`);
   }
 }
 
@@ -3962,7 +4133,7 @@ function logMarketTypeContext(idx, dir) {
 function logMarketTypeSignals(idx) {
   const mtype = getMarketType();
 
-  if (mtype === "boom" || mtype === "crash") {
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") {
     const spikeRej = detectSpikeRejection(idx);
     if (spikeRej) addLog(`✅ ${spikeRej.desc}`);
     const ibFalse = detectInsideBarFalseBreakout(idx);
@@ -5312,7 +5483,7 @@ function initLoginGate() {
  *     and sidebar detail panels update to show that panel's data.
  */
 
-const MULTI_MAX_PANELS = 27;
+const MULTI_MAX_PANELS = 90;
 const multiPanels = new Map();   /* symbol → panel object */
 
 /* ---- Panel state factory ---- */
