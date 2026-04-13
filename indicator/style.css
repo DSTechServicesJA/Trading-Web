@@ -1761,6 +1761,13 @@ body.light-theme .ms-card-footer {
 .scalp-bull .scalp-dir { color: var(--success); }
 .scalp-bear .scalp-dir { color: var(--danger); }
 
+.scalp-symbol {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--primary);
+  opacity: 0.85;
+}
+
 .scalp-price {
   font-weight: 600;
   color: var(--text);
