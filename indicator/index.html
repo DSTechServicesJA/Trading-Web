@@ -458,6 +458,25 @@
               <label class="toggle-row"><input type="checkbox" id="scalpingModeToggle" /> Scalping Mode</label>
               <p class="hint">Quick 5-10 pip trades on short timeframes (from MD: use 5min range, tighter SL, quick TP at 1:1 R:R, auto-timeout after 15 candles).</p>
 
+              <hr class="param-divider" />
+              <p class="param-group-title">⚡ Live Scalp Scanner</p>
+
+              <label class="toggle-row"><input type="checkbox" id="liveScalpToggle" /> Live Scalp Detection</label>
+              <p class="hint">Scans every candle for high-probability scalp setups using 7-point confluence: EMA momentum, RSI zone, MACD cross, Stochastic cross, Bollinger bounce, candle pattern, ADX trend. Alerts appear in real-time on the chart.</p>
+
+              <label for="liveScalpMinConf" class="spaced-label">Min Confluence (1–7)</label>
+              <input type="number" id="liveScalpMinConf" min="1" max="7" step="1" value="3" />
+              <p class="hint">Higher = fewer but higher-quality scalp signals. Recommended: 3–4 for active markets, 5+ for conservative.</p>
+
+            </div>
+          </section>
+
+          <!-- Live Scalp Alerts -->
+          <section class="box scalp-alerts-section">
+            <h3 class="collapsible">⚡ Live Scalp Alerts <span id="scalpAlertCount" class="scalp-count-badge">0</span></h3>
+            <div class="collapsible-body open">
+              <ul id="scalpAlertList" class="scalp-alert-list"></ul>
+              <p class="hint" style="margin-top:6px;">Recent scalp signals detected by the live scanner. Each shows direction, entry price, confluence score, and reasons.</p>
             </div>
           </section>
 
@@ -772,6 +791,12 @@
         <div id="multiSymbolGrid" class="multi-symbol-grid"></div>
       </section>
 
+      <!-- Live Scalp Alert Banner (slides in from top when scalp detected) -->
+      <div id="scalpAlertBanner" class="scalp-banner">
+        <span class="scalp-banner-icon">⚡</span>
+        <span id="scalpAlertBannerText" class="scalp-banner-text">--</span>
+      </div>
+
       <!-- Main Chart -->
       <section class="chart-embed">
         <canvas id="mainChart" width="900" height="500"></canvas>
@@ -811,6 +836,9 @@
         </div>
         <div class="legend-row">
           <span class="legend-swatch live-price-swatch"></span> Live Price
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch scalp-swatch"></span> Scalp Signal
         </div>
         <div class="legend-row ema-toggle-row">
           <label><input type="checkbox" id="emaToggle" /> Show EMA</label>
