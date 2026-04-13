@@ -457,6 +457,26 @@ select {
   color: var(--text-muted);
 }
 
+/* ---- Account Size Inputs ---- */
+.account-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.account-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.account-input-row label {
+  min-width: 110px;
+  white-space: nowrap;
+}
+.account-input-row input[type="number"] {
+  flex: 1;
+  width: auto;
+}
+
 /* ---- Buttons ---- */
 button {
   padding: 9px 18px;

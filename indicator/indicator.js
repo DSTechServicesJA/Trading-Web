@@ -436,6 +436,23 @@ let minRREnabled         = false;
 let pureTrailingEnabled  = false;
 let minRRValue           = 2.0;
 
+/* Account sizing */
+let accountSize          = 0;     /* 0 = disabled / not entered */
+let riskPercent          = 1.0;   /* default 1% risk per trade */
+
+/**
+ * Calculate account-based position metrics from trade data.
+ * Returns null if accountSize or riskPercent is not set.
+ */
+function calcPositionMetrics(tradeObj) {
+  if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
+  const dollarRisk   = accountSize * (riskPercent / 100);
+  const dollarReward = dollarRisk * (tradeObj.rr || 0);
+  const riskDist     = Math.abs(tradeObj.entry - tradeObj.sl);
+  const lotSize      = riskDist > 0 ? dollarRisk / riskDist : 0;
+  return { dollarRisk, dollarReward, lotSize };
+}
+
 /* Confluence score for current setup */
 let confluenceScore = 0;
 
@@ -504,6 +521,14 @@ function initUI() {
   UI.slPrice        = document.getElementById("slPrice");
   UI.tpPrice        = document.getElementById("tpPrice");
   UI.rrDisplay      = document.getElementById("rrDisplay");
+  UI.dollarRisk     = document.getElementById("dollarRisk");
+  UI.dollarReward   = document.getElementById("dollarReward");
+  UI.positionSize   = document.getElementById("positionSize");
+  UI.dollarRiskCard   = document.getElementById("dollarRiskCard");
+  UI.dollarRewardCard = document.getElementById("dollarRewardCard");
+  UI.positionSizeCard = document.getElementById("positionSizeCard");
+  UI.accountSizeInput = document.getElementById("accountSizeInput");
+  UI.riskPercentInput = document.getElementById("riskPercentInput");
   UI.signalLog      = document.getElementById("signalLog");
   UI.canvas         = document.getElementById("mainChart");
   UI.ctx            = UI.canvas.getContext("2d");
@@ -825,6 +850,14 @@ function buildTelegramCaption() {
     if (trade.rr != null) {
       lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
     }
+    if (accountSize > 0 && riskPercent > 0) {
+      const m = calcPositionMetrics(trade);
+      if (m) {
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      }
+    }
     if (trailingSL != null && trailingStopEnabled) {
       lines.push(`<b>Trailing SL:</b> <code>${fmt(trailingSL, 5)}</code>`);
     }
@@ -1103,6 +1136,14 @@ function buildPanelTelegramCaption(p) {
     if (p.trade.rr != null) {
       lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
     }
+    if (accountSize > 0 && riskPercent > 0) {
+      const m = calcPositionMetrics(p.trade);
+      if (m) {
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      }
+    }
     if (p.trailingSL != null && p.filters.trailingStopEnabled) {
       lines.push(`<b>Trailing SL:</b> <code>${fmt(p.trailingSL, 5)}</code>`);
     }
@@ -1201,7 +1242,9 @@ function saveSettings() {
       autoApplyRecommended,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
-      telegramAutoSend
+      telegramAutoSend,
+      accountSize,
+      riskPercent
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -1298,6 +1341,12 @@ function restoreSettings() {
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
+
+    /* Account sizing */
+    if (s.accountSize != null) accountSize = s.accountSize;
+    if (s.riskPercent != null) riskPercent = s.riskPercent;
+    if (UI.accountSizeInput) UI.accountSizeInput.value = accountSize > 0 ? accountSize : "";
+    if (UI.riskPercentInput) UI.riskPercentInput.value = riskPercent;
   } catch (e) { /* storage not available */ }
 }
 
@@ -2305,11 +2354,30 @@ function updateStateUI() {
     if (UI.slPrice) UI.slPrice.textContent    = fmt(trade.sl, 4);
     if (UI.tpPrice) UI.tpPrice.textContent    = trade.tp != null ? fmt(trade.tp, 4) : "TRAILING";
     if (UI.rrDisplay) UI.rrDisplay.textContent  = `1 : ${fmt(trade.rr, 1)}`;
+
+    /* Account-based $ Risk / $ Reward / Position Size */
+    const m = calcPositionMetrics(trade);
+    const acctActive = m != null;
+    if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = acctActive ? "" : "none";
+    if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = acctActive ? "" : "none";
+    if (UI.positionSizeCard) UI.positionSizeCard.style.display = acctActive ? "" : "none";
+    if (acctActive) {
+      if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(m.dollarRisk, 2)}`;
+      if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(m.dollarReward, 2)}` : "TRAILING";
+      if (UI.positionSize) UI.positionSize.textContent = fmt(m.lotSize, 2);
+    }
   } else {
     if (UI.entryPrice) UI.entryPrice.textContent = "--";
     if (UI.slPrice) UI.slPrice.textContent    = "--";
     if (UI.tpPrice) UI.tpPrice.textContent    = "--";
     if (UI.rrDisplay) UI.rrDisplay.textContent  = "--";
+    /* Hide account cards when no trade */
+    if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = "none";
+    if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = "none";
+    if (UI.positionSizeCard) UI.positionSizeCard.style.display = "none";
+    if (UI.dollarRisk) UI.dollarRisk.textContent = "--";
+    if (UI.dollarReward) UI.dollarReward.textContent = "--";
+    if (UI.positionSize) UI.positionSize.textContent = "--";
   }
 
   /* Update recommended settings active state */
@@ -4850,10 +4918,12 @@ function drawChart() {
     ctx.fillStyle = COLORS.entryLine;
     ctx.font = "bold 12px Arial";
     ctx.textAlign = "right";
-    ctx.fillText(
-      pureTrailingEnabled ? "PURE TRAILING" : `R:R  1 : ${fmt(trade.rr, 1)}`,
-      W - marginRight - 6, entryY - 6
-    );
+    let rrLabel = pureTrailingEnabled ? "PURE TRAILING" : `R:R  1 : ${fmt(trade.rr, 1)}`;
+    if (!pureTrailingEnabled) {
+      const m = calcPositionMetrics(trade);
+      if (m) rrLabel += `  ($${fmt(m.dollarRisk, 2)} → $${fmt(m.dollarReward, 2)})`;
+    }
+    ctx.fillText(rrLabel, W - marginRight - 6, entryY - 6);
     ctx.textAlign = "left";
   }
 
@@ -5877,6 +5947,24 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   UI.riskInput.addEventListener("input", onRRChange);
   UI.rewardInput.addEventListener("input", onRRChange);
+
+  /* Account size & risk % listeners */
+  if (UI.accountSizeInput) {
+    UI.accountSizeInput.addEventListener("input", () => {
+      const v = parseFloat(UI.accountSizeInput.value);
+      accountSize = (!isNaN(v) && v > 0) ? v : 0;
+      saveSettings();
+      updateStateUI();
+    });
+  }
+  if (UI.riskPercentInput) {
+    UI.riskPercentInput.addEventListener("input", () => {
+      const v = parseFloat(UI.riskPercentInput.value);
+      riskPercent = (!isNaN(v) && v > 0) ? v : 0;
+      saveSettings();
+      updateStateUI();
+    });
+  }
 
   /* Config parameter listeners */
   ["rangeDuration", "touchTolerance", "dojiRatio", "lookbackPeriod"].forEach(id => {
