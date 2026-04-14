@@ -1939,10 +1939,25 @@ body.light-theme .ms-card-footer {
   color: var(--danger-soft);
   border: 1px solid rgba(244,63,94,0.3);
 }
+.signal-card-result.confirmed {
+  background: rgba(96,165,250,0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96,165,250,0.3);
+  animation: signalConfirmedPulse 2.5s ease-in-out infinite;
+}
 
 /* Card border tint by result */
 .signal-card.signal-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
 .signal-card.signal-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }
+.signal-card.signal-card-confirmed { border-color: rgba(96,165,250,0.25); background: rgba(96,165,250,0.04); }
+
+/* Confirmation pattern label inside card */
+.signal-card-pattern {
+  color: #60a5fa;
+  font-size: 10px;
+  font-style: italic;
+  white-space: nowrap;
+}
 
 /* Empty state */
 .signal-banner-empty {
@@ -1956,6 +1971,11 @@ body.light-theme .ms-card-footer {
 @keyframes signalPendingPulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.5; }
+}
+
+@keyframes signalConfirmedPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
 }
 
 /* ================================================================
