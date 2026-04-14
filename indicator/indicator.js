@@ -2129,7 +2129,8 @@ function setRecRecBadge(el, text, cssClass) {
  * Each market type has different optimal configurations derived from the MD-file strategies.
  */
 function getMarketRecommendations(symbol) {
-  const mtype = getMarketType(symbol);
+  const sym = symbol || _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  const mtype = getMarketType(sym);
   switch (mtype) {
     case "boom":
       return {
@@ -2409,7 +2410,6 @@ function getMarketRecommendations(symbol) {
       };
     case "volatility": {
       /* Split: Volatility 1s (1HZ*) vs Standard (R_*) */
-      const sym = symbol || _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
       const isVol1s = /^1HZ/i.test(sym);
       if (isVol1s) {
         return {
@@ -2489,10 +2489,9 @@ function getMarketRecommendations(symbol) {
     }
     case "forex": {
       /* Split: Forex Majors vs Crosses vs Exotics */
-      const fxSym = symbol || _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
-      const FOREX_EXOTIC_PAIRS = /frxUSD(MXN|NOK|SEK|SGD|ZAR|PLN|TRY|HKD)/i;
-      const FOREX_MAJOR_PAIRS  = /frx(EURUSD|GBPUSD|USDJPY|USDCHF|AUDUSD|USDCAD|NZDUSD)/i;
-      if (FOREX_EXOTIC_PAIRS.test(fxSym)) {
+      const IS_FOREX_EXOTIC = /frxUSD(MXN|NOK|SEK|SGD|ZAR|PLN|TRY|HKD)/i;
+      const IS_FOREX_MAJOR  = /frx(EURUSD|GBPUSD|USDJPY|USDCHF|AUDUSD|USDCAD|NZDUSD)/i;
+      if (IS_FOREX_EXOTIC.test(sym)) {
         return {
           label: "🌍 Forex Exotic — Daily Price Action Strategy",
           timeframe: { text: "4 hours", gran: 14400 },
@@ -2532,7 +2531,7 @@ function getMarketRecommendations(symbol) {
               + "Stochastic disabled — less reliable on exotic pairs due to erratic movements."
         };
       }
-      if (FOREX_MAJOR_PAIRS.test(fxSym)) {
+      if (IS_FOREX_MAJOR.test(sym)) {
         return {
           label: "💱 Forex Major — 4H Price Action Strategy",
           timeframe: { text: "4 hours", gran: 14400 },
