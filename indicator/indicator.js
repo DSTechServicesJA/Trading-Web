@@ -2322,8 +2322,7 @@ function cycleSymbol(dir) {
   if (newIdx >= opts.length) newIdx = 0;
   UI.symbolSelect.selectedIndex = newIdx;
   updateCurrentSymbolLabel();
-  if (autoApplyRecommended) applyRecommendedSettings();
-  else updateRecommendedSettings();
+  applyRecommendedSettings();
   saveSettings();
   debouncedReconnect();
 }
@@ -4750,8 +4749,8 @@ async function sendTelegramScalpAlert(scalp) {
 function renderScalpAlerts() {
   if (!UI.scalpAlertList) return;
   UI.scalpAlertList.innerHTML = "";
-  const toShow = liveScalpHistory.slice(0, 15);
-  for (const s of toShow) {
+  const allScalps = getAggregatedScalpHistory();
+  for (const s of allScalps) {
     const li = document.createElement("li");
     li.className = "scalp-alert-item " + (s.dir === "BULL" ? "scalp-bull" : "scalp-bear");
     const t = new Date(s.epoch * 1000);
@@ -4766,7 +4765,7 @@ function renderScalpAlerts() {
       `<div class="scalp-levels">SL: ${fmt(s.sl, 4)} &nbsp;|&nbsp; TP: ${fmt(s.tp, 4)}</div>`;
     UI.scalpAlertList.appendChild(li);
   }
-  if (UI.scalpAlertCount) UI.scalpAlertCount.textContent = liveScalpHistory.length;
+  if (UI.scalpAlertCount) UI.scalpAlertCount.textContent = allScalps.length;
 }
 
 function showScalpBanner(scalp) {
@@ -8195,8 +8194,10 @@ function connectPanel(p) {
         UI.livePrice.textContent = fmt(p.candles[p.candles.length - 1].close, 4);
       }
     } else {
-      /* Non-focused panel: still update aggregated signal banners */
+      /* Non-focused panel: still update aggregated signal banners, alerts & stats */
       updateSignalBanners();
+      renderScalpAlerts();
+      updateScalpStatsUI();
     }
   };
 
@@ -8568,8 +8569,7 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreSettings();
   /* Auto-apply recommended settings on boot so the Active column
      and all filter toggles reflect the current symbol's recommendations */
-  if (autoApplyRecommended) applyRecommendedSettings();
-  else updateRecommendedSettings();
+  applyRecommendedSettings();
   restoreSignalLog();
   restoreSignalHistory();
   initTheme();
@@ -8585,7 +8585,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); if (autoApplyRecommended) applyRecommendedSettings(); else updateRecommendedSettings(); debouncedReconnect(); });
+  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); applyRecommendedSettings(); debouncedReconnect(); });
   UI.granSelect.addEventListener("change",   () => { saveSettings(); updateRecommendedSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */
