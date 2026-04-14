@@ -1445,6 +1445,15 @@ body.light-theme .ms-card-footer {
   transition: background 0.15s;
 }
 .btn-xs:hover { background: var(--bg-card-hover); }
+.btn-danger {
+  background: linear-gradient(135deg, var(--danger), #e11d48);
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.2);
+  color: #fff;
+}
+.btn-danger:hover {
+  background: linear-gradient(135deg, var(--danger-soft), var(--danger));
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.3);
+}
 .ms-group-label {
   grid-column: 1 / -1;
   font-size: 10px;

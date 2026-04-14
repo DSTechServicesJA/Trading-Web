@@ -75,6 +75,7 @@ const CHART_PRICE_PADDING     = 0.08;
 const EMA_FAST_PERIOD = 8;
 const EMA_SLOW_PERIOD = 21;
 const HTF_EMA_PERIOD  = 100;  /* long EMA on current TF as HTF trend proxy */
+const MTF_EMA_PERIOD  = 200;  /* very long EMA for multi-timeframe structure */
 
 /* ATR */
 const ATR_PERIOD = 14;
@@ -538,6 +539,8 @@ let monitoringTrade = false;
 let emaFast = [];
 let emaSlow = [];
 let emaHTF  = [];   /* EMA 100 for HTF trend proxy */
+let emaMTF  = [];   /* EMA 200 for multi-timeframe structure */
+let vwapValues = []; /* VWAP approximation (typical price rolling average) */
 
 /* ATR state */
 let atrValue  = 0;
@@ -850,6 +853,29 @@ function initUI() {
 
   /* Scalping mode */
   UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
+
+  /* Profit-Direction Constraint UI refs */
+  UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
+  UI.minConfluenceInput      = document.getElementById("minConfluenceInput");
+  UI.doubleRetestToggle      = document.getElementById("doubleRetestToggle");
+  UI.confirmBarToggle        = document.getElementById("confirmBarToggle");
+  UI.divergenceFilterToggle  = document.getElementById("divergenceFilterToggle");
+  UI.adxHardGateToggle       = document.getElementById("adxHardGateToggle");
+  UI.adxMaxInput             = document.getElementById("adxMaxInput");
+  UI.breakoutDistToggle      = document.getElementById("breakoutDistToggle");
+  UI.breakoutDistInput       = document.getElementById("breakoutDistInput");
+  UI.timeDecayToggle         = document.getElementById("timeDecayToggle");
+  UI.timeDecayInput          = document.getElementById("timeDecayInput");
+  UI.consecutiveDirToggle    = document.getElementById("consecutiveDirToggle");
+  UI.vwapFilterToggle        = document.getElementById("vwapFilterToggle");
+  UI.stochCrossToggle        = document.getElementById("stochCrossToggle");
+  UI.rangeSizeToggle         = document.getElementById("rangeSizeToggle");
+  UI.rangeSizeMinInput       = document.getElementById("rangeSizeMinInput");
+  UI.rangeSizeMaxInput       = document.getElementById("rangeSizeMaxInput");
+  UI.hhhlToggle              = document.getElementById("hhhlToggle");
+  UI.followThroughToggle     = document.getElementById("followThroughToggle");
+  UI.mtfStructureToggle      = document.getElementById("mtfStructureToggle");
+  UI.revertSettingsBtn       = document.getElementById("revertSettingsBtn");
 
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
@@ -1621,6 +1647,27 @@ function saveSettings() {
       adxFilterEnabled,
       stochFilterEnabled,
       scalpingModeEnabled,
+      /* Profit-Direction Constraints */
+      minConfluenceEnabled,
+      minConfluenceValue,
+      doubleRetestEnabled,
+      confirmBarEnabled,
+      divergenceFilterEnabled,
+      adxHardGateEnabled,
+      adxMaxThreshold,
+      breakoutDistEnabled,
+      breakoutDistATR,
+      timeDecayEnabled,
+      timeDecayCandles,
+      consecutiveDirEnabled,
+      vwapFilterEnabled,
+      stochCrossEnabled,
+      rangeSizeEnabled,
+      rangeSizeMin,
+      rangeSizeMax,
+      hhhlEnabled,
+      followThroughEnabled,
+      mtfStructureEnabled,
       autoApplyRecommended,
       liveScalpEnabled,
       liveScalpMinConf,
@@ -1712,6 +1759,48 @@ function restoreSettings() {
     /* Scalping mode */
     if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
     if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
+
+    /* Profit-Direction Constraint toggles */
+    if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
+    if (s.minConfluenceValue != null) minConfluenceValue = s.minConfluenceValue;
+    if (s.doubleRetestEnabled != null) doubleRetestEnabled = s.doubleRetestEnabled;
+    if (s.confirmBarEnabled != null) confirmBarEnabled = s.confirmBarEnabled;
+    if (s.divergenceFilterEnabled != null) divergenceFilterEnabled = s.divergenceFilterEnabled;
+    if (s.adxHardGateEnabled != null) adxHardGateEnabled = s.adxHardGateEnabled;
+    if (s.adxMaxThreshold != null) adxMaxThreshold = s.adxMaxThreshold;
+    if (s.breakoutDistEnabled != null) breakoutDistEnabled = s.breakoutDistEnabled;
+    if (s.breakoutDistATR != null) breakoutDistATR = s.breakoutDistATR;
+    if (s.timeDecayEnabled != null) timeDecayEnabled = s.timeDecayEnabled;
+    if (s.timeDecayCandles != null) timeDecayCandles = s.timeDecayCandles;
+    if (s.consecutiveDirEnabled != null) consecutiveDirEnabled = s.consecutiveDirEnabled;
+    if (s.vwapFilterEnabled != null) vwapFilterEnabled = s.vwapFilterEnabled;
+    if (s.stochCrossEnabled != null) stochCrossEnabled = s.stochCrossEnabled;
+    if (s.rangeSizeEnabled != null) rangeSizeEnabled = s.rangeSizeEnabled;
+    if (s.rangeSizeMin != null) rangeSizeMin = s.rangeSizeMin;
+    if (s.rangeSizeMax != null) rangeSizeMax = s.rangeSizeMax;
+    if (s.hhhlEnabled != null) hhhlEnabled = s.hhhlEnabled;
+    if (s.followThroughEnabled != null) followThroughEnabled = s.followThroughEnabled;
+    if (s.mtfStructureEnabled != null) mtfStructureEnabled = s.mtfStructureEnabled;
+    if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
+    if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+    if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
+    if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
+    if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
+    if (UI.adxHardGateToggle)      UI.adxHardGateToggle.checked      = adxHardGateEnabled;
+    if (UI.adxMaxInput)            UI.adxMaxInput.value              = adxMaxThreshold;
+    if (UI.breakoutDistToggle)     UI.breakoutDistToggle.checked     = breakoutDistEnabled;
+    if (UI.breakoutDistInput)      UI.breakoutDistInput.value        = breakoutDistATR;
+    if (UI.timeDecayToggle)        UI.timeDecayToggle.checked        = timeDecayEnabled;
+    if (UI.timeDecayInput)         UI.timeDecayInput.value           = timeDecayCandles;
+    if (UI.consecutiveDirToggle)   UI.consecutiveDirToggle.checked   = consecutiveDirEnabled;
+    if (UI.vwapFilterToggle)       UI.vwapFilterToggle.checked       = vwapFilterEnabled;
+    if (UI.stochCrossToggle)       UI.stochCrossToggle.checked       = stochCrossEnabled;
+    if (UI.rangeSizeToggle)        UI.rangeSizeToggle.checked        = rangeSizeEnabled;
+    if (UI.rangeSizeMinInput)      UI.rangeSizeMinInput.value        = rangeSizeMin;
+    if (UI.rangeSizeMaxInput)      UI.rangeSizeMaxInput.value        = rangeSizeMax;
+    if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
+    if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
+    if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
 
     /* Live Scalp Scanner */
     if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
@@ -3979,6 +4068,338 @@ function isStochFavorable(dir) {
   /* For BEAR: stoch should be coming from overbought (room to fall) */
   if (dir === "BEAR") return k >= STOCH_OVERSOLD;  /* not already oversold */
   return true;
+}
+
+/* ================= PROFIT-DIRECTION CONSTRAINT FILTERS ================= */
+
+/* Compute EMA 200 for MTF structure */
+function computeEMA200() {
+  emaMTF = [];
+  if (candles.length === 0) return;
+  const k = 2 / (MTF_EMA_PERIOD + 1);
+  let ema = candles[0].close;
+  emaMTF.push(ema);
+  for (let i = 1; i < candles.length; i++) {
+    ema = candles[i].close * k + ema * (1 - k);
+    emaMTF.push(ema);
+  }
+}
+
+/* Compute VWAP approximation (rolling typical price × range weighted average) */
+function computeVWAP() {
+  vwapValues = [];
+  if (candles.length === 0) return;
+  let cumTPxVol = 0;
+  let cumVol = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const tp = (c.high + c.low + c.close) / 3;
+    const vol = c.high - c.low;  /* range as volume proxy for synthetics */
+    cumTPxVol += tp * (vol || 1);
+    cumVol += (vol || 1);
+    vwapValues.push(cumVol > 0 ? cumTPxVol / cumVol : tp);
+  }
+}
+
+/* 1. Min Confluence Gate — applied after trade is built */
+function isConfluenceSufficient() {
+  if (!minConfluenceEnabled) return true;
+  const score = computeConfluenceScore();
+  return score >= minConfluenceValue;
+}
+
+/* 2. Double Retest — track retest count */
+function isDoubleRetestSatisfied() {
+  if (!doubleRetestEnabled) return true;
+  return retestCount >= 2;
+}
+
+/* 3. Confirmation Bar — check if candle at idx closed in trade direction */
+function isConfirmBarValid(idx) {
+  if (!confirmBarEnabled) return true;
+  if (idx >= candles.length || !breakout) return true;
+  const c = candles[idx];
+  if (breakout.dir === "BULL") return c.close > c.open;  /* bullish close */
+  if (breakout.dir === "BEAR") return c.close < c.open;  /* bearish close */
+  return true;
+}
+
+/* 4. Momentum Divergence — detect RSI divergence at retest */
+function hasMomentumDivergence(dir) {
+  if (!divergenceFilterEnabled) return true;
+  if (rsiValues.length < 10 || !breakout || !retestInfo) return true;
+
+  /* Find RSI at breakout and at retest */
+  const boIdx = breakout.candleIdx;
+  const rtIdx = retestInfo.candleIdx;
+  if (boIdx >= rsiValues.length || rtIdx >= rsiValues.length) return true;
+  const rsiBO = rsiValues[boIdx];
+  const rsRT = rsiValues[rtIdx];
+  if (rsiBO == null || rsRT == null) return true;
+
+  const priceBO = candles[boIdx].close;
+  const pricRT = candles[rtIdx].close;
+
+  if (dir === "BULL") {
+    /* Bullish divergence: price makes lower low but RSI makes higher low */
+    return pricRT <= priceBO ? rsRT > rsiBO : true;
+  }
+  if (dir === "BEAR") {
+    /* Bearish divergence: price makes higher high but RSI makes lower high */
+    return pricRT >= priceBO ? rsRT < rsiBO : true;
+  }
+  return true;
+}
+
+/* 5. ADX Hard Gate — block when ADX < 20 or > max threshold */
+function isADXInRange() {
+  if (!adxHardGateEnabled) return true;
+  if (adxValue <= 0) return true;  /* no data yet */
+  return adxValue >= ADX_RANGING_THRESHOLD && adxValue <= adxMaxThreshold;
+}
+
+/* 6. Breakout Distance — reject if retest too far from breakout level */
+function isBreakoutDistanceOK(idx) {
+  if (!breakoutDistEnabled) return true;
+  if (!breakout || atrValue <= 0) return true;
+  const price = candles[idx].close;
+  const dist = Math.abs(price - breakout.level);
+  return dist <= breakoutDistATR * atrValue;
+}
+
+/* 7. Time Decay — reject if too many candles between breakout and current */
+function isTimeDecayOK(idx) {
+  if (!timeDecayEnabled) return true;
+  if (!breakout) return true;
+  return (idx - breakout.candleIdx) <= timeDecayCandles;
+}
+
+/* 8. Consecutive Direction — 2 of last 3 candles close in trade direction */
+function hasConsecutiveDirection(idx, dir) {
+  if (!consecutiveDirEnabled) return true;
+  if (idx < 2) return true;
+  let count = 0;
+  for (let i = Math.max(0, idx - 2); i <= idx; i++) {
+    const c = candles[i];
+    if (dir === "BULL" && c.close > c.open) count++;
+    if (dir === "BEAR" && c.close < c.open) count++;
+  }
+  return count >= 2;
+}
+
+/* 9. VWAP Alignment — price near/above VWAP for BULL, near/below for BEAR */
+function isVWAPAligned(dir) {
+  if (!vwapFilterEnabled) return true;
+  if (vwapValues.length === 0) return true;
+  const vwap = vwapValues[vwapValues.length - 1];
+  const price = candles[candles.length - 1].close;
+  if (vwap == null) return true;
+  /* Allow within 0.5 ATR of VWAP as "near" */
+  const tolerance = atrValue > 0 ? atrValue * 0.5 : Math.abs(price * 0.002);
+  if (dir === "BULL") return price >= vwap - tolerance;
+  if (dir === "BEAR") return price <= vwap + tolerance;
+  return true;
+}
+
+/* 10. Stochastic Crossover — K crossing D from oversold/overbought */
+function hasStochCrossover(dir) {
+  if (!stochCrossEnabled) return true;
+  if (stochK.length < 2 || stochD.length < 2) return true;
+  const kNow  = stochK[stochK.length - 1];
+  const kPrev = stochK[stochK.length - 2];
+  const dNow  = stochD[stochD.length - 1];
+  const dPrev = stochD[stochD.length - 2];
+  if (kNow == null || kPrev == null || dNow == null || dPrev == null) return true;
+  if (dir === "BULL") {
+    /* K crosses above D from below, and coming from oversold zone */
+    return kPrev <= dPrev && kNow > dNow && kPrev <= STOCH_OVERSOLD + 20;
+  }
+  if (dir === "BEAR") {
+    /* K crosses below D from above, and coming from overbought zone */
+    return kPrev >= dPrev && kNow < dNow && kPrev >= STOCH_OVERBOUGHT - 20;
+  }
+  return true;
+}
+
+/* 11. Opening Range Size — range must be within min-max ATR multiples */
+function isRangeSizeOK() {
+  if (!rangeSizeEnabled) return true;
+  if (!openingRange || atrValue <= 0) return true;
+  const rangeSize = openingRange.high - openingRange.low;
+  const ratio = rangeSize / atrValue;
+  return ratio >= rangeSizeMin && ratio <= rangeSizeMax;
+}
+
+/* 12. Higher-High / Higher-Low Structure Check */
+function hasHHHLStructure(dir) {
+  if (!hhhlEnabled) return true;
+  if (candles.length < 10) return true;
+  /* Look at last 10 candles for swing structure */
+  const lookback = Math.min(candles.length, 10);
+  const start = candles.length - lookback;
+  const highs = [];
+  const lows = [];
+  /* Find mini swing points (local extremes) */
+  for (let i = start + 1; i < candles.length - 1; i++) {
+    if (candles[i].high > candles[i - 1].high && candles[i].high > candles[i + 1].high) {
+      highs.push(candles[i].high);
+    }
+    if (candles[i].low < candles[i - 1].low && candles[i].low < candles[i + 1].low) {
+      lows.push(candles[i].low);
+    }
+  }
+  if (highs.length < 2 || lows.length < 2) return true;  /* not enough data */
+  if (dir === "BULL") {
+    /* Higher highs and higher lows */
+    const hhOK = highs[highs.length - 1] > highs[highs.length - 2];
+    const hlOK = lows[lows.length - 1] > lows[lows.length - 2];
+    return hhOK && hlOK;
+  }
+  if (dir === "BEAR") {
+    /* Lower highs and lower lows */
+    const lhOK = highs[highs.length - 1] < highs[highs.length - 2];
+    const llOK = lows[lows.length - 1] < lows[lows.length - 2];
+    return lhOK && llOK;
+  }
+  return true;
+}
+
+/* 13. Post-Breakout Follow-Through — next candle after breakout continues in direction */
+function hasFollowThrough() {
+  if (!followThroughEnabled) return true;
+  if (!breakout || breakout.candleIdx + 1 >= candles.length) return true;
+  const nextCandle = candles[breakout.candleIdx + 1];
+  if (breakout.dir === "BULL") return nextCandle.close > nextCandle.open;
+  if (breakout.dir === "BEAR") return nextCandle.close < nextCandle.open;
+  return true;
+}
+
+/* 14. MTF Structure — EMA 200 alignment */
+function isMTFStructureAligned(dir) {
+  if (!mtfStructureEnabled) return true;
+  if (emaMTF.length === 0) return true;
+  const ema200 = emaMTF[emaMTF.length - 1];
+  const price = candles[candles.length - 1].close;
+  if (ema200 == null) return true;
+  if (dir === "BULL") return price > ema200;
+  if (dir === "BEAR") return price < ema200;
+  return true;
+}
+
+/* ---- Revert all settings to defaults ---- */
+function revertAllSettings() {
+  /* Core filter defaults */
+  autoResetEnabled     = true;
+  emaFilterEnabled     = false;
+  htfFilterEnabled     = false;
+  atrToleranceEnabled  = false;
+  trailingStopEnabled  = false;
+  partialTpEnabled     = false;
+  falseBreakoutEnabled = false;
+  minRREnabled         = false;
+  minRRValue           = 2.0;
+  pureTrailingEnabled  = false;
+
+  /* Advanced signal defaults */
+  rsiFilterEnabled     = false;
+  volumeSpikeEnabled   = false;
+  sessionFilterEnabled = false;
+  sessionFilterMode    = "london_ny";
+  fibRetestEnabled     = false;
+
+  /* GainzAlgo V2 defaults */
+  macdFilterEnabled      = false;
+  bbSqueezeFilterEnabled = false;
+  adxFilterEnabled       = false;
+  stochFilterEnabled     = false;
+
+  /* Profit-Direction Constraint defaults */
+  minConfluenceEnabled    = false;
+  minConfluenceValue      = 6;
+  doubleRetestEnabled     = false;
+  confirmBarEnabled       = false;
+  divergenceFilterEnabled = false;
+  adxHardGateEnabled      = false;
+  adxMaxThreshold         = 50;
+  breakoutDistEnabled     = false;
+  breakoutDistATR         = 3.0;
+  timeDecayEnabled        = false;
+  timeDecayCandles        = 20;
+  consecutiveDirEnabled   = false;
+  vwapFilterEnabled       = false;
+  stochCrossEnabled       = false;
+  rangeSizeEnabled        = false;
+  rangeSizeMin            = 0.5;
+  rangeSizeMax            = 3.0;
+  hhhlEnabled             = false;
+  followThroughEnabled    = false;
+  mtfStructureEnabled     = false;
+
+  /* Scalping & misc */
+  scalpingModeEnabled  = false;
+  autoApplyRecommended = true;
+
+  /* Advanced parameter defaults */
+  RANGE_MINUTES           = 15;
+  LEVEL_TOUCH_TOLERANCE   = 0.15;
+  DOJI_BODY_RATIO         = 0.2;
+  SWING_LOOKBACK_PERIOD   = 20;
+
+  /* Sync all UI elements */
+  if (UI.autoResetToggle)        UI.autoResetToggle.checked        = autoResetEnabled;
+  if (UI.emaFilterToggle)        UI.emaFilterToggle.checked        = emaFilterEnabled;
+  if (UI.htfFilterToggle)        UI.htfFilterToggle.checked        = htfFilterEnabled;
+  if (UI.atrToleranceToggle)     UI.atrToleranceToggle.checked     = atrToleranceEnabled;
+  if (UI.trailingStopToggle)     UI.trailingStopToggle.checked     = trailingStopEnabled;
+  if (UI.partialTpToggle)        UI.partialTpToggle.checked        = partialTpEnabled;
+  if (UI.falseBreakoutToggle)    UI.falseBreakoutToggle.checked    = falseBreakoutEnabled;
+  if (UI.minRRToggle)            UI.minRRToggle.checked            = minRREnabled;
+  if (UI.minRRInput)             UI.minRRInput.value               = minRRValue;
+  if (UI.pureTrailingToggle)     UI.pureTrailingToggle.checked     = pureTrailingEnabled;
+  if (UI.rsiFilterToggle)        UI.rsiFilterToggle.checked        = rsiFilterEnabled;
+  if (UI.volumeSpikeToggle)      UI.volumeSpikeToggle.checked      = volumeSpikeEnabled;
+  if (UI.sessionFilterToggle)    UI.sessionFilterToggle.checked    = sessionFilterEnabled;
+  if (UI.sessionFilterMode)      UI.sessionFilterMode.value        = sessionFilterMode;
+  if (UI.fibRetestToggle)        UI.fibRetestToggle.checked        = fibRetestEnabled;
+  if (UI.macdFilterToggle)       UI.macdFilterToggle.checked       = macdFilterEnabled;
+  if (UI.bbSqueezeFilterToggle)  UI.bbSqueezeFilterToggle.checked  = bbSqueezeFilterEnabled;
+  if (UI.adxFilterToggle)        UI.adxFilterToggle.checked        = adxFilterEnabled;
+  if (UI.stochFilterToggle)      UI.stochFilterToggle.checked      = stochFilterEnabled;
+  if (UI.scalpingModeToggle)     UI.scalpingModeToggle.checked     = scalpingModeEnabled;
+  if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
+
+  /* Profit-Direction UI sync */
+  if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
+  if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+  if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
+  if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
+  if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
+  if (UI.adxHardGateToggle)      UI.adxHardGateToggle.checked      = adxHardGateEnabled;
+  if (UI.adxMaxInput)            UI.adxMaxInput.value              = adxMaxThreshold;
+  if (UI.breakoutDistToggle)     UI.breakoutDistToggle.checked     = breakoutDistEnabled;
+  if (UI.breakoutDistInput)      UI.breakoutDistInput.value        = breakoutDistATR;
+  if (UI.timeDecayToggle)        UI.timeDecayToggle.checked        = timeDecayEnabled;
+  if (UI.timeDecayInput)         UI.timeDecayInput.value           = timeDecayCandles;
+  if (UI.consecutiveDirToggle)   UI.consecutiveDirToggle.checked   = consecutiveDirEnabled;
+  if (UI.vwapFilterToggle)       UI.vwapFilterToggle.checked       = vwapFilterEnabled;
+  if (UI.stochCrossToggle)       UI.stochCrossToggle.checked       = stochCrossEnabled;
+  if (UI.rangeSizeToggle)        UI.rangeSizeToggle.checked        = rangeSizeEnabled;
+  if (UI.rangeSizeMinInput)      UI.rangeSizeMinInput.value        = rangeSizeMin;
+  if (UI.rangeSizeMaxInput)      UI.rangeSizeMaxInput.value        = rangeSizeMax;
+  if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
+  if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
+  if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+
+  /* Advanced parameter UI sync */
+  if (UI.rangeDuration)  UI.rangeDuration.value  = RANGE_MINUTES;
+  if (UI.touchTolerance) UI.touchTolerance.value = (LEVEL_TOUCH_TOLERANCE * 100).toFixed(0);
+  if (UI.dojiRatio)      UI.dojiRatio.value      = (DOJI_BODY_RATIO * 100).toFixed(0);
+  if (UI.lookbackPeriod) UI.lookbackPeriod.value = SWING_LOOKBACK_PERIOD;
+
+  saveSettings();
+  updateStateUI();
+  updateRecommendedSettings();
+  addLog("🔄 All settings reverted to defaults");
 }
 
 /* ================= SIGNAL STRENGTH GAUGE ================= */
