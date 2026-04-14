@@ -1807,14 +1807,30 @@ function switchSidebarTab(tabId) {
   }
 }
 
+/* ---- Scroll to chart view (used by banner card clicks) ---- */
+function scrollToChartView() {
+  /* On mobile, close the sidebar panel so the chart is visible */
+  const panelContent = document.getElementById("panelContent");
+  if (panelContent && panelContent.classList.contains("panel-open")) {
+    panelContent.classList.remove("panel-open");
+  }
+
+  /* Scroll the chart canvas into view, respecting reduced-motion preference */
+  const chart = document.getElementById("mainChart");
+  if (chart) {
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    chart.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center" });
+  }
+}
+
 /* ---- Handle signal card click from banner ---- */
 function handleSignalCardClick(signal) {
   /* If multi-symbol, focus the panel for this signal's symbol */
   if (multiPanels.size > 0 && signal.symbol && multiPanels.has(signal.symbol)) {
     focusPanel(signal.symbol);
   }
-  /* Switch sidebar to State tab to show signal details */
-  switchSidebarTab("tab-state");
+  /* Scroll to chart view so the user can see the signal on the chart */
+  scrollToChartView();
 }
 
 /* ---- Handle scalp card click from banner ---- */
@@ -1824,8 +1840,8 @@ function handleScalpCardClick(scalp) {
   if (multiPanels.size > 0 && sym && multiPanels.has(sym)) {
     focusPanel(sym);
   }
-  /* Switch sidebar to State tab to show details */
-  switchSidebarTab("tab-state");
+  /* Scroll to chart view so the user can see the scalp on the chart */
+  scrollToChartView();
 }
 
 /* ---- Live Signal Ticker Banner ---- */
