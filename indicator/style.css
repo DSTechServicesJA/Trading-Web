@@ -326,9 +326,9 @@ h3 {
 }
 
 /* ---- Sidebar scroll containment ---- */
-/* 140px accounts for status bar (~52px) + nav (~36px) + tabs (~40px) + spacing */
+/* 80px accounts for status bar (~52px) + minimal spacing — maximise viewable area */
 .panel-content {
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 80px);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -1864,12 +1864,16 @@ body.light-theme .ms-card-footer {
   white-space: nowrap;
   border: 1px solid rgba(99,128,255,0.1);
   background: rgba(99,102,241,0.04);
-  transition: border-color 0.2s, box-shadow 0.2s;
-  cursor: default;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  cursor: pointer;
 }
 .signal-card:hover {
-  border-color: rgba(99,128,255,0.2);
+  border-color: rgba(99,128,255,0.35);
   box-shadow: 0 0 12px var(--glass-glow);
+  transform: translateY(-1px);
+}
+.signal-card:active {
+  transform: scale(0.97);
 }
 
 /* Direction arrows */
@@ -1962,12 +1966,16 @@ body.light-theme .ms-card-footer {
   white-space: nowrap;
   border: 1px solid rgba(250,204,21,0.12);
   background: rgba(250,204,21,0.04);
-  transition: border-color 0.2s, box-shadow 0.2s;
-  cursor: default;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  cursor: pointer;
 }
 .scalp-card:hover {
   border-color: rgba(250,204,21,0.3);
   box-shadow: 0 0 12px rgba(250,204,21,0.1);
+  transform: translateY(-1px);
+}
+.scalp-card:active {
+  transform: scale(0.97);
 }
 .scalp-card.scalp-card-bull {
   border-color: rgba(34,197,94,0.2);

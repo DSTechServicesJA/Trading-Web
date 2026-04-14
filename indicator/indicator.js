@@ -1789,6 +1789,45 @@ function updateStatsUI() {
   renderScalpTickerBanner();
 }
 
+/* ---- Switch sidebar to a specific tab programmatically ---- */
+function switchSidebarTab(tabId) {
+  const tabs = document.querySelectorAll(".sidebar-tab");
+  const panes = document.querySelectorAll(".tab-pane");
+  tabs.forEach(t => { t.classList.remove("active"); t.setAttribute("aria-selected", "false"); });
+  panes.forEach(p => p.classList.remove("active"));
+  const targetTab = document.querySelector(`.sidebar-tab[data-tab="${tabId}"]`);
+  const targetPane = document.getElementById(tabId);
+  if (targetTab) { targetTab.classList.add("active"); targetTab.setAttribute("aria-selected", "true"); }
+  if (targetPane) targetPane.classList.add("active");
+
+  /* On mobile, ensure the panel content is open */
+  const panelContent = document.getElementById("panelContent");
+  if (panelContent && !panelContent.classList.contains("panel-open")) {
+    panelContent.classList.add("panel-open");
+  }
+}
+
+/* ---- Handle signal card click from banner ---- */
+function handleSignalCardClick(signal) {
+  /* If multi-symbol, focus the panel for this signal's symbol */
+  if (multiPanels.size > 0 && signal.symbol && multiPanels.has(signal.symbol)) {
+    focusPanel(signal.symbol);
+  }
+  /* Switch sidebar to State tab to show signal details */
+  switchSidebarTab("tab-state");
+}
+
+/* ---- Handle scalp card click from banner ---- */
+function handleScalpCardClick(scalp) {
+  const sym = scalp.symbol || getActiveSymbol();
+  /* If multi-symbol, focus the panel for this scalp's symbol */
+  if (multiPanels.size > 0 && sym && multiPanels.has(sym)) {
+    focusPanel(sym);
+  }
+  /* Switch sidebar to State tab to show details */
+  switchSidebarTab("tab-state");
+}
+
 /* ---- Live Signal Ticker Banner ---- */
 function renderSignalBanner() {
   if (!UI.signalBannerTrack) return;
@@ -1835,7 +1874,11 @@ function renderSignalBanner() {
       `<span class="signal-card-time">${ts}</span>` +
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
 
-    card.title = `${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
+    card.title = `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
+
+    /* Clickable — focuses the panel and switches sidebar to State tab */
+    card.addEventListener("click", () => handleSignalCardClick(s));
+
     UI.signalBannerTrack.appendChild(card);
   }
 
@@ -1887,7 +1930,11 @@ function renderScalpTickerBanner() {
     card.appendChild(mkSpan("scalp-card-time", ts));
     if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
 
-    card.title = `⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
+    card.title = `Click to view details · ⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
+
+    /* Clickable — focuses the panel and switches sidebar to State tab */
+    card.addEventListener("click", () => handleScalpCardClick(s));
+
     UI.scalpTickerTrack.appendChild(card);
   }
 
