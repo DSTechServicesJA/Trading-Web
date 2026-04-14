@@ -75,7 +75,7 @@ const CHART_PRICE_PADDING     = 0.08;
 const EMA_FAST_PERIOD = 8;
 const EMA_SLOW_PERIOD = 21;
 const HTF_EMA_PERIOD  = 100;  /* long EMA on current TF as HTF trend proxy */
-const MTF_EMA_PERIOD  = 200;  /* very long EMA for multi-timeframe structure */
+const MTF_EMA_PERIOD  = 200;  /* long EMA on current TF as structural trend proxy (MTF approximation) */
 
 /* ATR */
 const ATR_PERIOD = 14;
@@ -103,6 +103,12 @@ const SR_CONFLUENCE_PRICE_PCT = 0.002;
 
 /* False breakout: number of candles to watch for price returning inside range */
 const FALSE_BREAKOUT_CANDLES = 3;
+
+/* Profit-Direction Constraint constants */
+const STOCH_CROSSOVER_BUFFER  = 20;   /* buffer zone for K/D crossover from oversold/overbought */
+const VWAP_ATR_TOLERANCE      = 0.5;  /* ATR multiplier for VWAP proximity */
+const VWAP_PRICE_TOLERANCE_PCT = 0.002; /* price % tolerance when ATR unavailable */
+const HHHL_LOOKBACK_PERIOD    = 10;   /* candles to look back for swing structure */
 
 /* RSI */
 const RSI_PERIOD = 14;
@@ -4119,7 +4125,8 @@ function computeEMA200() {
   }
 }
 
-/* Compute VWAP approximation (rolling typical price × range weighted average) */
+/* Compute VWAP approximation (rolling typical price × range weighted average).
+ * Uses candle range as volume proxy since synthetic indices don't provide real volume data. */
 function computeVWAP() {
   vwapValues = [];
   if (candles.length === 0) return;
@@ -4229,7 +4236,7 @@ function isVWAPAligned(dir) {
   const price = candles[candles.length - 1].close;
   if (vwap == null) return true;
   /* Allow within 0.5 ATR of VWAP as "near" */
-  const tolerance = atrValue > 0 ? atrValue * 0.5 : Math.abs(price * 0.002);
+  const tolerance = atrValue > 0 ? atrValue * VWAP_ATR_TOLERANCE : Math.abs(price * VWAP_PRICE_TOLERANCE_PCT);
   if (dir === "BULL") return price >= vwap - tolerance;
   if (dir === "BEAR") return price <= vwap + tolerance;
   return true;
@@ -4246,11 +4253,11 @@ function hasStochCrossover(dir) {
   if (kNow == null || kPrev == null || dNow == null || dPrev == null) return true;
   if (dir === "BULL") {
     /* K crosses above D from below, and coming from oversold zone */
-    return kPrev <= dPrev && kNow > dNow && kPrev <= STOCH_OVERSOLD + 20;
+    return kPrev <= dPrev && kNow > dNow && kPrev <= STOCH_OVERSOLD + STOCH_CROSSOVER_BUFFER;
   }
   if (dir === "BEAR") {
     /* K crosses below D from above, and coming from overbought zone */
-    return kPrev >= dPrev && kNow < dNow && kPrev >= STOCH_OVERBOUGHT - 20;
+    return kPrev >= dPrev && kNow < dNow && kPrev >= STOCH_OVERBOUGHT - STOCH_CROSSOVER_BUFFER;
   }
   return true;
 }
@@ -4267,9 +4274,9 @@ function isRangeSizeOK() {
 /* 12. Higher-High / Higher-Low Structure Check */
 function hasHHHLStructure(dir) {
   if (!hhhlEnabled) return true;
-  if (candles.length < 10) return true;
-  /* Look at last 10 candles for swing structure */
-  const lookback = Math.min(candles.length, 10);
+  if (candles.length < HHHL_LOOKBACK_PERIOD) return true;
+  /* Look at last N candles for swing structure */
+  const lookback = Math.min(candles.length, HHHL_LOOKBACK_PERIOD);
   const start = candles.length - lookback;
   const highs = [];
   const lows = [];
@@ -6415,7 +6422,7 @@ function processCandle(idx) {
         }
         setPhase("TRADE");
         addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
-        /* Log confluence score */
+        /* Confluence score was already computed for the min gate check above */
         addLog(`Confluence score: ${confluenceScore}`);
         recordSignal(confirmPattern);
       }
