@@ -708,6 +708,29 @@ let bbSqueezeFilterEnabled = false;
 let adxFilterEnabled = false;
 let stochFilterEnabled = false;
 
+/* Profit-Direction Constraint filters */
+let minConfluenceEnabled = false;
+let minConfluenceValue   = 6;       /* min confluence score (0-16) to allow trade */
+let doubleRetestEnabled  = false;   /* require 2 retests of breakout level */
+let confirmBarEnabled    = false;   /* next candle after confirm must close in direction */
+let divergenceFilterEnabled = false; /* RSI divergence at retest */
+let adxHardGateEnabled   = false;   /* block when ADX < 20 (ranging) or > 50 (exhausted) */
+let adxMaxThreshold      = 50;      /* upper ADX limit for exhausted trends */
+let breakoutDistEnabled  = false;   /* reject retest if price too far from breakout */
+let breakoutDistATR      = 3.0;     /* max distance in ATR multiples */
+let timeDecayEnabled     = false;   /* max candles between breakout and retest */
+let timeDecayCandles     = 20;      /* staleness threshold */
+let consecutiveDirEnabled = false;  /* 2 of last 3 candles must close in trade direction */
+let vwapFilterEnabled    = false;   /* price near/aligned with VWAP */
+let stochCrossEnabled    = false;   /* stochastic K/D crossover from oversold/overbought */
+let rangeSizeEnabled     = false;   /* opening range must be 0.5-3× ATR */
+let rangeSizeMin         = 0.5;     /* min range size in ATR multiples */
+let rangeSizeMax         = 3.0;     /* max range size in ATR multiples */
+let hhhlEnabled          = false;   /* higher-high/higher-low structure check */
+let followThroughEnabled = false;   /* post-breakout follow-through (next candle continues) */
+let mtfStructureEnabled  = false;   /* improved MTF via EMA 200 proxy */
+let retestCount          = 0;       /* track number of retests for double-retest filter */
+
 /* Scalping mode (from MD: quick 5-10 pip profits on 1min/5min charts) */
 let scalpingModeEnabled = false;
 
