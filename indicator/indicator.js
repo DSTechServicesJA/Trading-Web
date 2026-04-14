@@ -7765,11 +7765,36 @@ function removeSymbolPanel(symbol) {
     const section = document.getElementById("multiSymbolSection");
     if (section) section.style.display = "none";
     focusedPanelSymbol = null;
+
+    /* Clear stale globals so the main UI doesn't keep showing
+       data from the just-removed panel */
+    candles = []; rangeStartEpoch = null;
+    openingRange = null; breakout = null;
+    retestInfo = null; indecisionInfo = null; confirmInfo = null;
+    trade = null; phase = "WAITING"; monitoringTrade = false;
+    emaFast = []; emaSlow = []; emaHTF = [];
+    atrValue = 0; atrValues = []; rsiValues = [];
+    macdLine = []; macdSignal = []; macdHistogram = [];
+    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+    adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
+    stochK = []; stochD = [];
+    trailingSL = null; partialTpHit = false; confluenceScore = 0;
+    signalHistory = []; signalWins = 0; signalLosses = 0;
+    liveScalpHistory = []; lastScalpCandleIdx = -999;
+
+    /* Refresh the main chart and sidebar so they clear */
+    drawChart();
+    updateStateUI();
+    renderScalpAlerts();
   } else if (focusedPanelSymbol === symbol) {
     /* Focus the first remaining panel */
     const firstKey = multiPanels.keys().next().value;
     focusPanel(firstKey);
   }
+
+  /* Re-render signal banners & stats to drop signals from the removed panel */
+  updateSignalBanners();
+  updateStatsUI();
 
   updateMultiSymbolCount();
 }
