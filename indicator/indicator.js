@@ -712,7 +712,7 @@ let stochFilterEnabled = false;
 let scalpingModeEnabled = false;
 
 /* Auto-apply recommended settings when symbol changes */
-let autoApplyRecommended = false;
+let autoApplyRecommended = true;
 
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
@@ -2074,6 +2074,16 @@ function initKeyboardShortcuts() {
 /* Granularity → human-readable label map (used for display + recommended settings) */
 const GRAN_LABELS = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min", 1800: "30 min", 3600: "1 hour", 7200: "2 hours", 14400: "4 hours", 28800: "8 hours", 86400: "1 day" };
 
+/** Formats a duration in minutes into a consistent human-readable label (e.g. "10 min", "1 hour", "8 hours"). */
+function formatMinutes(m) {
+  if (m < 60) return m + " min";
+  const h = m / 60;
+  if (Number.isInteger(h)) return h === 1 ? "1 hour" : h + " hours";
+  const wh = Math.floor(h);
+  const rm = m % 60;
+  return (wh === 1 ? "1 hour" : wh + " hours") + " " + rm + " min";
+}
+
 /* Session filter mode → display label map */
 const SESSION_MODE_LABELS = {
   london_ny: "London+NY ✅",
@@ -2496,7 +2506,7 @@ function getMarketRecommendations(symbol) {
           label: "🌍 Forex Exotic — Daily Price Action Strategy",
           timeframe: { text: "4 hours", gran: 14400 },
           rr: { text: "1:3+", minRR: 3 },
-          range: { text: "480 min (2 candles)", minutes: 480 },
+          range: { text: "8 hours (2 candles)", minutes: 480 },
           ema: true,
           htf: true,
           atr: true,
@@ -2536,7 +2546,7 @@ function getMarketRecommendations(symbol) {
           label: "💱 Forex Major — 4H Price Action Strategy",
           timeframe: { text: "4 hours", gran: 14400 },
           rr: { text: "1:2–1:3", minRR: 2 },
-          range: { text: "480 min (2 candles)", minutes: 480 },
+          range: { text: "8 hours (2 candles)", minutes: 480 },
           ema: true,
           htf: true,
           atr: true,
@@ -2576,7 +2586,7 @@ function getMarketRecommendations(symbol) {
         label: "💱 Forex Cross — 4H Price Action Strategy",
         timeframe: { text: "4 hours", gran: 14400 },
         rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "480 min (2 candles)", minutes: 480 },
+        range: { text: "8 hours (2 candles)", minutes: 480 },
         ema: true,
         htf: true,
         atr: true,
@@ -2615,7 +2625,7 @@ function getMarketRecommendations(symbol) {
         label: "🥇 Commodity — 4H Breakout Strategy",
         timeframe: { text: "4 hours", gran: 14400 },
         rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "480 min (2 candles)", minutes: 480 },
+        range: { text: "8 hours (2 candles)", minutes: 480 },
         ema: true,
         htf: true,
         atr: true,
@@ -2738,7 +2748,7 @@ function updateRecommendedSettings() {
   /* Timeframe: compare against market-type recommendation */
   if (UI.recActive_timeframe && UI.granSelect) {
     const gran = parseInt(UI.granSelect.value, 10);
-    UI.recActive_timeframe.textContent = GRAN_LABELS[gran] || (gran + "s");
+    UI.recActive_timeframe.textContent = GRAN_LABELS[gran] || formatMinutes(Math.round(gran / 60));
     if (gran === rec.timeframe.gran) {
       UI.recActive_timeframe.className = "status-badge bull rec-badge-active";
     } else {
@@ -2762,7 +2772,7 @@ function updateRecommendedSettings() {
   /* Opening Range: compare against market-type recommendation */
   if (UI.recActive_range && UI.rangeDuration) {
     const rm = parseInt(UI.rangeDuration.value, 10) || RANGE_MINUTES;
-    UI.recActive_range.textContent = rm + " min";
+    UI.recActive_range.textContent = formatMinutes(rm);
     if (rm === rec.range.minutes) {
       UI.recActive_range.className = "status-badge bull rec-badge-active";
     } else {
@@ -7754,6 +7764,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initUI();
   initLoginGate();
   restoreSettings();
+  /* Auto-apply recommended settings on boot so the Active column
+     and all filter toggles reflect the current symbol's recommendations */
+  if (autoApplyRecommended) applyRecommendedSettings();
+  else updateRecommendedSettings();
   restoreSignalLog();
   restoreSignalHistory();
   initTheme();
@@ -7770,7 +7784,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Debounced reconnect on symbol/timeframe change */
   UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); if (autoApplyRecommended) applyRecommendedSettings(); else updateRecommendedSettings(); debouncedReconnect(); });
-  UI.granSelect.addEventListener("change",   () => { saveSettings(); debouncedReconnect(); });
+  UI.granSelect.addEventListener("change",   () => { saveSettings(); updateRecommendedSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */
   function onRRChange() {
@@ -7822,25 +7836,26 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.htfFilterToggle.addEventListener("change", () => { htfFilterEnabled = UI.htfFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.atrToleranceToggle) {
-    UI.atrToleranceToggle.addEventListener("change", () => { atrToleranceEnabled = UI.atrToleranceToggle.checked; saveSettings(); });
+    UI.atrToleranceToggle.addEventListener("change", () => { atrToleranceEnabled = UI.atrToleranceToggle.checked; saveSettings(); updateRecommendedSettings(); });
   }
   if (UI.trailingStopToggle) {
-    UI.trailingStopToggle.addEventListener("change", () => { trailingStopEnabled = UI.trailingStopToggle.checked; saveSettings(); });
+    UI.trailingStopToggle.addEventListener("change", () => { trailingStopEnabled = UI.trailingStopToggle.checked; saveSettings(); updateRecommendedSettings(); });
   }
   if (UI.partialTpToggle) {
     UI.partialTpToggle.addEventListener("change", () => { partialTpEnabled = UI.partialTpToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
   }
   if (UI.falseBreakoutToggle) {
-    UI.falseBreakoutToggle.addEventListener("change", () => { falseBreakoutEnabled = UI.falseBreakoutToggle.checked; saveSettings(); });
+    UI.falseBreakoutToggle.addEventListener("change", () => { falseBreakoutEnabled = UI.falseBreakoutToggle.checked; saveSettings(); updateRecommendedSettings(); });
   }
   if (UI.minRRToggle) {
-    UI.minRRToggle.addEventListener("change", () => { minRREnabled = UI.minRRToggle.checked; saveSettings(); });
+    UI.minRRToggle.addEventListener("change", () => { minRREnabled = UI.minRRToggle.checked; saveSettings(); updateRecommendedSettings(); });
   }
   if (UI.minRRInput) {
     UI.minRRInput.addEventListener("change", () => {
       const v = parseFloat(UI.minRRInput.value);
       if (!isNaN(v) && v > 0) minRRValue = v;
       saveSettings();
+      updateRecommendedSettings();
     });
   }
   if (UI.pureTrailingToggle) {
