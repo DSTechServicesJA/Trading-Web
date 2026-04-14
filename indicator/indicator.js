@@ -686,6 +686,7 @@ let telegramBotToken  = "";
 let telegramChatId    = "";
 let telegramAutoSend  = false;
 let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
+let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -977,6 +978,7 @@ function initUI() {
   UI.telegramChatId         = document.getElementById("telegramChatId");
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
   UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
+  UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -1316,6 +1318,74 @@ async function sendTelegramPhoto(blob, caption) {
     throw new Error(data.description || "Telegram API error");
   }
   return data;
+}
+
+/**
+ * Send a text-only message to Telegram via Bot API (HTML parse mode).
+ */
+async function sendTelegramMessage(text) {
+  const { token, chatId } = getTelegramCredentials();
+  validateTelegramCredentials(token, chatId);
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
+  });
+  const data = await resp.json();
+  if (!data.ok) {
+    throw new Error(data.description || "Telegram API error");
+  }
+  return data;
+}
+
+/**
+ * Send trade outcome (WIN / LOSS) via Telegram when enabled.
+ * Called from monitorTradeOutcome after a trade resolves.
+ */
+async function sendTradeOutcomeTelegram(signal) {
+  if (!telegramOutcomeSend) return;
+  try {
+    const sym = getSymbolLabel(signal.symbol || "");
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = signal.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
+    const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
+    const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
+    const rrStr = signal.rr != null ? signal.rr.toFixed(1) + ":1" : "--";
+    const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
+    const pattern = signal.confirmPattern || "--";
+
+    const lines = [];
+    lines.push(`${icon} <b>Trade ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>Pattern:</b> ${pattern}`);
+    lines.push(`<b>Entry:</b> ${entryStr}`);
+    lines.push(`<b>SL:</b> ${slStr}`);
+    lines.push(`<b>TP:</b> ${tpStr}`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(`<b>Confluence:</b> ${confScore}`);
+    if (signal.trailingSL != null) {
+      lines.push(`<b>Trailing SL:</b> ${fmt(signal.trailingSL, 4)}`);
+    }
+    if (signal.partialTpHit) {
+      lines.push(`<b>Partial TP:</b> Hit at 1:1`);
+    }
+    /* Win/loss tally */
+    const totalW = signalWins;
+    const totalL = signalLosses;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: trade outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Telegram outcome error: ${err.message}`);
+  }
 }
 
 /**
@@ -1711,6 +1781,7 @@ function saveSettings() {
       telegramChatId,
       telegramAutoSend,
       telegramScalpAutoSend,
+      telegramOutcomeSend,
       accountSize,
       riskPercent
     };
@@ -1855,10 +1926,12 @@ function restoreSettings() {
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
+    if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
+    if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -6663,13 +6736,18 @@ function recordSignal(confirmPattern) {
   const pattern = confirmPattern || "engulfing";
   const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
 
-  /* Try to upgrade the last CONFIRMED signal instead of creating a duplicate */
-  const lastConfirmed = signalHistory.length > 0 && signalHistory[signalHistory.length - 1].result === "CONFIRMED"
-    ? signalHistory[signalHistory.length - 1] : null;
+  /* Try to upgrade the last CONFIRMED signal instead of creating a duplicate.
+     Verify symbol matches to avoid upgrading a signal from a different panel. */
+  const currentSymbol = _multiPanelProcessing || UI.symbolSelect.value;
+  const lastIdx = signalHistory.length - 1;
+  const lastConfirmed = lastIdx >= 0
+    && signalHistory[lastIdx].result === "CONFIRMED"
+    && signalHistory[lastIdx].symbol === currentSymbol
+    ? signalHistory[lastIdx] : null;
 
   const signal = lastConfirmed || {};
-  signal.time = lastConfirmed ? signal.time : new Date().toISOString();
-  signal.symbol = _multiPanelProcessing || UI.symbolSelect.value;
+  if (!lastConfirmed) signal.time = new Date().toISOString();
+  signal.symbol = currentSymbol;
   signal.dir = trade.dir;
   signal.entry = trade.entry;
   signal.sl = trade.sl;
@@ -6779,6 +6857,7 @@ function monitorTradeOutcome(candle) {
       persistSignalHistory();
       updateStatsUI();
       playPhaseAlert(inProfit ? "TRADE" : "RANGE");
+      sendTradeOutcomeTelegram(pending);
       return;
     }
   }
@@ -6833,6 +6912,7 @@ function monitorTradeOutcome(candle) {
     persistSignalHistory();
     updateStatsUI();
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
+    sendTradeOutcomeTelegram(pending);
   }
 }
 
@@ -8884,6 +8964,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramScalpAutoSendToggle) {
     UI.telegramScalpAutoSendToggle.addEventListener("change", () => { telegramScalpAutoSend = UI.telegramScalpAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramOutcomeSendToggle) {
+    UI.telegramOutcomeSendToggle.addEventListener("change", () => { telegramOutcomeSend = UI.telegramOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
