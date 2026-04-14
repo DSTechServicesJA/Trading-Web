@@ -7654,27 +7654,27 @@ function createPanelState(symbol) {
       stochFilterEnabled:      rec.stoch,
       scalpingModeEnabled:     false,
       RANGE_MINUTES:       rec.range.minutes,
-      /* Profit-Direction Constraints — default OFF for multi-panel */
-      minConfluenceEnabled:    false,
-      minConfluenceValue:      6,
-      doubleRetestEnabled:     false,
-      confirmBarEnabled:       false,
-      divergenceFilterEnabled: false,
-      adxHardGateEnabled:      false,
-      adxMaxThreshold:         50,
-      breakoutDistEnabled:     false,
-      breakoutDistATR:         3.0,
-      timeDecayEnabled:        false,
-      timeDecayCandles:        20,
-      consecutiveDirEnabled:   false,
-      vwapFilterEnabled:       false,
-      stochCrossEnabled:       false,
-      rangeSizeEnabled:        false,
-      rangeSizeMin:            0.5,
-      rangeSizeMax:            3.0,
-      hhhlEnabled:             false,
-      followThroughEnabled:    false,
-      mtfStructureEnabled:     false,
+      /* Profit-Direction Constraints — inherit from current global state */
+      minConfluenceEnabled:    minConfluenceEnabled,
+      minConfluenceValue:      minConfluenceValue,
+      doubleRetestEnabled:     doubleRetestEnabled,
+      confirmBarEnabled:       confirmBarEnabled,
+      divergenceFilterEnabled: divergenceFilterEnabled,
+      adxHardGateEnabled:      adxHardGateEnabled,
+      adxMaxThreshold:         adxMaxThreshold,
+      breakoutDistEnabled:     breakoutDistEnabled,
+      breakoutDistATR:         breakoutDistATR,
+      timeDecayEnabled:        timeDecayEnabled,
+      timeDecayCandles:        timeDecayCandles,
+      consecutiveDirEnabled:   consecutiveDirEnabled,
+      vwapFilterEnabled:       vwapFilterEnabled,
+      stochCrossEnabled:       stochCrossEnabled,
+      rangeSizeEnabled:        rangeSizeEnabled,
+      rangeSizeMin:            rangeSizeMin,
+      rangeSizeMax:            rangeSizeMax,
+      hhhlEnabled:             hhhlEnabled,
+      followThroughEnabled:    followThroughEnabled,
+      mtfStructureEnabled:     mtfStructureEnabled,
     },
     /* DOM refs for the card */
     cardEl: null,
@@ -7993,6 +7993,36 @@ function syncFilterUIFromGlobals() {
   if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
   if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
   if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+}
+
+/**
+ * Propagate current Profit-Direction Constraint globals to ALL multi-panels.
+ * Called whenever a constraint toggle/input is changed so every chart
+ * picks up the new setting immediately and retains it across panel switches.
+ */
+function syncProfitDirToAllPanels() {
+  for (const p of multiPanels.values()) {
+    p.filters.minConfluenceEnabled    = minConfluenceEnabled;
+    p.filters.minConfluenceValue      = minConfluenceValue;
+    p.filters.doubleRetestEnabled     = doubleRetestEnabled;
+    p.filters.confirmBarEnabled       = confirmBarEnabled;
+    p.filters.divergenceFilterEnabled = divergenceFilterEnabled;
+    p.filters.adxHardGateEnabled      = adxHardGateEnabled;
+    p.filters.adxMaxThreshold         = adxMaxThreshold;
+    p.filters.breakoutDistEnabled     = breakoutDistEnabled;
+    p.filters.breakoutDistATR         = breakoutDistATR;
+    p.filters.timeDecayEnabled        = timeDecayEnabled;
+    p.filters.timeDecayCandles        = timeDecayCandles;
+    p.filters.consecutiveDirEnabled   = consecutiveDirEnabled;
+    p.filters.vwapFilterEnabled       = vwapFilterEnabled;
+    p.filters.stochCrossEnabled       = stochCrossEnabled;
+    p.filters.rangeSizeEnabled        = rangeSizeEnabled;
+    p.filters.rangeSizeMin            = rangeSizeMin;
+    p.filters.rangeSizeMax            = rangeSizeMax;
+    p.filters.hhhlEnabled             = hhhlEnabled;
+    p.filters.followThroughEnabled    = followThroughEnabled;
+    p.filters.mtfStructureEnabled     = mtfStructureEnabled;
+  }
 }
 
 /* ---- Connect a multi-symbol panel ---- */
@@ -8666,76 +8696,76 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Profit-Direction Constraint listeners */
   if (UI.minConfluenceToggle) {
-    UI.minConfluenceToggle.addEventListener("change", () => { minConfluenceEnabled = UI.minConfluenceToggle.checked; saveSettings(); updateStateUI(); });
+    UI.minConfluenceToggle.addEventListener("change", () => { minConfluenceEnabled = UI.minConfluenceToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.minConfluenceInput) {
     UI.minConfluenceInput.addEventListener("change", () => {
       const v = parseInt(UI.minConfluenceInput.value, 10);
       if (!isNaN(v) && v >= 0 && v <= 16) minConfluenceValue = v;
       UI.minConfluenceInput.value = minConfluenceValue;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.doubleRetestToggle) {
-    UI.doubleRetestToggle.addEventListener("change", () => { doubleRetestEnabled = UI.doubleRetestToggle.checked; saveSettings(); updateStateUI(); });
+    UI.doubleRetestToggle.addEventListener("change", () => { doubleRetestEnabled = UI.doubleRetestToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.confirmBarToggle) {
-    UI.confirmBarToggle.addEventListener("change", () => { confirmBarEnabled = UI.confirmBarToggle.checked; saveSettings(); updateStateUI(); });
+    UI.confirmBarToggle.addEventListener("change", () => { confirmBarEnabled = UI.confirmBarToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.divergenceFilterToggle) {
-    UI.divergenceFilterToggle.addEventListener("change", () => { divergenceFilterEnabled = UI.divergenceFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.divergenceFilterToggle.addEventListener("change", () => { divergenceFilterEnabled = UI.divergenceFilterToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.adxHardGateToggle) {
-    UI.adxHardGateToggle.addEventListener("change", () => { adxHardGateEnabled = UI.adxHardGateToggle.checked; saveSettings(); updateStateUI(); });
+    UI.adxHardGateToggle.addEventListener("change", () => { adxHardGateEnabled = UI.adxHardGateToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.adxMaxInput) {
     UI.adxMaxInput.addEventListener("change", () => {
       const v = parseInt(UI.adxMaxInput.value, 10);
       if (!isNaN(v) && v >= 25 && v <= 80) adxMaxThreshold = v;
       UI.adxMaxInput.value = adxMaxThreshold;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.breakoutDistToggle) {
-    UI.breakoutDistToggle.addEventListener("change", () => { breakoutDistEnabled = UI.breakoutDistToggle.checked; saveSettings(); updateStateUI(); });
+    UI.breakoutDistToggle.addEventListener("change", () => { breakoutDistEnabled = UI.breakoutDistToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.breakoutDistInput) {
     UI.breakoutDistInput.addEventListener("change", () => {
       const v = parseFloat(UI.breakoutDistInput.value);
       if (!isNaN(v) && v >= 1 && v <= 10) breakoutDistATR = v;
       UI.breakoutDistInput.value = breakoutDistATR;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.timeDecayToggle) {
-    UI.timeDecayToggle.addEventListener("change", () => { timeDecayEnabled = UI.timeDecayToggle.checked; saveSettings(); updateStateUI(); });
+    UI.timeDecayToggle.addEventListener("change", () => { timeDecayEnabled = UI.timeDecayToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.timeDecayInput) {
     UI.timeDecayInput.addEventListener("change", () => {
       const v = parseInt(UI.timeDecayInput.value, 10);
       if (!isNaN(v) && v >= 5 && v <= 100) timeDecayCandles = v;
       UI.timeDecayInput.value = timeDecayCandles;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.consecutiveDirToggle) {
-    UI.consecutiveDirToggle.addEventListener("change", () => { consecutiveDirEnabled = UI.consecutiveDirToggle.checked; saveSettings(); updateStateUI(); });
+    UI.consecutiveDirToggle.addEventListener("change", () => { consecutiveDirEnabled = UI.consecutiveDirToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.vwapFilterToggle) {
-    UI.vwapFilterToggle.addEventListener("change", () => { vwapFilterEnabled = UI.vwapFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.vwapFilterToggle.addEventListener("change", () => { vwapFilterEnabled = UI.vwapFilterToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.stochCrossToggle) {
-    UI.stochCrossToggle.addEventListener("change", () => { stochCrossEnabled = UI.stochCrossToggle.checked; saveSettings(); updateStateUI(); });
+    UI.stochCrossToggle.addEventListener("change", () => { stochCrossEnabled = UI.stochCrossToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.rangeSizeToggle) {
-    UI.rangeSizeToggle.addEventListener("change", () => { rangeSizeEnabled = UI.rangeSizeToggle.checked; saveSettings(); updateStateUI(); });
+    UI.rangeSizeToggle.addEventListener("change", () => { rangeSizeEnabled = UI.rangeSizeToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.rangeSizeMinInput) {
     UI.rangeSizeMinInput.addEventListener("change", () => {
       const v = parseFloat(UI.rangeSizeMinInput.value);
       if (!isNaN(v) && v >= 0.1 && v <= 3) rangeSizeMin = v;
       UI.rangeSizeMinInput.value = rangeSizeMin;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.rangeSizeMaxInput) {
@@ -8743,17 +8773,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const v = parseFloat(UI.rangeSizeMaxInput.value);
       if (!isNaN(v) && v >= 1 && v <= 10) rangeSizeMax = v;
       UI.rangeSizeMaxInput.value = rangeSizeMax;
-      saveSettings();
+      syncProfitDirToAllPanels(); saveSettings();
     });
   }
   if (UI.hhhlToggle) {
-    UI.hhhlToggle.addEventListener("change", () => { hhhlEnabled = UI.hhhlToggle.checked; saveSettings(); updateStateUI(); });
+    UI.hhhlToggle.addEventListener("change", () => { hhhlEnabled = UI.hhhlToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.followThroughToggle) {
-    UI.followThroughToggle.addEventListener("change", () => { followThroughEnabled = UI.followThroughToggle.checked; saveSettings(); updateStateUI(); });
+    UI.followThroughToggle.addEventListener("change", () => { followThroughEnabled = UI.followThroughToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.mtfStructureToggle) {
-    UI.mtfStructureToggle.addEventListener("change", () => { mtfStructureEnabled = UI.mtfStructureToggle.checked; saveSettings(); updateStateUI(); });
+    UI.mtfStructureToggle.addEventListener("change", () => { mtfStructureEnabled = UI.mtfStructureToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
   if (UI.revertSettingsBtn) {
     UI.revertSettingsBtn.addEventListener("click", () => { revertAllSettings(); });
