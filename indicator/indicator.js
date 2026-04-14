@@ -156,7 +156,7 @@ const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before scre
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
 const TELEGRAM_EXPORT_HEIGHT      = 1080;  /* high-res export height for Telegram screenshots */
-const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m" };
+const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m","1800":"30m","3600":"1h","7200":"2h","14400":"4h","28800":"8h","86400":"1d" };
 
 /* ================= SYMBOL SPECIFICATIONS (pip size / contract size / pip value) ================= */
 /**
@@ -2072,7 +2072,7 @@ function initKeyboardShortcuts() {
 }
 
 /* Granularity → human-readable label map (used for display + recommended settings) */
-const GRAN_LABELS = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min" };
+const GRAN_LABELS = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min", 1800: "30 min", 3600: "1 hour", 7200: "2 hours", 14400: "4 hours", 28800: "8 hours", 86400: "1 day" };
 
 /* Session filter mode → display label map */
 const SESSION_MODE_LABELS = {
@@ -3079,10 +3079,13 @@ function updateCandleCountdown() {
     return;
   }
 
-  const min = Math.floor(remaining / 60);
+  const hrs = Math.floor(remaining / 3600);
+  const min = Math.floor((remaining % 3600) / 60);
   const sec = remaining % 60;
 
-  if (min > 0) {
+  if (hrs > 0) {
+    UI.candleCountdown.textContent = `${hrs}h ${min.toString().padStart(2, "0")}m ${sec.toString().padStart(2, "0")}s`;
+  } else if (min > 0) {
     UI.candleCountdown.textContent = `${min}m ${sec.toString().padStart(2, "0")}s`;
   } else {
     UI.candleCountdown.textContent = `${sec}s`;
@@ -6245,11 +6248,14 @@ function drawChart() {
       const candleEndEpoch = lastCandle.epoch + gran;
       const nowEpoch = Math.floor(Date.now() / 1000);
       const remaining = Math.max(0, candleEndEpoch - nowEpoch);
-      const cMin = Math.floor(remaining / 60);
+      const cHrs = Math.floor(remaining / 3600);
+      const cMin = Math.floor((remaining % 3600) / 60);
       const cSec = remaining % 60;
-      const cdText = cMin > 0
-        ? `⏱ ${cMin}m ${cSec.toString().padStart(2, "0")}s`
-        : `⏱ ${cSec}s`;
+      const cdText = cHrs > 0
+        ? `⏱ ${cHrs}h ${cMin.toString().padStart(2, "0")}m ${cSec.toString().padStart(2, "0")}s`
+        : cMin > 0
+          ? `⏱ ${cMin}m ${cSec.toString().padStart(2, "0")}s`
+          : `⏱ ${cSec}s`;
       ctx.save();
       ctx.font = "bold 11px Arial";
       const cdTW = ctx.measureText(cdText).width + 12;
