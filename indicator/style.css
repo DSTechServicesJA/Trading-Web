@@ -312,7 +312,7 @@ h3 {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: var(--space-md);
-  align-items: start;
+  align-items: stretch;
 }
 @media (max-width: 920px) {
   .layout-grid { grid-template-columns: 1fr; }
@@ -326,8 +326,15 @@ h3 {
 }
 
 /* ---- Sidebar scroll containment ---- */
-/* 80px accounts for status bar (~52px) + minimal spacing — maximize viewable area */
+/* Sticky sidebar that stretches full page height and scrolls independently */
+.left-panel {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+}
 .panel-content {
+  /* 80px accounts for status bar (~52px) + minimal spacing */
   max-height: calc(100vh - 80px);
   overflow-y: auto;
   overflow-x: hidden;
@@ -939,6 +946,7 @@ button:disabled {
   .panel-toggle { display: block; }
   .panel-content { display: none; max-height: none; }
   .panel-content.panel-open { display: block; }
+  .left-panel { position: static; max-height: none; }
   .controls button { min-height: 48px; font-size: var(--fs-lg); }
   select, input[type="number"] { min-height: 48px; font-size: var(--fs-lg); }
   h1 { font-size: var(--fs-xl); }
