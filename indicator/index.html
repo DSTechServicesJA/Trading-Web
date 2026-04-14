@@ -471,6 +471,77 @@
               <p class="hint">Confirm momentum with Stochastic (14/3/3) — avoid overbought buys / oversold sells.</p>
 
               <hr class="param-divider" />
+              <p class="param-group-title">🎯 Profit-Direction Constraints</p>
+
+              <label class="toggle-row"><input type="checkbox" id="minConfluenceToggle" /> Min Confluence Gate</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="minConfluenceInput" style="margin-right:6px;">Min Score (0–16)</label>
+                <input type="number" id="minConfluenceInput" min="0" max="16" step="1" value="6" style="width:60px;" />
+              </div>
+              <p class="hint">Reject trades below this confluence score threshold. Higher = stricter quality gate.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="doubleRetestToggle" /> Double Retest</label>
+              <p class="hint">Require breakout level to be retested twice before entering — confirms level is holding.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="confirmBarToggle" /> Confirmation Bar</label>
+              <p class="hint">After confirmation pattern, require the next candle to close in the trade direction before entry.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="divergenceFilterToggle" /> Momentum Divergence</label>
+              <p class="hint">Check for RSI divergence at retest — bullish divergence for BULL, bearish for BEAR trades.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="adxHardGateToggle" /> ADX Hard Gate</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="adxMaxInput" style="margin-right:6px;">Max ADX</label>
+                <input type="number" id="adxMaxInput" min="25" max="80" step="5" value="50" style="width:60px;" />
+              </div>
+              <p class="hint">Block trades when ADX &lt; 20 (choppy) or &gt; max (overextended). Only trade sweet-spot trends.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="breakoutDistToggle" /> Breakout Distance</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="breakoutDistInput" style="margin-right:6px;">Max ATR ×</label>
+                <input type="number" id="breakoutDistInput" min="1" max="10" step="0.5" value="3" style="width:60px;" />
+              </div>
+              <p class="hint">Reject retests too far from breakout level — prevents late/exhausted entries.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="timeDecayToggle" /> Time Decay Filter</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="timeDecayInput" style="margin-right:6px;">Max Candles</label>
+                <input type="number" id="timeDecayInput" min="5" max="100" step="1" value="20" style="width:60px;" />
+              </div>
+              <p class="hint">If too many candles pass between breakout and retest, the setup is stale — skip it.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="consecutiveDirToggle" /> Consecutive Direction</label>
+              <p class="hint">Require 2 of the last 3 candles to close in the trade direction — confirms immediate momentum.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="vwapFilterToggle" /> VWAP Alignment</label>
+              <p class="hint">For BULL, price should be near/above session VWAP. For BEAR, near/below. Confirms volume-weighted bias.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="stochCrossToggle" /> Stochastic Crossover</label>
+              <p class="hint">Require %K crossing %D from oversold (BULL) or overbought (BEAR) — stronger than level-only check.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="rangeSizeToggle" /> Range Size Filter</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="rangeSizeMinInput" style="margin-right:6px;">Min ATR ×</label>
+                <input type="number" id="rangeSizeMinInput" min="0.1" max="3" step="0.1" value="0.5" style="width:60px;" />
+                <label class="hint" for="rangeSizeMaxInput" style="margin-left:8px;margin-right:6px;">Max ATR ×</label>
+                <input type="number" id="rangeSizeMaxInput" min="1" max="10" step="0.5" value="3" style="width:60px;" />
+              </div>
+              <p class="hint">Opening range too narrow = noise. Too wide = excessive risk. Filter by ATR multiples.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="hhhlToggle" /> HH/HL Structure</label>
+              <p class="hint">For BULL: verify recent higher-highs & higher-lows. For BEAR: lower-highs & lower-lows. True price-action trend.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="followThroughToggle" /> Breakout Follow-Through</label>
+              <p class="hint">After breakout candle, next 1-2 candles must continue in breakout direction — proves momentum.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="mtfStructureToggle" /> MTF Structure (EMA 200)</label>
+              <p class="hint">Enhanced multi-timeframe filter using EMA 200 as a structural trend reference.</p>
+
+              <hr class="param-divider" />
+              <button id="revertSettingsBtn" class="btn btn-danger" style="width:100%;margin-top:8px;margin-bottom:4px;">🔄 Revert All Settings to Defaults</button>
+              <p class="hint">Reset all strategy filters and parameters back to their original default values.</p>
+
+              <hr class="param-divider" />
               <p class="param-group-title">⚡ Scalping Mode</p>
 
               <label class="toggle-row"><input type="checkbox" id="scalpingModeToggle" /> Scalping Mode</label>
