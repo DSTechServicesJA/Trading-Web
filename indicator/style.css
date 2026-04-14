@@ -326,7 +326,7 @@ h3 {
 }
 
 /* ---- Sidebar scroll containment ---- */
-/* 80px accounts for status bar (~52px) + minimal spacing — maximise viewable area */
+/* 80px accounts for status bar (~52px) + minimal spacing — maximize viewable area */
 .panel-content {
   max-height: calc(100vh - 80px);
   overflow-y: auto;

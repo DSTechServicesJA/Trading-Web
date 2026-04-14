@@ -1875,9 +1875,13 @@ function renderSignalBanner() {
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
 
     card.title = `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} signal details`);
 
     /* Clickable — focuses the panel and switches sidebar to State tab */
     card.addEventListener("click", () => handleSignalCardClick(s));
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSignalCardClick(s); } });
 
     UI.signalBannerTrack.appendChild(card);
   }
@@ -1931,9 +1935,13 @@ function renderScalpTickerBanner() {
     if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
 
     card.title = `Click to view details · ⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} scalp details`);
 
     /* Clickable — focuses the panel and switches sidebar to State tab */
     card.addEventListener("click", () => handleScalpCardClick(s));
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleScalpCardClick(s); } });
 
     UI.scalpTickerTrack.appendChild(card);
   }
