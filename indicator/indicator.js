@@ -1241,6 +1241,21 @@ function buildTelegramCaption() {
   if (stochFilterEnabled) filters.push("Stochastic");
   if (scalpingModeEnabled) filters.push("Scalping");
   if (liveScalpEnabled) filters.push("Live Scalp Scanner");
+  /* Profit-Direction Constraints */
+  if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
+  if (doubleRetestEnabled) filters.push("Double Retest");
+  if (confirmBarEnabled) filters.push("Confirm Bar");
+  if (divergenceFilterEnabled) filters.push("Divergence");
+  if (adxHardGateEnabled) filters.push(`ADX Gate (20-${adxMaxThreshold})`);
+  if (breakoutDistEnabled) filters.push(`BO Dist ≤${breakoutDistATR}×ATR`);
+  if (timeDecayEnabled) filters.push(`Time Decay ≤${timeDecayCandles}`);
+  if (consecutiveDirEnabled) filters.push("Consec. Dir");
+  if (vwapFilterEnabled) filters.push("VWAP");
+  if (stochCrossEnabled) filters.push("Stoch Cross");
+  if (rangeSizeEnabled) filters.push(`Range ${rangeSizeMin}-${rangeSizeMax}×ATR`);
+  if (hhhlEnabled) filters.push("HH/HL");
+  if (followThroughEnabled) filters.push("Follow-Through");
+  if (mtfStructureEnabled) filters.push("MTF (EMA200)");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -1531,6 +1546,21 @@ function buildPanelTelegramCaption(p) {
   if (f.adxFilterEnabled) filters.push("ADX");
   if (f.stochFilterEnabled) filters.push("Stochastic");
   if (f.scalpingModeEnabled) filters.push("Scalping");
+  /* Profit-Direction Constraints */
+  if (f.minConfluenceEnabled) filters.push(`Min Confluence ≥${f.minConfluenceValue}`);
+  if (f.doubleRetestEnabled) filters.push("Double Retest");
+  if (f.confirmBarEnabled) filters.push("Confirm Bar");
+  if (f.divergenceFilterEnabled) filters.push("Divergence");
+  if (f.adxHardGateEnabled) filters.push(`ADX Gate (20-${f.adxMaxThreshold})`);
+  if (f.breakoutDistEnabled) filters.push(`BO Dist ≤${f.breakoutDistATR}×ATR`);
+  if (f.timeDecayEnabled) filters.push(`Time Decay ≤${f.timeDecayCandles}`);
+  if (f.consecutiveDirEnabled) filters.push("Consec. Dir");
+  if (f.vwapFilterEnabled) filters.push("VWAP");
+  if (f.stochCrossEnabled) filters.push("Stoch Cross");
+  if (f.rangeSizeEnabled) filters.push(`Range ${f.rangeSizeMin}-${f.rangeSizeMax}×ATR`);
+  if (f.hhhlEnabled) filters.push("HH/HL");
+  if (f.followThroughEnabled) filters.push("Follow-Through");
+  if (f.mtfStructureEnabled) filters.push("MTF (EMA200)");
   if (filters.length > 0) {
     lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
   }
@@ -3113,6 +3143,8 @@ function resetIndicator() {
   bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
   adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
   stochK = []; stochD = [];
+  emaMTF = []; vwapValues = [];
+  retestCount = 0;
   trailingSL   = null;
   partialTpHit = false;
   setPhase("WAITING");
@@ -3686,6 +3718,8 @@ function connect() {
       computeBollingerBands();
       computeADX();
       computeStochastic();
+      computeEMA200();
+      computeVWAP();
       processLatestCandle();
       processLiveScalp();
       monitorTradeOutcome(c);
@@ -5737,6 +5771,7 @@ function processAllCandles() {
   trade = null;
   trailingSL   = null;
   partialTpHit = false;
+  retestCount  = 0;
   setPhase("WAITING");
 
   if (candles.length === 0) return;
@@ -5747,6 +5782,8 @@ function processAllCandles() {
   computeBollingerBands();
   computeADX();
   computeStochastic();
+  computeEMA200();
+  computeVWAP();
 
   buildOpeningRange();
 
@@ -5816,6 +5853,7 @@ function resetForNextSetup() {
   trade          = null;
   trailingSL     = null;
   partialTpHit   = false;
+  retestCount    = 0;
   /* Start new range from the latest candle */
   rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
   setPhase("RANGE");
@@ -5972,6 +6010,14 @@ function processCandle(idx) {
 
   /* PHASE: looking for breakout */
   if (!breakout) {
+    /* Opening range size filter — too narrow = noise, too wide = risky */
+    if (!isRangeSizeOK()) {
+      return;  /* silently skip — range size is checked once */
+    }
+    /* ADX Hard Gate — block in ranging or exhausted markets */
+    if (!isADXInRange()) {
+      return;  /* silently skip — ADX checked each candle */
+    }
     /* Market-type direction filter: Boom prefers BULL, Crash prefers BEAR.
        Counter-trend breakouts on spike markets are much less reliable. */
     if (c.close > openingRange.high) {
@@ -5989,6 +6035,16 @@ function processCandle(idx) {
         addLog(`Bullish breakout at #${idx} BLOCKED by HTF trend filter`);
         return;
       }
+      /* Apply MTF structure (EMA 200) */
+      if (!isMTFStructureAligned("BULL")) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by MTF structure (price below EMA 200)`);
+        return;
+      }
+      /* Apply HH/HL structure check */
+      if (!hasHHHLStructure("BULL")) {
+        addLog(`Bullish breakout at #${idx} BLOCKED by HH/HL structure (no higher-highs/higher-lows)`);
+        return;
+      }
       /* Apply session filter */
       if (!isWithinActiveSession()) {
         addLog(`Bullish breakout at #${idx} BLOCKED by session filter (${getActiveSessionName()})`);
@@ -6003,6 +6059,7 @@ function processCandle(idx) {
         return;
       }
       breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
+      retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       /* Log market-type-specific context */
@@ -6023,6 +6080,16 @@ function processCandle(idx) {
         addLog(`Bearish breakout at #${idx} BLOCKED by HTF trend filter`);
         return;
       }
+      /* Apply MTF structure (EMA 200) */
+      if (!isMTFStructureAligned("BEAR")) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by MTF structure (price above EMA 200)`);
+        return;
+      }
+      /* Apply HH/HL structure check */
+      if (!hasHHHLStructure("BEAR")) {
+        addLog(`Bearish breakout at #${idx} BLOCKED by HH/HL structure (no lower-highs/lower-lows)`);
+        return;
+      }
       /* Apply session filter */
       if (!isWithinActiveSession()) {
         addLog(`Bearish breakout at #${idx} BLOCKED by session filter (${getActiveSessionName()})`);
@@ -6036,6 +6103,7 @@ function processCandle(idx) {
         return;
       }
       breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
+      retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
       logMarketTypeContext(idx, "BEAR");
@@ -6055,17 +6123,47 @@ function processCandle(idx) {
   /* PHASE: looking for retest */
   if (!retestInfo) {
     if (idx <= breakout.candleIdx) return;
+    /* Post-breakout follow-through check */
+    if (!hasFollowThrough()) {
+      addLog(`Breakout at #${breakout.candleIdx} INVALIDATED — no follow-through (next candle reversed)`);
+      breakout = null;
+      setPhase("BREAKOUT");
+      return;
+    }
+    /* Time decay — setup too stale */
+    if (!isTimeDecayOK(idx)) {
+      addLog(`⏳ Time decay: ${idx - breakout.candleIdx} candles since breakout (max ${timeDecayCandles}) — resetting`);
+      breakout = null;
+      setPhase("BREAKOUT");
+      return;
+    }
+    /* Breakout distance check */
+    if (!isBreakoutDistanceOK(idx)) {
+      addLog(`📏 Breakout distance: price too far from level (>${breakoutDistATR}× ATR) — skipping retest`);
+      return;
+    }
     const touches = touchesLevel(c, breakout.level);
     if (touches) {
+      /* Track retest count for double-retest filter */
+      retestCount++;
+      if (!isDoubleRetestSatisfied()) {
+        addLog(`Retest #${retestCount} at #${idx} — waiting for double retest (need ${2 - retestCount} more)`);
+        return;  /* don't set retestInfo yet; wait for 2nd touch */
+      }
       /* Apply RSI filter at retest */
       if (!isRSIFavorable(breakout.dir)) {
         const rsi = getCurrentRSI();
         addLog(`Retest at #${idx} — RSI ${fmt(rsi, 1)} not favorable for ${breakout.dir} (skipping)`);
         return;
       }
+      /* Apply momentum divergence filter */
+      if (!hasMomentumDivergence(breakout.dir)) {
+        addLog(`Retest at #${idx} BLOCKED by divergence filter — no favorable RSI divergence`);
+        return;
+      }
       retestInfo = { candleIdx: idx };
       setPhase("INDECISION");
-      addLog(`Retest detected at candle #${idx}`);
+      addLog(`Retest detected at candle #${idx}${retestCount > 1 ? ` (retest #${retestCount})` : ""}`);
       /* Log RSI at retest */
       const rsi = getCurrentRSI();
       if (rsi != null) {
@@ -6281,13 +6379,43 @@ function processCandle(idx) {
     }
 
     if (confirmed) {
+      /* Apply consecutive direction filter */
+      if (!hasConsecutiveDirection(idx, breakout.dir)) {
+        addLog(`${confirmPattern} at #${idx} BLOCKED — consecutive direction filter (momentum not aligned)`);
+        confirmed = false;
+      }
+      /* Apply VWAP alignment filter */
+      if (confirmed && !isVWAPAligned(breakout.dir)) {
+        addLog(`${confirmPattern} at #${idx} BLOCKED — VWAP filter (price wrong side of VWAP)`);
+        confirmed = false;
+      }
+      /* Apply stochastic crossover filter */
+      if (confirmed && !hasStochCrossover(breakout.dir)) {
+        addLog(`${confirmPattern} at #${idx} BLOCKED — stochastic crossover filter (no K/D cross)`);
+        confirmed = false;
+      }
+      /* Apply confirmation bar filter (next candle must close in direction) */
+      if (confirmed && !isConfirmBarValid(idx)) {
+        addLog(`${confirmPattern} at #${idx} BLOCKED — confirm bar filter (candle didn't close in ${breakout.dir} direction)`);
+        confirmed = false;
+      }
+    }
+
+    if (confirmed) {
       confirmInfo = { candleIdx: idx, pattern: confirmPattern };
       buildTrade(c, idx);
       if (trade) {
+        /* Apply min confluence gate — check after trade is built so score is accurate */
+        confluenceScore = computeConfluenceScore();
+        if (!isConfluenceSufficient()) {
+          addLog(`⚠ Trade REJECTED — confluence ${confluenceScore}/${minConfluenceValue} below minimum`);
+          trade = null;
+          confirmInfo = null;
+          return;
+        }
         setPhase("TRADE");
         addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
         /* Log confluence score */
-        confluenceScore = computeConfluenceScore();
         addLog(`Confluence score: ${confluenceScore}`);
         recordSignal(confirmPattern);
       }
@@ -7479,6 +7607,9 @@ function createPanelState(symbol) {
     emaFast: [],
     emaSlow: [],
     emaHTF: [],
+    emaMTF: [],
+    vwapValues: [],
+    retestCount: 0,
     atrValue: 0,
     atrValues: [],
     rsiValues: [],
@@ -7516,6 +7647,27 @@ function createPanelState(symbol) {
       stochFilterEnabled:      rec.stoch,
       scalpingModeEnabled:     false,
       RANGE_MINUTES:       rec.range.minutes,
+      /* Profit-Direction Constraints — default OFF for multi-panel */
+      minConfluenceEnabled:    false,
+      minConfluenceValue:      6,
+      doubleRetestEnabled:     false,
+      confirmBarEnabled:       false,
+      divergenceFilterEnabled: false,
+      adxHardGateEnabled:      false,
+      adxMaxThreshold:         50,
+      breakoutDistEnabled:     false,
+      breakoutDistATR:         3.0,
+      timeDecayEnabled:        false,
+      timeDecayCandles:        20,
+      consecutiveDirEnabled:   false,
+      vwapFilterEnabled:       false,
+      stochCrossEnabled:       false,
+      rangeSizeEnabled:        false,
+      rangeSizeMin:            0.5,
+      rangeSizeMax:            3.0,
+      hhhlEnabled:             false,
+      followThroughEnabled:    false,
+      mtfStructureEnabled:     false,
     },
     /* DOM refs for the card */
     cardEl: null,
@@ -7558,6 +7710,9 @@ function activatePanel(p) {
   adxDiMinus     = p.adxDiMinus;
   stochK         = p.stochK;
   stochD         = p.stochD;
+  emaMTF         = p.emaMTF || [];
+  vwapValues     = p.vwapValues || [];
+  retestCount    = p.retestCount || 0;
   trailingSL     = p.trailingSL;
   partialTpHit   = p.partialTpHit;
   confluenceScore = p.confluenceScore;
@@ -7591,6 +7746,27 @@ function activatePanel(p) {
   stochFilterEnabled     = f.stochFilterEnabled;
   scalpingModeEnabled    = f.scalpingModeEnabled;
   RANGE_MINUTES        = f.RANGE_MINUTES;
+  /* Profit-Direction Constraints */
+  minConfluenceEnabled    = f.minConfluenceEnabled;
+  minConfluenceValue      = f.minConfluenceValue;
+  doubleRetestEnabled     = f.doubleRetestEnabled;
+  confirmBarEnabled       = f.confirmBarEnabled;
+  divergenceFilterEnabled = f.divergenceFilterEnabled;
+  adxHardGateEnabled      = f.adxHardGateEnabled;
+  adxMaxThreshold         = f.adxMaxThreshold;
+  breakoutDistEnabled     = f.breakoutDistEnabled;
+  breakoutDistATR         = f.breakoutDistATR;
+  timeDecayEnabled        = f.timeDecayEnabled;
+  timeDecayCandles        = f.timeDecayCandles;
+  consecutiveDirEnabled   = f.consecutiveDirEnabled;
+  vwapFilterEnabled       = f.vwapFilterEnabled;
+  stochCrossEnabled       = f.stochCrossEnabled;
+  rangeSizeEnabled        = f.rangeSizeEnabled;
+  rangeSizeMin            = f.rangeSizeMin;
+  rangeSizeMax            = f.rangeSizeMax;
+  hhhlEnabled             = f.hhhlEnabled;
+  followThroughEnabled    = f.followThroughEnabled;
+  mtfStructureEnabled     = f.mtfStructureEnabled;
 }
 
 /* ---- Copy globals → panel state (save) ---- */
@@ -7623,6 +7799,9 @@ function savePanel(p) {
   p.adxDiMinus    = adxDiMinus;
   p.stochK        = stochK;
   p.stochD        = stochD;
+  p.emaMTF        = emaMTF;
+  p.vwapValues    = vwapValues;
+  p.retestCount   = retestCount;
   p.trailingSL     = trailingSL;
   p.partialTpHit   = partialTpHit;
   p.confluenceScore = confluenceScore;
@@ -7655,6 +7834,27 @@ function savePanel(p) {
   p.filters.stochFilterEnabled     = stochFilterEnabled;
   p.filters.scalpingModeEnabled    = scalpingModeEnabled;
   p.filters.RANGE_MINUTES        = RANGE_MINUTES;
+  /* Profit-Direction Constraints */
+  p.filters.minConfluenceEnabled    = minConfluenceEnabled;
+  p.filters.minConfluenceValue      = minConfluenceValue;
+  p.filters.doubleRetestEnabled     = doubleRetestEnabled;
+  p.filters.confirmBarEnabled       = confirmBarEnabled;
+  p.filters.divergenceFilterEnabled = divergenceFilterEnabled;
+  p.filters.adxHardGateEnabled      = adxHardGateEnabled;
+  p.filters.adxMaxThreshold         = adxMaxThreshold;
+  p.filters.breakoutDistEnabled     = breakoutDistEnabled;
+  p.filters.breakoutDistATR         = breakoutDistATR;
+  p.filters.timeDecayEnabled        = timeDecayEnabled;
+  p.filters.timeDecayCandles        = timeDecayCandles;
+  p.filters.consecutiveDirEnabled   = consecutiveDirEnabled;
+  p.filters.vwapFilterEnabled       = vwapFilterEnabled;
+  p.filters.stochCrossEnabled       = stochCrossEnabled;
+  p.filters.rangeSizeEnabled        = rangeSizeEnabled;
+  p.filters.rangeSizeMin            = rangeSizeMin;
+  p.filters.rangeSizeMax            = rangeSizeMax;
+  p.filters.hhhlEnabled             = hhhlEnabled;
+  p.filters.followThroughEnabled    = followThroughEnabled;
+  p.filters.mtfStructureEnabled     = mtfStructureEnabled;
 }
 
 /* ---- Get display name for a symbol ---- */
@@ -7765,6 +7965,27 @@ function syncFilterUIFromGlobals() {
   if (UI.scalpingModeToggle)    UI.scalpingModeToggle.checked    = scalpingModeEnabled;
   if (UI.rangeDuration)       UI.rangeDuration.value          = RANGE_MINUTES;
   if (UI.autoResetToggle)     UI.autoResetToggle.checked     = autoResetEnabled;
+  /* Profit-Direction Constraints */
+  if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
+  if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+  if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
+  if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
+  if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
+  if (UI.adxHardGateToggle)      UI.adxHardGateToggle.checked      = adxHardGateEnabled;
+  if (UI.adxMaxInput)            UI.adxMaxInput.value              = adxMaxThreshold;
+  if (UI.breakoutDistToggle)     UI.breakoutDistToggle.checked     = breakoutDistEnabled;
+  if (UI.breakoutDistInput)      UI.breakoutDistInput.value        = breakoutDistATR;
+  if (UI.timeDecayToggle)        UI.timeDecayToggle.checked        = timeDecayEnabled;
+  if (UI.timeDecayInput)         UI.timeDecayInput.value           = timeDecayCandles;
+  if (UI.consecutiveDirToggle)   UI.consecutiveDirToggle.checked   = consecutiveDirEnabled;
+  if (UI.vwapFilterToggle)       UI.vwapFilterToggle.checked       = vwapFilterEnabled;
+  if (UI.stochCrossToggle)       UI.stochCrossToggle.checked       = stochCrossEnabled;
+  if (UI.rangeSizeToggle)        UI.rangeSizeToggle.checked        = rangeSizeEnabled;
+  if (UI.rangeSizeMinInput)      UI.rangeSizeMinInput.value        = rangeSizeMin;
+  if (UI.rangeSizeMaxInput)      UI.rangeSizeMaxInput.value        = rangeSizeMax;
+  if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
+  if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
+  if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
 }
 
 /* ---- Connect a multi-symbol panel ---- */
@@ -7816,6 +8037,8 @@ function connectPanel(p) {
   p.bbUpper = []; p.bbLower = []; p.bbMiddle = []; p.bbWidth = [];
   p.adxValue = 0; p.adxDiPlus = 0; p.adxDiMinus = 0;
   p.stochK = []; p.stochD = [];
+  p.emaMTF = []; p.vwapValues = [];
+  p.retestCount = 0;
   p.trailingSL = null;
   p.partialTpHit = false;
   p.confluenceScore = 0;
@@ -7909,6 +8132,8 @@ function connectPanel(p) {
       computeBollingerBands();
       computeADX();
       computeStochastic();
+      computeEMA200();
+      computeVWAP();
       processLatestCandle();
       processLiveScalp();
       monitorTradeOutcome(c);
@@ -8430,6 +8655,101 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
+  }
+
+  /* Profit-Direction Constraint listeners */
+  if (UI.minConfluenceToggle) {
+    UI.minConfluenceToggle.addEventListener("change", () => { minConfluenceEnabled = UI.minConfluenceToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.minConfluenceInput) {
+    UI.minConfluenceInput.addEventListener("change", () => {
+      const v = parseInt(UI.minConfluenceInput.value, 10);
+      if (!isNaN(v) && v >= 0 && v <= 16) minConfluenceValue = v;
+      UI.minConfluenceInput.value = minConfluenceValue;
+      saveSettings();
+    });
+  }
+  if (UI.doubleRetestToggle) {
+    UI.doubleRetestToggle.addEventListener("change", () => { doubleRetestEnabled = UI.doubleRetestToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.confirmBarToggle) {
+    UI.confirmBarToggle.addEventListener("change", () => { confirmBarEnabled = UI.confirmBarToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.divergenceFilterToggle) {
+    UI.divergenceFilterToggle.addEventListener("change", () => { divergenceFilterEnabled = UI.divergenceFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.adxHardGateToggle) {
+    UI.adxHardGateToggle.addEventListener("change", () => { adxHardGateEnabled = UI.adxHardGateToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.adxMaxInput) {
+    UI.adxMaxInput.addEventListener("change", () => {
+      const v = parseInt(UI.adxMaxInput.value, 10);
+      if (!isNaN(v) && v >= 25 && v <= 80) adxMaxThreshold = v;
+      UI.adxMaxInput.value = adxMaxThreshold;
+      saveSettings();
+    });
+  }
+  if (UI.breakoutDistToggle) {
+    UI.breakoutDistToggle.addEventListener("change", () => { breakoutDistEnabled = UI.breakoutDistToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.breakoutDistInput) {
+    UI.breakoutDistInput.addEventListener("change", () => {
+      const v = parseFloat(UI.breakoutDistInput.value);
+      if (!isNaN(v) && v >= 1 && v <= 10) breakoutDistATR = v;
+      UI.breakoutDistInput.value = breakoutDistATR;
+      saveSettings();
+    });
+  }
+  if (UI.timeDecayToggle) {
+    UI.timeDecayToggle.addEventListener("change", () => { timeDecayEnabled = UI.timeDecayToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.timeDecayInput) {
+    UI.timeDecayInput.addEventListener("change", () => {
+      const v = parseInt(UI.timeDecayInput.value, 10);
+      if (!isNaN(v) && v >= 5 && v <= 100) timeDecayCandles = v;
+      UI.timeDecayInput.value = timeDecayCandles;
+      saveSettings();
+    });
+  }
+  if (UI.consecutiveDirToggle) {
+    UI.consecutiveDirToggle.addEventListener("change", () => { consecutiveDirEnabled = UI.consecutiveDirToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.vwapFilterToggle) {
+    UI.vwapFilterToggle.addEventListener("change", () => { vwapFilterEnabled = UI.vwapFilterToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.stochCrossToggle) {
+    UI.stochCrossToggle.addEventListener("change", () => { stochCrossEnabled = UI.stochCrossToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.rangeSizeToggle) {
+    UI.rangeSizeToggle.addEventListener("change", () => { rangeSizeEnabled = UI.rangeSizeToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.rangeSizeMinInput) {
+    UI.rangeSizeMinInput.addEventListener("change", () => {
+      const v = parseFloat(UI.rangeSizeMinInput.value);
+      if (!isNaN(v) && v >= 0.1 && v <= 3) rangeSizeMin = v;
+      UI.rangeSizeMinInput.value = rangeSizeMin;
+      saveSettings();
+    });
+  }
+  if (UI.rangeSizeMaxInput) {
+    UI.rangeSizeMaxInput.addEventListener("change", () => {
+      const v = parseFloat(UI.rangeSizeMaxInput.value);
+      if (!isNaN(v) && v >= 1 && v <= 10) rangeSizeMax = v;
+      UI.rangeSizeMaxInput.value = rangeSizeMax;
+      saveSettings();
+    });
+  }
+  if (UI.hhhlToggle) {
+    UI.hhhlToggle.addEventListener("change", () => { hhhlEnabled = UI.hhhlToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.followThroughToggle) {
+    UI.followThroughToggle.addEventListener("change", () => { followThroughEnabled = UI.followThroughToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.mtfStructureToggle) {
+    UI.mtfStructureToggle.addEventListener("change", () => { mtfStructureEnabled = UI.mtfStructureToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.revertSettingsBtn) {
+    UI.revertSettingsBtn.addEventListener("click", () => { revertAllSettings(); });
   }
   /* Live Scalp Scanner listeners */
   if (UI.liveScalpToggle) {
