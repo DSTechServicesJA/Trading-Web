@@ -2129,7 +2129,8 @@ function setRecRecBadge(el, text, cssClass) {
  * Each market type has different optimal configurations derived from the MD-file strategies.
  */
 function getMarketRecommendations(symbol) {
-  const mtype = getMarketType(symbol);
+  const sym = symbol || _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  const mtype = getMarketType(sym);
   switch (mtype) {
     case "boom":
       return {
@@ -2216,9 +2217,9 @@ function getMarketRecommendations(symbol) {
     case "jump":
       return {
         label: "🦘 Jump Index — Gap & Impulse Strategy",
-        timeframe: { text: "1–5 min", gran: 60 },
+        timeframe: { text: "5–15 min", gran: 300 },
         rr: { text: "1:3+", minRR: 3 },
-        range: { text: "10 min", minutes: 10 },
+        range: { text: "15 min", minutes: 15 },
         ema: true,
         htf: true,
         atr: true,
@@ -2243,6 +2244,7 @@ function getMarketRecommendations(symbol) {
           "BB squeeze detects compression before jump release"
         ],
         hint: "Jump indices produce sudden price jumps in either direction. "
+            + "5-minute timeframe recommended — smooths out chop between jumps for cleaner signals. "
             + "Jumps create strong supply/demand zones where price departed rapidly — "
             + "wait for price to return to these zones for high-probability entries. "
             + "Momentum impulse detection confirms continuation after a jump. "
@@ -2296,9 +2298,9 @@ function getMarketRecommendations(symbol) {
     case "dailyreset":
       return {
         label: "📅 Daily Reset — Trend Follow Strategy",
-        timeframe: { text: "5 min", gran: 300 },
+        timeframe: { text: "15 min–1 hour", gran: 900 },
         rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "20 min", minutes: 20 },
+        range: { text: "45 min", minutes: 45 },
         ema: true,
         htf: true,
         atr: true,
@@ -2325,6 +2327,7 @@ function getMarketRecommendations(symbol) {
         hint: "Daily Reset indices trend in one direction and reset daily. "
             + "Bull Market trends upward, Bear Market trends downward. "
             + "Trade in the natural trend direction for highest probability. "
+            + "15-minute timeframe recommended — intraday TFs (15M–1H) make sense since holding overnight is meaningless. "
             + "EMA alignment and ADX confirm the trending regime. "
             + "Use pullback entries at EMA support/resistance. "
             + "All standard indicators work well in these smooth trending conditions."
@@ -2332,9 +2335,9 @@ function getMarketRecommendations(symbol) {
     case "dex":
       return {
         label: "📰 DEX Index — News Spike Strategy",
-        timeframe: { text: "1–5 min", gran: 60 },
+        timeframe: { text: "5–15 min", gran: 300 },
         rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "10 min", minutes: 10 },
+        range: { text: "15 min", minutes: 15 },
         ema: true,
         htf: true,
         atr: true,
@@ -2359,6 +2362,7 @@ function getMarketRecommendations(symbol) {
           "BB squeeze detects compression before spike expansion"
         ],
         hint: "DEX indices simulate news-event spikes. UP variants spike upward, DN variants spike downward. "
+            + "5-minute timeframe recommended — balances signal quality for directional spike detection. "
             + "Similar to Boom/Crash but with news-event-like frequency. "
             + "Trade in the spike direction for highest probability. "
             + "Wide trailing stop (2× ATR) captures extended spike momentum. "
@@ -2404,9 +2408,249 @@ function getMarketRecommendations(symbol) {
             + "Volume spike filter disabled — regime transitions are smooth, not spiked. "
             + "All standard indicators produce reliable signals within a stable regime."
       };
+    case "volatility": {
+      /* Split: Volatility 1s (1HZ*) vs Standard (R_*) */
+      const isVol1s = /^1HZ/i.test(sym);
+      if (isVol1s) {
+        return {
+          label: "⚡ Volatility (1s) — Fast Breakout Strategy",
+          timeframe: { text: "1–5 min", gran: 60 },
+          rr: { text: "1:2", minRR: 2 },
+          range: { text: "10 min", minutes: 10 },
+          ema: true,
+          htf: true,
+          atr: true,
+          trailing: { rec: true, note: "1.5× ATR standard" },
+          partialTp: true,
+          falseBreakout: true,
+          minRR: { rec: true, value: "1:2 ✅" },
+          rsi: true,
+          volSpike: { rec: true, note: "Standard 1.5× average range" },
+          session: { rec: false, note: "24/7 synthetic" },
+          fib: true,
+          macd: true,
+          bbSqueeze: true,
+          adx: true,
+          stoch: true,
+          signals: [
+            "Opening range breakout with conviction on 1-minute candles",
+            "Retest + indecision + engulfing confirmation",
+            "Pin bar and morning/evening star at retest",
+            "Inside bar breakout for clean continuation",
+            "Fast tick-based action — 1M candles capture rapid movements",
+            "MACD momentum confirmation at breakout",
+            "BB squeeze preceding breakout for volatility expansion"
+          ],
+          hint: "Volatility 1s indices generate candles every second — 1-minute timeframe is recommended "
+              + "for capturing rapid price movements without excessive noise. "
+              + "Short opening range (10 min) adapts to fast-forming consolidation. "
+              + "All standard filters apply — EMA, HTF, ATR tolerance, trailing stop. "
+              + "Session filter disabled — synthetic markets run 24/7. "
+              + "Confluence score (0-16) gauges overall setup quality."
+        };
+      }
+      /* Volatility Standard (R_10, R_25, R_50, R_75, R_100) */
+      return {
+        label: "⚡ Volatility (Standard) — Breakout Strategy",
+        timeframe: { text: "5–15 min", gran: 300 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "15 min", minutes: 15 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "1.5× ATR standard" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Standard 1.5× average range" },
+        session: { rec: false, note: "24/7 synthetic" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Opening range breakout with conviction on 5-minute candles",
+          "Retest + indecision + engulfing confirmation",
+          "Pin bar and morning/evening star at retest",
+          "Inside bar breakout for clean continuation",
+          "S/R confluence and Fibonacci retracement alignment",
+          "MACD momentum confirmation at breakout",
+          "BB squeeze preceding breakout for volatility expansion"
+        ],
+        hint: "Standard Volatility indices move slower than 1s variants — 5-minute timeframe "
+            + "gives cleaner breakout signals with less noise. "
+            + "15-minute opening range captures orderly consolidation structure. "
+            + "All standard filters apply — EMA, HTF, ATR tolerance, trailing stop. "
+            + "Session filter disabled — synthetic markets run 24/7. "
+            + "Confluence score (0-16) gauges overall setup quality."
+      };
+    }
+    case "forex": {
+      /* Split: Forex Majors vs Crosses vs Exotics */
+      const IS_FOREX_EXOTIC = /frxUSD(MXN|NOK|SEK|SGD|ZAR|PLN|TRY|HKD)/i;
+      const IS_FOREX_MAJOR  = /frx(EURUSD|GBPUSD|USDJPY|USDCHF|AUDUSD|USDCAD|NZDUSD)/i;
+      if (IS_FOREX_EXOTIC.test(sym)) {
+        return {
+          label: "🌍 Forex Exotic — Daily Price Action Strategy",
+          timeframe: { text: "4 hours", gran: 14400 },
+          rr: { text: "1:3+", minRR: 3 },
+          range: { text: "480 min (2 candles)", minutes: 480 },
+          ema: true,
+          htf: true,
+          atr: true,
+          trailing: { rec: true, note: "Wide (2× ATR for exotic volatility)" },
+          partialTp: true,
+          falseBreakout: true,
+          minRR: { rec: true, value: "1:3 ✅" },
+          rsi: true,
+          volSpike: { rec: true, note: "Standard 1.5× average range" },
+          session: { rec: true, note: "London+NY ✅" },
+          fib: true,
+          macd: true,
+          bbSqueeze: true,
+          adx: true,
+          stoch: false,
+          signals: [
+            "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
+            "Engulfing pattern at support/resistance for power shift",
+            "Inside bar breakout at key level for continuation",
+            "Top-down analysis: Weekly → Daily → 4H for entry",
+            "S/R confluence and Fibonacci retracement alignment",
+            "London+NY session filter — highest liquidity reduces exotic spread impact",
+            "Higher R:R target (1:3+) compensates for wider exotic spreads"
+          ],
+          hint: "Exotic forex pairs have much wider spreads — the MD strategies warn to focus on low-spread pairs. "
+              + "If trading exotics, use 4H timeframe minimum to reduce spread impact per trade. "
+              + "MD: 'Price action works on bigger time frames — trading on the 5-minute chart will lose you money.' "
+              + "Top-down analysis required: Weekly chart for major S/R → Daily for structure → 4H for entries. "
+              + "Higher R:R target (1:3+) ensures potential profit outweighs the wider spread cost. "
+              + "Wide trailing stop (2× ATR) accommodates exotic pair volatility. "
+              + "London+NY session filter is critical — exotic spreads widen dramatically outside peak hours. "
+              + "Stochastic disabled — less reliable on exotic pairs due to erratic movements."
+        };
+      }
+      if (IS_FOREX_MAJOR.test(sym)) {
+        return {
+          label: "💱 Forex Major — 4H Price Action Strategy",
+          timeframe: { text: "4 hours", gran: 14400 },
+          rr: { text: "1:2–1:3", minRR: 2 },
+          range: { text: "480 min (2 candles)", minutes: 480 },
+          ema: true,
+          htf: true,
+          atr: true,
+          trailing: { rec: true, note: "1.5× ATR standard" },
+          partialTp: true,
+          falseBreakout: true,
+          minRR: { rec: true, value: "1:2 ✅" },
+          rsi: true,
+          volSpike: { rec: true, note: "Standard 1.5× average range" },
+          session: { rec: true, note: "London+NY ✅" },
+          fib: true,
+          macd: true,
+          bbSqueeze: true,
+          adx: true,
+          stoch: true,
+          signals: [
+            "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
+            "Engulfing pattern with trend at MA bounce — MD: '21 and 8 SMA on Daily and 4H'",
+            "Inside bar breakout at key level — MD: 'Daily and 4H, not 5-minute'",
+            "Top-down analysis: Weekly → Daily → 4H for entry",
+            "Supply/demand zones — MD: 'Daily and 4H zones are most powerful'",
+            "Trendline 3rd-touch entry — MD: '4H and Daily time frames only'",
+            "Fibonacci retracement confluence at key levels"
+          ],
+          hint: "MD Strategy: 'Primary time frames for price action: 1H, 4H, and Daily.' "
+              + "MD: 'Price action works on bigger time frames. Trading pin bars on the 5-minute chart will lose you money.' "
+              + "4H recommended for entry signals — pin bars, engulfing bars, inside bars all require 4H minimum per MD. "
+              + "Top-down analysis: start with Weekly chart for major S/R, move to Daily for structure, 4H for entries. "
+              + "MD: '4H and Daily time frames only — never use smaller time frames' for trendlines. "
+              + "Focus on EUR/USD and GBP/USD — MD specifically recommends these for lower spreads. "
+              + "London+NY session filter ensures trading during highest-liquidity hours. "
+              + "MD: 'If you trade price action based on a single time frame, you will end up losing your entire account.'"
+        };
+      }
+      /* Forex Crosses (EUR/GBP, EUR/JPY, GBP/JPY, etc.) */
+      return {
+        label: "💱 Forex Cross — 4H Price Action Strategy",
+        timeframe: { text: "4 hours", gran: 14400 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "480 min (2 candles)", minutes: 480 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "1.5× ATR standard" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Standard 1.5× average range" },
+        session: { rec: true, note: "London+NY ✅" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
+          "Engulfing pattern with trend at MA bounce — MD: '21 and 8 SMA on Daily and 4H'",
+          "Inside bar breakout at key level — MD: 'Daily and 4H, not 5-minute'",
+          "Top-down analysis: Weekly → Daily → 4H for entry",
+          "Trendline 3rd-touch entry — MD: '4H and Daily time frames only'",
+          "S/R confluence and Fibonacci retracement alignment",
+          "Cross pairs have wider spreads than majors — 4H reduces noise impact"
+        ],
+        hint: "Forex cross pairs follow the same MD price action rules as majors. "
+            + "MD: 'Primary time frames for price action: 1H, 4H, and Daily.' "
+            + "4H recommended — same rules apply: pin bars, engulfing, inside bars require 4H minimum. "
+            + "Cross pairs have slightly wider spreads than majors — bigger timeframe reduces spread impact. "
+            + "Top-down analysis required: Weekly → Daily → 4H for entries. "
+            + "London+NY session filter ensures best liquidity. "
+            + "All standard indicators work well on 4H cross pair charts."
+      };
+    }
+    case "commodity":
+      return {
+        label: "🥇 Commodity — 4H Breakout Strategy",
+        timeframe: { text: "4 hours", gran: 14400 },
+        rr: { text: "1:2–1:3", minRR: 2 },
+        range: { text: "480 min (2 candles)", minutes: 480 },
+        ema: true,
+        htf: true,
+        atr: true,
+        trailing: { rec: true, note: "1.5× ATR standard" },
+        partialTp: true,
+        falseBreakout: true,
+        minRR: { rec: true, value: "1:2 ✅" },
+        rsi: true,
+        volSpike: { rec: true, note: "Standard 1.5× average range" },
+        session: { rec: true, note: "London+NY ✅" },
+        fib: true,
+        macd: true,
+        bbSqueeze: true,
+        adx: true,
+        stoch: true,
+        signals: [
+          "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
+          "Engulfing pattern at support/resistance for power shift",
+          "Inside bar breakout at key level for continuation",
+          "Top-down analysis: Weekly → Daily → 4H for entry",
+          "Supply/demand zones — MD: 'Daily and 4H zones are most powerful'",
+          "S/R confluence and Fibonacci retracement alignment",
+          "MACD momentum confirmation at breakout"
+        ],
+        hint: "Commodities (Gold, Silver, Platinum, Palladium) have high volatility — "
+            + "the MD strategies recommend bigger timeframes to reduce noise. "
+            + "MD: 'Price action works on bigger time frames.' "
+            + "4H recommended for entry signals — same price action rules as forex. "
+            + "Top-down analysis: Weekly chart for major S/R → Daily for structure → 4H for entries. "
+            + "London+NY session filter essential — commodity spreads widen outside peak hours. "
+            + "All standard indicators work well on 4H commodity charts."
+      };
     default:
       return {
-        label: "⚡ " + (mtype === "forex" ? "Forex" : mtype === "commodity" ? "Commodity" : "Volatility") + " — Breakout Strategy",
+        label: "⚡ Breakout Strategy",
         timeframe: { text: "5 min", gran: 300 },
         rr: { text: "1:2–1:3", minRR: 2 },
         range: { text: "15 min", minutes: 15 },
@@ -2419,7 +2663,7 @@ function getMarketRecommendations(symbol) {
         minRR: { rec: true, value: "1:2 ✅" },
         rsi: true,
         volSpike: { rec: true, note: "Standard 1.5× average range" },
-        session: { rec: mtype === "forex" || mtype === "commodity", note: mtype === "forex" || mtype === "commodity" ? "London+NY ✅" : "24/7 synthetic" },
+        session: { rec: false, note: "24/7 synthetic" },
         fib: true,
         macd: true,
         bbSqueeze: true,
@@ -2440,13 +2684,7 @@ function getMarketRecommendations(symbol) {
             + "Partial TP at 1:1 secures gains and moves SL to breakeven. "
             + "False breakout filter prevents entering on fake-outs. "
             + "Min R:R gate ensures every trade has at least 1:2 risk-reward. "
-            + "MACD histogram alignment confirms breakout momentum direction. "
-            + "Bollinger Band squeeze detects compression before breakout expansion. "
-            + "ADX trending confirmation filters out low-conviction ranges. "
-            + "Stochastic momentum alignment adds a final confluence layer. "
-            + "Confluence score (0-16) gauges overall setup quality. "
-            + "Scalping mode adapts the strategy for quick 5-10 pip profits on short timeframes "
-            + "(shorter opening range, tighter SL, quick TP, candle timeout)."
+            + "Confluence score (0-16) gauges overall setup quality."
       };
   }
 }
