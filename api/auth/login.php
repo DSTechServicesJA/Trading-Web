@@ -55,5 +55,13 @@ try {
     ]);
 } catch (\Throwable $e) {
     error_log('Login error: ' . $e->getMessage());
-    jsonResponse(['error' => 'Login failed. Please try again later.'], 500);
+    $msg = 'Login failed. Please try again later.';
+    if (isDebug()) {
+        if (str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Table')) {
+            $msg = 'Login failed: users table not found — run database/schema.sql on your database';
+        } else {
+            $msg = 'Login failed: ' . $e->getMessage();
+        }
+    }
+    jsonResponse(['error' => $msg], 500);
 }

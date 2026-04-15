@@ -38,7 +38,10 @@ const ITGuruAuth = (() => {
     const text = await resp.text();
     if (!text) return {};
     try { return JSON.parse(text); }
-    catch { return {}; }
+    catch {
+      /* Server returned non-JSON (e.g. a PHP error page) — surface what we can */
+      return { _raw: text.substring(0, 300) };
+    }
   }
 
   /* -------- Public API -------- */
@@ -76,7 +79,13 @@ const ITGuruAuth = (() => {
     const data = await safeJson(resp);
 
     if (!resp.ok) {
-      throw new Error(data.error || "Login failed");
+      if (data.error) {
+        throw new Error(data.error);
+      } else if (data._raw) {
+        console.error("Server returned non-JSON:", data._raw);
+        throw new Error(`Login failed (HTTP ${resp.status}). Check browser console for details or visit /api/auth/status`);
+      }
+      throw new Error(`Login failed (HTTP ${resp.status})`);
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);
@@ -123,11 +132,18 @@ const ITGuruAuth = (() => {
     const data = await safeJson(resp);
 
     if (!resp.ok) {
-      throw new Error(data.error || "Registration failed");
+      /* Surface the server error, or hint at what went wrong */
+      if (data.error) {
+        throw new Error(data.error);
+      } else if (data._raw) {
+        console.error("Server returned non-JSON:", data._raw);
+        throw new Error(`Registration failed (HTTP ${resp.status}). Check browser console for details or visit /api/auth/status`);
+      }
+      throw new Error(`Registration failed (HTTP ${resp.status})`);
     }
 
     if (!data.token) {
-      throw new Error("Registration failed due to a server error. Please try again later.");
+      throw new Error("Registration failed — no token returned. Visit /api/auth/status to diagnose.");
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);
