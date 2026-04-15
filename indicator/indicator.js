@@ -686,6 +686,7 @@ let telegramBotToken  = "";
 let telegramChatId    = "";
 let telegramAutoSend  = false;
 let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
+let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -977,6 +978,7 @@ function initUI() {
   UI.telegramChatId         = document.getElementById("telegramChatId");
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
   UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
+  UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -1316,6 +1318,74 @@ async function sendTelegramPhoto(blob, caption) {
     throw new Error(data.description || "Telegram API error");
   }
   return data;
+}
+
+/**
+ * Send a text-only message to Telegram via Bot API (HTML parse mode).
+ */
+async function sendTelegramMessage(text) {
+  const { token, chatId } = getTelegramCredentials();
+  validateTelegramCredentials(token, chatId);
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
+  });
+  const data = await resp.json();
+  if (!data.ok) {
+    throw new Error(data.description || "Telegram API error");
+  }
+  return data;
+}
+
+/**
+ * Send trade outcome (WIN / LOSS) via Telegram when enabled.
+ * Called from monitorTradeOutcome after a trade resolves.
+ */
+async function sendTradeOutcomeTelegram(signal) {
+  if (!telegramOutcomeSend) return;
+  try {
+    const sym = getSymbolLabel(signal.symbol || "");
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = signal.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
+    const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
+    const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
+    const rrStr = signal.rr != null ? signal.rr.toFixed(1) + ":1" : "--";
+    const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
+    const pattern = signal.confirmPattern || "--";
+
+    const lines = [];
+    lines.push(`${icon} <b>Trade ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>Pattern:</b> ${pattern}`);
+    lines.push(`<b>Entry:</b> ${entryStr}`);
+    lines.push(`<b>SL:</b> ${slStr}`);
+    lines.push(`<b>TP:</b> ${tpStr}`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(`<b>Confluence:</b> ${confScore}`);
+    if (signal.trailingSL != null) {
+      lines.push(`<b>Trailing SL:</b> ${fmt(signal.trailingSL, 4)}`);
+    }
+    if (signal.partialTpHit) {
+      lines.push(`<b>Partial TP:</b> Hit at 1:1`);
+    }
+    /* Win/loss tally */
+    const totalW = signalWins;
+    const totalL = signalLosses;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: trade outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Telegram outcome error: ${err.message}`);
+  }
 }
 
 /**
@@ -1711,6 +1781,7 @@ function saveSettings() {
       telegramChatId,
       telegramAutoSend,
       telegramScalpAutoSend,
+      telegramOutcomeSend,
       accountSize,
       riskPercent
     };
@@ -1855,10 +1926,12 @@ function restoreSettings() {
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
+    if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
+    if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -2014,7 +2087,7 @@ function renderSignalBanner() {
   for (const s of signals) {
     const card = document.createElement("div");
     const resultLower = (s.result || "PENDING").toLowerCase();
-    card.className = "signal-card" + (resultLower === "win" ? " signal-card-win" : resultLower === "loss" ? " signal-card-loss" : "");
+    card.className = "signal-card" + (resultLower === "win" ? " signal-card-win" : resultLower === "loss" ? " signal-card-loss" : resultLower === "confirmed" ? " signal-card-confirmed" : "");
 
     const isBull = s.dir === "BULL";
     const dirLabel = isBull ? "▲" : "▼";
@@ -2022,23 +2095,29 @@ function renderSignalBanner() {
     const t = new Date(s.time);
     const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const sym = s.symbol || "--";
+    const isConfirmed = resultLower === "confirmed";
     const entryStr = s.entry != null ? fmt(s.entry, 4) : "--";
     const slStr = s.sl != null ? fmt(s.sl, 4) : "--";
     const tpStr = s.tp != null ? fmt(s.tp, 4) : "--";
     const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
     const confStr = s.confluenceScore != null ? s.confluenceScore + "/16" : "";
+    const patternStr = s.confirmPattern || "";
 
     card.innerHTML =
       `<span class="signal-card-dir ${dirClass}">${dirLabel}</span>` +
       `<span class="signal-card-symbol">${sym}</span>` +
-      `<span class="signal-card-price">@ ${entryStr}</span>` +
-      `<span class="signal-card-levels">SL ${slStr} · TP ${tpStr}</span>` +
-      `<span class="signal-card-rr">${rrStr}</span>` +
+      (isConfirmed && patternStr
+        ? `<span class="signal-card-pattern">${patternStr}</span>`
+        : `<span class="signal-card-price">@ ${entryStr}</span>`) +
+      (isConfirmed ? "" : `<span class="signal-card-levels">SL ${slStr} · TP ${tpStr}</span>`) +
+      (isConfirmed ? "" : `<span class="signal-card-rr">${rrStr}</span>`) +
       (confStr ? `<span class="signal-card-conf">⚡${confStr}</span>` : "") +
       `<span class="signal-card-time">${ts}</span>` +
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
 
-    card.title = `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
+    card.title = isConfirmed
+      ? `${isBull ? "BUY" : "SELL"} ${sym} — ${patternStr} confirmed\nAwaiting trade build…`
+      : `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} signal details`);
@@ -6409,6 +6488,9 @@ function processCandle(idx) {
 
     if (confirmed) {
       confirmInfo = { candleIdx: idx, pattern: confirmPattern };
+      /* Record a CONFIRMED signal immediately so it appears in the Live Signals banner */
+      recordConfirmedSignal(confirmPattern);
+      addLog(`${confirmPattern} confirmed at #${idx}`);
       buildTrade(c, idx);
       if (trade) {
         /* Apply min confluence gate — check after trade is built so score is accurate */
@@ -6420,7 +6502,7 @@ function processCandle(idx) {
           return;
         }
         setPhase("TRADE");
-        addLog(`${confirmPattern} confirmed at #${idx} — TRADE ENTRY`);
+        addLog(`${confirmPattern} at #${idx} — TRADE ENTRY`);
         /* Confluence score was already computed for the min gate check above */
         addLog(`Confluence score: ${confluenceScore}`);
         recordSignal(confirmPattern);
@@ -6604,42 +6686,96 @@ function findSwingHigh(upToIdx) {
 }
 
 /* ================= WIN/LOSS TRACKING ================= */
-function recordSignal(confirmPattern) {
-  if (!trade) return;
+
+/* Record a lightweight "CONFIRMED" signal as soon as the confirmation pattern fires,
+   before the trade is built. This makes the signal visible in the Live Signals banner
+   at the confirmed stage. If a trade is subsequently built and passes all gates,
+   recordSignal() upgrades this entry to "PENDING" with full trade details. */
+function recordConfirmedSignal(confirmPattern) {
   const pattern = confirmPattern || "engulfing";
-  const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
+  const sym = _multiPanelProcessing || UI.symbolSelect.value;
   const signal = {
     time: new Date().toISOString(),
-    symbol: _multiPanelProcessing || UI.symbolSelect.value,
-    dir: trade.dir,
-    entry: trade.entry,
-    sl: trade.sl,
-    tp: trade.tp,
-    rr: trade.rr,
-    result: "PENDING",
-    emaAligned: emaFilterEnabled ? isEmaAligned(trade.dir) : null,
+    symbol: sym,
+    dir: breakout ? breakout.dir : null,
+    entry: null,
+    sl: null,
+    tp: null,
+    rr: null,
+    result: "CONFIRMED",
+    emaAligned: emaFilterEnabled && breakout ? isEmaAligned(breakout.dir) : null,
     htfTrend: getHTFTrend(),
     breakoutStrength: (breakout && breakout.strong) ? "STRONG" : "WEAK",
     partialTpHit: false,
     trailingSL: null,
-    confluenceScore: computeConfluenceScore(),
+    confluenceScore: null,
     srConfluence: breakout ? hasSRConfluence(breakout.level) : false,
     confirmPattern: pattern,
     rsiAtRetest: getCurrentRSI(),
     volumeSpike: breakout ? (breakout.volumeSpike != null ? breakout.volumeSpike : hasVolumeSpikeOnBreakout(breakout.candleIdx)) : null,
     session: getActiveSessionName(),
-    fibLevel: fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null,
+    fibLevel: null,
     macdHist: getCurrentMACD(),
     bbSqueeze: isBBSqueeze(),
     adx: adxValue > 0 ? +fmt(adxValue, 1) : null,
     stochK: getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null,
     volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null,
     scalpingMode: scalpingModeEnabled,
-    /* Account-based position sizing data */
     lotSize: null,
     pipsAtRisk: null,
     stake: null
   };
+  signalHistory.push(signal);
+  persistSignalHistory();
+  updateStatsUI();
+  updateSignalBanners();
+}
+
+function recordSignal(confirmPattern) {
+  if (!trade) return;
+  const pattern = confirmPattern || "engulfing";
+  const fibResult = breakout ? getFibRetestLevel(breakout.level) : null;
+
+  /* Try to upgrade the last CONFIRMED signal instead of creating a duplicate.
+     Verify symbol matches to avoid upgrading a signal from a different panel. */
+  const currentSymbol = _multiPanelProcessing || UI.symbolSelect.value;
+  const lastIdx = signalHistory.length - 1;
+  const lastConfirmed = lastIdx >= 0
+    && signalHistory[lastIdx].result === "CONFIRMED"
+    && signalHistory[lastIdx].symbol === currentSymbol
+    ? signalHistory[lastIdx] : null;
+
+  const signal = lastConfirmed || {};
+  if (!lastConfirmed) signal.time = new Date().toISOString();
+  signal.symbol = currentSymbol;
+  signal.dir = trade.dir;
+  signal.entry = trade.entry;
+  signal.sl = trade.sl;
+  signal.tp = trade.tp;
+  signal.rr = trade.rr;
+  signal.result = "PENDING";
+  signal.emaAligned = emaFilterEnabled ? isEmaAligned(trade.dir) : null;
+  signal.htfTrend = getHTFTrend();
+  signal.breakoutStrength = (breakout && breakout.strong) ? "STRONG" : "WEAK";
+  signal.partialTpHit = false;
+  signal.trailingSL = null;
+  signal.confluenceScore = computeConfluenceScore();
+  signal.srConfluence = breakout ? hasSRConfluence(breakout.level) : false;
+  signal.confirmPattern = pattern;
+  signal.rsiAtRetest = getCurrentRSI();
+  signal.volumeSpike = breakout ? (breakout.volumeSpike != null ? breakout.volumeSpike : hasVolumeSpikeOnBreakout(breakout.candleIdx)) : null;
+  signal.session = getActiveSessionName();
+  signal.fibLevel = fibResult ? (fibResult.ratio * 100).toFixed(1) + "%" : null;
+  signal.macdHist = getCurrentMACD();
+  signal.bbSqueeze = isBBSqueeze();
+  signal.adx = adxValue > 0 ? +fmt(adxValue, 1) : null;
+  signal.stochK = getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null;
+  signal.volatilityRegime = adxValue > 0 ? getVolatilityRegime() : null;
+  signal.scalpingMode = scalpingModeEnabled;
+  signal.lotSize = null;
+  signal.pipsAtRisk = null;
+  signal.stake = null;
+
   /* Populate lot-size fields from account sizing */
   if (accountSize > 0 && riskPercent > 0) {
     const pm = calcPositionMetrics(trade);
@@ -6649,7 +6785,7 @@ function recordSignal(confirmPattern) {
       signal.stake      = null;  /* deprecated — using lot size for MT5 */
     }
   }
-  signalHistory.push(signal);
+  if (!lastConfirmed) signalHistory.push(signal);
   /* Capture chart screenshot as data URL for PDF export */
   try {
     if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
@@ -6721,6 +6857,7 @@ function monitorTradeOutcome(candle) {
       persistSignalHistory();
       updateStatsUI();
       playPhaseAlert(inProfit ? "TRADE" : "RANGE");
+      sendTradeOutcomeTelegram(pending);
       return;
     }
   }
@@ -6775,6 +6912,7 @@ function monitorTradeOutcome(candle) {
     persistSignalHistory();
     updateStatsUI();
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
+    sendTradeOutcomeTelegram(pending);
   }
 }
 
@@ -8826,6 +8964,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramScalpAutoSendToggle) {
     UI.telegramScalpAutoSendToggle.addEventListener("change", () => { telegramScalpAutoSend = UI.telegramScalpAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramOutcomeSendToggle) {
+    UI.telegramOutcomeSendToggle.addEventListener("change", () => { telegramOutcomeSend = UI.telegramOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
