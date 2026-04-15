@@ -4657,8 +4657,9 @@ function detectLiveScalp() {
 
   const sl = dir === "BULL" ? entry - slDist : entry + slDist;
   const tp = dir === "BULL" ? entry + tpDist : entry - tpDist;
+  const rr = slDist > 0 ? tpDist / slDist : 0;
 
-  return { dir, conf, reasons, entry, sl, tp, epoch: c.epoch, candleIdx: idx, symbol: getActiveSymbol() };
+  return { dir, conf, reasons, entry, sl, tp, rr, epoch: c.epoch, candleIdx: idx, symbol: getActiveSymbol() };
 }
 
 /**
