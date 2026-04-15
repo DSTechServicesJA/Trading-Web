@@ -7709,6 +7709,68 @@ function initLoginGate() {
 const MULTI_MAX_PANELS = 90;
 const multiPanels = new Map();   /* symbol → panel object */
 
+/* ---- Batched rendering for multi-panel performance ---- */
+const _dirtyPanels = new Set();          /* panels needing mini-chart redraw */
+let _rafScheduled = false;               /* whether a rAF callback is pending  */
+let _focusedDirty = false;               /* focused panel needs main-view refresh */
+let _bannersDirty = false;               /* aggregated banners need refresh */
+const _PANEL_UI_THROTTLE_MS = 300;       /* min interval for card DOM updates */
+const _BANNER_THROTTLE_MS = 500;         /* min interval for banner / stats updates */
+let _lastBannerUpdate = 0;
+
+/** Mark a panel for deferred mini-chart redraw (batched via rAF). */
+function markPanelDirty(p) {
+  _dirtyPanels.add(p);
+  if (!_rafScheduled) {
+    _rafScheduled = true;
+    requestAnimationFrame(_flushDirtyPanels);
+  }
+}
+
+/** Flush all pending mini-chart redraws + focused-panel main-view in one frame. */
+function _flushDirtyPanels() {
+  _rafScheduled = false;
+
+  /* Redraw dirty mini-charts */
+  for (const p of _dirtyPanels) {
+    drawMiniChart(p);
+  }
+  _dirtyPanels.clear();
+
+  /* Refresh focused panel main view once per frame */
+  if (_focusedDirty) {
+    _focusedDirty = false;
+    const fp = multiPanels.get(focusedPanelSymbol);
+    if (fp) {
+      activatePanel(fp);
+      updateStateUI();
+      drawChart();
+      updateStatsUI();
+      if (UI.livePrice && fp.candles.length > 0) {
+        UI.livePrice.textContent = fmt(fp.candles[fp.candles.length - 1].close, 4);
+      }
+    }
+  }
+
+  /* Refresh aggregated banners at most every _BANNER_THROTTLE_MS */
+  if (_bannersDirty) {
+    const now = Date.now();
+    if (now - _lastBannerUpdate >= _BANNER_THROTTLE_MS) {
+      _bannersDirty = false;
+      _lastBannerUpdate = now;
+      updateSignalBanners();
+      renderScalpAlerts();
+      updateScalpStatsUI();
+    } else {
+      /* Re-schedule so it doesn't get lost */
+      if (!_rafScheduled) {
+        _rafScheduled = true;
+        requestAnimationFrame(_flushDirtyPanels);
+      }
+    }
+  }
+}
+
 /* ---- Aggregate signals from ALL panels (+ single-mode globals) ---- */
 function getAggregatedSignalHistory() {
   if (multiPanels.size === 0) return signalHistory;   /* single-symbol mode */
@@ -8329,26 +8391,23 @@ function connectPanel(p) {
     savePanel(p);
     _multiPanelProcessing = null;
 
-    /* Update card UI */
-    updatePanelCardUI(p);
-    drawMiniChart(p);
-
-    /* If this panel is focused, update the main view */
-    if (focusedPanelSymbol === p.symbol) {
-      updateStateUI();
-      drawChart();
-      updateStatsUI();
-
-      /* Update live price in status bar */
-      if (UI.livePrice && p.candles.length > 0) {
-        UI.livePrice.textContent = fmt(p.candles[p.candles.length - 1].close, 4);
-      }
-    } else {
-      /* Non-focused panel: still update aggregated signal banners, alerts & stats */
-      updateSignalBanners();
-      renderScalpAlerts();
-      updateScalpStatsUI();
+    /* Throttled card DOM update (badges, price, status) */
+    const _now = Date.now();
+    if (!p._lastCardUI || _now - p._lastCardUI >= _PANEL_UI_THROTTLE_MS) {
+      p._lastCardUI = _now;
+      updatePanelCardUI(p);
     }
+
+    /* Batch mini-chart redraw into a single animation frame */
+    markPanelDirty(p);
+
+    /* If this panel is focused, schedule main-view refresh */
+    if (focusedPanelSymbol === p.symbol) {
+      _focusedDirty = true;
+    }
+
+    /* Schedule aggregated banner / stats refresh (throttled) */
+    _bannersDirty = true;
   };
 
   panelWs.onclose = () => {
@@ -8447,14 +8506,18 @@ function drawMiniChart(p) {
   if (!ctx) return;
   const COLORS = getColors();
 
-  /* High-DPI */
+  /* High-DPI — cache dimensions to avoid expensive getBoundingClientRect() */
   const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width  = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  if (!p._cachedW || !p._cachedH) {
+    const rect = canvas.getBoundingClientRect();
+    p._cachedW = rect.width;
+    p._cachedH = rect.height;
+  }
+  const W = p._cachedW;
+  const H = p._cachedH;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
-  const W = rect.width;
-  const H = rect.height;
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = COLORS.bg;
@@ -9086,8 +9149,10 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Resize redraw */
   window.addEventListener("resize", () => {
     drawChart();
-    /* Redraw all multi-symbol mini-charts */
+    /* Invalidate cached canvas sizes and redraw all multi-symbol mini-charts */
     for (const p of multiPanels.values()) {
+      p._cachedW = 0;
+      p._cachedH = 0;
       drawMiniChart(p);
     }
   });
