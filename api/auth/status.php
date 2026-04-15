@@ -76,6 +76,53 @@ if ($dbOk) {
     }
 }
 
+/* ── 4b. Verify expected columns exist ── */
+if ($dbOk && ($checks['users_table'] ?? '') === 'ok') {
+    try {
+        $pdo->query(
+            'SELECT id, username, display_name, password_hash, email FROM users LIMIT 0'
+        );
+        $checks['users_columns'] = 'ok';
+    } catch (\Throwable $e) {
+        $hint = 'missing columns — re-run database/schema.sql';
+        if (isDebug()) $hint .= ' — ' . $e->getMessage();
+        $checks['users_columns'] = 'FAIL — ' . $hint;
+        $allOk = false;
+    }
+}
+
+/* ── 4c. JWT encode / decode round-trip ── */
+try {
+    $testToken = jwtEncode(['test' => true, 'iat' => time(), 'exp' => time() + 60]);
+    $decoded   = jwtDecode($testToken);
+    if ($decoded && ($decoded['test'] ?? false) === true) {
+        $checks['jwt_roundtrip'] = 'ok';
+    } else {
+        $checks['jwt_roundtrip'] = 'FAIL — token decoded but payload mismatch';
+        $allOk = false;
+    }
+} catch (\Throwable $e) {
+    $checks['jwt_roundtrip'] = 'FAIL — ' . $e->getMessage();
+    $allOk = false;
+}
+
+/* ── 4d. password_hash / password_verify sanity check ── */
+try {
+    $testHash = password_hash('test', PASSWORD_BCRYPT, ['cost' => 4]);
+    if ($testHash === false) {
+        $checks['password_hashing'] = 'FAIL — password_hash returned false';
+        $allOk = false;
+    } elseif (!password_verify('test', $testHash)) {
+        $checks['password_hashing'] = 'FAIL — password_verify could not verify a freshly generated hash';
+        $allOk = false;
+    } else {
+        $checks['password_hashing'] = 'ok';
+    }
+} catch (\Throwable $e) {
+    $checks['password_hashing'] = 'FAIL — ' . $e->getMessage();
+    $allOk = false;
+}
+
 /* ── 5. APP_ENV / Debug mode ── */
 $checks['app_env']   = env('APP_ENV', '(not set)');
 $checks['debug']     = isDebug() ? 'on' : 'off';
