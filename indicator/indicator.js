@@ -64,6 +64,15 @@ let WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 function updateWsUrl() {
   WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 }
+
+/** Safely parse a JSON response, returning {} on empty/invalid body */
+async function safeJson(resp) {
+  const text = await resp.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return {}; }
+}
+
 const DERIV_TOKEN_KEY = "deriv_token";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
@@ -1319,7 +1328,7 @@ async function sendTelegramPhoto(blob, caption) {
 
   const url = `https://api.telegram.org/bot${token}/sendPhoto`;
   const resp = await fetch(url, { method: "POST", body: form });
-  const data = await resp.json();
+  const data = await safeJson(resp);
   if (!data.ok) {
     throw new Error(data.description || "Telegram API error");
   }
@@ -1339,7 +1348,7 @@ async function sendTelegramMessage(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
   });
-  const data = await resp.json();
+  const data = await safeJson(resp);
   if (!data.ok) {
     throw new Error(data.description || "Telegram API error");
   }
@@ -1409,7 +1418,7 @@ async function testTelegramConnection() {
 
     /* Verify the bot token */
     const meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const meData = await meResp.json();
+    const meData = await safeJson(meResp);
     if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
 
     /* Verify the chat ID is reachable */
@@ -1418,7 +1427,7 @@ async function testTelegramConnection() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId })
     });
-    const chatData = await chatResp.json();
+    const chatData = await safeJson(chatResp);
     if (!chatData.ok) throw new Error(chatData.description || "Cannot reach chat");
 
     const botName = meData.result.first_name || meData.result.username;
