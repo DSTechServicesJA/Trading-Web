@@ -15,6 +15,10 @@ wp-config.php
 *.sqlite
 *.db
 
+# ── Allow tracked server files (no secrets inside) ──
+!api/config.php
+!database/schema.sql
+
 # ──────────────────────────────────────────────
 # OS & Editor files
 # ──────────────────────────────────────────────
