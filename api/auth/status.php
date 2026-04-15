@@ -28,9 +28,17 @@ $checks['env_loaded'] = $envOk ? 'ok' : 'FAIL — DB_NAME or DB_USER is empty; c
 if (!$envOk) $allOk = false;
 
 /* ── 2. JWT_SECRET configured ── */
-$jwtOk = (env('JWT_SECRET') !== '' && env('JWT_SECRET') !== 'generate_a_random_64_char_string_here');
-$checks['jwt_secret'] = $jwtOk ? 'ok' : 'FAIL — JWT_SECRET is missing or still set to the placeholder value';
-if (!$jwtOk) $allOk = false;
+$jwtVal   = env('JWT_SECRET');
+$jwtOk    = ($jwtVal !== '' && $jwtVal !== 'generate_a_random_64_char_string_here');
+$jwtAuto  = $jwtOk && is_file(dirname(__DIR__, 2) . '/.jwt_secret');
+if ($jwtOk) {
+    $checks['jwt_secret'] = $jwtAuto
+        ? 'ok (auto-generated — set JWT_SECRET in .env for full control)'
+        : 'ok';
+} else {
+    $checks['jwt_secret'] = 'FAIL — JWT_SECRET is missing or still set to the placeholder value';
+    $allOk = false;
+}
 
 /* ── 3. Database connection ── */
 $dbOk = false;

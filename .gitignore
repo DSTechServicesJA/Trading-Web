@@ -4,6 +4,7 @@
 .env
 .env.*
 !.env.example
+.jwt_secret
 
 # ──────────────────────────────────────────────
 # Server-side config that may contain credentials
