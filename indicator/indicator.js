@@ -57,8 +57,13 @@
 "use strict";
 
 /* ================= CONFIG ================= */
-const APP_ID  = 120128;
-const WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+let APP_ID  = 120128;
+let WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+
+/** Rebuild WS_URL after APP_ID changes */
+function updateWsUrl() {
+  WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+}
 const DERIV_TOKEN_KEY = "deriv_token";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
@@ -798,6 +803,7 @@ function initUI() {
   UI.candleCountdown = document.getElementById("candleCountdown");
 
   /* Configurable parameter inputs */
+  UI.appIdInput       = document.getElementById("appIdInput");
   UI.rangeDuration    = document.getElementById("rangeDuration");
   UI.touchTolerance   = document.getElementById("touchTolerance");
   UI.dojiRatio        = document.getElementById("dojiRatio");
@@ -1721,6 +1727,7 @@ const LS_PREFIX = "itguru_indicator_";
 function saveSettings() {
   try {
     const settings = {
+      appId: APP_ID,
       symbol: UI.symbolSelect.value,
       granularity: UI.granSelect.value,
       risk: UI.riskInput.value,
@@ -1794,6 +1801,12 @@ function restoreSettings() {
     const raw = localStorage.getItem(LS_PREFIX + "settings");
     if (!raw) return;
     const s = JSON.parse(raw);
+    if (s.appId != null) {
+      const parsed = parseInt(s.appId, 10);
+      APP_ID = isNaN(parsed) || parsed <= 0 ? 120128 : parsed;
+      updateWsUrl();
+      if (UI.appIdInput) UI.appIdInput.value = APP_ID;
+    }
     if (s.symbol && UI.symbolSelect) UI.symbolSelect.value = s.symbol;
     if (s.granularity && UI.granSelect) UI.granSelect.value = s.granularity;
     if (s.risk && UI.riskInput) UI.riskInput.value = s.risk;
@@ -4407,6 +4420,10 @@ function isMTFStructureAligned(dir) {
 
 /* ---- Revert all settings to defaults ---- */
 function revertAllSettings() {
+  /* API default */
+  APP_ID = 120128;
+  updateWsUrl();
+
   /* Core filter defaults */
   autoResetEnabled     = true;
   emaFilterEnabled     = false;
@@ -4465,6 +4482,7 @@ function revertAllSettings() {
   SWING_LOOKBACK_PERIOD   = 20;
 
   /* Sync all UI elements */
+  if (UI.appIdInput)             UI.appIdInput.value               = APP_ID;
   if (UI.autoResetToggle)        UI.autoResetToggle.checked        = autoResetEnabled;
   if (UI.emaFilterToggle)        UI.emaFilterToggle.checked        = emaFilterEnabled;
   if (UI.htfFilterToggle)        UI.htfFilterToggle.checked        = htfFilterEnabled;
@@ -8923,6 +8941,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.mtfStructureToggle) {
     UI.mtfStructureToggle.addEventListener("change", () => { mtfStructureEnabled = UI.mtfStructureToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
+  }
+  if (UI.appIdInput) {
+    UI.appIdInput.addEventListener("change", () => {
+      const val = parseInt(UI.appIdInput.value, 10);
+      if (!isNaN(val) && val > 0) {
+        APP_ID = val;
+        updateWsUrl();
+        saveSettings();
+        addLog(`API App ID changed to ${APP_ID}. Reconnect to apply.`);
+      } else {
+        UI.appIdInput.value = APP_ID;
+      }
+    });
   }
   if (UI.revertSettingsBtn) {
     UI.revertSettingsBtn.addEventListener("click", () => { revertAllSettings(); });
