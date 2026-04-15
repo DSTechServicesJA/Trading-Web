@@ -44,6 +44,31 @@ const ITGuruAuth = (() => {
     }
   }
 
+  /**
+   * Fetch an auth endpoint with automatic .php fallback.
+   * Hosts without mod_rewrite / URL rewriting return 404 for clean URLs
+   * like /api/auth/login — this helper retries with /api/auth/login.php.
+   */
+  async function authFetch(endpoint, options) {
+    let resp;
+    try {
+      resp = await fetch(`${AUTH_API_BASE}/${endpoint}`, options);
+    } catch {
+      throw new Error("Network error — check your connection and try again");
+    }
+
+    /* If clean URL returned 404, retry with .php extension */
+    if (resp.status === 404) {
+      try {
+        resp = await fetch(`${AUTH_API_BASE}/${endpoint}.php`, options);
+      } catch {
+        throw new Error("Network error — check your connection and try again");
+      }
+    }
+
+    return resp;
+  }
+
   /* -------- Public API -------- */
 
   /** Check if the user has a valid session */
@@ -65,16 +90,11 @@ const ITGuruAuth = (() => {
 
   /** Login with username + password */
   async function login(username, password) {
-    let resp;
-    try {
-      resp = await fetch(`${AUTH_API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-    } catch {
-      throw new Error("Network error — check your connection and try again");
-    }
+    const resp = await authFetch("login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
 
     const data = await safeJson(resp);
 
@@ -118,16 +138,11 @@ const ITGuruAuth = (() => {
       throw new Error("Invalid email address");
     }
 
-    let resp;
-    try {
-      resp = await fetch(`${AUTH_API_BASE}/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, email })
-      });
-    } catch {
-      throw new Error("Network error — check your connection and try again");
-    }
+    const resp = await authFetch("register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, email })
+    });
 
     const data = await safeJson(resp);
 
@@ -157,7 +172,7 @@ const ITGuruAuth = (() => {
     if (!token) return false;
 
     try {
-      const resp = await fetch(`${AUTH_API_BASE}/verify`, {
+      const resp = await authFetch("verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
