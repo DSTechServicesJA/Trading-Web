@@ -348,10 +348,20 @@ function categoriseAuthError(string $prefix, \Throwable $e): string
         if (isDebug()) $msg .= ' — ' . $em;
     } elseif (str_contains($em, "doesn't exist") || (str_contains($em, 'Table') && str_contains($em, 'exist'))) {
         $msg .= ': users table not found — run database/schema.sql on your database';
+    } elseif (str_contains($em, 'Unknown column') || str_contains($em, 'Column not found') || str_contains($em, '42S22')) {
+        $msg .= ': database schema mismatch — re-run database/schema.sql to update your table';
+        if (isDebug()) $msg .= ' — ' . $em;
+    } elseif (str_contains($em, 'server has gone away') || str_contains($em, 'Lost connection')) {
+        $msg .= ': database connection was lost — please try again';
     } elseif ($e instanceof \RuntimeException && str_contains($em, 'JWT_SECRET')) {
         $msg .= ': JWT_SECRET is not set in your .env file';
     } else {
-        $msg .= isDebug() ? ': ' . $em : '. Please try again later.';
+        /* Always include the exception class so the user can report/search it,
+           but keep sensitive details behind APP_DEBUG. */
+        $class = (new \ReflectionClass($e))->getShortName();
+        $msg  .= isDebug()
+            ? ": $em"
+            : ". Unexpected error ({$class}). Enable APP_DEBUG=true in .env for details, then retry.";
     }
 
     return $msg . ' (visit /api/auth/status to diagnose)';
