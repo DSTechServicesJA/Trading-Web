@@ -16,6 +16,32 @@
 <main class="container">
 
   <h1>IT Guru – High Confidence 1HZ75V Bot <span class="badge">SAFE MODE</span></h1>
+
+  <!-- Login Gate Overlay -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+      <div id="loginFormSection">
+        <h2>🔐 Login</h2>
+        <p>Sign in to access IT Guru V75 Bot.</p>
+        <input type="text" id="loginUsername" class="login-input" placeholder="Username" autocomplete="username" />
+        <input type="password" id="loginPassword" class="login-input" placeholder="Password" autocomplete="current-password" />
+        <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
+        <button id="loginBtn" type="button" class="login-action-btn">LOGIN</button>
+        <div id="loginError" class="login-error"></div>
+        <p class="login-switch">Don't have an account? <a href="#" id="switchToRegister">Register</a></p>
+      </div>
+      <div id="registerFormSection" style="display:none;">
+        <h2>📝 Register</h2>
+        <p>Create a new IT Guru account.</p>
+        <input type="text" id="regUsername" class="login-input" placeholder="Username" autocomplete="username" />
+        <input type="email" id="regEmail" class="login-input" placeholder="Email (optional)" autocomplete="email" />
+        <input type="password" id="regPassword" class="login-input" placeholder="Password" autocomplete="new-password" />
+        <button id="regSubmitBtn" type="button" class="login-action-btn">CREATE ACCOUNT</button>
+        <div id="regError" class="login-error"></div>
+        <p class="login-switch">Already have an account? <a href="#" id="switchToLogin">Sign in</a></p>
+      </div>
+    </div>
+  </div>
   
           <section class="account-toggle alert" aria-labelledby="acct-label">
           <label id="acct-label">
@@ -63,6 +89,7 @@
         <div class="buttons">
           <button id="connectBtn" class="btn-primary">Connect</button>
           <button id="resetSessionBtn" type="button" class="btn-primary">Reset Session</button>
+          <button id="authLogoutBtn" type="button" class="btn-primary btn-logout">Logout</button>
         </div>
       </section>
 
@@ -129,6 +156,7 @@
 </main>
 
 <!-- BOT SCRIPT -->
+  <script src="../auth.js"></script>
   <script src="bot.js"></script>
 
 <!-- SESSION RESET WIRING -->

@@ -4276,45 +4276,33 @@ function saveStakeSettings() {
 }
 
 function initLoginGate() {
+  /* Use the shared auth module if available */
+  if (typeof ITGuruAuth !== "undefined") {
+    ITGuruAuth.initLoginGate({
+      onLogin: () => {
+        /* After successful auth login, auto-connect if token exists */
+        const token = tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+        if (token && !wsStarted) {
+          wsStarted = true;
+          connectWS();
+        }
+      }
+    });
+
+    /* Wire auth logout button */
+    const authLogoutBtn = document.getElementById("authLogoutBtn");
+    if (authLogoutBtn) {
+      authLogoutBtn.addEventListener("click", () => {
+        ITGuruAuth.logout();
+        location.reload();
+      });
+    }
+    return;
+  }
+
+  /* Fallback: no auth module, allow browsing freely */
   const overlay = document.getElementById("loginOverlay");
-  const btn = document.getElementById("loginBtn");
-  const err = document.getElementById("loginError");
-  const loginTokenInput = document.getElementById("loginToken");
-
-  if (!overlay || !btn) return;
-
-  overlay.style.display =
-    sessionStorage.getItem("itguru_logged_in") === "1"
-      ? "none"
-      : "flex";
-
-  btn.onclick = () => {
-    /* Priority: overlay input → page-level input → previously stored token */
-    const token = loginTokenInput?.value?.trim() || tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
-
-    if (!token) {
-      if (err) err.textContent = "Enter Deriv API token to continue";
-      return;
-    }
-
-    sessionStorage.setItem("deriv_token", token);
-    sessionStorage.setItem("itguru_logged_in", "1");
-    overlay.style.display = "none";
-    if (err) err.textContent = "";
-
-    /* Sync token into the page-level token input if it exists */
-    if (tokenInput) tokenInput.value = token;
-
-    if (!wsStarted) {
-      wsStarted = true;
-      connectWS();
-      return;
-    }
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ authorize: token }));
-    }
-  };
+  if (overlay) overlay.style.display = "none";
 }
 
 function logLoss(profit) {
