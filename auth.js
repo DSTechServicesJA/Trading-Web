@@ -24,7 +24,10 @@
 
 const ITGuruAuth = (() => {
   /* -------- Configuration -------- */
-  const AUTH_API_BASE = "https://trading.dsitservicesja.com/api/auth";
+  /* Override by setting window.ITGURU_AUTH_API_BASE before loading this script */
+  const AUTH_API_BASE = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
+    ? window.ITGURU_AUTH_API_BASE
+    : "https://trading.dsitservicesja.com/api/auth";
   const SESSION_KEY   = "itguru_auth_token";
   const USER_KEY      = "itguru_auth_user";
 
@@ -129,7 +132,6 @@ const ITGuruAuth = (() => {
   function initLoginGate(opts = {}) {
     const overlay   = document.getElementById("loginOverlay");
     const loginBtn  = document.getElementById("loginBtn");
-    const regBtn    = document.getElementById("registerBtn");
     const err       = document.getElementById("loginError");
     const userInput = document.getElementById("loginUsername");
     const passInput = document.getElementById("loginPassword");

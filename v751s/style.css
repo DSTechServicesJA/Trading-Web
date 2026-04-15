@@ -640,8 +640,8 @@ button:disabled {
 }
 
 .btn-logout {
-  background: linear-gradient(135deg, var(--danger), #dc2626) !important;
-  color: #fff !important;
+  background: linear-gradient(135deg, var(--danger), #dc2626);
+  color: #fff;
 }
 
 .btn-logout:hover {
