@@ -1802,7 +1802,8 @@ function restoreSettings() {
     if (!raw) return;
     const s = JSON.parse(raw);
     if (s.appId != null) {
-      APP_ID = parseInt(s.appId, 10) || 120128;
+      const parsed = parseInt(s.appId, 10);
+      APP_ID = isNaN(parsed) || parsed <= 0 ? 120128 : parsed;
       updateWsUrl();
       if (UI.appIdInput) UI.appIdInput.value = APP_ID;
     }
@@ -8944,7 +8945,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.appIdInput) {
     UI.appIdInput.addEventListener("change", () => {
       const val = parseInt(UI.appIdInput.value, 10);
-      if (val && val > 0) {
+      if (!isNaN(val) && val > 0) {
         APP_ID = val;
         updateWsUrl();
         saveSettings();
