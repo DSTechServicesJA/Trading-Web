@@ -7762,11 +7762,13 @@ function _flushDirtyPanels() {
       renderScalpAlerts();
       updateScalpStatsUI();
     } else {
-      /* Re-schedule so it doesn't get lost */
-      if (!_rafScheduled) {
-        _rafScheduled = true;
-        requestAnimationFrame(_flushDirtyPanels);
-      }
+      /* Re-schedule via setTimeout to fire exactly when the throttle window opens */
+      setTimeout(() => {
+        if (_bannersDirty && !_rafScheduled) {
+          _rafScheduled = true;
+          requestAnimationFrame(_flushDirtyPanels);
+        }
+      }, _BANNER_THROTTLE_MS - (now - _lastBannerUpdate));
     }
   }
 }
@@ -8392,9 +8394,9 @@ function connectPanel(p) {
     _multiPanelProcessing = null;
 
     /* Throttled card DOM update (badges, price, status) */
-    const _now = Date.now();
-    if (!p._lastCardUI || _now - p._lastCardUI >= _PANEL_UI_THROTTLE_MS) {
-      p._lastCardUI = _now;
+    const now = Date.now();
+    if (!p._lastCardUI || now - p._lastCardUI >= _PANEL_UI_THROTTLE_MS) {
+      p._lastCardUI = now;
       updatePanelCardUI(p);
     }
 
@@ -9151,8 +9153,8 @@ document.addEventListener("DOMContentLoaded", () => {
     drawChart();
     /* Invalidate cached canvas sizes and redraw all multi-symbol mini-charts */
     for (const p of multiPanels.values()) {
-      p._cachedW = 0;
-      p._cachedH = 0;
+      p._cachedW = null;
+      p._cachedH = null;
       drawMiniChart(p);
     }
   });
