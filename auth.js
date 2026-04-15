@@ -62,11 +62,16 @@ const ITGuruAuth = (() => {
 
   /** Login with username + password */
   async function login(username, password) {
-    const resp = await fetch(`${AUTH_API_BASE}/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    });
+    let resp;
+    try {
+      resp = await fetch(`${AUTH_API_BASE}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+    } catch {
+      throw new Error("Network error — check your connection and try again");
+    }
 
     const data = await safeJson(resp);
 
@@ -90,16 +95,39 @@ const ITGuruAuth = (() => {
 
   /** Register a new account */
   async function register(username, password, email) {
-    const resp = await fetch(`${AUTH_API_BASE}/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, email })
-    });
+    /* Client-side validation matching server requirements */
+    if (username.length < 3 || username.length > 50) {
+      throw new Error("Username must be 3–50 characters");
+    }
+    if (!/^[a-zA-Z0-9_.\-]+$/.test(username)) {
+      throw new Error("Username may only contain letters, numbers, dots, hyphens, and underscores");
+    }
+    if (password.length < 8) {
+      throw new Error("Password must be at least 8 characters");
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error("Invalid email address");
+    }
+
+    let resp;
+    try {
+      resp = await fetch(`${AUTH_API_BASE}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, email })
+      });
+    } catch {
+      throw new Error("Network error — check your connection and try again");
+    }
 
     const data = await safeJson(resp);
 
     if (!resp.ok) {
       throw new Error(data.error || "Registration failed");
+    }
+
+    if (!data.token) {
+      throw new Error("Registration succeeded but no session token was returned");
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);

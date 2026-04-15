@@ -43,46 +43,51 @@ if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     jsonResponse(['error' => 'Invalid email address'], 400);
 }
 
-/* ── Check for existing username ── */
-$pdo  = getDB();
-$stmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
-$stmt->execute([$username]);
+try {
+    /* ── Check for existing username ── */
+    $pdo  = getDB();
+    $stmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
+    $stmt->execute([$username]);
 
-if ($stmt->fetch()) {
-    jsonResponse(['error' => 'Username already exists'], 409);
-}
-
-/* ── Check for existing email (if provided) ── */
-if ($email !== '') {
-    $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
-    $stmt->execute([$email]);
     if ($stmt->fetch()) {
-        jsonResponse(['error' => 'Email address already registered'], 409);
+        jsonResponse(['error' => 'Username already exists'], 409);
     }
+
+    /* ── Check for existing email (if provided) ── */
+    if ($email !== '') {
+        $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        $stmt->execute([$email]);
+        if ($stmt->fetch()) {
+            jsonResponse(['error' => 'Email address already registered'], 409);
+        }
+    }
+
+    /* ── Create user (bcrypt, cost 12) ── */
+    $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO users (username, email, password_hash, display_name)
+         VALUES (?, ?, ?, ?)'
+    );
+    $stmt->execute([$username, $email ?: null, $hash, $username]);
+    $userId = (int) $pdo->lastInsertId();
+
+    /* ── Issue JWT ── */
+    $token = jwtEncode([
+        'sub'      => $userId,
+        'username' => $username,
+        'iat'      => time(),
+        'exp'      => time() + 3600,
+    ]);
+
+    jsonResponse([
+        'token' => $token,
+        'user'  => [
+            'username'    => $username,
+            'displayName' => $username,
+        ],
+    ], 201);
+} catch (\Throwable $e) {
+    error_log('Registration error: ' . $e->getMessage());
+    jsonResponse(['error' => 'Registration failed. Please try again later.'], 500);
 }
-
-/* ── Create user (bcrypt, cost 12) ── */
-$hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-
-$stmt = $pdo->prepare(
-    'INSERT INTO users (username, email, password_hash, display_name)
-     VALUES (?, ?, ?, ?)'
-);
-$stmt->execute([$username, $email ?: null, $hash, $username]);
-$userId = (int) $pdo->lastInsertId();
-
-/* ── Issue JWT ── */
-$token = jwtEncode([
-    'sub'      => $userId,
-    'username' => $username,
-    'iat'      => time(),
-    'exp'      => time() + 3600,
-]);
-
-jsonResponse([
-    'token' => $token,
-    'user'  => [
-        'username'    => $username,
-        'displayName' => $username,
-    ],
-], 201);
