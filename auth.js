@@ -127,7 +127,7 @@ const ITGuruAuth = (() => {
     }
 
     if (!data.token) {
-      throw new Error("Registration succeeded but no session token was returned");
+      throw new Error("Registration failed due to a server error. Please try again later.");
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);
