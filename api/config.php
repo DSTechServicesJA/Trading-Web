@@ -1,0 +1,281 @@
+<?php
+/**
+ * Trading-Web — Server Configuration
+ * ───────────────────────────────────
+ * Loads .env, establishes DB connection, and provides JWT + utility helpers.
+ * Required by every API endpoint — never accessed directly by the browser.
+ */
+
+declare(strict_types=1);
+
+/* ── Prevent direct access ── */
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit(json_encode(['error' => 'Direct access forbidden']));
+}
+
+/* ══════════════════════════════════════════════
+   1. Load .env file
+   ══════════════════════════════════════════════ */
+
+function loadEnv(string $path): void
+{
+    if (!is_file($path) || !is_readable($path)) {
+        return;
+    }
+
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        if (!str_contains($line, '=')) {
+            continue;
+        }
+
+        [$key, $value] = explode('=', $line, 2);
+        $key   = trim($key);
+        $value = trim($value);
+
+        /* Remove surrounding quotes ("value" or 'value') */
+        if (preg_match('/^(["\'])(.*)\\1$/', $value, $m)) {
+            $value = $m[2];
+        }
+
+        $_ENV[$key] = $value;
+        putenv("$key=$value");
+    }
+}
+
+/* Search for .env in common locations */
+$envSearchPaths = [
+    __DIR__ . '/../.env',          // repo root  (same level as api/)
+    dirname(__DIR__, 2) . '/.env', // one level above document root
+    __DIR__ . '/.env',             // inside api/ folder
+];
+
+foreach ($envSearchPaths as $envPath) {
+    if (is_file($envPath)) {
+        loadEnv($envPath);
+        break;
+    }
+}
+
+/** Read an environment variable with an optional default. */
+function env(string $key, string $default = ''): string
+{
+    return $_ENV[$key] ?? getenv($key) ?: $default;
+}
+
+/* ══════════════════════════════════════════════
+   2. Database connection (PDO — MySQL)
+   ══════════════════════════════════════════════ */
+
+function getDB(): PDO
+{
+    static $pdo = null;
+    if ($pdo !== null) {
+        return $pdo;
+    }
+
+    $host = env('DB_HOST', 'localhost');
+    $name = env('DB_NAME');
+    $user = env('DB_USER');
+    $pass = env('DB_PASSWORD');
+
+    if ($name === '' || $user === '') {
+        http_response_code(500);
+        exit(json_encode(['error' => 'Database not configured. Check your .env file.']));
+    }
+
+    try {
+        $pdo = new PDO(
+            "mysql:host=$host;dbname=$name;charset=utf8mb4",
+            $user,
+            $pass,
+            [
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES   => false,
+            ]
+        );
+        return $pdo;
+    } catch (PDOException $e) {
+        error_log('DB connection failed: ' . $e->getMessage());
+        http_response_code(500);
+        exit(json_encode(['error' => 'Database connection failed']));
+    }
+}
+
+/* ══════════════════════════════════════════════
+   3. JWT helpers (HMAC-SHA256)
+   ══════════════════════════════════════════════ */
+
+function base64url_encode(string $data): string
+{
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function base64url_decode(string $data): string
+{
+    return base64_decode(strtr($data, '-_', '+/'));
+}
+
+/**
+ * Create a signed JWT token.
+ *
+ * @param  array<string,mixed> $payload
+ * @return string
+ */
+function jwtEncode(array $payload): string
+{
+    $secret = env('JWT_SECRET');
+    if ($secret === '') {
+        throw new RuntimeException('JWT_SECRET is not set in .env');
+    }
+
+    $header  = base64url_encode(json_encode(['typ' => 'JWT', 'alg' => 'HS256']));
+    $body    = base64url_encode(json_encode($payload));
+    $sig     = base64url_encode(hash_hmac('sha256', "$header.$body", $secret, true));
+
+    return "$header.$body.$sig";
+}
+
+/**
+ * Decode and verify a JWT token.
+ *
+ * @return array<string,mixed>|null  Decoded payload on success, null on failure.
+ */
+function jwtDecode(string $token): ?array
+{
+    $secret = env('JWT_SECRET');
+    if ($secret === '') {
+        return null;
+    }
+
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) {
+        return null;
+    }
+
+    [$header, $payload, $sig] = $parts;
+
+    $expected = base64url_encode(hash_hmac('sha256', "$header.$payload", $secret, true));
+    if (!hash_equals($expected, $sig)) {
+        return null;
+    }
+
+    $data = json_decode(base64url_decode($payload), true);
+    if (!is_array($data)) {
+        return null;
+    }
+
+    /* Check expiration */
+    if (isset($data['exp']) && $data['exp'] < time()) {
+        return null;
+    }
+
+    return $data;
+}
+
+/* ══════════════════════════════════════════════
+   4. IP-based rate limiting (file-system)
+   ══════════════════════════════════════════════ */
+
+/**
+ * Simple rate limiter.  Returns TRUE if the request is allowed.
+ *
+ * @param int $maxAttempts  Maximum requests per window
+ * @param int $windowSecs   Window duration in seconds
+ */
+function rateLimit(int $maxAttempts = 5, int $windowSecs = 60): bool
+{
+    $ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rateDir = sys_get_temp_dir() . '/trading_rate_limits';
+
+    if (!is_dir($rateDir)) {
+        @mkdir($rateDir, 0700, true);
+    }
+
+    $file     = $rateDir . '/' . md5($ip) . '.json';
+    $attempts = [];
+
+    if (is_file($file)) {
+        $raw      = @file_get_contents($file);
+        $attempts = $raw ? (json_decode($raw, true) ?? []) : [];
+    }
+
+    $now      = time();
+    $attempts = array_values(array_filter($attempts, fn($t) => $t > ($now - $windowSecs)));
+
+    if (count($attempts) >= $maxAttempts) {
+        return false;
+    }
+
+    $attempts[] = $now;
+    @file_put_contents($file, json_encode($attempts), LOCK_EX);
+
+    return true;
+}
+
+/* ══════════════════════════════════════════════
+   5. Common response helpers
+   ══════════════════════════════════════════════ */
+
+/** Send a JSON response and terminate. */
+function jsonResponse(mixed $data, int $status = 200): never
+{
+    http_response_code($status);
+    echo json_encode($data);
+    exit;
+}
+
+/** Reject non-POST requests. */
+function requirePost(): void
+{
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonResponse(['error' => 'Method not allowed'], 405);
+    }
+}
+
+/** Read and decode the JSON request body. */
+function getJsonBody(): array
+{
+    $raw  = file_get_contents('php://input');
+    $data = json_decode($raw ?: '', true);
+    if (!is_array($data)) {
+        jsonResponse(['error' => 'Invalid JSON body'], 400);
+    }
+    return $data;
+}
+
+/* ── Shared headers for every API response ── */
+header('Content-Type: application/json; charset=utf-8');
+header('X-Content-Type-Options: nosniff');
+
+/* CORS — same-origin in production, open in dev */
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (env('APP_ENV') !== 'production') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+} elseif ($origin !== '') {
+    /* In production only allow your own domain */
+    $allowed = env('AUTH_API_BASE');
+    $parsed  = parse_url($allowed);
+    $scheme  = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '');
+    if (str_starts_with($origin, $scheme)) {
+        header("Access-Control-Allow-Origin: $origin");
+        header('Access-Control-Allow-Methods: POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type');
+    }
+}

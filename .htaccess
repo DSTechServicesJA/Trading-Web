@@ -1,0 +1,30 @@
+# ──────────────────────────────────────────────
+# Trading-Web — Root .htaccess
+# ──────────────────────────────────────────────
+# URL rewriting for the PHP API + security hardening.
+# Deploy this file to your Hostinger document root.
+# ──────────────────────────────────────────────
+
+RewriteEngine On
+
+# ── Block access to dotfiles (.env, .git, etc.) ──
+RewriteRule (^\.|/\.) - [F,L]
+
+# ── API URL rewriting (extensionless PHP) ──
+# Maps /api/auth/login → /api/auth/login.php etc.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/auth/(login|register|verify)$ api/auth/$1.php [L,QSA]
+
+# ── Security headers ──
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+# ── Block direct download of sensitive file types ──
+<FilesMatch "\.(env|sql|sqlite|db|log|ini|sh|bak)$">
+    Require all denied
+</FilesMatch>
