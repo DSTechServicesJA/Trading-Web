@@ -69,7 +69,14 @@ foreach ($envSearchPaths as $envPath) {
 /** Read an environment variable with an optional default. */
 function env(string $key, string $default = ''): string
 {
-    return $_ENV[$key] ?? getenv($key) ?: $default;
+    return $_ENV[$key] ?? (getenv($key) ?: $default);
+}
+
+/** Check whether debug mode is enabled in .env (APP_DEBUG=true). */
+function isDebug(): bool
+{
+    $val = env('APP_DEBUG', 'false');
+    return in_array(strtolower($val), ['true', '1', 'yes', 'on'], true);
 }
 
 /* ══════════════════════════════════════════════
@@ -89,8 +96,9 @@ function getDB(): PDO
     $pass = env('DB_PASSWORD');
 
     if ($name === '' || $user === '') {
-        http_response_code(500);
-        exit(json_encode(['error' => 'Database not configured. Check your .env file.']));
+        throw new RuntimeException(
+            'Database not configured — DB_NAME or DB_USER is empty. Check your .env file.'
+        );
     }
 
     try {
@@ -107,8 +115,19 @@ function getDB(): PDO
         return $pdo;
     } catch (PDOException $e) {
         error_log('DB connection failed: ' . $e->getMessage());
-        http_response_code(500);
-        exit(json_encode(['error' => 'Database connection failed']));
+        $detail = '';
+        if (isDebug()) {
+            if (str_contains($e->getMessage(), 'Unknown database')) {
+                $detail = ': database "' . $name . '" does not exist — create it in your hosting panel';
+            } elseif (str_contains($e->getMessage(), 'Access denied')) {
+                $detail = ': access denied — check DB_USER and DB_PASSWORD in your .env file';
+            } elseif (str_contains($e->getMessage(), 'Connection refused') || str_contains($e->getMessage(), 'No such file')) {
+                $detail = ': cannot reach DB host "' . $host . '" — check DB_HOST in .env';
+            } else {
+                $detail = ': ' . $e->getMessage();
+            }
+        }
+        throw new RuntimeException('Database connection failed' . $detail, 0, $e);
     }
 }
 
@@ -276,7 +295,7 @@ header('X-Content-Type-Options: nosniff');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (env('APP_ENV') !== 'production') {
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: POST, OPTIONS');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type');
 } elseif ($origin !== '') {
     /* In production only allow your own domain */
@@ -285,7 +304,7 @@ if (env('APP_ENV') !== 'production') {
     $scheme  = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '');
     if (str_starts_with($origin, $scheme)) {
         header("Access-Control-Allow-Origin: $origin");
-        header('Access-Control-Allow-Methods: POST, OPTIONS');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Allow-Headers: Content-Type');
     }
 }
