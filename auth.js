@@ -31,6 +31,16 @@ const ITGuruAuth = (() => {
   const SESSION_KEY   = "itguru_auth_token";
   const USER_KEY      = "itguru_auth_user";
 
+  /* -------- Helpers -------- */
+
+  /** Safely parse a JSON response, returning a fallback on empty/invalid body */
+  async function safeJson(resp) {
+    const text = await resp.text();
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch { return {}; }
+  }
+
   /* -------- Public API -------- */
 
   /** Check if the user has a valid session */
@@ -58,7 +68,7 @@ const ITGuruAuth = (() => {
       body: JSON.stringify({ username, password })
     });
 
-    const data = await resp.json();
+    const data = await safeJson(resp);
 
     if (!resp.ok) {
       throw new Error(data.error || "Login failed");
@@ -86,7 +96,7 @@ const ITGuruAuth = (() => {
       body: JSON.stringify({ username, password, email })
     });
 
-    const data = await resp.json();
+    const data = await safeJson(resp);
 
     if (!resp.ok) {
       throw new Error(data.error || "Registration failed");
@@ -108,7 +118,7 @@ const ITGuruAuth = (() => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
       });
-      const data = await resp.json();
+      const data = await safeJson(resp);
       return data.valid === true;
     } catch {
       return false;
