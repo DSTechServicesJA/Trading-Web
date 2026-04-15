@@ -195,11 +195,21 @@ function jwtDecode(string $token): ?array
  */
 function rateLimit(int $maxAttempts = 5, int $windowSecs = 60): bool
 {
-    $ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    /* Resolve client IP — prefer X-Forwarded-For behind trusted proxies */
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $forwarded = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        $candidate = trim($forwarded[0]);
+        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+            $ip = $candidate;
+        }
+    }
+
     $rateDir = sys_get_temp_dir() . '/trading_rate_limits';
 
-    if (!is_dir($rateDir)) {
-        @mkdir($rateDir, 0700, true);
+    if (!is_dir($rateDir) && !mkdir($rateDir, 0700, true)) {
+        error_log('Rate-limit: could not create directory ' . $rateDir);
+        return true; /* fail open — don't block requests if dir creation fails */
     }
 
     $file     = $rateDir . '/' . md5($ip) . '.json';

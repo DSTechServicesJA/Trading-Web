@@ -65,8 +65,8 @@ if ($email !== '') {
 $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
 
 $stmt = $pdo->prepare(
-    'INSERT INTO users (username, email, password_hash, display_name, created_at)
-     VALUES (?, ?, ?, ?, NOW())'
+    'INSERT INTO users (username, email, password_hash, display_name)
+     VALUES (?, ?, ?, ?)'
 );
 $stmt->execute([$username, $email ?: null, $hash, $username]);
 $userId = (int) $pdo->lastInsertId();
