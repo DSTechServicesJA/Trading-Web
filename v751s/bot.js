@@ -488,3 +488,15 @@ updateStats();
 updateConfidenceLabel(0);
 updateMarketSignal("NO EDGE");
 setBotState(true);
+
+// Init auth gate + logout button
+if (typeof ITGuruAuth !== "undefined") {
+  ITGuruAuth.initLoginGate();
+  const authLogoutBtn = document.getElementById("authLogoutBtn");
+  if (authLogoutBtn) {
+    authLogoutBtn.addEventListener("click", () => {
+      ITGuruAuth.logout();
+      location.reload();
+    });
+  }
+}

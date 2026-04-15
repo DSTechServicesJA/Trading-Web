@@ -804,6 +804,7 @@ function initUI() {
 
   /* Configurable parameter inputs */
   UI.appIdInput       = document.getElementById("appIdInput");
+  UI.derivTokenInput  = document.getElementById("derivTokenInput");
   UI.rangeDuration    = document.getElementById("rangeDuration");
   UI.touchTolerance   = document.getElementById("touchTolerance");
   UI.dojiRatio        = document.getElementById("dojiRatio");
@@ -977,7 +978,6 @@ function initUI() {
   UI.loginOverlay     = document.getElementById("loginOverlay");
   UI.loginBtn         = document.getElementById("loginBtn");
   UI.loginError       = document.getElementById("loginError");
-  UI.loginToken       = document.getElementById("loginToken");
 
   /* Telegram */
   UI.telegramBotToken       = document.getElementById("telegramBotToken");
@@ -7653,48 +7653,32 @@ function syncConfigFromUI() {
 
 /* ================= LOGIN GATE ================= */
 function initLoginGate() {
-  if (!UI.loginOverlay || !UI.loginBtn) return;
+  /* Use the shared auth module if available */
+  if (typeof ITGuruAuth !== "undefined") {
+    ITGuruAuth.initLoginGate({
+      onLogin: () => {
+        /* Restore saved Deriv API token from settings if any */
+        const remembered = localStorage.getItem("itguru_deriv_token");
+        if (remembered) {
+          const derivToken = _deobfuscate(remembered);
+          if (derivToken) sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
+        }
+      }
+    });
 
-  /* Check if previously remembered */
-  const remembered = localStorage.getItem("itguru_deriv_token");
-  if (remembered) {
-    const derivToken = _deobfuscate(remembered);
-    if (derivToken) {
-      sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
-      sessionStorage.setItem("itguru_logged_in", "1");
+    /* Wire auth logout button */
+    const authLogoutBtn = document.getElementById("authLogoutBtn");
+    if (authLogoutBtn) {
+      authLogoutBtn.addEventListener("click", () => {
+        ITGuruAuth.logout();
+        location.reload();
+      });
     }
+    return;
   }
 
-  UI.loginOverlay.style.display =
-    sessionStorage.getItem("itguru_logged_in") === "1"
-      ? "none"
-      : "flex";
-
-  /* Restore remember-me checkbox state */
-  const rememberMe = document.getElementById("loginRememberMe");
-  if (rememberMe && remembered) rememberMe.checked = true;
-
-  UI.loginBtn.onclick = () => {
-    const token = UI.loginToken?.value?.trim() || sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
-
-    if (!token) {
-      if (UI.loginError) UI.loginError.textContent = "Enter Deriv API token to continue";
-      return;
-    }
-
-    sessionStorage.setItem(DERIV_TOKEN_KEY, token);
-    sessionStorage.setItem("itguru_logged_in", "1");
-
-    /* Handle "Remember me" */
-    if (rememberMe && rememberMe.checked) {
-      localStorage.setItem("itguru_deriv_token", _obfuscate(token));
-    } else {
-      localStorage.removeItem("itguru_deriv_token");
-    }
-
-    UI.loginOverlay.style.display = "none";
-    if (UI.loginError) UI.loginError.textContent = "";
-  };
+  /* Fallback: no auth module, allow browsing freely */
+  if (UI.loginOverlay) UI.loginOverlay.style.display = "none";
 }
 
 /* ================= MULTI-SYMBOL ANALYSIS ================= */
@@ -8952,6 +8936,24 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog(`API App ID changed to ${APP_ID}. Reconnect to apply.`);
       } else {
         UI.appIdInput.value = APP_ID;
+      }
+    });
+  }
+  if (UI.derivTokenInput) {
+    /* Restore saved token into the input */
+    const savedToken = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
+    if (savedToken) UI.derivTokenInput.value = savedToken;
+
+    UI.derivTokenInput.addEventListener("change", () => {
+      const token = UI.derivTokenInput.value.trim();
+      if (token) {
+        sessionStorage.setItem(DERIV_TOKEN_KEY, token);
+        localStorage.setItem("itguru_deriv_token", _obfuscate(token));
+        addLog("Deriv API token updated. Reconnect to apply.");
+      } else {
+        sessionStorage.removeItem(DERIV_TOKEN_KEY);
+        localStorage.removeItem("itguru_deriv_token");
+        addLog("Deriv API token cleared.");
       }
     });
   }
