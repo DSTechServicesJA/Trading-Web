@@ -39,7 +39,21 @@ try {
     $dbOk = true;
     $checks['db_connection'] = 'ok';
 } catch (\Throwable $e) {
-    $checks['db_connection'] = 'FAIL — ' . (isDebug() ? $e->getMessage() : 'could not connect (enable APP_DEBUG=true for details)');
+    $detail = $e->getMessage();
+    /* Redact credentials from the message but always show the category */
+    $hint = 'could not connect';
+    if (str_contains($detail, 'Unknown database')) {
+        $hint = 'database does not exist — create it in your hosting panel';
+    } elseif (str_contains($detail, 'Access denied')) {
+        $hint = 'access denied — check DB_USER and DB_PASSWORD in .env';
+    } elseif (str_contains($detail, 'Connection refused') || str_contains($detail, 'No such file')) {
+        $hint = 'cannot reach DB host — check DB_HOST in .env';
+    } elseif (str_contains($detail, 'DB_NAME') || str_contains($detail, 'DB_USER') || str_contains($detail, 'not configured')) {
+        $hint = 'DB_NAME or DB_USER is empty — check .env file';
+    } elseif (isDebug()) {
+        $hint = $detail;
+    }
+    $checks['db_connection'] = 'FAIL — ' . $hint;
     $allOk = false;
 }
 

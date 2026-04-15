@@ -287,6 +287,37 @@ function getJsonBody(): array
     return $data;
 }
 
+/**
+ * Categorise a caught exception into an actionable error message.
+ *
+ * Always returns a user-facing hint (DB not configured, connection failed,
+ * missing table, missing JWT_SECRET).  Sensitive details are only appended
+ * when APP_DEBUG=true.
+ *
+ * @param string      $prefix  e.g. "Login failed" or "Registration failed"
+ * @param \Throwable  $e       the caught exception
+ */
+function categoriseAuthError(string $prefix, \Throwable $e): string
+{
+    $em  = $e->getMessage();
+    $msg = $prefix;
+
+    if (str_contains($em, 'DB_NAME') || str_contains($em, 'DB_USER') || str_contains($em, 'Database not configured')) {
+        $msg .= ': database is not configured — check your .env file';
+    } elseif (str_contains($em, 'Connection refused') || str_contains($em, 'No such file') || str_contains($em, 'Access denied') || str_contains($em, 'Unknown database') || str_contains($em, 'connection failed')) {
+        $msg .= ': cannot connect to the database';
+        if (isDebug()) $msg .= ' — ' . $em;
+    } elseif (str_contains($em, "doesn't exist") || (str_contains($em, 'Table') && str_contains($em, 'exist'))) {
+        $msg .= ': users table not found — run database/schema.sql on your database';
+    } elseif ($e instanceof \RuntimeException && str_contains($em, 'JWT_SECRET')) {
+        $msg .= ': JWT_SECRET is not set in your .env file';
+    } else {
+        $msg .= isDebug() ? ': ' . $em : '. Please try again later.';
+    }
+
+    return $msg . ' (visit /api/auth/status to diagnose)';
+}
+
 /* ── Shared headers for every API response ── */
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
