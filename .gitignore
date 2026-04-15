@@ -18,6 +18,7 @@ wp-config.php
 # ── Allow tracked server files (no secrets inside) ──
 !api/config.php
 !database/schema.sql
+!database/seed_user.sql
 
 # ──────────────────────────────────────────────
 # OS & Editor files
