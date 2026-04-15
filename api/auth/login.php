@@ -57,7 +57,7 @@ try {
     error_log('Login error: ' . $e->getMessage());
     $msg = 'Login failed. Please try again later.';
     if (isDebug()) {
-        if (str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Table')) {
+        if (str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Table') && str_contains($e->getMessage(), 'exist')) {
             $msg = 'Login failed: users table not found — run database/schema.sql on your database';
         } else {
             $msg = 'Login failed: ' . $e->getMessage();
