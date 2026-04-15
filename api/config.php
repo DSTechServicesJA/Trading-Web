@@ -72,6 +72,45 @@ function env(string $key, string $default = ''): string
     return $_ENV[$key] ?? (getenv($key) ?: $default);
 }
 
+/* ── Auto-generate JWT_SECRET if missing or placeholder ──────
+   Generates a cryptographically secure 64-char hex secret and
+   persists it to .jwt_secret so it survives across requests.
+   This lets the app work out-of-the-box without manual setup. */
+(function (): void {
+    $current = env('JWT_SECRET');
+    $placeholder = 'generate_a_random_64_char_string_here';
+
+    if ($current !== '' && $current !== $placeholder) {
+        return;                                        // already configured
+    }
+
+    $secretFile = dirname(__DIR__) . '/.jwt_secret';
+
+    /* Try to load a previously auto-generated secret */
+    if (is_file($secretFile) && is_readable($secretFile)) {
+        $saved = trim((string) file_get_contents($secretFile));
+        if ($saved !== '' && $saved !== $placeholder) {
+            $_ENV['JWT_SECRET'] = $saved;
+            putenv("JWT_SECRET=$saved");
+            return;
+        }
+    }
+
+    /* Generate a new secret and persist it */
+    $secret = bin2hex(random_bytes(32));               // 64 hex chars
+    $written = @file_put_contents($secretFile, $secret, LOCK_EX);
+    if ($written !== false) {
+        @chmod($secretFile, 0600);
+    } else {
+        /* Cannot persist — log a warning so the admin knows */
+        error_log('JWT_SECRET auto-generation: could not write ' . $secretFile
+            . ' — a new secret will be generated on every request until this is fixed.');
+    }
+
+    $_ENV['JWT_SECRET'] = $secret;
+    putenv("JWT_SECRET=$secret");
+})();
+
 /** Check whether debug mode is enabled in .env (APP_DEBUG=true). */
 function isDebug(): bool
 {
@@ -285,6 +324,37 @@ function getJsonBody(): array
         jsonResponse(['error' => 'Invalid JSON body'], 400);
     }
     return $data;
+}
+
+/**
+ * Categorise a caught exception into an actionable error message.
+ *
+ * Always returns a user-facing hint (DB not configured, connection failed,
+ * missing table, missing JWT_SECRET).  Sensitive details are only appended
+ * when APP_DEBUG=true.
+ *
+ * @param string      $prefix  e.g. "Login failed" or "Registration failed"
+ * @param \Throwable  $e       the caught exception
+ */
+function categoriseAuthError(string $prefix, \Throwable $e): string
+{
+    $em  = $e->getMessage();
+    $msg = $prefix;
+
+    if (str_contains($em, 'DB_NAME') || str_contains($em, 'DB_USER') || str_contains($em, 'Database not configured')) {
+        $msg .= ': database is not configured — check your .env file';
+    } elseif (str_contains($em, 'Connection refused') || str_contains($em, 'No such file') || str_contains($em, 'Access denied') || str_contains($em, 'Unknown database') || str_contains($em, 'connection failed')) {
+        $msg .= ': cannot connect to the database';
+        if (isDebug()) $msg .= ' — ' . $em;
+    } elseif (str_contains($em, "doesn't exist") || (str_contains($em, 'Table') && str_contains($em, 'exist'))) {
+        $msg .= ': users table not found — run database/schema.sql on your database';
+    } elseif ($e instanceof \RuntimeException && str_contains($em, 'JWT_SECRET')) {
+        $msg .= ': JWT_SECRET is not set in your .env file';
+    } else {
+        $msg .= isDebug() ? ': ' . $em : '. Please try again later.';
+    }
+
+    return $msg . ' (visit /api/auth/status to diagnose)';
 }
 
 /* ── Shared headers for every API response ── */

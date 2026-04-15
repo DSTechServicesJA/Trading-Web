@@ -28,9 +28,17 @@ $checks['env_loaded'] = $envOk ? 'ok' : 'FAIL — DB_NAME or DB_USER is empty; c
 if (!$envOk) $allOk = false;
 
 /* ── 2. JWT_SECRET configured ── */
-$jwtOk = (env('JWT_SECRET') !== '' && env('JWT_SECRET') !== 'generate_a_random_64_char_string_here');
-$checks['jwt_secret'] = $jwtOk ? 'ok' : 'FAIL — JWT_SECRET is missing or still set to the placeholder value';
-if (!$jwtOk) $allOk = false;
+$jwtVal   = env('JWT_SECRET');
+$jwtOk    = ($jwtVal !== '' && $jwtVal !== 'generate_a_random_64_char_string_here');
+$jwtAuto  = $jwtOk && is_file(dirname(__DIR__, 2) . '/.jwt_secret');
+if ($jwtOk) {
+    $checks['jwt_secret'] = $jwtAuto
+        ? 'ok (auto-generated — set JWT_SECRET in .env for full control)'
+        : 'ok';
+} else {
+    $checks['jwt_secret'] = 'FAIL — JWT_SECRET is missing or still set to the placeholder value';
+    $allOk = false;
+}
 
 /* ── 3. Database connection ── */
 $dbOk = false;
@@ -39,7 +47,21 @@ try {
     $dbOk = true;
     $checks['db_connection'] = 'ok';
 } catch (\Throwable $e) {
-    $checks['db_connection'] = 'FAIL — ' . (isDebug() ? $e->getMessage() : 'could not connect (enable APP_DEBUG=true for details)');
+    $detail = $e->getMessage();
+    /* Redact credentials from the message but always show the category */
+    $hint = 'could not connect';
+    if (str_contains($detail, 'Unknown database')) {
+        $hint = 'database does not exist — create it in your hosting panel';
+    } elseif (str_contains($detail, 'Access denied')) {
+        $hint = 'access denied — check DB_USER and DB_PASSWORD in .env';
+    } elseif (str_contains($detail, 'Connection refused') || str_contains($detail, 'No such file')) {
+        $hint = 'cannot reach DB host — check DB_HOST in .env';
+    } elseif (str_contains($detail, 'DB_NAME') || str_contains($detail, 'DB_USER') || str_contains($detail, 'not configured')) {
+        $hint = 'DB_NAME or DB_USER is empty — check .env file';
+    } elseif (isDebug()) {
+        $hint = $detail;
+    }
+    $checks['db_connection'] = 'FAIL — ' . $hint;
     $allOk = false;
 }
 

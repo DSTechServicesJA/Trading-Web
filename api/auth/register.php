@@ -89,15 +89,5 @@ try {
     ], 201);
 } catch (\Throwable $e) {
     error_log('Registration error: ' . $e->getMessage());
-    $msg = 'Registration failed. Please try again later.';
-    if (isDebug()) {
-        if (str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Table') && str_contains($e->getMessage(), 'exist')) {
-            $msg = 'Registration failed: users table not found — run database/schema.sql on your database';
-        } elseif ($e instanceof \RuntimeException && str_contains($e->getMessage(), 'JWT_SECRET')) {
-            $msg = 'Registration failed: JWT_SECRET is not set in your .env file';
-        } else {
-            $msg = 'Registration failed: ' . $e->getMessage();
-        }
-    }
-    jsonResponse(['error' => $msg], 500);
+    jsonResponse(['error' => categoriseAuthError('Registration failed', $e)], 500);
 }
