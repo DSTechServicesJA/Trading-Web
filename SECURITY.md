@@ -56,6 +56,15 @@ on the server, fill in the real values, and ensure `.env` is listed in `.gitigno
 
 ---
 
+### Content Security Policy — known limitation
+The CSP currently allows `'unsafe-inline'` for `script-src` because the existing codebase uses
+inline event handlers and `<script>` blocks. This still blocks external malicious scripts but
+does not fully mitigate reflected/stored XSS.
+**Future improvement:** refactor all inline JS into external `.js` files, then replace
+`'unsafe-inline'` with nonce-based (`'nonce-<random>'`) or hash-based CSP for full XSS protection.
+
+---
+
 ## 🔑 Deriv API Token
 
 The Deriv `APP_ID` (120128) is a **public** application identifier — it is safe to include in client-side code. However, individual users' **API tokens** (entered in the UI) should:
