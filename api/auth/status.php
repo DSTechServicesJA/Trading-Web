@@ -108,7 +108,7 @@ try {
 
 /* ── 4d. password_hash / password_verify sanity check ── */
 try {
-    $testHash = password_hash('test', PASSWORD_BCRYPT, ['cost' => 12]);
+    $testHash = password_hash('test', PASSWORD_BCRYPT, ['cost' => 4]);
     if ($testHash === false) {
         $checks['password_hashing'] = 'FAIL — password_hash returned false';
         $allOk = false;

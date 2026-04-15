@@ -358,7 +358,7 @@ function categoriseAuthError(string $prefix, \Throwable $e): string
     } else {
         /* Always include the exception class so the user can report/search it,
            but keep sensitive details behind APP_DEBUG. */
-        $class = (new \ReflectionClass($e))->getShortName();
+        $class = basename(str_replace('\\', '/', get_class($e)));
         $msg  .= isDebug()
             ? ": $em"
             : ". Unexpected error ({$class}). Enable APP_DEBUG=true in .env for details, then retry.";
