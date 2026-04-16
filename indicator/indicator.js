@@ -174,6 +174,7 @@ const SCALP_MAX_CANDLES         = 15;    /* auto-timeout: close trade monitoring
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
+const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side proxy to bypass CORS */
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
 const TELEGRAM_EXPORT_HEIGHT      = 1080;  /* high-res export height for Telegram screenshots */
@@ -1321,13 +1322,26 @@ async function sendTelegramPhoto(blob, caption) {
   validateTelegramCredentials(token, chatId);
 
   const form = new FormData();
+  form.append("action", "sendPhoto");
+  form.append("token", token);
   form.append("chat_id", chatId);
   form.append("photo", blob, "chart.png");
   form.append("caption", caption);
   form.append("parse_mode", "HTML");
 
-  const url = `https://api.telegram.org/bot${token}/sendPhoto`;
-  const resp = await fetch(url, { method: "POST", body: form });
+  /* Try server-side proxy first (avoids CORS), fall back to direct API */
+  let resp;
+  try {
+    resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", body: form });
+  } catch (_proxyErr) {
+    /* Proxy unreachable — try direct Telegram API as fallback */
+    const directForm = new FormData();
+    directForm.append("chat_id", chatId);
+    directForm.append("photo", blob, "chart.png");
+    directForm.append("caption", caption);
+    directForm.append("parse_mode", "HTML");
+    resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: directForm });
+  }
   const data = await safeJson(resp);
   if (!data.ok) {
     throw new Error(data.description || "Telegram API error");
@@ -1342,12 +1356,23 @@ async function sendTelegramMessage(text) {
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
-  });
+  const payload = { chat_id: chatId, text, parse_mode: "HTML" };
+
+  /* Try server-side proxy first (avoids CORS), fall back to direct API */
+  let resp;
+  try {
+    resp = await fetch(TELEGRAM_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sendMessage", token, payload })
+    });
+  } catch (_proxyErr) {
+    resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
   const data = await safeJson(resp);
   if (!data.ok) {
     throw new Error(data.description || "Telegram API error");
@@ -1416,17 +1441,35 @@ async function testTelegramConnection() {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
 
-    /* Verify the bot token */
-    const meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    /* Verify the bot token — proxy first, direct fallback */
+    let meResp;
+    try {
+      meResp = await fetch(TELEGRAM_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getMe", token, payload: {} })
+      });
+    } catch (_proxyErr) {
+      meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    }
     const meData = await safeJson(meResp);
     if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
 
-    /* Verify the chat ID is reachable */
-    const chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId })
-    });
+    /* Verify the chat ID is reachable — proxy first, direct fallback */
+    let chatResp;
+    try {
+      chatResp = await fetch(TELEGRAM_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "getChat", token, payload: { chat_id: chatId } })
+      });
+    } catch (_proxyErr) {
+      chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId })
+      });
+    }
     const chatData = await safeJson(chatResp);
     if (!chatData.ok) throw new Error(chatData.description || "Cannot reach chat");
 
