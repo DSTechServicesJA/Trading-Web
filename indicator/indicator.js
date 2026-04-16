@@ -1155,15 +1155,31 @@ function showToast(title, msg, type = "info", duration = 6000) {
   const iconMap = { info: "🔔", success: "✅", warning: "⚠️", trade: "📈" };
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `
-    <span class="toast-icon">${iconMap[type] || "🔔"}</span>
-    <div class="toast-body">
-      <div class="toast-title">${title}</div>
-      <div class="toast-msg">${msg}</div>
-    </div>
-    <button class="toast-close" aria-label="Dismiss">&times;</button>
-  `;
-  const closeBtn = toast.querySelector(".toast-close");
+
+  const iconSpan = document.createElement("span");
+  iconSpan.className = "toast-icon";
+  iconSpan.textContent = iconMap[type] || "🔔";
+
+  const body = document.createElement("div");
+  body.className = "toast-body";
+  const titleDiv = document.createElement("div");
+  titleDiv.className = "toast-title";
+  titleDiv.textContent = title;
+  const msgDiv = document.createElement("div");
+  msgDiv.className = "toast-msg";
+  msgDiv.textContent = msg;
+  body.appendChild(titleDiv);
+  body.appendChild(msgDiv);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "toast-close";
+  closeBtn.setAttribute("aria-label", "Dismiss");
+  closeBtn.textContent = "\u00D7";
+
+  toast.appendChild(iconSpan);
+  toast.appendChild(body);
+  toast.appendChild(closeBtn);
+
   const dismiss = () => {
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove());
@@ -1198,26 +1214,23 @@ function startNyOpenRangeTimer() {
   _nyOpenRangeTimerInterval = setInterval(() => {
     if (!nyOpenRangeEnabled) return;
     const et = getEasternTime();
-    /* Notify at exactly 9:30 AM EST (once per session) */
+    /* Notify at 9:30 AM EST (once per day).
+       Check the full minute window to avoid missing due to interval drift. */
     if (et.hours === 9 && et.minutes === 30 && !_nyOpenRangeNotified) {
       _nyOpenRangeNotified = true;
       nyOpenRangePhase = "RANGE";
       const sym = getActiveSymbol();
       showToast(
-        "🕤 9:30 AM EST — NY Open",
-        `Market open! Analyzing ${sym} for the 9:30–9:35 opening range. Marking high & low…`,
+        "\uD83D\uDD64 9:30 AM EST \u2014 NY Open",
+        `Market open! Analyzing ${sym} for the 9:30\u20139:35 opening range. Marking high & low\u2026`,
         "warning", 10000
       );
       sendPhaseNotification("NY_OPEN_RANGE");
-      addLog("🕤 NY Open Range: 9:30 AM EST reached — collecting 9:30–9:35 range");
+      addLog("\uD83D\uDD64 NY Open Range: 9:30 AM EST reached \u2014 collecting 9:30\u20139:35 range");
       playPhaseAlert("RANGE");
     }
-    /* Reset notification flag after the window passes (after 9:36) */
-    if (et.hours === 9 && et.minutes >= 36) {
-      _nyOpenRangeNotified = false;
-    }
-    /* Also reset at midnight for next day */
-    if (et.hours === 0 && et.minutes === 0) {
+    /* Reset notification flag after the window passes (after 9:36) so it can fire again tomorrow */
+    if ((et.hours === 9 && et.minutes >= 36) || et.hours >= 10) {
       _nyOpenRangeNotified = false;
     }
   }, 5000);   /* check every 5 seconds */
@@ -1323,11 +1336,13 @@ function processNyOpenRangeCandle(idx) {
     let closedInsideRange = (c.close >= rangeL && c.close <= rangeH);
 
     if (dir === "BULL") {
-      /* For bull: candle low must dip into or touch the range, but close above range high */
-      wicksIntoRange = (c.low <= rangeH);
+      /* For bull: candle low must dip into the range (between rangeL and rangeH),
+         but close must remain above the range high */
+      wicksIntoRange = (c.low <= rangeH && c.low >= rangeL);
     } else {
-      /* For bear: candle high must poke into or touch the range, but close below range low */
-      wicksIntoRange = (c.high >= rangeL);
+      /* For bear: candle high must poke into the range (between rangeL and rangeH),
+         but close must remain below the range low */
+      wicksIntoRange = (c.high >= rangeL && c.high <= rangeH);
     }
 
     if (wicksIntoRange && !closedInsideRange) {
