@@ -7421,7 +7421,9 @@ function getColors() {
     emaFast:       "#f59e0b",
     emaSlow:       "#8b5cf6",
     emaHTF:        "#06b6d4",    /* cyan for HTF EMA 100 */
-    trailingSL:    "#f97316"     /* orange for trailing stop */
+    trailingSL:    "#f97316",    /* orange for trailing stop */
+    breakoutHighLine: "#22c55e", /* green for breakout high level */
+    breakoutLowLine:  "#ef4444"  /* red for breakout low level */
   };
 }
 
@@ -7537,6 +7539,10 @@ function drawChart() {
     ctx.font = "bold 10px Arial";
     const rangeLabel = scalpingModeEnabled ? `${SCALP_RANGE_MINUTES}-MIN SCALP RANGE` : `${RANGE_MINUTES}-MIN RANGE`;
     ctx.fillText(rangeLabel, x1 + 4, y1 - 4);
+
+    /* ---- Breakout High / Low horizontal lines ---- */
+    drawHLine(ctx, y1, marginLeft, W - marginRight, COLORS.breakoutHighLine, "HIGH " + fmt(openingRange.high, 4), W, marginRight);
+    drawHLine(ctx, y2, marginLeft, W - marginRight, COLORS.breakoutLowLine,  "LOW " + fmt(openingRange.low, 4), W, marginRight);
   }
 
   /* ---- NY Open Range highlight (9:30–9:35 AM EST) ---- */
@@ -9131,6 +9137,20 @@ function drawMiniChart(p) {
     const y2 = yOf(p.openingRange.low);
     ctx.fillStyle = COLORS.rangeFill;
     ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+
+    /* Breakout High / Low horizontal lines */
+    const drawMiniHL = (yPos, color) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, yPos);
+      ctx.lineTo(W - marginRight, yPos);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    drawMiniHL(y1, COLORS.breakoutHighLine);
+    drawMiniHL(y2, COLORS.breakoutLowLine);
   }
 
   /* Candles */
