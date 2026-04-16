@@ -2158,3 +2158,33 @@ body.light-theme .ms-card-footer {
   font-style: italic;
   padding: 4px 0;
 }
+
+/* Scalp card result badge */
+.scalp-card-result {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.scalp-card-result.pending {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning-soft);
+  border: 1px solid rgba(245,158,11,0.3);
+  animation: signalPendingPulse 2s ease-in-out infinite;
+}
+.scalp-card-result.win {
+  background: rgba(16,185,129,0.15);
+  color: var(--success-soft);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.scalp-card-result.loss {
+  background: rgba(244,63,94,0.15);
+  color: var(--danger-soft);
+  border: 1px solid rgba(244,63,94,0.3);
+}
+
+/* Scalp card border tint by result */
+.scalp-card.scalp-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
+.scalp-card.scalp-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }

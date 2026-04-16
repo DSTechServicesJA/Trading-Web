@@ -911,6 +911,9 @@ function initUI() {
 
   /* Live Scalp Stats */
   UI.scalpStatsTotal       = document.getElementById("scalpStatsTotal");
+  UI.scalpStatsWins        = document.getElementById("scalpStatsWins");
+  UI.scalpStatsLosses      = document.getElementById("scalpStatsLosses");
+  UI.scalpStatsWinRate     = document.getElementById("scalpStatsWinRate");
   UI.scalpStatsBull        = document.getElementById("scalpStatsBull");
   UI.scalpStatsBear        = document.getElementById("scalpStatsBear");
   UI.scalpStatsAvgConf     = document.getElementById("scalpStatsAvgConf");
@@ -2219,7 +2222,8 @@ function renderScalpTickerBanner() {
     const s = allScalps[i];
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
-    card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}`;
+    const resultLower = (s.result || "PENDING").toLowerCase();
+    card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}${resultLower === "win" ? " scalp-card-win" : resultLower === "loss" ? " scalp-card-loss" : ""}`;
 
     const dirLabel = isBull ? "▲" : "▼";
     const dirClass = isBull ? "bull" : "bear";
@@ -2240,9 +2244,10 @@ function renderScalpTickerBanner() {
     card.appendChild(mkSpan("scalp-card-rr", rrStr));
     card.appendChild(mkSpan("scalp-card-conf", s.conf + "/7"));
     card.appendChild(mkSpan("scalp-card-time", ts));
+    card.appendChild(mkSpan("scalp-card-result " + resultLower, s.result || "PENDING"));
     if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
 
-    card.title = `Click to view details · ⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\n${s.reasons.join(", ")}`;
+    card.title = `Click to view details · ⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\nResult: ${s.result || "PENDING"}\n${s.reasons.join(", ")}`;
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} scalp details`);
@@ -2264,6 +2269,10 @@ function updateScalpStatsUI() {
 
   const h = getAggregatedScalpHistory();  /* newest-first, aggregated across all panels */
   const total = h.length;
+  const wins  = h.filter(s => s.result === "WIN").length;
+  const losses = h.filter(s => s.result === "LOSS").length;
+  const resolved = wins + losses;
+  const winRate = resolved > 0 ? (wins / resolved * 100).toFixed(1) + "%" : "0%";
   const bulls = h.filter(s => s.dir === "BULL").length;
   const bears = h.filter(s => s.dir === "BEAR").length;
   const avgConf = total > 0 ? (h.reduce((sum, s) => sum + s.conf, 0) / total).toFixed(1) : "0";
@@ -2271,6 +2280,9 @@ function updateScalpStatsUI() {
   const lastTime = total > 0 ? new Date(h[0].epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--";
 
   if (UI.scalpStatsTotal)    UI.scalpStatsTotal.textContent    = total;
+  if (UI.scalpStatsWins)     UI.scalpStatsWins.textContent     = wins;
+  if (UI.scalpStatsLosses)   UI.scalpStatsLosses.textContent   = losses;
+  if (UI.scalpStatsWinRate)  UI.scalpStatsWinRate.textContent  = winRate;
   if (UI.scalpStatsBull)     UI.scalpStatsBull.textContent     = bulls;
   if (UI.scalpStatsBear)     UI.scalpStatsBear.textContent     = bears;
   if (UI.scalpStatsAvgConf)  UI.scalpStatsAvgConf.textContent  = avgConf + "/7";
@@ -3872,6 +3884,7 @@ function connect() {
       processLatestCandle();
       processLiveScalp();
       monitorTradeOutcome(c);
+      monitorScalpOutcomes(c);
       drawChart();
     }
   };
@@ -4729,7 +4742,7 @@ function detectLiveScalp() {
   const tp = dir === "BULL" ? entry + tpDist : entry - tpDist;
   const rr = slDist > 0 ? tpDist / slDist : 0;
 
-  return { dir, conf, reasons, entry, sl, tp, rr, epoch: c.epoch, candleIdx: idx, symbol: getActiveSymbol() };
+  return { dir, conf, reasons, entry, sl, tp, rr, epoch: c.epoch, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING" };
 }
 
 /**
@@ -4766,6 +4779,59 @@ function processLiveScalp() {
   /* Log to signal log */
   const symbol = getActiveSymbol() || "--";
   addLog(`⚡ SCALP ${scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(scalp.entry, 4)} | Confluence ${scalp.conf}/7 | ${scalp.reasons.join(", ")}`);
+}
+
+/**
+ * Monitor all PENDING scalps in liveScalpHistory for SL/TP outcome.
+ * Called on every candle update (same pipeline as monitorTradeOutcome).
+ * Uses a max-candle timeout (same as SCALP_MAX_CANDLES) for time-based exit.
+ */
+function monitorScalpOutcomes(candle) {
+  if (!liveScalpEnabled) return;
+  let changed = false;
+  for (const s of liveScalpHistory) {
+    if (s.result !== "PENDING") continue;
+
+    /* Time-based exit: if enough candles have passed since the scalp entry */
+    if (s.candleIdx != null) {
+      const elapsed = (candles.length - 1) - s.candleIdx;
+      if (elapsed >= SCALP_MAX_CANDLES) {
+        const inProfit = (s.dir === "BULL" && candle.close > s.entry) ||
+                         (s.dir === "BEAR" && candle.close < s.entry);
+        s.result = inProfit ? "WIN" : "LOSS";
+        addLog(`⚡ Scalp ${s.result} (timeout ${SCALP_MAX_CANDLES} candles) — ${s.dir} ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+        changed = true;
+        continue;
+      }
+    }
+
+    /* Check SL / TP hit */
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) {
+        s.result = "LOSS";
+        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
+        changed = true;
+      } else if (candle.high >= s.tp) {
+        s.result = "WIN";
+        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
+        changed = true;
+      }
+    } else {
+      if (candle.high >= s.sl) {
+        s.result = "LOSS";
+        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
+        changed = true;
+      } else if (candle.low <= s.tp) {
+        s.result = "WIN";
+        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    updateScalpStatsUI();
+    renderScalpTickerBanner();
+  }
 }
 
 function playScalpAlert(dir) {
@@ -8430,6 +8496,7 @@ function connectPanel(p) {
       processLatestCandle();
       processLiveScalp();
       monitorTradeOutcome(c);
+      monitorScalpOutcomes(c);
     }
 
     /* Save state back to panel */
