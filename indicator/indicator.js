@@ -1083,14 +1083,15 @@ function setPhase(newPhase) {
   /* Auto-focus the panel that fired a TRADE signal so chart markup is visible.
      Only for live streaming signals — skip during historical batch processing. */
   if (prevPhase !== newPhase && newPhase === "TRADE" && _multiPanelProcessing && !_historicalProcessing) {
-    const tradeSymbol = _multiPanelProcessing;
-    /* Defer focus until after savePanel() so panel state is up-to-date */
+    const panelSymbol = _multiPanelProcessing;
+    /* Defer focus until after savePanel() completes so panel state is up-to-date */
+    const FOCUS_DELAY_MS = 50;
     setTimeout(() => {
-      if (multiPanels.has(tradeSymbol)) {
-        focusPanel(tradeSymbol);
-        showToast("📈 TRADE Signal", `${getSymbolLabel(tradeSymbol)} entered TRADE phase — chart focused`, "trade", 5000);
+      if (multiPanels.has(panelSymbol)) {
+        focusPanel(panelSymbol);
+        showToast("📈 TRADE Signal", `${getSymbolLabel(panelSymbol)} entered TRADE phase — chart focused`, "trade", 5000);
       }
-    }, 50);
+    }, FOCUS_DELAY_MS);
   }
 
   /* Auto-send Telegram on TRADE phase — for ALL panels, not just focused.
