@@ -1995,9 +1995,11 @@ body.light-theme .ms-card-footer {
 /* Price / level text */
 .signal-card-price { color: var(--text-soft); }
 .signal-card-levels { color: var(--text-muted); font-size: 10px; }
-.signal-card-rr { color: var(--cyan); }
+.signal-card-sep { color: var(--text-muted); font-size: 10px; opacity: 0.5; }
+.signal-card-rr { color: var(--cyan); font-weight: 700; }
 .signal-card-time { color: var(--text-muted); font-size: 10px; }
 .signal-card-conf { color: var(--warning-soft); font-size: 10px; }
+.scalp-card-sep { color: var(--text-muted); font-size: 10px; opacity: 0.5; }
 
 /* Result badge */
 .signal-card-result {

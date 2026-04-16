@@ -320,6 +320,7 @@ function _deobfuscate(encoded) {
 /* Multi-panel context tracking (used throughout for context-aware processing) */
 let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
+let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
 
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
@@ -1071,23 +1072,52 @@ function setPhase(newPhase) {
       RETEST: "warning", INDECISION: "warning", CONFIRM: "enabled", TRADE: "bull"
     }[newPhase] || "disabled");
   }
-  /* Play alert on meaningful phase transitions */
-  if (prevPhase !== newPhase && newPhase !== "WAITING") {
+  /* Play alert on meaningful phase transitions (live only, skip historical batch) */
+  if (prevPhase !== newPhase && newPhase !== "WAITING" && !_historicalProcessing) {
     playPhaseAlert(newPhase);
     /* Send browser notification for focused panel or single mode */
     if (isFocusedOrSingle) sendPhaseNotification(newPhase);
     /* Also send notification for non-focused panels reaching TRADE (actionable) */
     if (!isFocusedOrSingle && newPhase === "TRADE") sendPhaseNotification(newPhase);
   }
-  /* Auto-send Telegram on TRADE phase — for ALL panels, not just focused */
-  if (prevPhase !== newPhase && newPhase === "TRADE" && telegramAutoSend) {
-    if (_multiPanelProcessing) {
-      /* Multi-panel: use panel-specific Telegram send (mini-chart + panel state) */
-      const panelSymbol = _multiPanelProcessing;
-      setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
+  /* Auto-focus the panel that fired a TRADE signal so chart markup is visible.
+     Only for live streaming signals — skip during historical batch processing. */
+  if (prevPhase !== newPhase && newPhase === "TRADE" && _multiPanelProcessing && !_historicalProcessing) {
+    const panelSymbol = _multiPanelProcessing;
+    /* Defer focus until after savePanel() completes so panel state is up-to-date */
+    const FOCUS_DELAY_MS = 50;
+    setTimeout(() => {
+      if (multiPanels.has(panelSymbol)) {
+        focusPanel(panelSymbol);
+        showToast("📈 TRADE Signal", `${getSymbolLabel(panelSymbol)} entered TRADE phase — chart focused`, "trade", 5000);
+      }
+    }, FOCUS_DELAY_MS);
+  }
+
+  /* Auto-send Telegram on TRADE phase — for ALL panels, not just focused.
+     Only for live streaming signals — skip during historical batch processing. */
+  if (prevPhase !== newPhase && newPhase === "TRADE" && !_historicalProcessing) {
+    if (telegramAutoSend) {
+      if (_multiPanelProcessing) {
+        /* Multi-panel: use panel-specific Telegram send (mini-chart + panel state) */
+        const panelSymbol = _multiPanelProcessing;
+        setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
+      } else {
+        /* Single-symbol mode: use main chart as before */
+        setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+      }
     } else {
-      /* Single-symbol mode: use main chart as before */
-      setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+      /* Warn user that Telegram isn't configured when a TRADE fires */
+      const { token, chatId } = getTelegramCredentials();
+      if (!token || !chatId) {
+        showToast("⚠️ Telegram Not Configured",
+          "A TRADE signal fired but Telegram bot token / chat ID are not set. Configure in Settings → Telegram.",
+          "warning", 8000);
+      } else {
+        showToast("ℹ️ Telegram Auto-Send Off",
+          "A TRADE signal fired but Telegram auto-send is disabled. Enable it in Settings → Telegram.",
+          "info", 6000);
+      }
     }
   }
 }
@@ -1792,6 +1822,7 @@ async function sendTelegramAlert() {
     saveSettings();
   } catch (err) {
     addLog(`📤 Telegram error: ${err.message}`);
+    showToast("❌ Telegram Error", err.message, "warning", 6000);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `❌ ${err.message}`;
       UI.telegramStatus.className = "hint telegram-status telegram-err";
@@ -1841,6 +1872,7 @@ async function sendPanelTelegramAlert(symbol) {
     }
   } catch (err) {
     addLog(`📤 [${symbol}] Telegram error: ${err.message}`);
+    showToast("❌ Telegram Error", `${getSymbolLabel(symbol)}: ${err.message}`, "warning", 6000);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `❌ ${getSymbolLabel(symbol)}: ${err.message}`;
       UI.telegramStatus.className = "hint telegram-status telegram-err";
@@ -2445,7 +2477,7 @@ function renderSignalBanner() {
         ? `<span class="signal-card-pattern">${patternStr}</span>`
         : `<span class="signal-card-price">@ ${entryStr}</span>`) +
       (isConfirmed ? "" : `<span class="signal-card-levels">SL ${slStr} · TP ${tpStr}</span>`) +
-      (isConfirmed ? "" : `<span class="signal-card-rr">${rrStr}</span>`) +
+      (isConfirmed ? "" : `<span class="signal-card-sep">·</span><span class="signal-card-rr">${rrStr}</span>`) +
       (confStr ? `<span class="signal-card-conf">⚡${confStr}</span>` : "") +
       `<span class="signal-card-time">${ts}</span>` +
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
@@ -2508,6 +2540,7 @@ function renderScalpTickerBanner() {
     card.appendChild(mkSpan("scalp-card-symbol", sym));
     card.appendChild(mkSpan("scalp-card-price", "@ " + entryStr));
     card.appendChild(mkSpan("scalp-card-levels", "SL " + slStr + " · TP " + tpStr));
+    card.appendChild(mkSpan("scalp-card-sep", "·"));
     card.appendChild(mkSpan("scalp-card-rr", rrStr));
     card.appendChild(mkSpan("scalp-card-conf", s.conf + "/7"));
     card.appendChild(mkSpan("scalp-card-time", ts));
@@ -6259,6 +6292,7 @@ function computeConfluenceScore() {
 /* ================= STRATEGY LOGIC ================= */
 
 function processAllCandles() {
+  _historicalProcessing = true;
   openingRange = null;
   breakout = null;
   retestInfo = null;
@@ -6305,6 +6339,7 @@ function processAllCandles() {
   }
 
   updateStateUI();
+  _historicalProcessing = false;
 }
 
 function processLatestCandle() {
