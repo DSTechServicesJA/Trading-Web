@@ -7565,6 +7565,32 @@ function drawChart() {
       ctx.stroke();
       ctx.setLineDash([]);
 
+      /* Result badge (WIN/LOSS) next to the scalp marker */
+      if (s.result === "WIN" || s.result === "LOSS") {
+        const rColor = s.result === "WIN" ? "rgba(16,185,129,0.9)" : "rgba(244,63,94,0.9)";
+        const rText = s.result;
+        ctx.font = "bold 8px Arial";
+        const rw = ctx.measureText(rText).width + 6;
+        const rx = sx + 10;
+        const ry = sy - 6;
+        ctx.fillStyle = rColor;
+        ctx.beginPath();
+        ctx.moveTo(rx + 3, ry);
+        ctx.lineTo(rx + rw - 3, ry);
+        ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + 3);
+        ctx.lineTo(rx + rw, ry + 10);
+        ctx.quadraticCurveTo(rx + rw, ry + 13, rx + rw - 3, ry + 13);
+        ctx.lineTo(rx + 3, ry + 13);
+        ctx.quadraticCurveTo(rx, ry + 13, rx, ry + 10);
+        ctx.lineTo(rx, ry + 3);
+        ctx.quadraticCurveTo(rx, ry, rx + 3, ry);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.fillText(rText, rx + rw / 2, ry + 10);
+      }
+
       ctx.restore();
     }
   }
