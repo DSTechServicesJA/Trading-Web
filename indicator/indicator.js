@@ -759,6 +759,16 @@ let retestCount          = 0;       /* track number of retests for double-retest
 /* Scalping mode (from MD: quick 5-10 pip profits on 1min/5min charts) */
 let scalpingModeEnabled = false;
 
+/* NY Open Range (9:30–9:35 AM EST) strategy */
+let nyOpenRangeEnabled   = false;
+let nyOpenRange          = null;   /* { high, low, startIdx, endIdx, startEpoch, endEpoch } */
+let nyOpenRangeBreakout  = null;   /* { dir, candleIdx, level } */
+let nyOpenRangeRetest    = null;   /* { candleIdx } */
+let nyOpenRangeTrade     = null;   /* { entry, sl, tp, dir, rr } */
+let nyOpenRangePhase     = "IDLE"; /* IDLE | WAITING | RANGE | BREAKOUT | RETEST | TRADE */
+let _nyOpenRangeNotified = false;  /* prevent duplicate 9:30 notifications per session */
+let _nyOpenRangeTimerInterval = null; /* check-clock interval */
+
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = true;
 
@@ -877,6 +887,8 @@ function initUI() {
 
   /* Scalping mode */
   UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
+  UI.nyOpenRangeToggle     = document.getElementById("nyOpenRangeToggle");
+  UI.toastContainer        = document.getElementById("toastContainer");
 
   /* Profit-Direction Constraint UI refs */
   UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
@@ -1126,6 +1138,237 @@ function requestNotificationPermission() {
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
+}
+
+/* ================= ON-SCREEN TOAST NOTIFICATIONS ================= */
+/**
+ * Show a non-blocking on-screen toast notification.
+ * @param {string} title   – bold title text
+ * @param {string} msg     – description text
+ * @param {string} type    – "info" | "success" | "warning" | "trade"
+ * @param {number} duration – auto-dismiss in ms (0 = manual dismiss only)
+ */
+function showToast(title, msg, type = "info", duration = 6000) {
+  const container = UI.toastContainer || document.getElementById("toastContainer");
+  if (!container) return;
+
+  const iconMap = { info: "🔔", success: "✅", warning: "⚠️", trade: "📈" };
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <span class="toast-icon">${iconMap[type] || "🔔"}</span>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${msg}</div>
+    </div>
+    <button class="toast-close" aria-label="Dismiss">&times;</button>
+  `;
+  const closeBtn = toast.querySelector(".toast-close");
+  const dismiss = () => {
+    toast.classList.add("toast-out");
+    toast.addEventListener("animationend", () => toast.remove());
+  };
+  closeBtn.addEventListener("click", dismiss);
+  container.appendChild(toast);
+
+  /* Keep max 5 toasts on screen */
+  while (container.children.length > 5) container.firstElementChild.remove();
+
+  if (duration > 0) setTimeout(dismiss, duration);
+}
+
+/* ================= NY OPEN RANGE (9:30 AM EST) STRATEGY ================= */
+/**
+ * Convert current time to Eastern Time (EST/EDT-aware) using Intl.
+ * Returns { hours, minutes } in ET.
+ */
+function getEasternTime() {
+  const now = new Date();
+  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
+  const parts = new Date(etStr);
+  return { hours: parts.getHours(), minutes: parts.getMinutes(), seconds: parts.getSeconds() };
+}
+
+/**
+ * Start the clock-checker interval that watches for 9:30 AM EST.
+ * Fires a toast + browser notification when it's time.
+ */
+function startNyOpenRangeTimer() {
+  if (_nyOpenRangeTimerInterval) return;
+  _nyOpenRangeTimerInterval = setInterval(() => {
+    if (!nyOpenRangeEnabled) return;
+    const et = getEasternTime();
+    /* Notify at exactly 9:30 AM EST (once per session) */
+    if (et.hours === 9 && et.minutes === 30 && !_nyOpenRangeNotified) {
+      _nyOpenRangeNotified = true;
+      nyOpenRangePhase = "RANGE";
+      const sym = getActiveSymbol();
+      showToast(
+        "🕤 9:30 AM EST — NY Open",
+        `Market open! Analyzing ${sym} for the 9:30–9:35 opening range. Marking high & low…`,
+        "warning", 10000
+      );
+      sendPhaseNotification("NY_OPEN_RANGE");
+      addLog("🕤 NY Open Range: 9:30 AM EST reached — collecting 9:30–9:35 range");
+      playPhaseAlert("RANGE");
+    }
+    /* Reset notification flag after the window passes (after 9:36) */
+    if (et.hours === 9 && et.minutes >= 36) {
+      _nyOpenRangeNotified = false;
+    }
+    /* Also reset at midnight for next day */
+    if (et.hours === 0 && et.minutes === 0) {
+      _nyOpenRangeNotified = false;
+    }
+  }, 5000);   /* check every 5 seconds */
+}
+
+function stopNyOpenRangeTimer() {
+  if (_nyOpenRangeTimerInterval) {
+    clearInterval(_nyOpenRangeTimerInterval);
+    _nyOpenRangeTimerInterval = null;
+  }
+}
+
+/**
+ * Given candle data, determine if a candle falls within the 9:30–9:35 AM EST window.
+ * Uses candle epoch (Unix seconds).
+ */
+function isInNyOpenWindow(epochSec) {
+  const d = new Date(epochSec * 1000);
+  const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York" });
+  const etDate = new Date(etStr);
+  const h = etDate.getHours();
+  const m = etDate.getMinutes();
+  return (h === 9 && m >= 30 && m < 35);
+}
+
+/**
+ * Build the NY Open Range from candle data (9:30–9:35 AM EST window).
+ * Looks at all candles and finds those within the 5-min window.
+ */
+function buildNyOpenRange() {
+  if (!nyOpenRangeEnabled || candles.length === 0) return;
+  if (nyOpenRange) return;  /* already built */
+
+  let high = -Infinity, low = Infinity;
+  let startIdx = -1, endIdx = -1;
+  let startEpoch = 0, endEpoch = 0;
+
+  for (let i = 0; i < candles.length; i++) {
+    if (isInNyOpenWindow(candles[i].epoch)) {
+      if (startIdx < 0) {
+        startIdx = i;
+        startEpoch = candles[i].epoch;
+      }
+      if (candles[i].high > high) high = candles[i].high;
+      if (candles[i].low < low)   low = candles[i].low;
+      endIdx = i;
+      endEpoch = candles[i].epoch;
+    }
+  }
+
+  if (startIdx < 0 || high === -Infinity) return;
+
+  /* Check if the window has closed (latest candle is past 9:35 AM EST) */
+  const lastCandle = candles[candles.length - 1];
+  if (!isInNyOpenWindow(lastCandle.epoch) && endIdx >= 0) {
+    /* Window has passed — range is complete */
+    nyOpenRange = { high, low, startIdx, endIdx, startEpoch, endEpoch };
+    nyOpenRangePhase = "BREAKOUT";
+    addLog(`🕤 NY Open Range set: High ${fmt(high, 4)}, Low ${fmt(low, 4)} (candles #${startIdx}–#${endIdx})`);
+    showToast(
+      "NY Open Range Set",
+      `High: ${fmt(high, 4)} | Low: ${fmt(low, 4)} — Watching for breakout…`,
+      "success", 8000
+    );
+  }
+}
+
+/**
+ * Process a single candle through the NY Open Range strategy phases.
+ * Called from processLatestCandle / processAllCandles alongside the main strategy.
+ */
+function processNyOpenRangeCandle(idx) {
+  if (!nyOpenRangeEnabled || !nyOpenRange) return;
+  const c = candles[idx];
+
+  /* ---- PHASE: BREAKOUT — looking for 5-min candle closing outside range ---- */
+  if (nyOpenRangePhase === "BREAKOUT" && !nyOpenRangeBreakout) {
+    if (idx <= nyOpenRange.endIdx) return;
+
+    if (c.close > nyOpenRange.high) {
+      nyOpenRangeBreakout = { dir: "BULL", candleIdx: idx, level: nyOpenRange.high };
+      nyOpenRangePhase = "RETEST";
+      addLog(`🕤 NY Open Range BULL breakout at #${idx}, close ${fmt(c.close, 4)} > high ${fmt(nyOpenRange.high, 4)}`);
+      showToast("NY Range Breakout ▲", `Bullish breakout — waiting for retest…`, "info", 8000);
+    } else if (c.close < nyOpenRange.low) {
+      nyOpenRangeBreakout = { dir: "BEAR", candleIdx: idx, level: nyOpenRange.low };
+      nyOpenRangePhase = "RETEST";
+      addLog(`🕤 NY Open Range BEAR breakout at #${idx}, close ${fmt(c.close, 4)} < low ${fmt(nyOpenRange.low, 4)}`);
+      showToast("NY Range Breakout ▼", `Bearish breakout — waiting for retest…`, "info", 8000);
+    }
+    return;
+  }
+
+  /* ---- PHASE: RETEST — candle wicks back into range but does NOT close inside ---- */
+  if (nyOpenRangePhase === "RETEST" && nyOpenRangeBreakout && !nyOpenRangeRetest) {
+    if (idx <= nyOpenRangeBreakout.candleIdx) return;
+
+    const rangeH = nyOpenRange.high;
+    const rangeL = nyOpenRange.low;
+    const dir    = nyOpenRangeBreakout.dir;
+
+    let wicksIntoRange = false;
+    let closedInsideRange = (c.close >= rangeL && c.close <= rangeH);
+
+    if (dir === "BULL") {
+      /* For bull: candle low must dip into or touch the range, but close above range high */
+      wicksIntoRange = (c.low <= rangeH);
+    } else {
+      /* For bear: candle high must poke into or touch the range, but close below range low */
+      wicksIntoRange = (c.high >= rangeL);
+    }
+
+    if (wicksIntoRange && !closedInsideRange) {
+      /* Valid retest! */
+      nyOpenRangeRetest = { candleIdx: idx };
+      nyOpenRangePhase = "TRADE";
+
+      /* Build the trade: SL at midpoint, TP at 1:2 R:R */
+      const midpoint = (rangeH + rangeL) / 2;
+      const entry    = c.close;
+      const sl       = midpoint;
+      const risk     = Math.abs(entry - sl);
+
+      if (risk > 0) {
+        const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
+        const rr = 2.0;
+        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, symbol: getActiveSymbol() };
+
+        addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)} (midpoint), TP ${fmt(tp, 4)} (1:2 R:R)`);
+        showToast(
+          `NY Range Entry ${dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:2`,
+          "trade", 12000
+        );
+        playPhaseAlert("TRADE");
+        sendPhaseNotification("TRADE");
+      }
+    }
+    return;
+  }
+}
+
+/**
+ * Reset NY Open Range state for a new session / day.
+ */
+function resetNyOpenRange() {
+  nyOpenRange         = null;
+  nyOpenRangeBreakout = null;
+  nyOpenRangeRetest   = null;
+  nyOpenRangeTrade    = null;
+  nyOpenRangePhase    = nyOpenRangeEnabled ? "WAITING" : "IDLE";
 }
 
 /* ================= TELEGRAM INTEGRATION ================= */
@@ -1743,7 +1986,9 @@ function _snapshotChartGlobals() {
     rsiFilterEnabled, volumeSpikeEnabled, sessionFilterEnabled,
     sessionFilterMode, fibRetestEnabled,
     macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
-    stochFilterEnabled, scalpingModeEnabled, RANGE_MINUTES
+    stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
+    nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
+    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES
   };
 }
 function _restoreChartGlobals(s) {
@@ -1773,7 +2018,10 @@ function _restoreChartGlobals(s) {
   fibRetestEnabled = s.fibRetestEnabled;
   macdFilterEnabled = s.macdFilterEnabled; bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
   adxFilterEnabled = s.adxFilterEnabled; stochFilterEnabled = s.stochFilterEnabled;
-  scalpingModeEnabled = s.scalpingModeEnabled; RANGE_MINUTES = s.RANGE_MINUTES;
+  scalpingModeEnabled = s.scalpingModeEnabled; nyOpenRangeEnabled = s.nyOpenRangeEnabled;
+  nyOpenRange = s.nyOpenRange; nyOpenRangeBreakout = s.nyOpenRangeBreakout;
+  nyOpenRangeRetest = s.nyOpenRangeRetest; nyOpenRangeTrade = s.nyOpenRangeTrade;
+  nyOpenRangePhase = s.nyOpenRangePhase; RANGE_MINUTES = s.RANGE_MINUTES;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -1815,6 +2063,7 @@ function saveSettings() {
       adxFilterEnabled,
       stochFilterEnabled,
       scalpingModeEnabled,
+      nyOpenRangeEnabled,
       /* Profit-Direction Constraints */
       minConfluenceEnabled,
       minConfluenceValue,
@@ -1934,6 +2183,9 @@ function restoreSettings() {
     /* Scalping mode */
     if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
     if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
+
+    if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
+    if (UI.nyOpenRangeToggle) UI.nyOpenRangeToggle.checked = nyOpenRangeEnabled;
 
     /* Profit-Direction Constraint toggles */
     if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
@@ -3308,6 +3560,7 @@ function resetIndicator() {
   retestCount = 0;
   trailingSL   = null;
   partialTpHit = false;
+  resetNyOpenRange();
   setPhase("WAITING");
   updateStateUI();
 }
@@ -3792,6 +4045,9 @@ function connect() {
     startUptimeTimer();
     startPing();
 
+    /* Start NY Open Range timer if enabled */
+    if (nyOpenRangeEnabled) startNyOpenRangeTimer();
+
     /* Authorize with stored Deriv token first to bind live account */
     const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
     if (token) {
@@ -3922,6 +4178,7 @@ function disconnect() {
   stopPing();
   stopCandleCountdown();
   stopUptimeTimer();
+  stopNyOpenRangeTimer();
   updateAccountBadge(null);
 
   if (ws) {
@@ -4538,6 +4795,7 @@ function revertAllSettings() {
 
   /* Scalping & misc */
   scalpingModeEnabled  = false;
+  nyOpenRangeEnabled   = false;
   autoApplyRecommended = true;
 
   /* Advanced parameter defaults */
@@ -4568,6 +4826,7 @@ function revertAllSettings() {
   if (UI.adxFilterToggle)        UI.adxFilterToggle.checked        = adxFilterEnabled;
   if (UI.stochFilterToggle)      UI.stochFilterToggle.checked      = stochFilterEnabled;
   if (UI.scalpingModeToggle)     UI.scalpingModeToggle.checked     = scalpingModeEnabled;
+  if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
 
   /* Profit-Direction UI sync */
@@ -5996,6 +6255,9 @@ function processAllCandles() {
   retestCount  = 0;
   setPhase("WAITING");
 
+  /* Reset NY Open Range for full reprocessing */
+  resetNyOpenRange();
+
   if (candles.length === 0) return;
   rangeStartEpoch = candles[0].epoch;
   computeATR();
@@ -6016,6 +6278,17 @@ function processAllCandles() {
     }
   }
 
+  /* NY Open Range: build range and process all candles through it */
+  if (nyOpenRangeEnabled) {
+    buildNyOpenRange();
+    if (nyOpenRange) {
+      for (let i = nyOpenRange.endIdx + 1; i < candles.length; i++) {
+        processNyOpenRangeCandle(i);
+        if (nyOpenRangeTrade) break;
+      }
+    }
+  }
+
   updateStateUI();
 }
 
@@ -6031,6 +6304,13 @@ function processLatestCandle() {
     buildOpeningRange();
     /* If still in WAITING/RANGE, nothing more to do */
     if (phase === "WAITING" || phase === "RANGE") {
+      /* NY Open Range: try to build / advance on each candle */
+      if (nyOpenRangeEnabled) {
+        buildNyOpenRange();
+        if (nyOpenRange && nyOpenRangePhase !== "TRADE") {
+          processNyOpenRangeCandle(candles.length - 1);
+        }
+      }
       updateStateUI();
       return;
     }
@@ -6059,6 +6339,14 @@ function processLatestCandle() {
     prevPhase = phase;
   }
 
+  /* NY Open Range: advance on latest candle (runs alongside main strategy) */
+  if (nyOpenRangeEnabled) {
+    buildNyOpenRange();
+    if (nyOpenRange && nyOpenRangePhase !== "TRADE") {
+      processNyOpenRangeCandle(idx);
+    }
+  }
+
   updateStateUI();
 }
 
@@ -6076,6 +6364,8 @@ function resetForNextSetup() {
   trailingSL     = null;
   partialTpHit   = false;
   retestCount    = 0;
+  /* Reset NY Open Range alongside main strategy */
+  resetNyOpenRange();
   /* Start new range from the latest candle */
   rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
   setPhase("RANGE");
@@ -7149,6 +7439,15 @@ function drawChart() {
     if (trade.sl > priceHigh) priceHigh = trade.sl;
     if (trade.sl < priceLow)  priceLow = trade.sl;
   }
+  /* Include NY Open Range trade levels in price range */
+  if (nyOpenRangeTrade) {
+    if (nyOpenRangeTrade.tp != null) {
+      if (nyOpenRangeTrade.tp > priceHigh) priceHigh = nyOpenRangeTrade.tp;
+      if (nyOpenRangeTrade.tp < priceLow)  priceLow = nyOpenRangeTrade.tp;
+    }
+    if (nyOpenRangeTrade.sl > priceHigh) priceHigh = nyOpenRangeTrade.sl;
+    if (nyOpenRangeTrade.sl < priceLow)  priceLow = nyOpenRangeTrade.sl;
+  }
   const pricePad = (priceHigh - priceLow) * CHART_PRICE_PADDING;
   priceHigh += pricePad;
   priceLow  -= pricePad;
@@ -7188,6 +7487,90 @@ function drawChart() {
     ctx.font = "bold 10px Arial";
     const rangeLabel = scalpingModeEnabled ? `${SCALP_RANGE_MINUTES}-MIN SCALP RANGE` : `${RANGE_MINUTES}-MIN RANGE`;
     ctx.fillText(rangeLabel, x1 + 4, y1 - 4);
+  }
+
+  /* ---- NY Open Range highlight (9:30–9:35 AM EST) ---- */
+  if (nyOpenRange && nyOpenRangeEnabled) {
+    const nx1 = xOf(nyOpenRange.startIdx) - candleW / 2 - 2;
+    const nx2 = xOf(nyOpenRange.endIdx) + candleW / 2 + 2;
+    const ny1 = yOf(nyOpenRange.high);
+    const ny2 = yOf(nyOpenRange.low);
+
+    let nFill = "rgba(168,85,247,0.10)";    /* purple tint */
+    let nBorder = "rgba(168,85,247,0.60)";
+    if (nyOpenRangeBreakout) {
+      nFill   = nyOpenRangeBreakout.dir === "BULL" ? "rgba(16,185,129,0.10)" : "rgba(244,63,94,0.10)";
+      nBorder = nyOpenRangeBreakout.dir === "BULL" ? "rgba(16,185,129,0.60)" : "rgba(244,63,94,0.60)";
+    }
+
+    const nExtendX = nyOpenRangeBreakout ? W - marginRight : nx2;
+    ctx.fillStyle = nFill;
+    ctx.fillRect(nx1, ny1, nExtendX - nx1, ny2 - ny1);
+    ctx.strokeStyle = nBorder;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 3]);
+    ctx.strokeRect(nx1, ny1, nExtendX - nx1, ny2 - ny1);
+    ctx.setLineDash([]);
+
+    /* Midpoint line (SL reference) */
+    const midY = yOf((nyOpenRange.high + nyOpenRange.low) / 2);
+    ctx.strokeStyle = "rgba(168,85,247,0.40)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(nx1, midY);
+    ctx.lineTo(nExtendX, midY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = nBorder;
+    ctx.font = "bold 10px Arial";
+    ctx.fillText("9:30 AM EST RANGE", nx1 + 4, ny1 - 4);
+
+    /* Draw NY Open Range trade levels (entry / SL / TP) */
+    if (nyOpenRangeTrade) {
+      const nt = nyOpenRangeTrade;
+      /* Entry line */
+      const entryY = yOf(nt.entry);
+      ctx.strokeStyle = "#a855f7";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(xOf(nt.entryIdx), entryY);
+      ctx.lineTo(W - marginRight, entryY);
+      ctx.stroke();
+      ctx.fillStyle = "#a855f7";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText(`ENTRY ${fmt(nt.entry, 4)}`, W - marginRight - 4, entryY - 4);
+
+      /* SL line */
+      const slY = yOf(nt.sl);
+      ctx.strokeStyle = COLORS.sl || "#f43f5e";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(xOf(nt.entryIdx), slY);
+      ctx.lineTo(W - marginRight, slY);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.sl || "#f43f5e";
+      ctx.fillText(`SL ${fmt(nt.sl, 4)} (mid)`, W - marginRight - 4, slY - 4);
+
+      /* TP line */
+      if (nt.tp != null) {
+        const tpY = yOf(nt.tp);
+        ctx.strokeStyle = COLORS.tp || "#10b981";
+        ctx.beginPath();
+        ctx.moveTo(xOf(nt.entryIdx), tpY);
+        ctx.lineTo(W - marginRight, tpY);
+        ctx.stroke();
+        ctx.fillStyle = COLORS.tp || "#10b981";
+        ctx.fillText(`TP ${fmt(nt.tp, 4)} (1:2)`, W - marginRight - 4, tpY - 4);
+      }
+
+      ctx.setLineDash([]);
+      ctx.textAlign = "left";
+    }
   }
 
   /* ---- Breakout candle box ---- */
@@ -8318,6 +8701,7 @@ function syncFilterUIFromGlobals() {
   if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
   if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
   if (UI.scalpingModeToggle)    UI.scalpingModeToggle.checked    = scalpingModeEnabled;
+  if (UI.nyOpenRangeToggle)     UI.nyOpenRangeToggle.checked     = nyOpenRangeEnabled;
   if (UI.rangeDuration)       UI.rangeDuration.value          = RANGE_MINUTES;
   if (UI.autoResetToggle)     UI.autoResetToggle.checked     = autoResetEnabled;
   /* Profit-Direction Constraints */
@@ -9043,6 +9427,25 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
+  }
+  if (UI.nyOpenRangeToggle) {
+    UI.nyOpenRangeToggle.addEventListener("change", () => {
+      nyOpenRangeEnabled = UI.nyOpenRangeToggle.checked;
+      saveSettings();
+      if (nyOpenRangeEnabled) {
+        startNyOpenRangeTimer();
+        resetNyOpenRange();
+        nyOpenRangePhase = "WAITING";
+        addLog("🕤 NY Open Range strategy enabled — watching for 9:30 AM EST");
+        showToast("NY Open Range Enabled", "Watching for 9:30 AM EST to mark the opening range.", "info", 5000);
+      } else {
+        stopNyOpenRangeTimer();
+        resetNyOpenRange();
+        addLog("🕤 NY Open Range strategy disabled");
+      }
+      updateStateUI();
+      drawChart();
+    });
   }
 
   /* Profit-Direction Constraint listeners */

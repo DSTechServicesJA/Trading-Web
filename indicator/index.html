@@ -585,6 +585,12 @@
               <p class="hint">Reset all strategy filters and parameters back to their original default values.</p>
 
               <hr class="param-divider" />
+              <p class="param-group-title">🕤 NY Open Range (9:30 AM EST)</p>
+
+              <label class="toggle-row"><input type="checkbox" id="nyOpenRangeToggle" /> NY Open Range Strategy</label>
+              <p class="hint">At 9:30 AM EST, analyze the 9:30–9:35 candle to mark the range high/low. Wait for a 5-min candle to close outside the range, then enter on a valid retest (wick back into range without closing inside). SL at midpoint of range, TP at 1:2 R:R.</p>
+
+              <hr class="param-divider" />
               <p class="param-group-title">⚡ Scalping Mode</p>
 
               <label class="toggle-row"><input type="checkbox" id="scalpingModeToggle" /> Scalping Mode</label>
@@ -1075,5 +1081,9 @@
     obs.observe(src, { childList: true, characterData: true, subtree: true });
   })();
 </script>
+
+<!-- On-Screen Toast Notifications -->
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
 </body>
 </html>
