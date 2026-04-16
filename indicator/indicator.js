@@ -1336,19 +1336,24 @@ function processNyOpenRangeCandle(idx) {
   if (!nyOpenRangeEnabled || !nyOpenRange) return;
   const c = candles[idx];
 
-  /* ---- PHASE: BREAKOUT — looking for 5-min candle closing outside range ---- */
+  /* ---- PHASE: BREAKOUT — looking for candle whose entire body closes outside range ---- */
   if (nyOpenRangePhase === "BREAKOUT" && !nyOpenRangeBreakout) {
     if (idx <= nyOpenRange.endIdx) return;
 
-    if (c.close > nyOpenRange.high) {
+    /* Require the entire candle body (both open AND close) to be outside the
+       range — a wick poking out while the body stays inside does not count. */
+    const bodyHigh = Math.max(c.open, c.close);
+    const bodyLow  = Math.min(c.open, c.close);
+
+    if (bodyLow > nyOpenRange.high) {
       nyOpenRangeBreakout = { dir: "BULL", candleIdx: idx, level: nyOpenRange.high };
       nyOpenRangePhase = "RETEST";
-      addLog(`🕤 NY Open Range BULL breakout at #${idx}, close ${fmt(c.close, 4)} > high ${fmt(nyOpenRange.high, 4)}`);
+      addLog(`🕤 NY Open Range BULL breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully above high ${fmt(nyOpenRange.high, 4)}`);
       showToast("NY Range Breakout ▲", `Bullish breakout — waiting for retest…`, "info", 8000);
-    } else if (c.close < nyOpenRange.low) {
+    } else if (bodyHigh < nyOpenRange.low) {
       nyOpenRangeBreakout = { dir: "BEAR", candleIdx: idx, level: nyOpenRange.low };
       nyOpenRangePhase = "RETEST";
-      addLog(`🕤 NY Open Range BEAR breakout at #${idx}, close ${fmt(c.close, 4)} < low ${fmt(nyOpenRange.low, 4)}`);
+      addLog(`🕤 NY Open Range BEAR breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully below low ${fmt(nyOpenRange.low, 4)}`);
       showToast("NY Range Breakout ▼", `Bearish breakout — waiting for retest…`, "info", 8000);
     }
     return;
