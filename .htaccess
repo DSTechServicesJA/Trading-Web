@@ -16,6 +16,11 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/auth/(login|register|verify|status)$ api/auth/$1.php [L,QSA]
 
+# ── Telegram proxy (extensionless) ──
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/telegram/proxy$ api/telegram/proxy.php [L,QSA]
+
 # ── Security headers ──
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
