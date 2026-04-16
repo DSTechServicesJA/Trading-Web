@@ -1321,26 +1321,26 @@ async function sendTelegramPhoto(blob, caption) {
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
-  const form = new FormData();
-  form.append("action", "sendPhoto");
-  form.append("token", token);
-  form.append("chat_id", chatId);
-  form.append("photo", blob, "chart.png");
-  form.append("caption", caption);
-  form.append("parse_mode", "HTML");
+  /** Build the base FormData fields shared by both proxy and direct paths */
+  function buildPhotoForm() {
+    const f = new FormData();
+    f.append("chat_id", chatId);
+    f.append("photo", blob, "chart.png");
+    f.append("caption", caption);
+    f.append("parse_mode", "HTML");
+    return f;
+  }
 
   /* Try server-side proxy first (avoids CORS), fall back to direct API */
   let resp;
   try {
+    const form = buildPhotoForm();
+    form.append("action", "sendPhoto");
+    form.append("token", token);
     resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", body: form });
   } catch (_proxyErr) {
     /* Proxy unreachable — try direct Telegram API as fallback */
-    const directForm = new FormData();
-    directForm.append("chat_id", chatId);
-    directForm.append("photo", blob, "chart.png");
-    directForm.append("caption", caption);
-    directForm.append("parse_mode", "HTML");
-    resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: directForm });
+    resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm() });
   }
   const data = await safeJson(resp);
   if (!data.ok) {

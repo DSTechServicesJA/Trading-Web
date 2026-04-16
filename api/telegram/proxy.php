@@ -115,7 +115,7 @@ if ($isMultipart && $action === 'sendPhoto') {
     curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
 } else {
     /* ── JSON payload (sendMessage, getMe, getChat) ── */
-    $jsonPayload = json_encode($payload ?? new \stdClass());
+    $jsonPayload = json_encode(is_array($payload) && count($payload) > 0 ? $payload : new \stdClass());
     curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 }
