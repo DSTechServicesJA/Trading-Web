@@ -4793,7 +4793,7 @@ function monitorScalpOutcomes(candle) {
     if (s.result !== "PENDING") continue;
 
     /* Time-based exit: if enough candles have passed since the scalp entry */
-    if (s.candleIdx != null) {
+    if (s.candleIdx !== null && s.candleIdx !== undefined) {
       const elapsed = (candles.length - 1) - s.candleIdx;
       if (elapsed >= SCALP_MAX_CANDLES) {
         const inProfit = (s.dir === "BULL" && candle.close > s.entry) ||
