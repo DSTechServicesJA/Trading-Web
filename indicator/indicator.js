@@ -703,6 +703,7 @@ let telegramChatId    = "";
 let telegramAutoSend  = false;
 let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
 let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
+let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (tight Asian, London sweep) to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -1028,6 +1029,7 @@ function initUI() {
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
   UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
   UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
+  UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -1510,11 +1512,17 @@ function buildSessionRanges() {
     ? { high: nyHigh,     low: nyLow,     startIdx: nyStart,     endIdx: nyEnd }     : null;
 
   /* Determine if Asian range is "tight" (< ATR threshold) */
+  const wasTight = asianRangeTight;
   if (sessionRangeAsian && atrValue > 0) {
     const asianSize = sessionRangeAsian.high - sessionRangeAsian.low;
     asianRangeTight = asianSize < atrValue * ASIAN_TIGHT_ATR_MULT;
   } else {
     asianRangeTight = false;
+  }
+
+  /* Send Telegram alert on first detection of tight Asian range */
+  if (asianRangeTight && !wasTight && telegramSessionRangeAutoSend && !_historicalProcessing) {
+    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN"), CHART_RENDER_DELAY_MS);
   }
 }
 
@@ -1547,6 +1555,9 @@ function detectLondonAsianSweep() {
         `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
         "warning", 8000
       );
+      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP"), CHART_RENDER_DELAY_MS);
+      }
       return;
     }
     /* Check sweep of Asian LOW */
@@ -1558,6 +1569,9 @@ function detectLondonAsianSweep() {
         `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
         "warning", 8000
       );
+      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP"), CHART_RENDER_DELAY_MS);
+      }
       return;
     }
   }
@@ -1683,6 +1697,22 @@ function buildTelegramCaption() {
     lines.push(``);
     lines.push(`<b>Range High:</b> <code>${fmt(openingRange.high, 5)}</code>`);
     lines.push(`<b>Range Low:</b> <code>${fmt(openingRange.low, 5)}</code>`);
+  }
+
+  /* Session Ranges context */
+  if (sessionRangesEnabled && sessionRangeAsian) {
+    lines.push(``);
+    lines.push(`<b>🌍 Session Ranges:</b>`);
+    lines.push(`  Asian: <code>${fmt(sessionRangeAsian.high, 5)}</code> / <code>${fmt(sessionRangeAsian.low, 5)}</code>${asianRangeTight ? " ⚡TIGHT" : ""}`);
+    if (sessionRangeLondon) {
+      lines.push(`  London: <code>${fmt(sessionRangeLondon.high, 5)}</code> / <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+    }
+    if (sessionRangeNY) {
+      lines.push(`  NY: <code>${fmt(sessionRangeNY.high, 5)}</code> / <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+    }
+    if (londonSweepSignal) {
+      lines.push(`  Sweep: London ${londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${londonSweepSignal.dir} @ <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+    }
   }
 
   lines.push(``);
@@ -2108,6 +2138,22 @@ function buildPanelTelegramCaption(p) {
     lines.push(`<b>Range Low:</b> <code>${fmt(p.openingRange.low, 5)}</code>`);
   }
 
+  /* Session Ranges context */
+  if (sessionRangesEnabled && p.sessionRangeAsian) {
+    lines.push(``);
+    lines.push(`<b>🌍 Session Ranges:</b>`);
+    lines.push(`  Asian: <code>${fmt(p.sessionRangeAsian.high, 5)}</code> / <code>${fmt(p.sessionRangeAsian.low, 5)}</code>${p.asianRangeTight ? " ⚡TIGHT" : ""}`);
+    if (p.sessionRangeLondon) {
+      lines.push(`  London: <code>${fmt(p.sessionRangeLondon.high, 5)}</code> / <code>${fmt(p.sessionRangeLondon.low, 5)}</code>`);
+    }
+    if (p.sessionRangeNY) {
+      lines.push(`  NY: <code>${fmt(p.sessionRangeNY.high, 5)}</code> / <code>${fmt(p.sessionRangeNY.low, 5)}</code>`);
+    }
+    if (p.londonSweepSignal) {
+      lines.push(`  Sweep: London ${p.londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${p.londonSweepSignal.dir} @ <code>${fmt(p.londonSweepSignal.price, 5)}</code>`);
+    }
+  }
+
   lines.push(``);
   lines.push(`<b>Confluence:</b> ${p.confluenceScore}/16`);
 
@@ -2305,6 +2351,7 @@ function saveSettings() {
       telegramAutoSend,
       telegramScalpAutoSend,
       telegramOutcomeSend,
+      telegramSessionRangeAutoSend,
       accountSize,
       riskPercent
     };
@@ -2463,11 +2510,13 @@ function restoreSettings() {
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
     if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
+    if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
     if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
+    if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -5479,6 +5528,128 @@ async function sendTelegramScalpAlert(scalp) {
     addLog(`📤 Scalp Telegram error: ${err.message}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `❌ Scalp: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Build a Telegram caption for session range signals (tight Asian range / London sweep).
+ * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
+ */
+function buildSessionRangeTelegramCaption(signalType) {
+  const symbol = UI.symbolSelect
+    ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
+       ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
+       : UI.symbolSelect.value)
+    : "--";
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+  const lines = [];
+
+  if (signalType === "LONDON_SWEEP") {
+    const dir = londonSweepSignal ? londonSweepSignal.dir : "--";
+    const sweepEmoji = dir === "HIGH" ? "▲" : "▼";
+    const reversal = dir === "HIGH" ? "bearish" : "bullish";
+    lines.push(`<b>🌍 London Sweep ${sweepEmoji} Asian ${dir}</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symbol}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    if (sessionRangeAsian) {
+      lines.push(`<b>Asian Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
+      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>${asianRangeTight ? " ⚡ TIGHT" : ""}`);
+    }
+    if (londonSweepSignal) {
+      lines.push(``);
+      lines.push(`<b>Sweep Price:</b> <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+      lines.push(`<b>Signal:</b> Potential ${reversal} reversal`);
+    }
+    if (sessionRangeLondon) {
+      lines.push(``);
+      lines.push(`<b>London Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeLondon.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+    }
+  } else {
+    /* TIGHT_ASIAN */
+    lines.push(`<b>⚡ Tight Asian Range Detected</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symbol}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    if (sessionRangeAsian) {
+      lines.push(`<b>Asian Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
+      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>`);
+      if (atrValue > 0) {
+        lines.push(`  ATR: <code>${fmt(atrValue, 5)}</code>`);
+        lines.push(`  Ratio: ${fmt(rangeSize / atrValue, 2)}× ATR (< ${ASIAN_TIGHT_ATR_MULT}×)`);
+      }
+    }
+    lines.push(``);
+    lines.push(`<b>Signal:</b> Compression likely to expand during London session`);
+  }
+
+  if (sessionRangeNY) {
+    lines.push(``);
+    lines.push(`<b>NY Range:</b>`);
+    lines.push(`  High: <code>${fmt(sessionRangeNY.high, 5)}</code>`);
+    lines.push(`  Low: <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a session range signal to Telegram with chart screenshot.
+ * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
+ */
+async function sendTelegramSessionRangeAlert(signalType) {
+  if (!telegramSessionRangeAutoSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Check credentials are available */
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Session Range Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending session range…";
+  try {
+    const blob = await captureChartScreenshot();
+    const caption = buildSessionRangeTelegramCaption(signalType);
+    await sendTelegramPhoto(blob, caption);
+    addLog(`📤 Session Range Telegram alert sent — ${signalType}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ Session range sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 Session Range Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ Session: ${err.message}`;
       UI.telegramStatus.className = "hint telegram-status telegram-err";
     }
   }
@@ -8802,6 +8973,13 @@ function activatePanel(p) {
   lastScalpCandleIdx = p.lastScalpCandleIdx;
   ws             = p.ws;
 
+  /* Session Ranges */
+  sessionRangeAsian   = p.sessionRangeAsian  || null;
+  sessionRangeLondon  = p.sessionRangeLondon || null;
+  sessionRangeNY      = p.sessionRangeNY     || null;
+  asianRangeTight     = p.asianRangeTight    || false;
+  londonSweepSignal   = p.londonSweepSignal  || null;
+
   /* Activate per-panel filter settings into globals */
   const f = p.filters;
   autoResetEnabled     = f.autoResetEnabled;
@@ -8890,6 +9068,13 @@ function savePanel(p) {
   p.liveScalpHistory  = liveScalpHistory;
   p.lastScalpCandleIdx = lastScalpCandleIdx;
   p.ws             = ws;
+
+  /* Session Ranges */
+  p.sessionRangeAsian   = sessionRangeAsian;
+  p.sessionRangeLondon  = sessionRangeLondon;
+  p.sessionRangeNY      = sessionRangeNY;
+  p.asianRangeTight     = asianRangeTight;
+  p.londonSweepSignal   = londonSweepSignal;
 
   /* Save current filter state back to panel */
   p.filters.autoResetEnabled     = autoResetEnabled;
@@ -9991,6 +10176,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramOutcomeSendToggle) {
     UI.telegramOutcomeSendToggle.addEventListener("change", () => { telegramOutcomeSend = UI.telegramOutcomeSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramSessionRangeAutoSendToggle) {
+    UI.telegramSessionRangeAutoSendToggle.addEventListener("change", () => { telegramSessionRangeAutoSend = UI.telegramSessionRangeAutoSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
