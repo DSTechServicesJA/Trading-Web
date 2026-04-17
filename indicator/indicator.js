@@ -1534,6 +1534,7 @@ function detectLondonAsianSweep() {
   /* Scan London candles after Asian range ends */
   const scanStart = Math.max(sessionRangeLondon.startIdx, sessionRangeAsian.endIdx + 1);
   const scanEnd   = Math.min(sessionRangeLondon.endIdx, candles.length - 1);
+  if (scanStart > scanEnd) return;  /* no London candles past Asian range yet */
 
   for (let i = scanStart; i <= scanEnd; i++) {
     const c = candles[i];
