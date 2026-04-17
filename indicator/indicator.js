@@ -1522,7 +1522,8 @@ function buildSessionRanges() {
 
   /* Send Telegram alert on first detection of tight Asian range */
   if (asianRangeTight && !wasTight && telegramSessionRangeAutoSend && !_historicalProcessing) {
-    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN"), CHART_RENDER_DELAY_MS);
+    const _sym = _multiPanelProcessing || null;
+    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN", _sym), CHART_RENDER_DELAY_MS);
   }
 }
 
@@ -1556,7 +1557,8 @@ function detectLondonAsianSweep() {
         "warning", 8000
       );
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP"), CHART_RENDER_DELAY_MS);
+        const _sym = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", _sym), CHART_RENDER_DELAY_MS);
       }
       return;
     }
@@ -1570,7 +1572,8 @@ function detectLondonAsianSweep() {
         "warning", 8000
       );
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP"), CHART_RENDER_DELAY_MS);
+        const _sym = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", _sym), CHART_RENDER_DELAY_MS);
       }
       return;
     }
@@ -1744,6 +1747,7 @@ function buildTelegramCaption() {
   if (stochFilterEnabled) filters.push("Stochastic");
   if (scalpingModeEnabled) filters.push("Scalping");
   if (liveScalpEnabled) filters.push("Live Scalp Scanner");
+  if (sessionRangesEnabled) filters.push("Session Ranges");
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -2177,6 +2181,7 @@ function buildPanelTelegramCaption(p) {
   if (f.adxFilterEnabled) filters.push("ADX");
   if (f.stochFilterEnabled) filters.push("Stochastic");
   if (f.scalpingModeEnabled) filters.push("Scalping");
+  if (sessionRangesEnabled) filters.push("Session Ranges");
   /* Profit-Direction Constraints */
   if (f.minConfluenceEnabled) filters.push(`Min Confluence ≥${f.minConfluenceValue}`);
   if (f.doubleRetestEnabled) filters.push("Double Retest");
@@ -5619,8 +5624,9 @@ function buildSessionRangeTelegramCaption(signalType) {
 /**
  * Send a session range signal to Telegram with chart screenshot.
  * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
+ * @param {string|null} panelSymbol  — if non-null, capture this panel's chart instead of the main chart
  */
-async function sendTelegramSessionRangeAlert(signalType) {
+async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
 
   /* Sync credentials from DOM */
@@ -5636,14 +5642,32 @@ async function sendTelegramSessionRangeAlert(signalType) {
     return;
   }
 
-  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending session range…";
+  const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
+  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
-    const blob = await captureChartScreenshot();
-    const caption = buildSessionRangeTelegramCaption(signalType);
+    /* In multi-panel mode, capture the correct panel's chart */
+    let blob;
+    const p = panelSymbol ? multiPanels.get(panelSymbol) : null;
+    if (p) {
+      blob = await capturePanelScreenshot(p);
+    } else {
+      blob = await captureChartScreenshot();
+    }
+    /* Build caption — if in multi-panel mode, temporarily activate panel globals
+       so the caption reads the correct session range data for this panel */
+    let caption;
+    if (p) {
+      const snap = _snapshotChartGlobals();
+      activatePanel(p);
+      caption = buildSessionRangeTelegramCaption(signalType);
+      _restoreChartGlobals(snap);
+    } else {
+      caption = buildSessionRangeTelegramCaption(signalType);
+    }
     await sendTelegramPhoto(blob, caption);
-    addLog(`📤 Session Range Telegram alert sent — ${signalType}`);
+    addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "✅ Session range sent!";
+      UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
       UI.telegramStatus.className = "hint telegram-status telegram-ok";
     }
   } catch (err) {
