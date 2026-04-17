@@ -8207,14 +8207,14 @@ function drawChart() {
 
       /* Entry line */
       const srtEntryY = yOf(srt.entry);
-      ctx.strokeStyle = "#a855f7";
+      ctx.strokeStyle = COLORS.entryLine || "#a855f7";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.moveTo(srtStartX, srtEntryY);
       ctx.lineTo(W - marginRight, srtEntryY);
       ctx.stroke();
-      ctx.fillStyle = "#a855f7";
+      ctx.fillStyle = COLORS.entryLine || "#a855f7";
       ctx.font = "bold 10px Arial";
       ctx.textAlign = "right";
       ctx.fillText(`ENTRY ${fmt(srt.entry, 4)}`, W - marginRight - 4, srtEntryY - 4);
