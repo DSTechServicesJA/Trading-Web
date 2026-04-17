@@ -770,6 +770,15 @@ let nyOpenRangePhase     = "IDLE"; /* IDLE | WAITING | RANGE | BREAKOUT | RETEST
 let _nyOpenRangeNotified = false;  /* prevent duplicate 9:30 notifications per session */
 let _nyOpenRangeTimerInterval = null; /* check-clock interval */
 
+/* ================= SESSION RANGES (Asian / London / NY) ================= */
+let sessionRangesEnabled  = false;    /* master toggle */
+let sessionRangeAsian     = null;     /* { high, low, startIdx, endIdx } */
+let sessionRangeLondon    = null;     /* { high, low, startIdx, endIdx } */
+let sessionRangeNY        = null;     /* { high, low, startIdx, endIdx } */
+let asianRangeTight       = false;    /* true when Asian range < ASIAN_TIGHT_ATR_MULT × ATR */
+let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx, price } */
+const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
+
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = true;
 
@@ -890,6 +899,14 @@ function initUI() {
   UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
   UI.nyOpenRangeToggle     = document.getElementById("nyOpenRangeToggle");
   UI.toastContainer        = document.getElementById("toastContainer");
+
+  /* Session Ranges UI refs */
+  UI.sessionRangesToggle   = document.getElementById("sessionRangesToggle");
+  UI.sessionRangeAsianDisplay  = document.getElementById("sessionRangeAsianDisplay");
+  UI.sessionRangeLondonDisplay = document.getElementById("sessionRangeLondonDisplay");
+  UI.sessionRangeNYDisplay     = document.getElementById("sessionRangeNYDisplay");
+  UI.asianTightDisplay         = document.getElementById("asianTightDisplay");
+  UI.londonSweepDisplay        = document.getElementById("londonSweepDisplay");
 
   /* Profit-Direction Constraint UI refs */
   UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
@@ -1421,6 +1438,139 @@ function resetNyOpenRange() {
   nyOpenRangeRetest   = null;
   nyOpenRangeTrade    = null;
   nyOpenRangePhase    = nyOpenRangeEnabled ? "WAITING" : "IDLE";
+}
+
+/* ================= SESSION RANGES (Asian / London / NY) ================= */
+
+/**
+ * Determine which trading session a candle belongs to based on its UTC hour.
+ * Returns an object with boolean flags for each session.
+ */
+function getCandleSessionFlags(epochSec) {
+  const d = new Date(epochSec * 1000);
+  const hour = d.getUTCHours();
+  return {
+    asian:  hour >= SESSION_ASIAN.start  && hour < SESSION_ASIAN.end,
+    london: hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end,
+    ny:     hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end
+  };
+}
+
+/**
+ * Build session ranges (Asian, London, NY) from candle data.
+ * Each range captures the high/low of candles that fall within the session's UTC hours.
+ * Only builds ranges for today's date (based on the latest candle).
+ */
+function buildSessionRanges() {
+  if (!sessionRangesEnabled || candles.length === 0) return;
+
+  /* Determine "today" from the latest candle */
+  const latestDate = new Date(candles[candles.length - 1].epoch * 1000);
+  const todayUTC = latestDate.toISOString().slice(0, 10); /* YYYY-MM-DD */
+
+  let asianHigh = -Infinity, asianLow = Infinity, asianStart = -1, asianEnd = -1;
+  let londonHigh = -Infinity, londonLow = Infinity, londonStart = -1, londonEnd = -1;
+  let nyHigh = -Infinity, nyLow = Infinity, nyStart = -1, nyEnd = -1;
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const d = new Date(c.epoch * 1000);
+    const dateStr = d.toISOString().slice(0, 10);
+    /* Only consider candles from today */
+    if (dateStr !== todayUTC) continue;
+
+    const flags = getCandleSessionFlags(c.epoch);
+
+    if (flags.asian) {
+      if (asianStart < 0) asianStart = i;
+      asianEnd = i;
+      if (c.high > asianHigh) asianHigh = c.high;
+      if (c.low < asianLow)   asianLow = c.low;
+    }
+    if (flags.london) {
+      if (londonStart < 0) londonStart = i;
+      londonEnd = i;
+      if (c.high > londonHigh) londonHigh = c.high;
+      if (c.low < londonLow)   londonLow = c.low;
+    }
+    if (flags.ny) {
+      if (nyStart < 0) nyStart = i;
+      nyEnd = i;
+      if (c.high > nyHigh) nyHigh = c.high;
+      if (c.low < nyLow)   nyLow = c.low;
+    }
+  }
+
+  /* Set ranges (only if we found candles for that session) */
+  sessionRangeAsian  = asianStart  >= 0 && asianHigh  !== -Infinity
+    ? { high: asianHigh,  low: asianLow,  startIdx: asianStart,  endIdx: asianEnd }  : null;
+  sessionRangeLondon = londonStart >= 0 && londonHigh !== -Infinity
+    ? { high: londonHigh, low: londonLow, startIdx: londonStart, endIdx: londonEnd } : null;
+  sessionRangeNY     = nyStart     >= 0 && nyHigh     !== -Infinity
+    ? { high: nyHigh,     low: nyLow,     startIdx: nyStart,     endIdx: nyEnd }     : null;
+
+  /* Determine if Asian range is "tight" (< ATR threshold) */
+  if (sessionRangeAsian && atrValue > 0) {
+    const asianSize = sessionRangeAsian.high - sessionRangeAsian.low;
+    asianRangeTight = asianSize < atrValue * ASIAN_TIGHT_ATR_MULT;
+  } else {
+    asianRangeTight = false;
+  }
+}
+
+/**
+ * Detect London session sweeping the Asian range high or low.
+ * A "sweep" occurs when a London-session candle's wick exceeds the Asian high or low
+ * but the candle body closes back inside the Asian range — a liquidity grab.
+ * Also detects a clean break (close outside) as a sweep signal.
+ */
+function detectLondonAsianSweep() {
+  if (!sessionRangesEnabled || !sessionRangeAsian || !sessionRangeLondon) return;
+  if (londonSweepSignal) return; /* already detected for this session */
+
+  const aH = sessionRangeAsian.high;
+  const aL = sessionRangeAsian.low;
+
+  /* Scan London candles after Asian range ends */
+  const scanStart = Math.max(sessionRangeLondon.startIdx, sessionRangeAsian.endIdx + 1);
+  const scanEnd   = Math.min(sessionRangeLondon.endIdx, candles.length - 1);
+
+  for (let i = scanStart; i <= scanEnd; i++) {
+    const c = candles[i];
+    /* Check sweep of Asian HIGH */
+    if (c.high > aH) {
+      londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
+      addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
+      showToast(
+        "London Sweep ▲ Asian High",
+        `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
+        "warning", 8000
+      );
+      return;
+    }
+    /* Check sweep of Asian LOW */
+    if (c.low < aL) {
+      londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
+      addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
+      showToast(
+        "London Sweep ▼ Asian Low",
+        `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
+        "warning", 8000
+      );
+      return;
+    }
+  }
+}
+
+/**
+ * Reset all session range state.
+ */
+function resetSessionRanges() {
+  sessionRangeAsian   = null;
+  sessionRangeLondon  = null;
+  sessionRangeNY      = null;
+  asianRangeTight     = false;
+  londonSweepSignal   = null;
 }
 
 /* ================= TELEGRAM INTEGRATION ================= */
@@ -2042,7 +2192,9 @@ function _snapshotChartGlobals() {
     macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
     stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
     nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
-    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES
+    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
+    sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
+    sessionRangeNY, asianRangeTight, londonSweepSignal
   };
 }
 function _restoreChartGlobals(s) {
@@ -2076,6 +2228,10 @@ function _restoreChartGlobals(s) {
   nyOpenRange = s.nyOpenRange; nyOpenRangeBreakout = s.nyOpenRangeBreakout;
   nyOpenRangeRetest = s.nyOpenRangeRetest; nyOpenRangeTrade = s.nyOpenRangeTrade;
   nyOpenRangePhase = s.nyOpenRangePhase; RANGE_MINUTES = s.RANGE_MINUTES;
+  sessionRangesEnabled = s.sessionRangesEnabled;
+  sessionRangeAsian = s.sessionRangeAsian; sessionRangeLondon = s.sessionRangeLondon;
+  sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
+  londonSweepSignal = s.londonSweepSignal;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -2118,6 +2274,7 @@ function saveSettings() {
       stochFilterEnabled,
       scalpingModeEnabled,
       nyOpenRangeEnabled,
+      sessionRangesEnabled,
       /* Profit-Direction Constraints */
       minConfluenceEnabled,
       minConfluenceValue,
@@ -2240,6 +2397,10 @@ function restoreSettings() {
 
     if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
     if (UI.nyOpenRangeToggle) UI.nyOpenRangeToggle.checked = nyOpenRangeEnabled;
+
+    /* Session Ranges */
+    if (s.sessionRangesEnabled != null) sessionRangesEnabled = s.sessionRangesEnabled;
+    if (UI.sessionRangesToggle) UI.sessionRangesToggle.checked = sessionRangesEnabled;
 
     /* Profit-Direction Constraint toggles */
     if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
@@ -3801,6 +3962,56 @@ function updateStateUI() {
       : "env-label";
   }
 
+  /* Session Ranges display */
+  if (UI.sessionRangeAsianDisplay) {
+    if (sessionRangesEnabled && sessionRangeAsian) {
+      UI.sessionRangeAsianDisplay.textContent = `H:${fmt(sessionRangeAsian.high, 4)} L:${fmt(sessionRangeAsian.low, 4)}`;
+      UI.sessionRangeAsianDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeAsianDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeAsianDisplay.className = "env-label";
+    }
+  }
+  if (UI.asianTightDisplay) {
+    if (sessionRangesEnabled && sessionRangeAsian) {
+      UI.asianTightDisplay.textContent = asianRangeTight ? "TIGHT ⚡" : "WIDE";
+      UI.asianTightDisplay.className = "status-badge " + (asianRangeTight ? "warning" : "disabled");
+    } else {
+      UI.asianTightDisplay.textContent = "--";
+      UI.asianTightDisplay.className = "env-label";
+    }
+  }
+  if (UI.sessionRangeLondonDisplay) {
+    if (sessionRangesEnabled && sessionRangeLondon) {
+      UI.sessionRangeLondonDisplay.textContent = `H:${fmt(sessionRangeLondon.high, 4)} L:${fmt(sessionRangeLondon.low, 4)}`;
+      UI.sessionRangeLondonDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeLondonDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeLondonDisplay.className = "env-label";
+    }
+  }
+  if (UI.sessionRangeNYDisplay) {
+    if (sessionRangesEnabled && sessionRangeNY) {
+      UI.sessionRangeNYDisplay.textContent = `H:${fmt(sessionRangeNY.high, 4)} L:${fmt(sessionRangeNY.low, 4)}`;
+      UI.sessionRangeNYDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeNYDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeNYDisplay.className = "env-label";
+    }
+  }
+  if (UI.londonSweepDisplay) {
+    if (sessionRangesEnabled && londonSweepSignal) {
+      const sweepLabel = londonSweepSignal.dir === "HIGH"
+        ? `SWEPT HIGH ▲ @${fmt(londonSweepSignal.price, 4)}`
+        : `SWEPT LOW ▼ @${fmt(londonSweepSignal.price, 4)}`;
+      UI.londonSweepDisplay.textContent = sweepLabel;
+      UI.londonSweepDisplay.className = "status-badge " + (londonSweepSignal.dir === "HIGH" ? "bear" : "bull");
+    } else {
+      UI.londonSweepDisplay.textContent = sessionRangesEnabled ? "NONE" : "OFF";
+      UI.londonSweepDisplay.className = "env-label";
+    }
+  }
+
   /* Fibonacci retest display */
   if (UI.fibRetestDisplay) {
     if (breakout) {
@@ -4851,6 +5062,7 @@ function revertAllSettings() {
   /* Scalping & misc */
   scalpingModeEnabled  = false;
   nyOpenRangeEnabled   = false;
+  sessionRangesEnabled = false;
   autoApplyRecommended = true;
 
   /* Advanced parameter defaults */
@@ -4882,6 +5094,7 @@ function revertAllSettings() {
   if (UI.stochFilterToggle)      UI.stochFilterToggle.checked      = stochFilterEnabled;
   if (UI.scalpingModeToggle)     UI.scalpingModeToggle.checked     = scalpingModeEnabled;
   if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
+  if (UI.sessionRangesToggle)    UI.sessionRangesToggle.checked    = sessionRangesEnabled;
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
 
   /* Profit-Direction UI sync */
@@ -6314,6 +6527,9 @@ function processAllCandles() {
   /* Reset NY Open Range for full reprocessing */
   resetNyOpenRange();
 
+  /* Reset Session Ranges for full reprocessing */
+  resetSessionRanges();
+
   if (candles.length === 0) return;
   rangeStartEpoch = candles[0].epoch;
   computeATR();
@@ -6343,6 +6559,12 @@ function processAllCandles() {
         if (nyOpenRangeTrade) break;
       }
     }
+  }
+
+  /* Session Ranges: build ranges and detect London sweep */
+  if (sessionRangesEnabled) {
+    buildSessionRanges();
+    detectLondonAsianSweep();
   }
 
   updateStateUI();
@@ -6404,6 +6626,12 @@ function processLatestCandle() {
     }
   }
 
+  /* Session Ranges: rebuild ranges and check for London sweep on each candle */
+  if (sessionRangesEnabled) {
+    buildSessionRanges();
+    detectLondonAsianSweep();
+  }
+
   updateStateUI();
 }
 
@@ -6423,6 +6651,8 @@ function resetForNextSetup() {
   retestCount    = 0;
   /* Reset NY Open Range alongside main strategy */
   resetNyOpenRange();
+  /* Reset Session Ranges alongside main strategy */
+  resetSessionRanges();
   /* Start new range from the latest candle */
   rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
   setPhase("RANGE");
@@ -7632,6 +7862,53 @@ function drawChart() {
       }
 
       ctx.setLineDash([]);
+      ctx.textAlign = "left";
+    }
+  }
+
+  /* ---- Session Ranges (Asian / London / NY) highlight ---- */
+  if (sessionRangesEnabled) {
+    const sessionRangeConfigs = [
+      { range: sessionRangeAsian,  label: "ASIAN",  fill: "rgba(255,191,0,0.06)",  border: "rgba(255,191,0,0.45)" },
+      { range: sessionRangeLondon, label: "LONDON", fill: "rgba(59,130,246,0.06)", border: "rgba(59,130,246,0.45)" },
+      { range: sessionRangeNY,     label: "NY",     fill: "rgba(168,85,247,0.06)", border: "rgba(168,85,247,0.45)" }
+    ];
+    for (const cfg of sessionRangeConfigs) {
+      if (!cfg.range) continue;
+      const sx1 = xOf(cfg.range.startIdx) - candleW / 2 - 2;
+      const sx2 = xOf(cfg.range.endIdx) + candleW / 2 + 2;
+      const sy1 = yOf(cfg.range.high);
+      const sy2 = yOf(cfg.range.low);
+      ctx.fillStyle = cfg.fill;
+      ctx.fillRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
+      ctx.strokeStyle = cfg.border;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = cfg.border;
+      ctx.font = "bold 9px Arial";
+      ctx.fillText(cfg.label + " RANGE", sx1 + 3, sy1 - 3);
+    }
+
+    /* Asian "tight" badge on chart */
+    if (sessionRangeAsian && asianRangeTight) {
+      const ax = xOf(sessionRangeAsian.startIdx) - candleW / 2;
+      const amidY = yOf((sessionRangeAsian.high + sessionRangeAsian.low) / 2);
+      ctx.fillStyle = "rgba(255,191,0,0.85)";
+      ctx.font = "bold 10px Arial";
+      ctx.fillText("⚡ TIGHT", ax + 3, amidY + 3);
+    }
+
+    /* London sweep arrow marker on chart */
+    if (londonSweepSignal && londonSweepSignal.candleIdx < candles.length) {
+      const lsx = xOf(londonSweepSignal.candleIdx);
+      const lsy = yOf(londonSweepSignal.price);
+      ctx.fillStyle = londonSweepSignal.dir === "HIGH" ? "rgba(244,63,94,0.90)" : "rgba(16,185,129,0.90)";
+      ctx.font = "bold 11px Arial";
+      ctx.textAlign = "center";
+      const sweepArrow = londonSweepSignal.dir === "HIGH" ? "▼ SWEEP" : "▲ SWEEP";
+      ctx.fillText(sweepArrow, lsx, londonSweepSignal.dir === "HIGH" ? lsy - 8 : lsy + 14);
       ctx.textAlign = "left";
     }
   }
@@ -9519,6 +9796,28 @@ document.addEventListener("DOMContentLoaded", () => {
         stopNyOpenRangeTimer();
         resetNyOpenRange();
         addLog("🕤 NY Open Range strategy disabled");
+      }
+      updateStateUI();
+      drawChart();
+    });
+  }
+
+  /* Session Ranges toggle listener */
+  if (UI.sessionRangesToggle) {
+    UI.sessionRangesToggle.addEventListener("change", () => {
+      sessionRangesEnabled = UI.sessionRangesToggle.checked;
+      saveSettings();
+      if (sessionRangesEnabled) {
+        resetSessionRanges();
+        if (candles.length > 0) {
+          buildSessionRanges();
+          detectLondonAsianSweep();
+        }
+        addLog("🌍 Session Ranges enabled — tracking Asian, London, NY ranges");
+        showToast("Session Ranges Enabled", "Tracking Asian/London/NY session high & low ranges.", "info", 5000);
+      } else {
+        resetSessionRanges();
+        addLog("🌍 Session Ranges disabled");
       }
       updateStateUI();
       drawChart();
