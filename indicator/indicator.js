@@ -778,6 +778,7 @@ let sessionRangeLondon    = null;     /* { high, low, startIdx, endIdx } */
 let sessionRangeNY        = null;     /* { high, low, startIdx, endIdx } */
 let asianRangeTight       = false;    /* true when Asian range < ASIAN_TIGHT_ATR_MULT × ATR */
 let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx, price } */
+let sessionRangeTrade     = null;     /* null | { entry, sl, tp, dir, rr, entryIdx, symbol } — computed on London sweep */
 const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 
 /* Auto-apply recommended settings when symbol changes */
@@ -908,6 +909,11 @@ function initUI() {
   UI.sessionRangeNYDisplay     = document.getElementById("sessionRangeNYDisplay");
   UI.asianTightDisplay         = document.getElementById("asianTightDisplay");
   UI.londonSweepDisplay        = document.getElementById("londonSweepDisplay");
+  UI.sessionRangeTradeDisplay  = document.getElementById("sessionRangeTradeDisplay");
+  UI.sessionRangeEntryDisplay  = document.getElementById("sessionRangeEntryDisplay");
+  UI.sessionRangeSLDisplay     = document.getElementById("sessionRangeSLDisplay");
+  UI.sessionRangeTPDisplay     = document.getElementById("sessionRangeTPDisplay");
+  UI.sessionRangeRRDisplay     = document.getElementById("sessionRangeRRDisplay");
 
   /* Profit-Direction Constraint UI refs */
   UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
@@ -1547,30 +1553,72 @@ function detectLondonAsianSweep() {
 
   for (let i = scanStart; i <= scanEnd; i++) {
     const c = candles[i];
-    /* Check sweep of Asian HIGH */
+    /* Check sweep of Asian HIGH — bearish reversal (SELL) */
     if (c.high > aH) {
       londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
-      addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
-      showToast(
-        "London Sweep ▲ Asian High",
-        `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
-        "warning", 8000
-      );
+
+      /* Compute trade levels: Entry at candle close, SL above the sweep wick,
+         TP based on user-inputted R:R ratio below entry */
+      const entry = c.close;
+      const sl    = c.high;                        /* SL above the sweep wick */
+      const risk  = Math.abs(sl - entry);
+      if (risk > 0) {
+        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
+        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
+        const rr  = userReward / userRisk;
+        const tp  = entry - risk * rr;
+        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, symbol: getActiveSymbol() };
+        addLog(`🌍 London Sweep TRADE: SELL entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
+        showToast(
+          "London Sweep ▼ SELL Signal",
+          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmt(aH, 4)} — bearish reversal`,
+          "trade", 12000
+        );
+      } else {
+        sessionRangeTrade = null;
+        addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
+        showToast(
+          "London Sweep ▲ Asian High",
+          `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
+          "warning", 8000
+        );
+      }
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
         const currentPanelSymbol = _multiPanelProcessing || null;
         setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
       }
       return;
     }
-    /* Check sweep of Asian LOW */
+    /* Check sweep of Asian LOW — bullish reversal (BUY) */
     if (c.low < aL) {
       londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
-      addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
-      showToast(
-        "London Sweep ▼ Asian Low",
-        `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
-        "warning", 8000
-      );
+
+      /* Compute trade levels: Entry at candle close, SL below the sweep wick,
+         TP based on user-inputted R:R ratio above entry */
+      const entry = c.close;
+      const sl    = c.low;                         /* SL below the sweep wick */
+      const risk  = Math.abs(entry - sl);
+      if (risk > 0) {
+        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
+        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
+        const rr  = userReward / userRisk;
+        const tp  = entry + risk * rr;
+        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, symbol: getActiveSymbol() };
+        addLog(`🌍 London Sweep TRADE: BUY entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
+        showToast(
+          "London Sweep ▲ BUY Signal",
+          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmt(aL, 4)} — bullish reversal`,
+          "trade", 12000
+        );
+      } else {
+        sessionRangeTrade = null;
+        addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
+        showToast(
+          "London Sweep ▼ Asian Low",
+          `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
+          "warning", 8000
+        );
+      }
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
         const currentPanelSymbol = _multiPanelProcessing || null;
         setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
@@ -1589,6 +1637,7 @@ function resetSessionRanges() {
   sessionRangeNY      = null;
   asianRangeTight     = false;
   londonSweepSignal   = null;
+  sessionRangeTrade   = null;
 }
 
 /* ================= TELEGRAM INTEGRATION ================= */
@@ -2246,7 +2295,8 @@ function _snapshotChartGlobals() {
     nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
     nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
     sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
-    sessionRangeNY, asianRangeTight, londonSweepSignal
+    sessionRangeNY, asianRangeTight, londonSweepSignal,
+    sessionRangeTrade
   };
 }
 function _restoreChartGlobals(s) {
@@ -2284,6 +2334,7 @@ function _restoreChartGlobals(s) {
   sessionRangeAsian = s.sessionRangeAsian; sessionRangeLondon = s.sessionRangeLondon;
   sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
   londonSweepSignal = s.londonSweepSignal;
+  sessionRangeTrade = s.sessionRangeTrade;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -4067,6 +4118,38 @@ function updateStateUI() {
     }
   }
 
+  /* Session Range Trade levels display (Entry / SL / TP / R:R) */
+  if (UI.sessionRangeTradeDisplay) {
+    if (sessionRangesEnabled && sessionRangeTrade) {
+      const dirLabel = sessionRangeTrade.dir === "BULL" ? "▲ BUY" : "▼ SELL";
+      UI.sessionRangeTradeDisplay.textContent = dirLabel;
+      UI.sessionRangeTradeDisplay.className = "status-badge " + (sessionRangeTrade.dir === "BULL" ? "bull" : "bear");
+    } else {
+      UI.sessionRangeTradeDisplay.textContent = sessionRangesEnabled ? "NONE" : "OFF";
+      UI.sessionRangeTradeDisplay.className = "env-label";
+    }
+  }
+  if (UI.sessionRangeEntryDisplay) {
+    UI.sessionRangeEntryDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
+      ? fmt(sessionRangeTrade.entry, 4) : "--";
+    UI.sessionRangeEntryDisplay.className = sessionRangeTrade ? "status-badge disabled" : "env-label";
+  }
+  if (UI.sessionRangeSLDisplay) {
+    UI.sessionRangeSLDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
+      ? fmt(sessionRangeTrade.sl, 4) : "--";
+    UI.sessionRangeSLDisplay.className = sessionRangeTrade ? "status-badge bear" : "env-label";
+  }
+  if (UI.sessionRangeTPDisplay) {
+    UI.sessionRangeTPDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
+      ? fmt(sessionRangeTrade.tp, 4) : "--";
+    UI.sessionRangeTPDisplay.className = sessionRangeTrade ? "status-badge bull" : "env-label";
+  }
+  if (UI.sessionRangeRRDisplay) {
+    UI.sessionRangeRRDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
+      ? `1:${fmt(sessionRangeTrade.rr, 1)}` : "--";
+    UI.sessionRangeRRDisplay.className = sessionRangeTrade ? "status-badge disabled" : "env-label";
+  }
+
   /* Fibonacci retest display */
   if (UI.fibRetestDisplay) {
     if (breakout) {
@@ -5580,6 +5663,19 @@ function buildSessionRangeTelegramCaption(signalType) {
       lines.push(``);
       lines.push(`<b>Sweep Price:</b> <code>${fmt(londonSweepSignal.price, 5)}</code>`);
       lines.push(`<b>Signal:</b> Potential ${reversal} reversal`);
+    }
+    if (sessionRangeTrade) {
+      const trDir = sessionRangeTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+      lines.push(``);
+      lines.push(`<b>🎯 Trade Setup:</b> ${trDir}`);
+      lines.push(`<b>📍 Entry:</b> <code>${fmt(sessionRangeTrade.entry, 5)}</code>`);
+      lines.push(`<b>🛑 SL:</b> <code>${fmt(sessionRangeTrade.sl, 5)}</code>`);
+      lines.push(`<b>🎯 TP:</b> <code>${fmt(sessionRangeTrade.tp, 5)}</code>`);
+      lines.push(`<b>R:R:</b> 1:${fmt(sessionRangeTrade.rr, 1)}`);
+      const trRisk = Math.abs(sessionRangeTrade.entry - sessionRangeTrade.sl);
+      if (trRisk > 0) {
+        lines.push(`<b>Risk (pips):</b> <code>${fmt(trRisk, 5)}</code>`);
+      }
     }
     if (sessionRangeLondon) {
       lines.push(``);
@@ -8107,6 +8203,53 @@ function drawChart() {
       ctx.fillText(sweepArrow, lsx, londonSweepSignal.dir === "HIGH" ? lsy - 8 : lsy + 14);
       ctx.textAlign = "left";
     }
+
+    /* Session Range Trade levels (Entry / SL / TP) drawn on chart */
+    if (sessionRangeTrade && sessionRangeTrade.entryIdx < candles.length) {
+      const srt = sessionRangeTrade;
+      const srtStartX = xOf(srt.entryIdx);
+
+      /* Entry line */
+      const srtEntryY = yOf(srt.entry);
+      ctx.strokeStyle = COLORS.entryLine || "#a855f7";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(srtStartX, srtEntryY);
+      ctx.lineTo(W - marginRight, srtEntryY);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.entryLine || "#a855f7";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText(`ENTRY ${fmt(srt.entry, 4)}`, W - marginRight - 4, srtEntryY - 4);
+
+      /* SL line */
+      const srtSlY = yOf(srt.sl);
+      ctx.strokeStyle = COLORS.sl || "#f43f5e";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(srtStartX, srtSlY);
+      ctx.lineTo(W - marginRight, srtSlY);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.sl || "#f43f5e";
+      ctx.fillText(`SL ${fmt(srt.sl, 4)}`, W - marginRight - 4, srtSlY - 4);
+
+      /* TP line */
+      if (srt.tp != null) {
+        const srtTpY = yOf(srt.tp);
+        ctx.strokeStyle = COLORS.tp || "#10b981";
+        ctx.beginPath();
+        ctx.moveTo(srtStartX, srtTpY);
+        ctx.lineTo(W - marginRight, srtTpY);
+        ctx.stroke();
+        ctx.fillStyle = COLORS.tp || "#10b981";
+        ctx.fillText(`TP ${fmt(srt.tp, 4)} (1:${fmt(srt.rr, 1)})`, W - marginRight - 4, srtTpY - 4);
+      }
+
+      ctx.setLineDash([]);
+      ctx.textAlign = "left";
+    }
   }
 
   /* ---- Breakout candle box ---- */
@@ -9003,6 +9146,7 @@ function activatePanel(p) {
   sessionRangeNY      = p.sessionRangeNY     || null;
   asianRangeTight     = p.asianRangeTight    || false;
   londonSweepSignal   = p.londonSweepSignal  || null;
+  sessionRangeTrade   = p.sessionRangeTrade  || null;
 
   /* Activate per-panel filter settings into globals */
   const f = p.filters;
@@ -9099,6 +9243,7 @@ function savePanel(p) {
   p.sessionRangeNY      = sessionRangeNY;
   p.asianRangeTight     = asianRangeTight;
   p.londonSweepSignal   = londonSweepSignal;
+  p.sessionRangeTrade   = sessionRangeTrade;
 
   /* Save current filter state back to panel */
   p.filters.autoResetEnabled     = autoResetEnabled;
