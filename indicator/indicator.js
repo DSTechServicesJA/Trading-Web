@@ -1522,8 +1522,8 @@ function buildSessionRanges() {
 
   /* Send Telegram alert on first detection of tight Asian range */
   if (asianRangeTight && !wasTight && telegramSessionRangeAutoSend && !_historicalProcessing) {
-    const _sym = _multiPanelProcessing || null;
-    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN", _sym), CHART_RENDER_DELAY_MS);
+    const currentPanelSymbol = _multiPanelProcessing || null;
+    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN", currentPanelSymbol), CHART_RENDER_DELAY_MS);
   }
 }
 
@@ -1557,8 +1557,8 @@ function detectLondonAsianSweep() {
         "warning", 8000
       );
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        const _sym = _multiPanelProcessing || null;
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", _sym), CHART_RENDER_DELAY_MS);
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
       }
       return;
     }
@@ -1572,8 +1572,8 @@ function detectLondonAsianSweep() {
         "warning", 8000
       );
       if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        const _sym = _multiPanelProcessing || null;
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", _sym), CHART_RENDER_DELAY_MS);
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
       }
       return;
     }
