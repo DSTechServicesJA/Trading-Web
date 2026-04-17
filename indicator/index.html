@@ -591,6 +591,12 @@
               <p class="hint">At 9:30 AM EST, analyze the 9:30–9:35 candle to mark the range high/low. Wait for a 5-min candle to close outside the range, then enter on a valid retest (wick back into range without closing inside). SL at midpoint of range, TP at 1:2 R:R.</p>
 
               <hr class="param-divider" />
+              <p class="param-group-title">🌍 Session Ranges (Asian / London / NY)</p>
+
+              <label class="toggle-row"><input type="checkbox" id="sessionRangesToggle" /> Session Ranges Indicator</label>
+              <p class="hint">Identifies and draws the Asian (00–09 UTC), London (07–16 UTC), and New York (12–21 UTC) session high/low ranges. Detects "tight" Asian ranges (&lt; 1× ATR) and signals when London sweeps the Asian range high or low (liquidity grab).</p>
+
+              <hr class="param-divider" />
               <p class="param-group-title">⚡ Scalping Mode</p>
 
               <label class="toggle-row"><input type="checkbox" id="scalpingModeToggle" /> Scalping Mode</label>
@@ -659,6 +665,9 @@
 
               <label class="toggle-row"><input type="checkbox" id="telegramOutcomeSendToggle" /> Auto-Send Trade Outcome (WIN/LOSS)</label>
               <p class="hint">Automatically send a message to Telegram when a trade resolves as WIN or LOSS, with trade details and running win rate.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramSessionRangeAutoSendToggle" /> Auto-Send Session Range Signals</label>
+              <p class="hint">Automatically send chart screenshot + details when a London sweep of the Asian range is detected or tight Asian range is identified.</p>
 
               <div class="telegram-btn-row">
                 <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
@@ -794,6 +803,28 @@
             <div class="side-row">
               <span>Volatility</span>
               <span id="volatilityRegime" class="env-label">--</span>
+            </div>
+
+            <!-- Session Ranges Display -->
+            <div class="side-row">
+              <span>Asian Range</span>
+              <span id="sessionRangeAsianDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Asian Tight</span>
+              <span id="asianTightDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>London Range</span>
+              <span id="sessionRangeLondonDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>NY Range</span>
+              <span id="sessionRangeNYDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>London Sweep</span>
+              <span id="londonSweepDisplay" class="env-label">--</span>
             </div>
 
             <!-- Signal Strength Gauge -->

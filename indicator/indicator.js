@@ -703,6 +703,7 @@ let telegramChatId    = "";
 let telegramAutoSend  = false;
 let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
 let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
+let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (tight Asian, London sweep) to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -769,6 +770,15 @@ let nyOpenRangeTrade     = null;   /* { entry, sl, tp, dir, rr } */
 let nyOpenRangePhase     = "IDLE"; /* IDLE | WAITING | RANGE | BREAKOUT | RETEST | TRADE */
 let _nyOpenRangeNotified = false;  /* prevent duplicate 9:30 notifications per session */
 let _nyOpenRangeTimerInterval = null; /* check-clock interval */
+
+/* ================= SESSION RANGES (Asian / London / NY) ================= */
+let sessionRangesEnabled  = false;    /* master toggle */
+let sessionRangeAsian     = null;     /* { high, low, startIdx, endIdx } */
+let sessionRangeLondon    = null;     /* { high, low, startIdx, endIdx } */
+let sessionRangeNY        = null;     /* { high, low, startIdx, endIdx } */
+let asianRangeTight       = false;    /* true when Asian range < ASIAN_TIGHT_ATR_MULT × ATR */
+let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx, price } */
+const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = true;
@@ -891,6 +901,14 @@ function initUI() {
   UI.nyOpenRangeToggle     = document.getElementById("nyOpenRangeToggle");
   UI.toastContainer        = document.getElementById("toastContainer");
 
+  /* Session Ranges UI refs */
+  UI.sessionRangesToggle   = document.getElementById("sessionRangesToggle");
+  UI.sessionRangeAsianDisplay  = document.getElementById("sessionRangeAsianDisplay");
+  UI.sessionRangeLondonDisplay = document.getElementById("sessionRangeLondonDisplay");
+  UI.sessionRangeNYDisplay     = document.getElementById("sessionRangeNYDisplay");
+  UI.asianTightDisplay         = document.getElementById("asianTightDisplay");
+  UI.londonSweepDisplay        = document.getElementById("londonSweepDisplay");
+
   /* Profit-Direction Constraint UI refs */
   UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
   UI.minConfluenceInput      = document.getElementById("minConfluenceInput");
@@ -1011,6 +1029,7 @@ function initUI() {
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
   UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
   UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
+  UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -1423,6 +1442,155 @@ function resetNyOpenRange() {
   nyOpenRangePhase    = nyOpenRangeEnabled ? "WAITING" : "IDLE";
 }
 
+/* ================= SESSION RANGES (Asian / London / NY) ================= */
+
+/**
+ * Determine which trading session a candle belongs to based on its UTC hour.
+ * Returns an object with boolean flags for each session.
+ */
+function getCandleSessionFlags(epochSec) {
+  const d = new Date(epochSec * 1000);
+  const hour = d.getUTCHours();
+  return {
+    asian:  hour >= SESSION_ASIAN.start  && hour < SESSION_ASIAN.end,
+    london: hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end,
+    ny:     hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end
+  };
+}
+
+/**
+ * Build session ranges (Asian, London, NY) from candle data.
+ * Each range captures the high/low of candles that fall within the session's UTC hours.
+ * Only builds ranges for today's date (based on the latest candle).
+ */
+function buildSessionRanges() {
+  if (!sessionRangesEnabled || candles.length === 0) return;
+
+  /* Determine "today" from the latest candle */
+  const latestDate = new Date(candles[candles.length - 1].epoch * 1000);
+  const todayUTC = latestDate.toISOString().slice(0, 10); /* YYYY-MM-DD */
+
+  let asianHigh = -Infinity, asianLow = Infinity, asianStart = -1, asianEnd = -1;
+  let londonHigh = -Infinity, londonLow = Infinity, londonStart = -1, londonEnd = -1;
+  let nyHigh = -Infinity, nyLow = Infinity, nyStart = -1, nyEnd = -1;
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const d = new Date(c.epoch * 1000);
+    const dateStr = d.toISOString().slice(0, 10);
+    /* Only consider candles from today */
+    if (dateStr !== todayUTC) continue;
+
+    const flags = getCandleSessionFlags(c.epoch);
+
+    if (flags.asian) {
+      if (asianStart < 0) asianStart = i;
+      asianEnd = i;
+      if (c.high > asianHigh) asianHigh = c.high;
+      if (c.low < asianLow)   asianLow = c.low;
+    }
+    if (flags.london) {
+      if (londonStart < 0) londonStart = i;
+      londonEnd = i;
+      if (c.high > londonHigh) londonHigh = c.high;
+      if (c.low < londonLow)   londonLow = c.low;
+    }
+    if (flags.ny) {
+      if (nyStart < 0) nyStart = i;
+      nyEnd = i;
+      if (c.high > nyHigh) nyHigh = c.high;
+      if (c.low < nyLow)   nyLow = c.low;
+    }
+  }
+
+  /* Set ranges (only if we found candles for that session) */
+  sessionRangeAsian  = asianStart  >= 0 && asianHigh  !== -Infinity
+    ? { high: asianHigh,  low: asianLow,  startIdx: asianStart,  endIdx: asianEnd }  : null;
+  sessionRangeLondon = londonStart >= 0 && londonHigh !== -Infinity
+    ? { high: londonHigh, low: londonLow, startIdx: londonStart, endIdx: londonEnd } : null;
+  sessionRangeNY     = nyStart     >= 0 && nyHigh     !== -Infinity
+    ? { high: nyHigh,     low: nyLow,     startIdx: nyStart,     endIdx: nyEnd }     : null;
+
+  /* Determine if Asian range is "tight" (< ATR threshold) */
+  const wasTight = asianRangeTight;
+  if (sessionRangeAsian && atrValue > 0) {
+    const asianSize = sessionRangeAsian.high - sessionRangeAsian.low;
+    asianRangeTight = asianSize < atrValue * ASIAN_TIGHT_ATR_MULT;
+  } else {
+    asianRangeTight = false;
+  }
+
+  /* Send Telegram alert on first detection of tight Asian range */
+  if (asianRangeTight && !wasTight && telegramSessionRangeAutoSend && !_historicalProcessing) {
+    const currentPanelSymbol = _multiPanelProcessing || null;
+    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN", currentPanelSymbol), CHART_RENDER_DELAY_MS);
+  }
+}
+
+/**
+ * Detect London session sweeping the Asian range high or low.
+ * A "sweep" occurs when a London-session candle's wick exceeds the Asian high or low
+ * but the candle body closes back inside the Asian range — a liquidity grab.
+ * Also detects a clean break (close outside) as a sweep signal.
+ */
+function detectLondonAsianSweep() {
+  if (!sessionRangesEnabled || !sessionRangeAsian || !sessionRangeLondon) return;
+  if (londonSweepSignal) return; /* already detected for this session */
+
+  const aH = sessionRangeAsian.high;
+  const aL = sessionRangeAsian.low;
+
+  /* Scan London candles after Asian range ends */
+  const scanStart = Math.max(sessionRangeLondon.startIdx, sessionRangeAsian.endIdx + 1);
+  const scanEnd   = Math.min(sessionRangeLondon.endIdx, candles.length - 1);
+  if (scanStart > scanEnd) return;  /* no London candles past Asian range yet */
+
+  for (let i = scanStart; i <= scanEnd; i++) {
+    const c = candles[i];
+    /* Check sweep of Asian HIGH */
+    if (c.high > aH) {
+      londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
+      addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
+      showToast(
+        "London Sweep ▲ Asian High",
+        `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
+        "warning", 8000
+      );
+      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
+      }
+      return;
+    }
+    /* Check sweep of Asian LOW */
+    if (c.low < aL) {
+      londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
+      addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
+      showToast(
+        "London Sweep ▼ Asian Low",
+        `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
+        "warning", 8000
+      );
+      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
+      }
+      return;
+    }
+  }
+}
+
+/**
+ * Reset all session range state.
+ */
+function resetSessionRanges() {
+  sessionRangeAsian   = null;
+  sessionRangeLondon  = null;
+  sessionRangeNY      = null;
+  asianRangeTight     = false;
+  londonSweepSignal   = null;
+}
+
 /* ================= TELEGRAM INTEGRATION ================= */
 
 /**
@@ -1534,6 +1702,22 @@ function buildTelegramCaption() {
     lines.push(`<b>Range Low:</b> <code>${fmt(openingRange.low, 5)}</code>`);
   }
 
+  /* Session Ranges context */
+  if (sessionRangesEnabled && sessionRangeAsian) {
+    lines.push(``);
+    lines.push(`<b>🌍 Session Ranges:</b>`);
+    lines.push(`  Asian: <code>${fmt(sessionRangeAsian.high, 5)}</code> / <code>${fmt(sessionRangeAsian.low, 5)}</code>${asianRangeTight ? " ⚡TIGHT" : ""}`);
+    if (sessionRangeLondon) {
+      lines.push(`  London: <code>${fmt(sessionRangeLondon.high, 5)}</code> / <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+    }
+    if (sessionRangeNY) {
+      lines.push(`  NY: <code>${fmt(sessionRangeNY.high, 5)}</code> / <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+    }
+    if (londonSweepSignal) {
+      lines.push(`  Sweep: London ${londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${londonSweepSignal.dir} @ <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+    }
+  }
+
   lines.push(``);
   lines.push(`<b>Confluence:</b> ${confluenceScore}/16`);
   const regime = adxValue > 0 ? getVolatilityRegime() : "--";
@@ -1563,6 +1747,7 @@ function buildTelegramCaption() {
   if (stochFilterEnabled) filters.push("Stochastic");
   if (scalpingModeEnabled) filters.push("Scalping");
   if (liveScalpEnabled) filters.push("Live Scalp Scanner");
+  if (sessionRangesEnabled) filters.push("Session Ranges");
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -1957,6 +2142,22 @@ function buildPanelTelegramCaption(p) {
     lines.push(`<b>Range Low:</b> <code>${fmt(p.openingRange.low, 5)}</code>`);
   }
 
+  /* Session Ranges context */
+  if (sessionRangesEnabled && p.sessionRangeAsian) {
+    lines.push(``);
+    lines.push(`<b>🌍 Session Ranges:</b>`);
+    lines.push(`  Asian: <code>${fmt(p.sessionRangeAsian.high, 5)}</code> / <code>${fmt(p.sessionRangeAsian.low, 5)}</code>${p.asianRangeTight ? " ⚡TIGHT" : ""}`);
+    if (p.sessionRangeLondon) {
+      lines.push(`  London: <code>${fmt(p.sessionRangeLondon.high, 5)}</code> / <code>${fmt(p.sessionRangeLondon.low, 5)}</code>`);
+    }
+    if (p.sessionRangeNY) {
+      lines.push(`  NY: <code>${fmt(p.sessionRangeNY.high, 5)}</code> / <code>${fmt(p.sessionRangeNY.low, 5)}</code>`);
+    }
+    if (p.londonSweepSignal) {
+      lines.push(`  Sweep: London ${p.londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${p.londonSweepSignal.dir} @ <code>${fmt(p.londonSweepSignal.price, 5)}</code>`);
+    }
+  }
+
   lines.push(``);
   lines.push(`<b>Confluence:</b> ${p.confluenceScore}/16`);
 
@@ -1980,6 +2181,7 @@ function buildPanelTelegramCaption(p) {
   if (f.adxFilterEnabled) filters.push("ADX");
   if (f.stochFilterEnabled) filters.push("Stochastic");
   if (f.scalpingModeEnabled) filters.push("Scalping");
+  if (sessionRangesEnabled) filters.push("Session Ranges");
   /* Profit-Direction Constraints */
   if (f.minConfluenceEnabled) filters.push(`Min Confluence ≥${f.minConfluenceValue}`);
   if (f.doubleRetestEnabled) filters.push("Double Retest");
@@ -2042,7 +2244,9 @@ function _snapshotChartGlobals() {
     macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
     stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
     nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
-    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES
+    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
+    sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
+    sessionRangeNY, asianRangeTight, londonSweepSignal
   };
 }
 function _restoreChartGlobals(s) {
@@ -2076,6 +2280,10 @@ function _restoreChartGlobals(s) {
   nyOpenRange = s.nyOpenRange; nyOpenRangeBreakout = s.nyOpenRangeBreakout;
   nyOpenRangeRetest = s.nyOpenRangeRetest; nyOpenRangeTrade = s.nyOpenRangeTrade;
   nyOpenRangePhase = s.nyOpenRangePhase; RANGE_MINUTES = s.RANGE_MINUTES;
+  sessionRangesEnabled = s.sessionRangesEnabled;
+  sessionRangeAsian = s.sessionRangeAsian; sessionRangeLondon = s.sessionRangeLondon;
+  sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
+  londonSweepSignal = s.londonSweepSignal;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -2118,6 +2326,7 @@ function saveSettings() {
       stochFilterEnabled,
       scalpingModeEnabled,
       nyOpenRangeEnabled,
+      sessionRangesEnabled,
       /* Profit-Direction Constraints */
       minConfluenceEnabled,
       minConfluenceValue,
@@ -2147,6 +2356,7 @@ function saveSettings() {
       telegramAutoSend,
       telegramScalpAutoSend,
       telegramOutcomeSend,
+      telegramSessionRangeAutoSend,
       accountSize,
       riskPercent
     };
@@ -2241,6 +2451,10 @@ function restoreSettings() {
     if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
     if (UI.nyOpenRangeToggle) UI.nyOpenRangeToggle.checked = nyOpenRangeEnabled;
 
+    /* Session Ranges */
+    if (s.sessionRangesEnabled != null) sessionRangesEnabled = s.sessionRangesEnabled;
+    if (UI.sessionRangesToggle) UI.sessionRangesToggle.checked = sessionRangesEnabled;
+
     /* Profit-Direction Constraint toggles */
     if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
     if (s.minConfluenceValue != null) minConfluenceValue = s.minConfluenceValue;
@@ -2301,11 +2515,13 @@ function restoreSettings() {
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
     if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
+    if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
     if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
+    if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -3801,6 +4017,56 @@ function updateStateUI() {
       : "env-label";
   }
 
+  /* Session Ranges display */
+  if (UI.sessionRangeAsianDisplay) {
+    if (sessionRangesEnabled && sessionRangeAsian) {
+      UI.sessionRangeAsianDisplay.textContent = `H:${fmt(sessionRangeAsian.high, 4)} L:${fmt(sessionRangeAsian.low, 4)}`;
+      UI.sessionRangeAsianDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeAsianDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeAsianDisplay.className = "env-label";
+    }
+  }
+  if (UI.asianTightDisplay) {
+    if (sessionRangesEnabled && sessionRangeAsian) {
+      UI.asianTightDisplay.textContent = asianRangeTight ? "TIGHT ⚡" : "WIDE";
+      UI.asianTightDisplay.className = "status-badge " + (asianRangeTight ? "warning" : "disabled");
+    } else {
+      UI.asianTightDisplay.textContent = "--";
+      UI.asianTightDisplay.className = "env-label";
+    }
+  }
+  if (UI.sessionRangeLondonDisplay) {
+    if (sessionRangesEnabled && sessionRangeLondon) {
+      UI.sessionRangeLondonDisplay.textContent = `H:${fmt(sessionRangeLondon.high, 4)} L:${fmt(sessionRangeLondon.low, 4)}`;
+      UI.sessionRangeLondonDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeLondonDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeLondonDisplay.className = "env-label";
+    }
+  }
+  if (UI.sessionRangeNYDisplay) {
+    if (sessionRangesEnabled && sessionRangeNY) {
+      UI.sessionRangeNYDisplay.textContent = `H:${fmt(sessionRangeNY.high, 4)} L:${fmt(sessionRangeNY.low, 4)}`;
+      UI.sessionRangeNYDisplay.className = "status-badge disabled";
+    } else {
+      UI.sessionRangeNYDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
+      UI.sessionRangeNYDisplay.className = "env-label";
+    }
+  }
+  if (UI.londonSweepDisplay) {
+    if (sessionRangesEnabled && londonSweepSignal) {
+      const sweepLabel = londonSweepSignal.dir === "HIGH"
+        ? `SWEPT HIGH ▲ @${fmt(londonSweepSignal.price, 4)}`
+        : `SWEPT LOW ▼ @${fmt(londonSweepSignal.price, 4)}`;
+      UI.londonSweepDisplay.textContent = sweepLabel;
+      UI.londonSweepDisplay.className = "status-badge " + (londonSweepSignal.dir === "HIGH" ? "bear" : "bull");
+    } else {
+      UI.londonSweepDisplay.textContent = sessionRangesEnabled ? "NONE" : "OFF";
+      UI.londonSweepDisplay.className = "env-label";
+    }
+  }
+
   /* Fibonacci retest display */
   if (UI.fibRetestDisplay) {
     if (breakout) {
@@ -4851,6 +5117,7 @@ function revertAllSettings() {
   /* Scalping & misc */
   scalpingModeEnabled  = false;
   nyOpenRangeEnabled   = false;
+  sessionRangesEnabled = false;
   autoApplyRecommended = true;
 
   /* Advanced parameter defaults */
@@ -4882,6 +5149,7 @@ function revertAllSettings() {
   if (UI.stochFilterToggle)      UI.stochFilterToggle.checked      = stochFilterEnabled;
   if (UI.scalpingModeToggle)     UI.scalpingModeToggle.checked     = scalpingModeEnabled;
   if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
+  if (UI.sessionRangesToggle)    UI.sessionRangesToggle.checked    = sessionRangesEnabled;
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
 
   /* Profit-Direction UI sync */
@@ -5265,6 +5533,147 @@ async function sendTelegramScalpAlert(scalp) {
     addLog(`📤 Scalp Telegram error: ${err.message}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `❌ Scalp: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Build a Telegram caption for session range signals (tight Asian range / London sweep).
+ * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
+ */
+function buildSessionRangeTelegramCaption(signalType) {
+  const symbol = UI.symbolSelect
+    ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
+       ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
+       : UI.symbolSelect.value)
+    : "--";
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+  const lines = [];
+
+  if (signalType === "LONDON_SWEEP") {
+    const dir = londonSweepSignal ? londonSweepSignal.dir : "--";
+    const sweepEmoji = dir === "HIGH" ? "▲" : "▼";
+    const reversal = dir === "HIGH" ? "bearish" : "bullish";
+    lines.push(`<b>🌍 London Sweep ${sweepEmoji} Asian ${dir}</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symbol}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    if (sessionRangeAsian) {
+      lines.push(`<b>Asian Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
+      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>${asianRangeTight ? " ⚡ TIGHT" : ""}`);
+    }
+    if (londonSweepSignal) {
+      lines.push(``);
+      lines.push(`<b>Sweep Price:</b> <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+      lines.push(`<b>Signal:</b> Potential ${reversal} reversal`);
+    }
+    if (sessionRangeLondon) {
+      lines.push(``);
+      lines.push(`<b>London Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeLondon.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+    }
+  } else {
+    /* TIGHT_ASIAN */
+    lines.push(`<b>⚡ Tight Asian Range Detected</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symbol}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    if (sessionRangeAsian) {
+      lines.push(`<b>Asian Range:</b>`);
+      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
+      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
+      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>`);
+      if (atrValue > 0) {
+        lines.push(`  ATR: <code>${fmt(atrValue, 5)}</code>`);
+        lines.push(`  Ratio: ${fmt(rangeSize / atrValue, 2)}× ATR (< ${ASIAN_TIGHT_ATR_MULT}×)`);
+      }
+    }
+    lines.push(``);
+    lines.push(`<b>Signal:</b> Compression likely to expand during London session`);
+  }
+
+  if (sessionRangeNY) {
+    lines.push(``);
+    lines.push(`<b>NY Range:</b>`);
+    lines.push(`  High: <code>${fmt(sessionRangeNY.high, 5)}</code>`);
+    lines.push(`  Low: <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a session range signal to Telegram with chart screenshot.
+ * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
+ * @param {string|null} panelSymbol  — if non-null, capture this panel's chart instead of the main chart
+ */
+async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
+  if (!telegramSessionRangeAutoSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Check credentials are available */
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Session Range Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
+  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
+  try {
+    /* In multi-panel mode, capture the correct panel's chart */
+    let blob;
+    const p = panelSymbol ? multiPanels.get(panelSymbol) : null;
+    if (p) {
+      blob = await capturePanelScreenshot(p);
+    } else {
+      blob = await captureChartScreenshot();
+    }
+    /* Build caption — if in multi-panel mode, temporarily activate panel globals
+       so the caption reads the correct session range data for this panel */
+    let caption;
+    if (p) {
+      const snap = _snapshotChartGlobals();
+      activatePanel(p);
+      caption = buildSessionRangeTelegramCaption(signalType);
+      _restoreChartGlobals(snap);
+    } else {
+      caption = buildSessionRangeTelegramCaption(signalType);
+    }
+    await sendTelegramPhoto(blob, caption);
+    addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 Session Range Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ Session: ${err.message}`;
       UI.telegramStatus.className = "hint telegram-status telegram-err";
     }
   }
@@ -6314,6 +6723,9 @@ function processAllCandles() {
   /* Reset NY Open Range for full reprocessing */
   resetNyOpenRange();
 
+  /* Reset Session Ranges for full reprocessing */
+  resetSessionRanges();
+
   if (candles.length === 0) return;
   rangeStartEpoch = candles[0].epoch;
   computeATR();
@@ -6343,6 +6755,12 @@ function processAllCandles() {
         if (nyOpenRangeTrade) break;
       }
     }
+  }
+
+  /* Session Ranges: build ranges and detect London sweep */
+  if (sessionRangesEnabled) {
+    buildSessionRanges();
+    detectLondonAsianSweep();
   }
 
   updateStateUI();
@@ -6404,6 +6822,12 @@ function processLatestCandle() {
     }
   }
 
+  /* Session Ranges: rebuild ranges and check for London sweep on each candle */
+  if (sessionRangesEnabled) {
+    buildSessionRanges();
+    detectLondonAsianSweep();
+  }
+
   updateStateUI();
 }
 
@@ -6423,6 +6847,8 @@ function resetForNextSetup() {
   retestCount    = 0;
   /* Reset NY Open Range alongside main strategy */
   resetNyOpenRange();
+  /* Reset Session Ranges alongside main strategy */
+  resetSessionRanges();
   /* Start new range from the latest candle */
   rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
   setPhase("RANGE");
@@ -7636,6 +8062,53 @@ function drawChart() {
     }
   }
 
+  /* ---- Session Ranges (Asian / London / NY) highlight ---- */
+  if (sessionRangesEnabled) {
+    const sessionRangeConfigs = [
+      { range: sessionRangeAsian,  label: "ASIAN",  fill: "rgba(255,191,0,0.06)",  border: "rgba(255,191,0,0.45)" },
+      { range: sessionRangeLondon, label: "LONDON", fill: "rgba(59,130,246,0.06)", border: "rgba(59,130,246,0.45)" },
+      { range: sessionRangeNY,     label: "NY",     fill: "rgba(168,85,247,0.06)", border: "rgba(168,85,247,0.45)" }
+    ];
+    for (const cfg of sessionRangeConfigs) {
+      if (!cfg.range) continue;
+      const sx1 = xOf(cfg.range.startIdx) - candleW / 2 - 2;
+      const sx2 = xOf(cfg.range.endIdx) + candleW / 2 + 2;
+      const sy1 = yOf(cfg.range.high);
+      const sy2 = yOf(cfg.range.low);
+      ctx.fillStyle = cfg.fill;
+      ctx.fillRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
+      ctx.strokeStyle = cfg.border;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = cfg.border;
+      ctx.font = "bold 9px Arial";
+      ctx.fillText(cfg.label + " RANGE", sx1 + 3, sy1 - 3);
+    }
+
+    /* Asian "tight" badge on chart */
+    if (sessionRangeAsian && asianRangeTight) {
+      const ax = xOf(sessionRangeAsian.startIdx) - candleW / 2;
+      const amidY = yOf((sessionRangeAsian.high + sessionRangeAsian.low) / 2);
+      ctx.fillStyle = "rgba(255,191,0,0.85)";
+      ctx.font = "bold 10px Arial";
+      ctx.fillText("⚡ TIGHT", ax + 3, amidY + 3);
+    }
+
+    /* London sweep arrow marker on chart */
+    if (londonSweepSignal && londonSweepSignal.candleIdx < candles.length) {
+      const lsx = xOf(londonSweepSignal.candleIdx);
+      const lsy = yOf(londonSweepSignal.price);
+      ctx.fillStyle = londonSweepSignal.dir === "HIGH" ? "rgba(244,63,94,0.90)" : "rgba(16,185,129,0.90)";
+      ctx.font = "bold 11px Arial";
+      ctx.textAlign = "center";
+      const sweepArrow = londonSweepSignal.dir === "HIGH" ? "▼ SWEEP" : "▲ SWEEP";
+      ctx.fillText(sweepArrow, lsx, londonSweepSignal.dir === "HIGH" ? lsy - 8 : lsy + 14);
+      ctx.textAlign = "left";
+    }
+  }
+
   /* ---- Breakout candle box ---- */
   if (breakout && breakout.candleIdx < candles.length) {
     const bc = candles[breakout.candleIdx];
@@ -8524,6 +8997,13 @@ function activatePanel(p) {
   lastScalpCandleIdx = p.lastScalpCandleIdx;
   ws             = p.ws;
 
+  /* Session Ranges */
+  sessionRangeAsian   = p.sessionRangeAsian  || null;
+  sessionRangeLondon  = p.sessionRangeLondon || null;
+  sessionRangeNY      = p.sessionRangeNY     || null;
+  asianRangeTight     = p.asianRangeTight    || false;
+  londonSweepSignal   = p.londonSweepSignal  || null;
+
   /* Activate per-panel filter settings into globals */
   const f = p.filters;
   autoResetEnabled     = f.autoResetEnabled;
@@ -8612,6 +9092,13 @@ function savePanel(p) {
   p.liveScalpHistory  = liveScalpHistory;
   p.lastScalpCandleIdx = lastScalpCandleIdx;
   p.ws             = ws;
+
+  /* Session Ranges */
+  p.sessionRangeAsian   = sessionRangeAsian;
+  p.sessionRangeLondon  = sessionRangeLondon;
+  p.sessionRangeNY      = sessionRangeNY;
+  p.asianRangeTight     = asianRangeTight;
+  p.londonSweepSignal   = londonSweepSignal;
 
   /* Save current filter state back to panel */
   p.filters.autoResetEnabled     = autoResetEnabled;
@@ -9525,6 +10012,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  /* Session Ranges toggle listener */
+  if (UI.sessionRangesToggle) {
+    UI.sessionRangesToggle.addEventListener("change", () => {
+      sessionRangesEnabled = UI.sessionRangesToggle.checked;
+      saveSettings();
+      if (sessionRangesEnabled) {
+        resetSessionRanges();
+        if (candles.length > 0) {
+          buildSessionRanges();
+          detectLondonAsianSweep();
+        }
+        addLog("🌍 Session Ranges enabled — tracking Asian, London, NY ranges");
+        showToast("Session Ranges Enabled", "Tracking Asian/London/NY session high & low ranges.", "info", 5000);
+      } else {
+        resetSessionRanges();
+        addLog("🌍 Session Ranges disabled");
+      }
+      updateStateUI();
+      drawChart();
+    });
+  }
+
   /* Profit-Direction Constraint listeners */
   if (UI.minConfluenceToggle) {
     UI.minConfluenceToggle.addEventListener("change", () => { minConfluenceEnabled = UI.minConfluenceToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
@@ -9691,6 +10200,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramOutcomeSendToggle) {
     UI.telegramOutcomeSendToggle.addEventListener("change", () => { telegramOutcomeSend = UI.telegramOutcomeSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramSessionRangeAutoSendToggle) {
+    UI.telegramSessionRangeAutoSendToggle.addEventListener("change", () => { telegramSessionRangeAutoSend = UI.telegramSessionRangeAutoSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
