@@ -1558,18 +1558,20 @@ function detectLondonAsianSweep() {
       londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
 
       /* Compute trade levels: Entry at candle close, SL above the sweep wick,
-         TP at 1:2 R:R below entry */
+         TP based on user-inputted R:R ratio below entry */
       const entry = c.close;
       const sl    = c.high;                        /* SL above the sweep wick */
       const risk  = Math.abs(sl - entry);
       if (risk > 0) {
-        const tp  = entry - risk * 2;              /* 1:2 R:R */
-        const rr  = 2.0;
+        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
+        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
+        const rr  = userReward / userRisk;
+        const tp  = entry - risk * rr;
         sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, symbol: getActiveSymbol() };
-        addLog(`🌍 London Sweep TRADE: SELL entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:2 R:R)`);
+        addLog(`🌍 London Sweep TRADE: SELL entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▼ SELL Signal",
-          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:2\nSwept Asian high ${fmt(aH, 4)} — bearish reversal`,
+          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmt(aH, 4)} — bearish reversal`,
           "trade", 12000
         );
       } else {
@@ -1592,18 +1594,20 @@ function detectLondonAsianSweep() {
       londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
 
       /* Compute trade levels: Entry at candle close, SL below the sweep wick,
-         TP at 1:2 R:R above entry */
+         TP based on user-inputted R:R ratio above entry */
       const entry = c.close;
       const sl    = c.low;                         /* SL below the sweep wick */
       const risk  = Math.abs(entry - sl);
       if (risk > 0) {
-        const tp  = entry + risk * 2;              /* 1:2 R:R */
-        const rr  = 2.0;
+        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
+        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
+        const rr  = userReward / userRisk;
+        const tp  = entry + risk * rr;
         sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, symbol: getActiveSymbol() };
-        addLog(`🌍 London Sweep TRADE: BUY entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:2 R:R)`);
+        addLog(`🌍 London Sweep TRADE: BUY entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▲ BUY Signal",
-          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:2\nSwept Asian low ${fmt(aL, 4)} — bullish reversal`,
+          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmt(aL, 4)} — bullish reversal`,
           "trade", 12000
         );
       } else {
@@ -8240,7 +8244,7 @@ function drawChart() {
         ctx.lineTo(W - marginRight, srtTpY);
         ctx.stroke();
         ctx.fillStyle = COLORS.tp || "#10b981";
-        ctx.fillText(`TP ${fmt(srt.tp, 4)} (1:2)`, W - marginRight - 4, srtTpY - 4);
+        ctx.fillText(`TP ${fmt(srt.tp, 4)} (1:${fmt(srt.rr, 1)})`, W - marginRight - 4, srtTpY - 4);
       }
 
       ctx.setLineDash([]);
