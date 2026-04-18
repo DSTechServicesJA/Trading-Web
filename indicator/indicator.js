@@ -703,6 +703,7 @@ let telegramChatId    = "";
 let telegramAutoSend  = false;
 let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram */
 let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
+let telegramScalpOutcomeSend = false; /* auto-send WIN/LOSS scalp outcome to Telegram */
 let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (tight Asian, London sweep) to Telegram */
 
 /* RSI state */
@@ -1076,6 +1077,7 @@ function initUI() {
   UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
   UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
   UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
+  UI.telegramScalpOutcomeSendToggle = document.getElementById("telegramScalpOutcomeSendToggle");
   UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
@@ -1970,7 +1972,7 @@ async function sendTradeOutcomeTelegram(signal) {
     const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
     const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
     const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
-    const rrStr = signal.rr != null ? signal.rr.toFixed(1) + ":1" : "--";
+    const rrStr = signal.rr != null ? "1:" + signal.rr.toFixed(1) : "--";
     const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
     const pattern = signal.confirmPattern || "--";
 
@@ -2454,6 +2456,7 @@ function saveSettings() {
       telegramAutoSend,
       telegramScalpAutoSend,
       telegramOutcomeSend,
+      telegramScalpOutcomeSend,
       telegramSessionRangeAutoSend,
       accountSize,
       riskPercent
@@ -2625,12 +2628,14 @@ function restoreSettings() {
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
     if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
     if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
+    if (s.telegramScalpOutcomeSend != null) telegramScalpOutcomeSend = s.telegramScalpOutcomeSend;
     if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
     if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
+    if (UI.telegramScalpOutcomeSendToggle) UI.telegramScalpOutcomeSendToggle.checked = telegramScalpOutcomeSend;
     if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
 
     /* Account sizing */
@@ -2799,7 +2804,7 @@ function renderSignalBanner() {
     const entryStr = s.entry != null ? fmt(s.entry, 4) : "--";
     const slStr = s.sl != null ? fmt(s.sl, 4) : "--";
     const tpStr = s.tp != null ? fmt(s.tp, 4) : "--";
-    const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
+    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
     const confStr = s.confluenceScore != null ? s.confluenceScore + "/16" : "";
     const patternStr = s.confirmPattern || "";
 
@@ -2865,7 +2870,7 @@ function renderScalpTickerBanner() {
     const entryStr = fmt(s.entry, 4);
     const slStr = fmt(s.sl, 4);
     const tpStr = fmt(s.tp, 4);
-    const rrStr = s.rr != null ? s.rr.toFixed(1) + "R" : "--";
+    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
     const reasonsStr = s.reasons.slice(0, 2).join(" · ");
 
     const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
@@ -6104,6 +6109,30 @@ function processLiveScalp() {
  * Called on every candle update (same pipeline as monitorTradeOutcome).
  * Uses a max-candle timeout (same as SCALP_MAX_CANDLES) for time-based exit.
  */
+
+/**
+ * Determine whether SL or TP was hit on a given candle for a scalp entry.
+ * Returns { slHit, tpHit }.
+ */
+function checkScalpSLTP(s, candle) {
+  if (s.dir === "BULL") {
+    return { slHit: candle.low <= s.sl, tpHit: candle.high >= s.tp };
+  }
+  return { slHit: candle.high >= s.sl, tpHit: candle.low <= s.tp };
+}
+
+/**
+ * When both SL and TP are breached in the same candle, resolve the outcome
+ * by comparing distances from entry.  The closer level is assumed to have
+ * been reached first.  On equal distance (1:1 R:R) the trade is marked WIN
+ * since the TP was reachable at the same range as the SL.
+ */
+function resolveScalpBothHit(s) {
+  const slDist = Math.abs(s.entry - s.sl);
+  const tpDist = Math.abs(s.tp - s.entry);
+  return tpDist <= slDist ? "WIN" : "LOSS";
+}
+
 function monitorScalpOutcomes(candle) {
   if (!liveScalpEnabled) return;
   let changed = false;
@@ -6114,41 +6143,58 @@ function monitorScalpOutcomes(candle) {
     if (s.candleIdx !== null && s.candleIdx !== undefined) {
       const elapsed = (candles.length - 1) - s.candleIdx;
       if (elapsed >= SCALP_MAX_CANDLES) {
-        const inProfit = (s.dir === "BULL" && candle.close > s.entry) ||
-                         (s.dir === "BEAR" && candle.close < s.entry);
-        s.result = inProfit ? "WIN" : "LOSS";
+        /* Even on timeout, check if SL or TP was hit on this final candle */
+        const { slHit, tpHit } = checkScalpSLTP(s, candle);
+        if (tpHit && slHit) {
+          s.result = resolveScalpBothHit(s);
+        } else if (tpHit) {
+          s.result = "WIN";
+        } else if (slHit) {
+          s.result = "LOSS";
+        } else {
+          /* Neither SL nor TP hit — fall back to close vs entry */
+          const inProfit = (s.dir === "BULL" && candle.close > s.entry) ||
+                           (s.dir === "BEAR" && candle.close < s.entry);
+          s.result = inProfit ? "WIN" : "LOSS";
+        }
         addLog(`⚡ Scalp ${s.result} (timeout ${SCALP_MAX_CANDLES} candles) — ${s.dir} ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
         changed = true;
         continue;
       }
     }
 
-    /* Check SL / TP hit */
-    if (s.dir === "BULL") {
-      if (candle.low <= s.sl) {
-        s.result = "LOSS";
-        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
-        changed = true;
-      } else if (candle.high >= s.tp) {
-        s.result = "WIN";
-        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
-        changed = true;
-      }
-    } else {
-      if (candle.high >= s.sl) {
-        s.result = "LOSS";
-        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
-        changed = true;
-      } else if (candle.low <= s.tp) {
-        s.result = "WIN";
-        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
-        changed = true;
-      }
+    /* Check SL / TP hit.
+       When both SL and TP are hit within the same candle we compare the
+       distance from the entry to each level — the closer level is assumed
+       to have been reached first.  This avoids the old "SL always wins"
+       bias that inflated the loss count. */
+    const { slHit, tpHit } = checkScalpSLTP(s, candle);
+    if (slHit && tpHit) {
+      s.result = resolveScalpBothHit(s);
+      addLog(`⚡ Scalp ${s.result} — ${s.symbol || ""} hit ${s.result === "WIN" ? "TP" : "SL"} @ ${fmt(s.result === "WIN" ? s.tp : s.sl, 4)} (both levels breached, ${s.result === "WIN" ? "TP" : "SL"} closer)`);
+      changed = true;
+    } else if (slHit) {
+      s.result = "LOSS";
+      addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
+      changed = true;
+    } else if (tpHit) {
+      s.result = "WIN";
+      addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
+      changed = true;
     }
   }
   if (changed) {
     updateScalpStatsUI();
     renderScalpTickerBanner();
+    /* Send Telegram outcome for each newly resolved scalp */
+    for (const s of liveScalpHistory) {
+      if (s.result === "WIN" || s.result === "LOSS") {
+        if (!s._outcomeSent) {
+          s._outcomeSent = true;
+          sendScalpOutcomeTelegram(s);
+        }
+      }
+    }
   }
 }
 
@@ -6278,6 +6324,63 @@ async function sendTelegramScalpAlert(scalp) {
       UI.telegramStatus.className = "hint telegram-status";
     }
   }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Send scalp outcome (WIN / LOSS) via Telegram when enabled.
+ * Called from monitorScalpOutcomes after a scalp resolves.
+ */
+async function sendScalpOutcomeTelegram(scalp) {
+  if (!telegramScalpOutcomeSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Scalp outcome Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const sym = getSymbolLabel(scalp.symbol || getActiveSymbol() || "");
+    const dir = scalp.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = scalp.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = scalp.entry != null ? fmt(scalp.entry, 5) : "--";
+    const slStr = scalp.sl != null ? fmt(scalp.sl, 5) : "--";
+    const tpStr = scalp.tp != null ? fmt(scalp.tp, 5) : "--";
+    const rrStr = scalp.rr != null ? "1:" + fmt(scalp.rr, 1) : "--";
+    const confScore = scalp.conf != null ? scalp.conf + "/7" : "--";
+    const reasons = scalp.reasons ? scalp.reasons.join(", ") : "--";
+
+    const lines = [];
+    lines.push(`${icon} <b>Scalp ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>📍 Entry:</b> ${entryStr}`);
+    lines.push(`<b>🛑 SL:</b> ${slStr}`);
+    lines.push(`<b>🎯 TP:</b> ${tpStr}`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(`<b>Confluence:</b> ${confScore}`);
+    lines.push(`<b>Reasons:</b> ${reasons}`);
+
+    /* Scalp win/loss tally */
+    const h = getAggregatedScalpHistory();
+    const totalW = h.filter(s => s.result === "WIN").length;
+    const totalL = h.filter(s => s.result === "LOSS").length;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`📊 <b>Scalp Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: scalp outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Scalp outcome Telegram error: ${err.message}`);
+  }
 }
 
 /**
@@ -11130,6 +11233,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramOutcomeSendToggle) {
     UI.telegramOutcomeSendToggle.addEventListener("change", () => { telegramOutcomeSend = UI.telegramOutcomeSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramScalpOutcomeSendToggle) {
+    UI.telegramScalpOutcomeSendToggle.addEventListener("change", () => { telegramScalpOutcomeSend = UI.telegramScalpOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSessionRangeAutoSendToggle) {
     UI.telegramSessionRangeAutoSendToggle.addEventListener("change", () => { telegramSessionRangeAutoSend = UI.telegramSessionRangeAutoSendToggle.checked; saveSettings(); });
