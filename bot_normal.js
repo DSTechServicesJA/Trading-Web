@@ -1267,10 +1267,6 @@ maxDrawdown = Math.min(maxDrawdown, sessionPL - peakPL);
 updatePerformanceUI();
 
 
-  // ✅ TRACK PEAK & DRAWDOWN
-  if (sessionPL > peakPL) peakPL = sessionPL;
-  maxDrawdown = Math.min(maxDrawdown, sessionPL - peakPL);
-
   // rest of your existing logic continues unchanged
 
   // ✅ ALWAYS LOG TRADE FIRST
@@ -1322,7 +1318,7 @@ updatePerformanceUI();
       THRESHOLD_MAX
     );
 
-  } else {
+  } else if (profit < 0) {
     winStreak = 0;
 logLoss(profit);
 
