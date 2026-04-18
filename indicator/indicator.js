@@ -790,6 +790,10 @@ const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = true;
 
+/* Lock checkboxes — prevent applyRecommendedSettings from overwriting timeframe / R:R */
+let lockTimeframe = false;
+let lockRR        = false;
+
 /* ================= STRATEGY 1: LIQUIDITY SWEEP (15m → 1m) ================= */
 let liquiditySweepEnabled = false;       /* master toggle */
 let liquiditySweepHistory = [];          /* alert history */
@@ -911,6 +915,8 @@ function initUI() {
   UI.sessionFilterMode   = document.getElementById("sessionFilterMode");
   UI.fibRetestToggle     = document.getElementById("fibRetestToggle");
   UI.autoApplyRecToggle  = document.getElementById("autoApplyRecToggle");
+  UI.lockTimeframeToggle = document.getElementById("lockTimeframeToggle");
+  UI.lockRRToggle        = document.getElementById("lockRRToggle");
   UI.rsiDisplay          = document.getElementById("rsiDisplay");
   UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
   UI.sessionDisplay      = document.getElementById("sessionDisplay");
@@ -2588,6 +2594,8 @@ function saveSettings() {
       followThroughEnabled,
       mtfStructureEnabled,
       autoApplyRecommended,
+      lockTimeframe,
+      lockRR,
       liveScalpEnabled,
       liveScalpMinConf,
       liquiditySweepEnabled,
@@ -2764,6 +2772,12 @@ function restoreSettings() {
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
     if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
+
+    /* Lock toggles */
+    if (s.lockTimeframe != null) lockTimeframe = s.lockTimeframe;
+    if (s.lockRR != null) lockRR = s.lockRR;
+    if (UI.lockTimeframeToggle) UI.lockTimeframeToggle.checked = lockTimeframe;
+    if (UI.lockRRToggle) UI.lockRRToggle.checked = lockRR;
 
     /* Telegram settings */
     if (s.telegramBotToken != null) {
@@ -4010,11 +4024,11 @@ function updateRecommendedSettings() {
 function applyRecommendedSettings() {
   const rec = getMarketRecommendations();
 
-  /* Timeframe */
-  if (UI.granSelect) UI.granSelect.value = rec.timeframe.gran;
+  /* Timeframe — skip if locked */
+  if (!lockTimeframe && UI.granSelect) UI.granSelect.value = rec.timeframe.gran;
 
-  /* R:R — set reward to recommended minRR (risk stays at 1) */
-  if (UI.rewardInput) UI.rewardInput.value = rec.rr.minRR;
+  /* R:R — set reward to recommended minRR (risk stays at 1) — skip if locked */
+  if (!lockRR && UI.rewardInput) UI.rewardInput.value = rec.rr.minRR;
 
   /* Opening range */
   RANGE_MINUTES = rec.range.minutes;
@@ -4038,9 +4052,9 @@ function applyRecommendedSettings() {
   adxFilterEnabled       = rec.adx;
   stochFilterEnabled     = rec.stoch;
 
-  /* Min R:R */
+  /* Min R:R — skip value update if R:R is locked */
   minRREnabled = rec.minRR.rec;
-  minRRValue   = rec.rr.minRR;
+  if (!lockRR) minRRValue = rec.rr.minRR;
 
   /* Session mode — if recommended, default to london_ny for forex/commodity */
   if (rec.session.rec) {
@@ -5424,6 +5438,8 @@ function revertAllSettings() {
   nyOpenRangeEnabled   = false;
   sessionRangesEnabled = false;
   autoApplyRecommended = true;
+  lockTimeframe = false;
+  lockRR        = false;
   liquiditySweepEnabled = false;
   stopLossHuntEnabled   = false;
   failedPinBarEnabled   = false;
@@ -5459,6 +5475,8 @@ function revertAllSettings() {
   if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
   if (UI.sessionRangesToggle)    UI.sessionRangesToggle.checked    = sessionRangesEnabled;
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
+  if (UI.lockTimeframeToggle)    UI.lockTimeframeToggle.checked    = lockTimeframe;
+  if (UI.lockRRToggle)           UI.lockRRToggle.checked           = lockRR;
   if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
   if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
@@ -10720,7 +10738,7 @@ function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
   /* Use per-symbol recommended timeframe from market type recommendations */
   const rec = getMarketRecommendations(p.symbol);
-  const gran = rec.timeframe.gran;
+  const gran = lockTimeframe ? (UI.granSelect ? parseInt(UI.granSelect.value, 10) : rec.timeframe.gran) : rec.timeframe.gran;
 
   /* Re-apply recommended filters for this symbol's market type */
   p.filters.emaFilterEnabled     = rec.ema;
@@ -10730,7 +10748,7 @@ function connectPanel(p) {
   p.filters.partialTpEnabled     = rec.partialTp;
   p.filters.falseBreakoutEnabled = rec.falseBreakout;
   p.filters.minRREnabled         = rec.minRR.rec;
-  p.filters.minRRValue           = rec.rr.minRR;
+  p.filters.minRRValue           = lockRR ? minRRValue : rec.rr.minRR;
   p.filters.rsiFilterEnabled     = rec.rsi;
   p.filters.volumeSpikeEnabled   = rec.volSpike.rec;
   p.filters.sessionFilterEnabled = rec.session.rec;
@@ -11591,6 +11609,20 @@ document.addEventListener("DOMContentLoaded", () => {
       autoApplyRecommended = UI.autoApplyRecToggle.checked;
       saveSettings();
       if (autoApplyRecommended) applyRecommendedSettings();
+    });
+  }
+
+  /* Lock Timeframe / R:R listeners */
+  if (UI.lockTimeframeToggle) {
+    UI.lockTimeframeToggle.addEventListener("change", () => {
+      lockTimeframe = UI.lockTimeframeToggle.checked;
+      saveSettings();
+    });
+  }
+  if (UI.lockRRToggle) {
+    UI.lockRRToggle.addEventListener("change", () => {
+      lockRR = UI.lockRRToggle.checked;
+      saveSettings();
     });
   }
 
