@@ -10738,7 +10738,10 @@ function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
   /* Use per-symbol recommended timeframe from market type recommendations */
   const rec = getMarketRecommendations(p.symbol);
-  const gran = lockTimeframe ? (UI.granSelect ? parseInt(UI.granSelect.value, 10) : rec.timeframe.gran) : rec.timeframe.gran;
+  let gran = rec.timeframe.gran;
+  if (lockTimeframe && UI.granSelect) {
+    gran = parseInt(UI.granSelect.value, 10) || gran;
+  }
 
   /* Re-apply recommended filters for this symbol's market type */
   p.filters.emaFilterEnabled     = rec.ema;
