@@ -257,6 +257,9 @@ const SR_LOOKBACK         = 40;   // candles to scan for S/R
 const SR_TOUCH_TOLERANCE  = 0.0004; // 0.04% price tolerance for level touches
 const TRENDLINE_MIN_TOUCHES = 2;
 const CONFLUENCE_MIN_SCORE  = 5;   // minimum confluence points to allow trade (raised from 3 for higher-quality entries)
+const PROBE_CONFLUENCE_BONUS = 2;  // extra confluence required for low-volatility probe trades
+const MIN_HOURLY_SAMPLES    = 8;   // minimum trades per hour before hourly filter activates
+const MIN_HOURLY_WINRATE    = 0.40; // block hours with win rate below this threshold
 const RISK_PER_TRADE_PCT   = 0.02; // 2% of balance per trade (Forex Millionaire rule)
 
 // --- SMA / Bollinger / Fibonacci constants (Forex Millionaire: 8 & 21 SMA, BB, Fib 50/61) ---
@@ -1703,7 +1706,7 @@ function restoreAdaptiveData() {
     const acm = localStorage.getItem("itguru_adaptiveConfMin");
     if (acm) {
       const parsed = parseInt(acm, 10);
-      if (!isNaN(parsed) && parsed >= 2 && parsed <= 10) adaptiveConfluenceMin = parsed;
+      if (!isNaN(parsed) && parsed >= Math.max(2, CONFLUENCE_MIN_SCORE - 3) && parsed <= CONFLUENCE_MIN_SCORE + 5) adaptiveConfluenceMin = parsed;
     }
 
     console.log("📦 Restored adaptive data from localStorage");
@@ -3545,7 +3548,7 @@ function analyzeSignal() {
 
   // --- PROFIT FACTOR GATE: pause when losing more than winning (after 10+ trades) ---
   const totalTradesForPF = wins + losses;
-  if (totalTradesForPF >= 10 && profitFactor < 1.0 && (grossProfit + grossLoss) > 0) {
+  if (totalTradesForPF >= 10 && grossLoss > 0 && profitFactor < 1.0) {
     setStatus("Profit factor < 1.0 — pausing for safety", "#ef4444");
     return false;
   }
@@ -3555,9 +3558,9 @@ function analyzeSignal() {
   const hourData = hourlyStats[currentHour];
   if (hourData) {
     const hourTotal = hourData.wins + hourData.losses;
-    if (hourTotal >= 8) {
+    if (hourTotal >= MIN_HOURLY_SAMPLES) {
       const hourWinRate = hourData.wins / hourTotal;
-      if (hourWinRate < 0.40) {
+      if (hourWinRate < MIN_HOURLY_WINRATE) {
         setStatus(`Blocked: Poor hour ${currentHour}:00 (WR ${Math.round(hourWinRate * 100)}%)`, "#f59e0b");
         return false;
       }
@@ -3778,7 +3781,7 @@ function analyzeSignal() {
       // --- LOW-VOL PROBE CONFLUENCE GATE: require higher confluence for probe trades ---
       if (candles.length >= 5) {
         const { score: probeCfScore } = scoreConfluence();
-        const probeCfRequired = adaptiveConfluenceMin + 2;  // stricter than normal
+        const probeCfRequired = adaptiveConfluenceMin + PROBE_CONFLUENCE_BONUS;
         if (probeCfScore < probeCfRequired) {
           logProbeDecision({
             mode,
