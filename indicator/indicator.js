@@ -127,7 +127,7 @@ const HHHL_LOOKBACK_PERIOD    = 10;   /* candles to look back for swing structur
 /* RSI */
 const RSI_PERIOD = 14;
 const RSI_RETEST_BULL_MAX = 45;  /* RSI at retest should be ≤ this for BULL (require deeper pullback for room to rise) */
-const RSI_RETEST_BEAR_MIN = 55;  /* RSI at retest should be ≥ this for BEAR (require stronger bounce for room to fall) */
+const RSI_RETEST_BEAR_MIN = 55;  /* RSI at retest should be ≥ this for BEAR (require stronger upward bounce during retest for room to fall) */
 
 /* Volume spike (range-based proxy – synthetic indices have no tick volume) */
 const VOLUME_SPIKE_LOOKBACK = 20;

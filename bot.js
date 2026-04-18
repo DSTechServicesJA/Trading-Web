@@ -2689,8 +2689,9 @@ function detectMarketRegime() {
     proposedMode = "CHAOS";
   } else if (spread > 0.00014 && vol && Math.abs(rsiMom) > 0.22) {
     proposedMode = "TREND";
-  } else if (trendDirection !== "NONE" && spread > 0.00008 && vol) {
+  } else if (trendDirection !== "NONE" && spread > 0.00010 && vol) {
     // Price Action Engine: HH/HL or LH/LL structure confirms trend even with weaker EMA
+    // Secondary threshold (0.00010) allows structure-confirmed trends with slightly weaker EMA spread
     proposedMode = "TREND";
   } else if (Math.max(oddRatio, evenRatio) >= 70 && ent < 0.82) {
     proposedMode = "ODD_EVEN";
