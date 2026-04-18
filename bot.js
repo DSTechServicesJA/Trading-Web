@@ -354,13 +354,25 @@ const WALKFORWARD_WINDOW = 50;    // trades to evaluate
 const WALKFORWARD_INTERVAL = 25;  // re-evaluate every N trades
 let walkForwardCounter = 0;
 
+// --- Efficient min/max for arrays (avoids call stack overflow with spread) ---
+function arrayMax(arr) {
+  let max = arr[0];
+  for (let i = 1; i < arr.length; i++) if (arr[i] > max) max = arr[i];
+  return max;
+}
+function arrayMin(arr) {
+  let min = arr[0];
+  for (let i = 1; i < arr.length; i++) if (arr[i] < min) min = arr[i];
+  return min;
+}
+
 // --- Build OHLC candle from tick array ---
 function buildCandle(ticks) {
   if (!ticks.length) return null;
   return {
     o: ticks[0],
-    h: Math.max(...ticks),
-    l: Math.min(...ticks),
+    h: arrayMax(ticks),
+    l: arrayMin(ticks),
     c: ticks[ticks.length - 1],
     ticks: ticks.length,
     time: Date.now()
@@ -713,12 +725,12 @@ function detectSupportResistance() {
 
   // Collect all swing points as candidate levels
   const candidates = [];
-  swingHighs.filter(s => s.index >= start).forEach(s => {
-    candidates.push({ price: s.price, type: "resistance" });
-  });
-  swingLows.filter(s => s.index >= start).forEach(s => {
-    candidates.push({ price: s.price, type: "support" });
-  });
+  for (let i = 0; i < swingHighs.length; i++) {
+    if (swingHighs[i].index >= start) candidates.push({ price: swingHighs[i].price, type: "resistance" });
+  }
+  for (let i = 0; i < swingLows.length; i++) {
+    if (swingLows[i].index >= start) candidates.push({ price: swingLows[i].price, type: "support" });
+  }
 
   // Cluster nearby levels
   const merged = [];
@@ -768,20 +780,18 @@ function calcSMA(candleArr, period) {
 }
 
 function updateSMAArrays() {
-  // Compute running SMAs from candle close prices
-  smaFastArr = [];
-  smaSlowArr = [];
-  for (let i = 0; i < candles.length; i++) {
-    if (i + 1 >= SMA_FAST_PERIOD) {
-      let sum = 0;
-      for (let j = i + 1 - SMA_FAST_PERIOD; j <= i; j++) sum += candles[j].c;
-      smaFastArr.push(sum / SMA_FAST_PERIOD);
-    }
-    if (i + 1 >= SMA_SLOW_PERIOD) {
-      let sum = 0;
-      for (let j = i + 1 - SMA_SLOW_PERIOD; j <= i; j++) sum += candles[j].c;
-      smaSlowArr.push(sum / SMA_SLOW_PERIOD);
-    }
+  // Incremental: only compute the latest SMA value instead of rebuilding entire arrays
+  if (candles.length >= SMA_FAST_PERIOD) {
+    let sum = 0;
+    for (let j = candles.length - SMA_FAST_PERIOD; j < candles.length; j++) sum += candles[j].c;
+    smaFastArr.push(sum / SMA_FAST_PERIOD);
+    if (smaFastArr.length > CANDLE_HISTORY_MAX) smaFastArr.shift();
+  }
+  if (candles.length >= SMA_SLOW_PERIOD) {
+    let sum = 0;
+    for (let j = candles.length - SMA_SLOW_PERIOD; j < candles.length; j++) sum += candles[j].c;
+    smaSlowArr.push(sum / SMA_SLOW_PERIOD);
+    if (smaSlowArr.length > CANDLE_HISTORY_MAX) smaSlowArr.shift();
   }
 }
 
@@ -1254,7 +1264,7 @@ function isPriceInSupplyDemandZone(price) {
 
 // --- Double S/R Stacking (Trendline Strategy: trendline + horizontal at same level) ---
 
-function detectDoubleSR(price, candleIdx) {
+function detectDoubleSR(price, candleIdx, precomputedUptl, precomputedDntl) {
   // Check if price is near both a horizontal S/R level AND a trendline
   let nearHorizontal = false;
   let nearTrendline = false;
@@ -1266,15 +1276,18 @@ function detectDoubleSR(price, candleIdx) {
     }
   }
   // Also check flipped levels
-  for (const fl of flippedLevels) {
-    if (Math.abs(price - fl.price) / price < SR_TOUCH_TOLERANCE * 2) {
-      nearHorizontal = true;
-      break;
+  if (!nearHorizontal) {
+    for (const fl of flippedLevels) {
+      if (Math.abs(price - fl.price) / price < SR_TOUCH_TOLERANCE * 2) {
+        nearHorizontal = true;
+        break;
+      }
     }
   }
 
-  const uptl = calcTrendline(swingLows.slice(-5));
-  const dntl = calcTrendline(swingHighs.slice(-5));
+  // Use pre-computed trendlines if provided, otherwise calculate
+  const uptl = precomputedUptl !== undefined ? precomputedUptl : calcTrendline(swingLows.slice(-5));
+  const dntl = precomputedDntl !== undefined ? precomputedDntl : calcTrendline(swingHighs.slice(-5));
   if (isPriceNearTrendline(uptl, candleIdx, price) || isPriceNearTrendline(dntl, candleIdx, price)) {
     nearTrendline = true;
   }
@@ -1365,7 +1378,7 @@ function scoreConfluence() {
   }
 
   // 2c. DOUBLE S/R STACKING (Trendline Strategy: trendline + horizontal at same point)
-  if (detectDoubleSR(currentPrice, currentIdx)) {
+  if (detectDoubleSR(currentPrice, currentIdx, uptl, dntl)) {
     score += 1;
     detail.level += 1;
   }
@@ -3027,8 +3040,8 @@ function buildPayoutSparklinePoints(values) {
 
   const width = 120;
   const height = 26;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const min = arrayMin(values);
+  const max = arrayMax(values);
   const range = Math.max(0.0001, max - min);
 
   if (values.length === 1) {
@@ -3475,6 +3488,26 @@ function analyzeSignal() {
     return false;
   }
 
+  // 🔪 SCALPING STRATEGY SIGNALS — check EARLY, before volatility/confluence/digit gates
+  // Scalping strategies have their own entry logic and should not be blocked by
+  // digit-based filters, volatility gates, or confluence minimums.
+  if (Date.now() - lastTradeTime >= TRADE_COOLDOWN_MS) {
+    const earlyScalpSig = getActiveScalpingSignal();
+    if (earlyScalpSig && (Date.now() - earlyScalpSig.time < SCALP_SIGNAL_EXPIRY_MS)) {
+      // Require minimum candle data so strategies have real signals
+      if (candles.length >= 3) {
+        if (isForexSymbol(symbol)) {
+          currentSide = earlyScalpSig.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
+        } else {
+          currentSide = earlyScalpSig.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
+        }
+        currentTradeMode = earlyScalpSig.strategy;
+        setStatus(`Scalp: ${earlyScalpSig.strategy} ${earlyScalpSig.direction}`, "#22c55e");
+        return true;
+      }
+    }
+  }
+
   // --- IMPROVEMENT #3: Steep Trendline Protection ---
   if (candles.length >= 5 && isSteepTrendline()) {
     setStatus("Blocked: Steep trendline — waiting for pullback", "#f59e0b");
@@ -3703,20 +3736,6 @@ function analyzeSignal() {
       });
       return false;
     }
-  }
-
-  // 🔪 SCALPING STRATEGY SIGNALS — check before normal mode flow
-  const scalpSignal = getActiveScalpingSignal();
-  if (scalpSignal && (Date.now() - scalpSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
-    // Map directional signal to contract type
-    if (isForexSymbol(symbol)) {
-      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
-    } else {
-      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
-    }
-    currentTradeMode = scalpSignal.strategy;
-    setStatus(`Scalp: ${scalpSignal.strategy} ${scalpSignal.direction}`, "#22c55e");
-    return true;
   }
 
   // Normal flow when volatility OK
@@ -3948,12 +3967,12 @@ updatePerformanceUI();
     console.warn("Trade history append failed", e);
   }
 
-  if (currentTradeMode === "TREND") li.style.borderLeft = "4px solid #22c55e";
-  if (currentTradeMode === "ODD_EVEN") li.style.borderLeft = "4px solid #3b82f6";
-  if (currentTradeMode === "REVERSAL") li.style.borderLeft = "4px solid #f59e0b";
-  if (currentTradeMode === "LIQ_SWEEP") li.style.borderLeft = "4px solid #a855f7";
-  if (currentTradeMode === "STOP_HUNT") li.style.borderLeft = "4px solid #ec4899";
-  if (currentTradeMode === "FAILED_PIN") li.style.borderLeft = "4px solid #14b8a6";
+  const modeBorderColors = {
+    TREND: "#22c55e", ODD_EVEN: "#3b82f6", REVERSAL: "#f59e0b",
+    LIQ_SWEEP: "#a855f7", STOP_HUNT: "#ec4899", FAILED_PIN: "#14b8a6"
+  };
+  const borderColor = modeBorderColors[currentTradeMode];
+  if (borderColor) li.style.borderLeft = `4px solid ${borderColor}`;
 
   tradeMarkers.push({
     index: chartPrices.length - 1,
@@ -4627,8 +4646,8 @@ function drawPriceChart() {
 
   chartCtx.clearRect(0, 0, w, h);
 
-  const max = Math.max(...chartPrices);
-  const min = Math.min(...chartPrices);
+  const max = arrayMax(chartPrices);
+  const min = arrayMin(chartPrices);
   const range = max - min || 1;
 
   chartCtx.fillStyle = isMarketVolatile()
@@ -4803,8 +4822,8 @@ function drawEquityCurve() {
 
   if (equityHistory.length < 2) return;
 
-  const max = Math.max(...equityHistory, 0.01);
-  const min = Math.min(...equityHistory, -0.01);
+  const max = Math.max(arrayMax(equityHistory), 0.01);
+  const min = Math.min(arrayMin(equityHistory), -0.01);
   const range = max - min || 1;
 
   // Zero line
@@ -4837,23 +4856,37 @@ function drawEquityCurve() {
   ctx.fill();
 }
 
-function updateConfluenceUI(score, detail) {
-  const scoreEl = document.getElementById("confluenceScore");
-  const detailEl = document.getElementById("confluenceDetail");
-  const patternEl = document.getElementById("patternSignal");
-  const trendStructEl = document.getElementById("trendStructure");
-  const srCountEl = document.getElementById("srLevelCount");
-  const candleCountEl = document.getElementById("candleCount");
+// Cached DOM elements for confluence UI (avoids repeated getElementById)
+let _cfUI = null;
+function getCfUI() {
+  if (!_cfUI) {
+    _cfUI = {
+      score: document.getElementById("confluenceScore"),
+      detail: document.getElementById("confluenceDetail"),
+      pattern: document.getElementById("patternSignal"),
+      trendStruct: document.getElementById("trendStructure"),
+      srCount: document.getElementById("srLevelCount"),
+      candleCount: document.getElementById("candleCount"),
+      sma: document.getElementById("smaStatus"),
+      bb: document.getElementById("bbStatus"),
+      fibSd: document.getElementById("fibSdStatus"),
+    };
+  }
+  return _cfUI;
+}
 
-  if (scoreEl) {
-    scoreEl.textContent = score;
-    scoreEl.className = "status-badge";
-    if (score >= CONFLUENCE_MIN_SCORE) scoreEl.classList.add("trend");
-    else if (score >= 2) scoreEl.classList.add("bias");
-    else scoreEl.classList.add("disabled");
+function updateConfluenceUI(score, detail) {
+  const ui = getCfUI();
+
+  if (ui.score) {
+    ui.score.textContent = score;
+    ui.score.className = "status-badge";
+    if (score >= CONFLUENCE_MIN_SCORE) ui.score.classList.add("trend");
+    else if (score >= 2) ui.score.classList.add("bias");
+    else ui.score.classList.add("disabled");
   }
 
-  if (detailEl) {
+  if (ui.detail) {
     const parts = [`T:${detail.trend}`, `L:${detail.level}`, `S:${detail.signal}`, `M:${detail.momentum}`];
     if (detail.sma) parts.push(`SMA:${detail.sma}`);
     if (detail.fib) parts.push(`FIB:${detail.fib}`);
@@ -4862,75 +4895,72 @@ function updateConfluenceUI(score, detail) {
     if (detail.flip) parts.push(`FL:${detail.flip}`);
     if (detail.fb) parts.push(`FB:${detail.fb}`);
     if (detail.scalp) parts.push(`SC:${detail.scalp}`);
-    detailEl.textContent = parts.join(" ");
+    ui.detail.textContent = parts.join(" ");
   }
 
-  if (patternEl) {
+  if (ui.pattern) {
     if (lastPatternSignal) {
-      patternEl.textContent = `${lastPatternSignal.pattern} (${lastPatternSignal.bias})`;
-      patternEl.className = "status-badge";
-      if (lastPatternSignal.bias === "BULL") patternEl.classList.add("trend");
-      else if (lastPatternSignal.bias === "BEAR") patternEl.classList.add("reversal");
-      else patternEl.classList.add("disabled");
+      ui.pattern.textContent = `${lastPatternSignal.pattern} (${lastPatternSignal.bias})`;
+      ui.pattern.className = "status-badge";
+      if (lastPatternSignal.bias === "BULL") ui.pattern.classList.add("trend");
+      else if (lastPatternSignal.bias === "BEAR") ui.pattern.classList.add("reversal");
+      else ui.pattern.classList.add("disabled");
     } else {
-      patternEl.textContent = "NONE";
-      patternEl.className = "status-badge disabled";
+      ui.pattern.textContent = "NONE";
+      ui.pattern.className = "status-badge disabled";
     }
   }
 
-  if (trendStructEl) {
-    trendStructEl.textContent = trendDirection;
-    trendStructEl.className = "status-badge";
-    if (trendDirection === "UP") trendStructEl.classList.add("trend");
-    else if (trendDirection === "DOWN") trendStructEl.classList.add("reversal");
-    else trendStructEl.classList.add("disabled");
+  if (ui.trendStruct) {
+    ui.trendStruct.textContent = trendDirection;
+    ui.trendStruct.className = "status-badge";
+    if (trendDirection === "UP") ui.trendStruct.classList.add("trend");
+    else if (trendDirection === "DOWN") ui.trendStruct.classList.add("reversal");
+    else ui.trendStruct.classList.add("disabled");
   }
 
-  if (srCountEl) {
+  if (ui.srCount) {
     const extras = [];
     if (flippedLevels.length) extras.push(`${flippedLevels.length}fl`);
     if (fibLevels.length) extras.push(`${fibLevels.length}fib`);
     if (supplyDemandZones.length) extras.push(`${supplyDemandZones.length}sd`);
     const suffix = extras.length ? ` +${extras.join(",")}` : "";
-    srCountEl.textContent = `${srLevels.length} levels${suffix}`;
+    ui.srCount.textContent = `${srLevels.length} levels${suffix}`;
   }
 
-  if (candleCountEl) {
-    candleCountEl.textContent = `${candles.length}/${candlesLg.length}`;
+  if (ui.candleCount) {
+    ui.candleCount.textContent = `${candles.length}/${candlesLg.length}`;
   }
 
   // SMA status
-  const smaStatusEl = document.getElementById("smaStatus");
-  if (smaStatusEl) {
+  if (ui.sma) {
     if (smaFastArr.length && smaSlowArr.length) {
       const s8 = smaFastArr.at(-1).toFixed(2);
       const s21 = smaSlowArr.at(-1).toFixed(2);
-      smaStatusEl.textContent = `8:${s8} 21:${s21}`;
+      ui.sma.textContent = `8:${s8} 21:${s21}`;
     } else {
-      smaStatusEl.textContent = "building…";
+      ui.sma.textContent = "building…";
     }
   }
 
   // Bollinger Bands status
-  const bbStatusEl = document.getElementById("bbStatus");
-  if (bbStatusEl) {
+  if (ui.bb) {
     if (bollingerBands) {
       const squeeze = isBBSqueeze() ? " SQUEEZE" : "";
-      bbStatusEl.textContent = `W:${(bollingerBands.width * 100).toFixed(2)}%${squeeze}`;
+      ui.bb.textContent = `W:${(bollingerBands.width * 100).toFixed(2)}%${squeeze}`;
     } else {
-      bbStatusEl.textContent = "building…";
+      ui.bb.textContent = "building…";
     }
   }
 
   // Fibonacci & Supply/Demand status
-  const fibSdStatusEl = document.getElementById("fibSdStatus");
-  if (fibSdStatusEl) {
+  if (ui.fibSd) {
     const parts = [];
     if (fibLevels.length) parts.push(`${fibLevels.length} fib`);
     if (supplyDemandZones.length) parts.push(`${supplyDemandZones.length} s/d`);
     if (flippedLevels.length) parts.push(`${flippedLevels.length} flip`);
     if (lastFalseBreakout && (Date.now() - lastFalseBreakout.time < 30000)) parts.push("FB!");
-    fibSdStatusEl.textContent = parts.length ? parts.join(" | ") : "--";
+    ui.fibSd.textContent = parts.length ? parts.join(" | ") : "--";
   }
 }
 
@@ -4943,8 +4973,8 @@ drawPriceChart = function() {
 
   const w = chartCanvas.width;
   const h = chartCanvas.height;
-  const max = Math.max(...chartPrices);
-  const min = Math.min(...chartPrices);
+  const max = arrayMax(chartPrices);
+  const min = arrayMin(chartPrices);
   const range = max - min || 1;
 
   const priceToY = (p) => h - ((p - min) / range) * h;
