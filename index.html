@@ -202,6 +202,28 @@
           </div>
         </section>
 
+        <!-- Scalping Strategies -->
+        <section class="risk dashboard strategy-toggles">
+          <h3 class="dash-title">SCALPING STRATEGIES</h3>
+          <label class="strategy-toggle-label">
+            <input type="checkbox" id="liquiditySweepToggle" />
+            <span>Liquidity Sweep</span>
+          </label>
+          <p class="hint">15m range break &amp; close-back entry on 1m.</p>
+
+          <label class="strategy-toggle-label">
+            <input type="checkbox" id="stopLossHuntToggle" />
+            <span>Stop Loss Hunt</span>
+          </label>
+          <p class="hint">S/R level hunt with re-entry logic.</p>
+
+          <label class="strategy-toggle-label">
+            <input type="checkbox" id="failedPinBarToggle" />
+            <span>Failed Pin Bar</span>
+          </label>
+          <p class="hint">Momentum pin bar failure entry.</p>
+        </section>
+
         <!-- Connection Info -->
         <section class="info">
           <p class="env-label" id="environmentLabel">Environment: DEMO</p>
@@ -365,6 +387,10 @@
               <div class="side-row">
                 <span>CANDLES</span>
                 <span id="candleCount" class="env-label">0/0</span>
+              </div>
+              <div class="side-row">
+                <span>SCALP STRAT</span>
+                <span id="scalpStratBadge" class="status-badge disabled">NONE</span>
               </div>
               <div class="side-row signal-meter">
                 <span>SIGNAL</span>
