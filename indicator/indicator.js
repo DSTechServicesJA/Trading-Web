@@ -6109,6 +6109,30 @@ function processLiveScalp() {
  * Called on every candle update (same pipeline as monitorTradeOutcome).
  * Uses a max-candle timeout (same as SCALP_MAX_CANDLES) for time-based exit.
  */
+
+/**
+ * Determine whether SL or TP was hit on a given candle for a scalp entry.
+ * Returns { slHit, tpHit }.
+ */
+function checkScalpSLTP(s, candle) {
+  if (s.dir === "BULL") {
+    return { slHit: candle.low <= s.sl, tpHit: candle.high >= s.tp };
+  }
+  return { slHit: candle.high >= s.sl, tpHit: candle.low <= s.tp };
+}
+
+/**
+ * When both SL and TP are breached in the same candle, resolve the outcome
+ * by comparing distances from entry.  The closer level is assumed to have
+ * been reached first.  On equal distance (1:1 R:R) the trade is marked WIN
+ * since the TP was reachable at the same range as the SL.
+ */
+function resolveScalpBothHit(s) {
+  const slDist = Math.abs(s.entry - s.sl);
+  const tpDist = Math.abs(s.tp - s.entry);
+  return tpDist <= slDist ? "WIN" : "LOSS";
+}
+
 function monitorScalpOutcomes(candle) {
   if (!liveScalpEnabled) return;
   let changed = false;
@@ -6120,21 +6144,12 @@ function monitorScalpOutcomes(candle) {
       const elapsed = (candles.length - 1) - s.candleIdx;
       if (elapsed >= SCALP_MAX_CANDLES) {
         /* Even on timeout, check if SL or TP was hit on this final candle */
-        let hitSL = false, hitTP = false;
-        if (s.dir === "BULL") {
-          hitSL = candle.low <= s.sl;
-          hitTP = candle.high >= s.tp;
-        } else {
-          hitSL = candle.high >= s.sl;
-          hitTP = candle.low <= s.tp;
-        }
-        if (hitTP && hitSL) {
-          const slDist = Math.abs(s.entry - s.sl);
-          const tpDist = Math.abs(s.tp - s.entry);
-          s.result = tpDist <= slDist ? "WIN" : "LOSS";
-        } else if (hitTP) {
+        const { slHit, tpHit } = checkScalpSLTP(s, candle);
+        if (tpHit && slHit) {
+          s.result = resolveScalpBothHit(s);
+        } else if (tpHit) {
           s.result = "WIN";
-        } else if (hitSL) {
+        } else if (slHit) {
           s.result = "LOSS";
         } else {
           /* Neither SL nor TP hit — fall back to close vs entry */
@@ -6153,52 +6168,19 @@ function monitorScalpOutcomes(candle) {
        distance from the entry to each level — the closer level is assumed
        to have been reached first.  This avoids the old "SL always wins"
        bias that inflated the loss count. */
-    if (s.dir === "BULL") {
-      const slHit = candle.low <= s.sl;
-      const tpHit = candle.high >= s.tp;
-      if (slHit && tpHit) {
-        const slDist = Math.abs(s.entry - s.sl);
-        const tpDist = Math.abs(s.tp - s.entry);
-        if (tpDist <= slDist) {
-          s.result = "WIN";
-          addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)} (SL also breached, TP closer)`);
-        } else {
-          s.result = "LOSS";
-          addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)} (TP also breached, SL closer)`);
-        }
-        changed = true;
-      } else if (slHit) {
-        s.result = "LOSS";
-        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
-        changed = true;
-      } else if (tpHit) {
-        s.result = "WIN";
-        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
-        changed = true;
-      }
-    } else {
-      const slHit = candle.high >= s.sl;
-      const tpHit = candle.low <= s.tp;
-      if (slHit && tpHit) {
-        const slDist = Math.abs(s.sl - s.entry);
-        const tpDist = Math.abs(s.entry - s.tp);
-        if (tpDist <= slDist) {
-          s.result = "WIN";
-          addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)} (SL also breached, TP closer)`);
-        } else {
-          s.result = "LOSS";
-          addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)} (TP also breached, SL closer)`);
-        }
-        changed = true;
-      } else if (slHit) {
-        s.result = "LOSS";
-        addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
-        changed = true;
-      } else if (tpHit) {
-        s.result = "WIN";
-        addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
-        changed = true;
-      }
+    const { slHit, tpHit } = checkScalpSLTP(s, candle);
+    if (slHit && tpHit) {
+      s.result = resolveScalpBothHit(s);
+      addLog(`⚡ Scalp ${s.result} — ${s.symbol || ""} hit ${s.result === "WIN" ? "TP" : "SL"} @ ${fmt(s.result === "WIN" ? s.tp : s.sl, 4)} (both levels breached, ${s.result === "WIN" ? "TP" : "SL"} closer)`);
+      changed = true;
+    } else if (slHit) {
+      s.result = "LOSS";
+      addLog(`⚡ Scalp LOSS — ${s.symbol || ""} hit SL @ ${fmt(s.sl, 4)}`);
+      changed = true;
+    } else if (tpHit) {
+      s.result = "WIN";
+      addLog(`⚡ Scalp WIN — ${s.symbol || ""} hit TP @ ${fmt(s.tp, 4)}`);
+      changed = true;
     }
   }
   if (changed) {
