@@ -612,6 +612,45 @@
               <input type="number" id="liveScalpMinConf" min="1" max="7" step="1" value="3" />
               <p class="hint">Higher = fewer but higher-quality scalp signals. Recommended: 3–4 for active markets, 5+ for conservative.</p>
 
+              <hr class="param-divider" />
+              <p class="param-group-title">🌊 Strategy 1: Liquidity Sweep (15m → 1m)</p>
+
+              <label class="toggle-row"><input type="checkbox" id="liquiditySweepToggle" /> Liquidity Sweep Detection</label>
+              <p class="hint">Identifies range from a single candle's high/low. If the next candle breaks the range but closes back inside → liquidity sweep signal. Entry at candle close, SL just outside the range, TP at 2:1 R:R. Works best on 15m/1m charts for scalp entries.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Strategy 2: Stop Loss Hunt</p>
+
+              <label class="toggle-row"><input type="checkbox" id="stopLossHuntToggle" /> Stop Loss Hunt Detection</label>
+              <p class="hint">Finds key support/resistance levels tested multiple times. When price breaks beyond the level but closes back inside → stop hunt signal. Entry at candle close, SL beyond the hunt candle, TP at 2:1 R:R. Includes re-entry logic if your stop is hunted again (stop hunt of stop hunters).</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📌 Strategy 3: Failed Pin Bar (Fear/Greed)</p>
+
+              <label class="toggle-row"><input type="checkbox" id="failedPinBarToggle" /> Failed Pin Bar Detection</label>
+              <p class="hint">Detects market fear (consecutive bearish candles) or greed (consecutive bullish candles). Spots a pin bar against the dominant emotion, then enters when the pin bar fails (breaks in direction of momentum). SL beyond the pin bar, TP at 1.5:1 R:R for quick scalp pips.</p>
+
+            </div>
+          </section>
+
+          <!-- Strategy Alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) -->
+          <section class="box scalp-alerts-section">
+            <h3 class="collapsible">🎯 Strategy Alerts <span id="liquiditySweepCount" class="scalp-count-badge">0</span></h3>
+            <div class="collapsible-body">
+              <p class="param-group-title">🌊 Liquidity Sweep Alerts</p>
+              <ul id="liquiditySweepAlertList" class="scalp-alert-list"></ul>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Stop Loss Hunt Alerts</p>
+              <ul id="stopLossHuntAlertList" class="scalp-alert-list"></ul>
+              <span id="stopLossHuntCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📌 Failed Pin Bar Alerts</p>
+              <ul id="failedPinBarAlertList" class="scalp-alert-list"></ul>
+              <span id="failedPinBarCount" style="display:none;">0</span>
+
+              <p class="hint" style="margin-top:6px;">Recent signals from the 3 custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
             </div>
           </section>
 

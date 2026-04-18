@@ -784,6 +784,32 @@ const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 /* Auto-apply recommended settings when symbol changes */
 let autoApplyRecommended = true;
 
+/* ================= STRATEGY 1: LIQUIDITY SWEEP (15m → 1m) ================= */
+let liquiditySweepEnabled = false;       /* master toggle */
+let liquiditySweepHistory = [];          /* alert history */
+const LIQUIDITY_SWEEP_MAX_HISTORY = 30;
+const LIQUIDITY_SWEEP_COOLDOWN = 3;      /* min candles between alerts */
+let lastLiquiditySweepIdx = -999;
+
+/* ================= STRATEGY 2: STOP LOSS HUNT ================= */
+let stopLossHuntEnabled = false;         /* master toggle */
+let stopLossHuntHistory = [];            /* alert history */
+const STOP_LOSS_HUNT_MAX_HISTORY = 30;
+const STOP_LOSS_HUNT_COOLDOWN = 3;
+const SLH_KEY_LEVEL_TOUCHES = 3;        /* min touches to define key S/R level */
+const SLH_LEVEL_LOOKBACK = 50;          /* candles to scan for S/R */
+const SLH_LEVEL_TOLERANCE_PCT = 0.001;  /* 0.1% tolerance for level matching */
+let lastStopLossHuntIdx = -999;
+
+/* ================= STRATEGY 3: FAILED PIN BAR (Fear/Greed) ================= */
+let failedPinBarEnabled = false;         /* master toggle */
+let failedPinBarHistory = [];            /* alert history */
+const FAILED_PIN_BAR_MAX_HISTORY = 30;
+const FAILED_PIN_BAR_COOLDOWN = 3;
+const FPB_CONSECUTIVE_CANDLES = 3;       /* min consecutive candles for fear/greed */
+const FPB_BODY_RATIO_MIN = 0.6;         /* min body/range for strong candle */
+let lastFailedPinBarIdx = -999;
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -937,6 +963,21 @@ function initUI() {
   UI.followThroughToggle     = document.getElementById("followThroughToggle");
   UI.mtfStructureToggle      = document.getElementById("mtfStructureToggle");
   UI.revertSettingsBtn       = document.getElementById("revertSettingsBtn");
+
+  /* Strategy 1: Liquidity Sweep */
+  UI.liquiditySweepToggle  = document.getElementById("liquiditySweepToggle");
+  UI.liquiditySweepAlertList = document.getElementById("liquiditySweepAlertList");
+  UI.liquiditySweepCount   = document.getElementById("liquiditySweepCount");
+
+  /* Strategy 2: Stop Loss Hunt */
+  UI.stopLossHuntToggle    = document.getElementById("stopLossHuntToggle");
+  UI.stopLossHuntAlertList = document.getElementById("stopLossHuntAlertList");
+  UI.stopLossHuntCount     = document.getElementById("stopLossHuntCount");
+
+  /* Strategy 3: Failed Pin Bar */
+  UI.failedPinBarToggle    = document.getElementById("failedPinBarToggle");
+  UI.failedPinBarAlertList = document.getElementById("failedPinBarAlertList");
+  UI.failedPinBarCount     = document.getElementById("failedPinBarCount");
 
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
@@ -1797,6 +1838,9 @@ function buildTelegramCaption() {
   if (scalpingModeEnabled) filters.push("Scalping");
   if (liveScalpEnabled) filters.push("Live Scalp Scanner");
   if (sessionRangesEnabled) filters.push("Session Ranges");
+  if (liquiditySweepEnabled) filters.push("Liquidity Sweep");
+  if (stopLossHuntEnabled) filters.push("Stop Loss Hunt");
+  if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -2402,6 +2446,9 @@ function saveSettings() {
       autoApplyRecommended,
       liveScalpEnabled,
       liveScalpMinConf,
+      liquiditySweepEnabled,
+      stopLossHuntEnabled,
+      failedPinBarEnabled,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
@@ -2553,6 +2600,18 @@ function restoreSettings() {
     if (s.liveScalpMinConf != null) liveScalpMinConf = s.liveScalpMinConf;
     if (UI.liveScalpToggle) UI.liveScalpToggle.checked = liveScalpEnabled;
     if (UI.liveScalpMinConf) UI.liveScalpMinConf.value = liveScalpMinConf;
+
+    /* Strategy 1: Liquidity Sweep */
+    if (s.liquiditySweepEnabled != null) liquiditySweepEnabled = s.liquiditySweepEnabled;
+    if (UI.liquiditySweepToggle) UI.liquiditySweepToggle.checked = liquiditySweepEnabled;
+
+    /* Strategy 2: Stop Loss Hunt */
+    if (s.stopLossHuntEnabled != null) stopLossHuntEnabled = s.stopLossHuntEnabled;
+    if (UI.stopLossHuntToggle) UI.stopLossHuntToggle.checked = stopLossHuntEnabled;
+
+    /* Strategy 3: Failed Pin Bar */
+    if (s.failedPinBarEnabled != null) failedPinBarEnabled = s.failedPinBarEnabled;
+    if (UI.failedPinBarToggle) UI.failedPinBarToggle.checked = failedPinBarEnabled;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -4543,8 +4602,10 @@ function connect() {
       computeVWAP();
       processLatestCandle();
       processLiveScalp();
+      processCustomStrategies();
       monitorTradeOutcome(c);
       monitorScalpOutcomes(c);
+      monitorCustomStrategyOutcomes(c);
       drawChart();
     }
   };
@@ -5202,6 +5263,9 @@ function revertAllSettings() {
   nyOpenRangeEnabled   = false;
   sessionRangesEnabled = false;
   autoApplyRecommended = true;
+  liquiditySweepEnabled = false;
+  stopLossHuntEnabled   = false;
+  failedPinBarEnabled   = false;
 
   /* Advanced parameter defaults */
   RANGE_MINUTES           = 15;
@@ -5234,6 +5298,9 @@ function revertAllSettings() {
   if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
   if (UI.sessionRangesToggle)    UI.sessionRangesToggle.checked    = sessionRangesEnabled;
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
+  if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
+  if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
+  if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
 
   /* Profit-Direction UI sync */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
@@ -5276,6 +5343,589 @@ function getSignalStrength(score) {
   if (score >= 7)  return { label: "MODERATE", cls: "warning", pct: 60 };
   if (score >= 4)  return { label: "WEAK", cls: "bear", pct: 40 };
   return { label: "VERY WEAK", cls: "disabled", pct: 20 };
+}
+
+/* ================= STRATEGY 1: LIQUIDITY SWEEP (15m → 1m) ================= */
+/**
+ * Detect a liquidity sweep pattern:
+ * 1. Take the high and low of a "reference" candle as the range.
+ * 2. If the next candle breaks the range (high or low) but closes back inside → signal.
+ *
+ * On a 15m chart this identifies the sweep; the same logic works on 1m using
+ * the 15m candle's high/low as the range for tighter entries.
+ *
+ * Returns null or { dir, entry, sl, tp, range, candleIdx, epoch, symbol, result }
+ */
+function detectLiquiditySweep() {
+  if (!liquiditySweepEnabled) return null;
+  const len = candles.length;
+  if (len < 3) return null;
+
+  const idx = len - 1;
+  if (idx - lastLiquiditySweepIdx < LIQUIDITY_SWEEP_COOLDOWN) return null;
+
+  /* Use candle at idx-1 as the "range" candle, idx as the sweep candle */
+  const rangeCandle = candles[idx - 1];
+  const sweepCandle = candles[idx];
+
+  const rangeHigh = rangeCandle.high;
+  const rangeLow  = rangeCandle.low;
+
+  let dir = null;
+
+  /* Bullish sweep: candle breaks below the range low but closes back inside */
+  if (sweepCandle.low < rangeLow && sweepCandle.close >= rangeLow && sweepCandle.close <= rangeHigh) {
+    dir = "BULL";
+  }
+  /* Bearish sweep: candle breaks above the range high but closes back inside */
+  if (sweepCandle.high > rangeHigh && sweepCandle.close <= rangeHigh && sweepCandle.close >= rangeLow) {
+    /* If both directions triggered, pick the one with more extreme wick */
+    if (dir === "BULL") {
+      const bearWick = sweepCandle.high - rangeHigh;
+      const bullWick = rangeLow - sweepCandle.low;
+      dir = bearWick > bullWick ? "BEAR" : "BULL";
+    } else {
+      dir = "BEAR";
+    }
+  }
+
+  if (!dir) return null;
+
+  /* Compute entry / SL / TP */
+  const entry = sweepCandle.close;
+  const rangeSize = rangeHigh - rangeLow;
+  const atr = atrValue > 0 ? atrValue : rangeSize;
+
+  /* SL: just outside the range on the sweep side */
+  const slBuffer = atr * 0.1; /* small buffer beyond the range */
+  const sl = dir === "BULL" ? rangeLow - slBuffer : rangeHigh + slBuffer;
+  const risk = Math.abs(entry - sl);
+  /* TP: next key level approximated as 2:1 R:R */
+  const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
+  const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
+
+  return {
+    dir, entry, sl, tp, rr,
+    range: { high: rangeHigh, low: rangeLow },
+    candleIdx: idx,
+    epoch: sweepCandle.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "liquidity_sweep"
+  };
+}
+
+/**
+ * Run the liquidity sweep scanner and handle alerting.
+ */
+function processLiquiditySweep() {
+  const signal = detectLiquiditySweep();
+  if (!signal) return;
+
+  lastLiquiditySweepIdx = signal.candleIdx;
+
+  liquiditySweepHistory.unshift(signal);
+  if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
+
+  /* Audio alert */
+  playStrategyAlert(signal.dir);
+
+  /* Log */
+  const symbol = getActiveSymbol() || "--";
+  addLog(`🌊 LIQUIDITY SWEEP ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | Range [${fmt(signal.range.low, 4)}–${fmt(signal.range.high, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+
+  showToast(
+    `Liquidity Sweep ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    "trade", 10000
+  );
+
+  /* Browser notification */
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmt(signal.entry, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    new Notification("IT Guru: Liquidity Sweep!", { body, icon: NOTIF_ICON });
+  }
+
+  renderStrategyAlerts();
+}
+
+/**
+ * Monitor pending liquidity sweep signals for SL/TP outcome.
+ */
+function monitorLiquiditySweepOutcomes(candle) {
+  if (!liquiditySweepEnabled) return;
+  let changed = false;
+  for (const s of liquiditySweepHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed >= 30) { /* timeout after 30 candles */
+      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
+      s.result = inProfit ? "WIN" : "LOSS";
+      addLog(`🌊 Liquidity Sweep ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) renderStrategyAlerts();
+}
+
+/* ================= STRATEGY 2: STOP LOSS HUNT ================= */
+/**
+ * Find key support/resistance levels from recent candles.
+ * A key level is a price zone touched at least SLH_KEY_LEVEL_TOUCHES times.
+ * Returns array of { level, touches, type: "support"|"resistance" }.
+ */
+function findKeyLevels() {
+  const len = candles.length;
+  const lookback = Math.min(SLH_LEVEL_LOOKBACK, len);
+  if (lookback < 5) return [];
+
+  /* Collect swing highs and lows */
+  const pivots = [];
+  for (let i = len - lookback; i < len; i++) {
+    const c = candles[i];
+    pivots.push({ price: c.high, type: "resistance" });
+    pivots.push({ price: c.low,  type: "support" });
+  }
+
+  /* Cluster pivots into levels */
+  const levels = [];
+  const tolerance = candles[len - 1].close * SLH_LEVEL_TOLERANCE_PCT;
+
+  for (const p of pivots) {
+    let found = false;
+    for (const l of levels) {
+      if (Math.abs(p.price - l.level) <= tolerance) {
+        l.touches++;
+        l.level = (l.level * (l.touches - 1) + p.price) / l.touches; /* running average */
+        if (p.type === "support") l.supportCount++;
+        else l.resistanceCount++;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      levels.push({
+        level: p.price,
+        touches: 1,
+        supportCount: p.type === "support" ? 1 : 0,
+        resistanceCount: p.type === "resistance" ? 1 : 0
+      });
+    }
+  }
+
+  /* Only return levels with enough touches */
+  return levels
+    .filter(l => l.touches >= SLH_KEY_LEVEL_TOUCHES)
+    .map(l => ({
+      level: l.level,
+      touches: l.touches,
+      type: l.supportCount >= l.resistanceCount ? "support" : "resistance"
+    }))
+    .sort((a, b) => b.touches - a.touches);
+}
+
+/**
+ * Detect a stop loss hunt pattern:
+ * 1. Identify a key S/R level tested multiple times.
+ * 2. Price breaks below support (or above resistance) but closes back inside.
+ * 3. Entry at close of the stop hunt candle.
+ *
+ * Returns null or { dir, entry, sl, tp, level, candleIdx, epoch, symbol, result }
+ */
+function detectStopLossHunt() {
+  if (!stopLossHuntEnabled) return null;
+  const len = candles.length;
+  if (len < 5) return null;
+
+  const idx = len - 1;
+  if (idx - lastStopLossHuntIdx < STOP_LOSS_HUNT_COOLDOWN) return null;
+
+  const c = candles[idx];
+  const keyLevels = findKeyLevels();
+  if (keyLevels.length === 0) return null;
+
+  const atr = atrValue > 0 ? atrValue : (c.high - c.low);
+  const tolerance = atr * 0.2;
+
+  for (const kl of keyLevels) {
+    /* Support hunt: price breaks below support but closes back above */
+    if (kl.type === "support") {
+      if (c.low < kl.level - tolerance && c.close > kl.level) {
+        const entry = c.close;
+        const sl = c.low - tolerance * 0.5; /* just beyond the hunt candle low */
+        const risk = Math.abs(entry - sl);
+        const tp = entry + risk * 2;
+
+        return {
+          dir: "BULL", entry, sl, tp,
+          rr: risk > 0 ? Math.abs(tp - entry) / risk : 0,
+          level: kl,
+          candleIdx: idx, epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "stop_loss_hunt"
+        };
+      }
+    }
+
+    /* Resistance hunt: price breaks above resistance but closes back below */
+    if (kl.type === "resistance") {
+      if (c.high > kl.level + tolerance && c.close < kl.level) {
+        const entry = c.close;
+        const sl = c.high + tolerance * 0.5; /* just beyond the hunt candle high */
+        const risk = Math.abs(entry - sl);
+        const tp = entry - risk * 2;
+
+        return {
+          dir: "BEAR", entry, sl, tp,
+          rr: risk > 0 ? Math.abs(tp - entry) / risk : 0,
+          level: kl,
+          candleIdx: idx, epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "stop_loss_hunt"
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Run the stop loss hunt scanner and handle alerting.
+ */
+function processStopLossHunt() {
+  const signal = detectStopLossHunt();
+  if (!signal) return;
+
+  lastStopLossHuntIdx = signal.candleIdx;
+
+  /* Check for "stop hunt of stop hunters" — re-entry if previous was stopped out */
+  const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && s.level.level === signal.level.level);
+  const reEntry = !!prevStopped;
+
+  stopLossHuntHistory.unshift(signal);
+  if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const symbol = getActiveSymbol() || "--";
+  const reLabel = reEntry ? " (RE-ENTRY — stop hunt of stop hunters)" : "";
+  addLog(`🎯 STOP LOSS HUNT ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)} | Level ${fmt(signal.level.level, 4)} (${signal.level.touches} touches) | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+
+  showToast(
+    `Stop Loss Hunt ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel}`,
+    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)}\nLevel: ${fmt(signal.level.level, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    new Notification("IT Guru: Stop Loss Hunt!", { body, icon: NOTIF_ICON });
+  }
+
+  renderStrategyAlerts();
+}
+
+/**
+ * Monitor pending stop loss hunt signals for SL/TP outcome.
+ */
+function monitorStopLossHuntOutcomes(candle) {
+  if (!stopLossHuntEnabled) return;
+  let changed = false;
+  for (const s of stopLossHuntHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed >= 30) {
+      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
+      s.result = inProfit ? "WIN" : "LOSS";
+      addLog(`🎯 Stop Loss Hunt ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) renderStrategyAlerts();
+}
+
+/* ================= STRATEGY 3: FAILED PIN BAR (Fear/Greed) ================= */
+/**
+ * Detect the market state: consecutive strong bearish candles = fear,
+ * consecutive strong bullish candles = greed.
+ * Returns "fear" | "greed" | null.
+ */
+function detectFearGreedState(idx) {
+  if (idx < FPB_CONSECUTIVE_CANDLES) return null;
+
+  let bullCount = 0;
+  let bearCount = 0;
+
+  for (let i = idx - FPB_CONSECUTIVE_CANDLES; i < idx; i++) {
+    const c = candles[i];
+    const body = Math.abs(c.close - c.open);
+    const range = c.high - c.low;
+    if (range <= 0) continue;
+
+    const bodyRatio = body / range;
+    if (bodyRatio < FPB_BODY_RATIO_MIN) continue; /* not a strong candle */
+
+    if (c.close > c.open) bullCount++;
+    else bearCount++;
+  }
+
+  if (bearCount >= FPB_CONSECUTIVE_CANDLES) return "fear";
+  if (bullCount >= FPB_CONSECUTIVE_CANDLES) return "greed";
+  return null;
+}
+
+/**
+ * Detect a failed pin bar pattern in fear/greed:
+ * 1. Identify market state (fear = consecutive bearish, greed = consecutive bullish).
+ * 2. Spot a pin bar against the dominant emotion on the current candle set.
+ * 3. Wait for the pin bar to be broken (next candle breaks the pin bar).
+ * 4. Enter at the close of the candle that breaks the pin bar.
+ *
+ * Returns null or { dir, entry, sl, tp, state, candleIdx, epoch, symbol, result }
+ */
+function detectFailedPinBar() {
+  if (!failedPinBarEnabled) return null;
+  const len = candles.length;
+  if (len < FPB_CONSECUTIVE_CANDLES + 2) return null;
+
+  const idx = len - 1;
+  if (idx - lastFailedPinBarIdx < FAILED_PIN_BAR_COOLDOWN) return null;
+
+  const breakCandle = candles[idx];       /* candle that breaks the pin bar */
+  const pinBarCandle = candles[idx - 1];  /* the pin bar itself */
+
+  /* Check market state BEFORE the pin bar (using candles before it) */
+  const state = detectFearGreedState(idx - 1);
+  if (!state) return null;
+
+  /* Detect pin bar against the dominant emotion */
+  const pinBody = Math.abs(pinBarCandle.close - pinBarCandle.open);
+  const pinRange = pinBarCandle.high - pinBarCandle.low;
+  if (pinRange <= 0 || pinBody <= 0) return null;
+  const pinBodyRatio = pinBody / pinRange;
+
+  /* Pin bar should have small body relative to range */
+  if (pinBodyRatio > 0.4) return null;
+
+  const upperWick = pinBarCandle.high - Math.max(pinBarCandle.open, pinBarCandle.close);
+  const lowerWick = Math.min(pinBarCandle.open, pinBarCandle.close) - pinBarCandle.low;
+
+  let pinDir = null;
+
+  if (state === "fear") {
+    /* In fear (bearish), look for bullish pin bar (long lower wick) */
+    if (lowerWick > pinBody * 2 && lowerWick > upperWick * 1.5) {
+      pinDir = "BULL"; /* bullish pin bar against fear */
+    }
+  } else if (state === "greed") {
+    /* In greed (bullish), look for bearish pin bar (long upper wick) */
+    if (upperWick > pinBody * 2 && upperWick > lowerWick * 1.5) {
+      pinDir = "BEAR"; /* bearish pin bar against greed */
+    }
+  }
+
+  if (!pinDir) return null;
+
+  /* Now check if the break candle "fails" the pin bar by breaking it
+     in the direction of the original momentum (continuing fear/greed) */
+  let pinBarBroken = false;
+  let dir = null;
+
+  if (pinDir === "BULL" && state === "fear") {
+    /* Pin bar was bullish (against fear). Failure = break below the pin bar low.
+       Trade direction = BEAR (momentum continues) → BUT the strategy says
+       "enter at the close of the candle that breaks the pin bar" which means
+       we enter in the direction of the break. Actually the strategy says the
+       pin bar FAILS, meaning price continues in the original fear direction.
+       So we enter BEAR (with momentum). */
+    if (breakCandle.close < pinBarCandle.low) {
+      pinBarBroken = true;
+      dir = "BEAR"; /* momentum continues down */
+    }
+  } else if (pinDir === "BEAR" && state === "greed") {
+    /* Pin bar was bearish (against greed). Failure = break above the pin bar high.
+       Entry = BULL (momentum continues up). */
+    if (breakCandle.close > pinBarCandle.high) {
+      pinBarBroken = true;
+      dir = "BULL"; /* momentum continues up */
+    }
+  }
+
+  if (!pinBarBroken || !dir) return null;
+
+  /* Compute entry / SL / TP */
+  const entry = breakCandle.close;
+  const atr = atrValue > 0 ? atrValue : pinRange;
+
+  /* SL: beyond the pin bar (the opposite extreme) */
+  const slBuffer = atr * 0.1;
+  const sl = dir === "BULL" ? pinBarCandle.low - slBuffer : pinBarCandle.high + slBuffer;
+  const risk = Math.abs(entry - sl);
+  /* TP: quick scalp — 1.5:1 R:R (in direction of momentum for fast pips) */
+  const tp = dir === "BULL" ? entry + risk * 1.5 : entry - risk * 1.5;
+  const rr = risk > 0 ? Math.abs(tp - entry) / risk : 0;
+
+  return {
+    dir, entry, sl, tp, rr, state,
+    pinBarIdx: idx - 1,
+    candleIdx: idx,
+    epoch: breakCandle.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "failed_pin_bar"
+  };
+}
+
+/**
+ * Run the failed pin bar scanner and handle alerting.
+ */
+function processFailedPinBar() {
+  const signal = detectFailedPinBar();
+  if (!signal) return;
+
+  lastFailedPinBarIdx = signal.candleIdx;
+
+  failedPinBarHistory.unshift(signal);
+  if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const symbol = getActiveSymbol() || "--";
+  const stateEmoji = signal.state === "fear" ? "😱" : "🤑";
+  addLog(`${stateEmoji} FAILED PIN BAR ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | State: ${signal.state.toUpperCase()} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+
+  showToast(
+    `Failed Pin Bar ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmt(signal.entry, 4)} | ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmt(signal.entry, 4)}\nState: ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    new Notification("IT Guru: Failed Pin Bar!", { body, icon: NOTIF_ICON });
+  }
+
+  renderStrategyAlerts();
+}
+
+/**
+ * Monitor pending failed pin bar signals for SL/TP outcome.
+ */
+function monitorFailedPinBarOutcomes(candle) {
+  if (!failedPinBarEnabled) return;
+  let changed = false;
+  for (const s of failedPinBarHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed >= 20) { /* shorter timeout — scalp-style */
+      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
+      s.result = inProfit ? "WIN" : "LOSS";
+      addLog(`${s.state === "fear" ? "😱" : "🤑"} Failed Pin Bar ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`😱 Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`😱 Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🤑 Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🤑 Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) renderStrategyAlerts();
+}
+
+/* ================= SHARED STRATEGY HELPERS ================= */
+/**
+ * Audio alert for the 3 custom strategies (triple beep).
+ */
+function playStrategyAlert(dir) {
+  if (!soundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const freq = dir === "BULL" ? 900 : 700;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "triangle";
+      gain.gain.value = 0.12;
+      osc.start(ctx.currentTime + i * 0.18);
+      osc.stop(ctx.currentTime + i * 0.18 + 0.1);
+    }
+  } catch (e) { /* audio not available */ }
+}
+
+/**
+ * Render all strategy alert lists (liquidity sweep, stop loss hunt, failed pin bar).
+ */
+function renderStrategyAlerts() {
+  /* Liquidity Sweep */
+  _renderAlertList(UI.liquiditySweepAlertList, UI.liquiditySweepCount, liquiditySweepHistory, "🌊", "Liquidity Sweep");
+  /* Stop Loss Hunt */
+  _renderAlertList(UI.stopLossHuntAlertList, UI.stopLossHuntCount, stopLossHuntHistory, "🎯", "Stop Loss Hunt");
+  /* Failed Pin Bar */
+  _renderAlertList(UI.failedPinBarAlertList, UI.failedPinBarCount, failedPinBarHistory, "📌", "Failed Pin Bar");
+}
+
+function _renderAlertList(listEl, countEl, history, emoji, label) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  if (countEl) countEl.textContent = history.length;
+
+  for (const s of history) {
+    const li = document.createElement("li");
+    li.className = "scalp-alert-item"; /* reuse existing scalp alert styling */
+    const dirIcon = s.dir === "BULL" ? "▲" : "▼";
+    const dirColor = s.dir === "BULL" ? "#22c55e" : "#ef4444";
+    const resultBadge = s.result === "WIN" ? ' <span style="color:#22c55e;">WIN ✓</span>'
+                      : s.result === "LOSS" ? ' <span style="color:#ef4444;">LOSS ✗</span>'
+                      : ' <span style="color:#94a3b8;">PENDING…</span>';
+    const ts = new Date(s.epoch * 1000).toLocaleTimeString();
+    li.innerHTML = `<span style="color:${dirColor};font-weight:700;">${emoji} ${dirIcon} ${s.dir}</span> `
+                 + `<span style="opacity:0.7;">${s.symbol || "--"}</span> `
+                 + `@ <b>${fmt(s.entry, 4)}</b> `
+                 + `| SL ${fmt(s.sl, 4)} | TP ${fmt(s.tp, 4)}`
+                 + resultBadge
+                 + ` <small style="opacity:0.5;">${ts}</small>`;
+    listEl.appendChild(li);
+  }
+}
+
+/**
+ * Process all three custom strategies. Called from the main candle pipeline.
+ */
+function processCustomStrategies() {
+  processLiquiditySweep();
+  processStopLossHunt();
+  processFailedPinBar();
+}
+
+/**
+ * Monitor all three custom strategy outcomes. Called from the main candle pipeline.
+ */
+function monitorCustomStrategyOutcomes(candle) {
+  monitorLiquiditySweepOutcomes(candle);
+  monitorStopLossHuntOutcomes(candle);
+  monitorFailedPinBarOutcomes(candle);
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -8657,6 +9307,91 @@ function drawChart() {
     }
   }
 
+  /* ---- Custom Strategy Markers on Chart (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) ---- */
+  const customStratHistories = [
+    { history: liquiditySweepHistory, enabled: liquiditySweepEnabled, emoji: "🌊", color: "#3b82f6" },
+    { history: stopLossHuntHistory,   enabled: stopLossHuntEnabled,   emoji: "🎯", color: "#f59e0b" },
+    { history: failedPinBarHistory,   enabled: failedPinBarEnabled,   emoji: "📌", color: "#a855f7" }
+  ];
+  for (const strat of customStratHistories) {
+    if (!strat.enabled || strat.history.length === 0) continue;
+    for (const s of strat.history) {
+      if (s.candleIdx < 0 || s.candleIdx >= candles.length) continue;
+      const sx = xOf(s.candleIdx);
+      const sy = yOf(s.entry);
+      const sc = candles[s.candleIdx];
+      if (!sc) continue;
+
+      const isBull = s.dir === "BULL";
+      const arrowColor = isBull ? "#22c55e" : "#ef4444";
+      const arrowY = isBull ? yOf(sc.low) + 18 : yOf(sc.high) - 18;
+
+      ctx.save();
+      /* Strategy-colored circle behind the emoji */
+      ctx.beginPath();
+      ctx.arc(sx, arrowY - 4, 8, 0, Math.PI * 2);
+      ctx.fillStyle = strat.color + "33"; /* 20% opacity */
+      ctx.fill();
+      ctx.strokeStyle = strat.color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      /* Arrow */
+      ctx.font = "bold 14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = arrowColor;
+      ctx.shadowColor = arrowColor;
+      ctx.shadowBlur = 5;
+      ctx.fillText(isBull ? "▲" : "▼", sx, arrowY);
+      ctx.shadowBlur = 0;
+
+      /* SL/TP lines */
+      const lineStartX = Math.max(marginLeft, sx - candleW * 3);
+      const lineEndX   = Math.min(W - marginRight, sx + candleW * 3);
+      ctx.setLineDash([2, 2]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(239,68,68,0.4)";
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, yOf(s.sl));
+      ctx.lineTo(lineEndX, yOf(s.sl));
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(34,197,94,0.4)";
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, yOf(s.tp));
+      ctx.lineTo(lineEndX, yOf(s.tp));
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      /* Result badge */
+      if (s.result === "WIN" || s.result === "LOSS") {
+        const rColor = s.result === "WIN" ? "rgba(16,185,129,0.9)" : "rgba(244,63,94,0.9)";
+        const rText = s.result;
+        ctx.font = "bold 8px Arial";
+        const rw = ctx.measureText(rText).width + 6;
+        const rx = sx + 10;
+        const ry = sy - 6;
+        ctx.fillStyle = rColor;
+        ctx.beginPath();
+        ctx.moveTo(rx + 3, ry);
+        ctx.lineTo(rx + rw - 3, ry);
+        ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + 3);
+        ctx.lineTo(rx + rw, ry + 10);
+        ctx.quadraticCurveTo(rx + rw, ry + 13, rx + rw - 3, ry + 13);
+        ctx.lineTo(rx + 3, ry + 13);
+        ctx.quadraticCurveTo(rx, ry + 13, rx, ry + 10);
+        ctx.lineTo(rx, ry + 3);
+        ctx.quadraticCurveTo(rx, ry, rx + 3, ry);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.fillText(rText, rx + rw / 2, ry + 10);
+      }
+
+      ctx.restore();
+    }
+  }
+
   /* ---- Crosshair + OHLC tooltip ---- */
   if (chartMouseActive && chartMouseX >= marginLeft && chartMouseX <= W - marginRight
       && chartMouseY >= marginTop && chartMouseY <= marginTop + chartH) {
@@ -9600,8 +10335,10 @@ function connectPanel(p) {
       computeVWAP();
       processLatestCandle();
       processLiveScalp();
+      processCustomStrategies();
       monitorTradeOutcome(c);
       monitorScalpOutcomes(c);
+      monitorCustomStrategyOutcomes(c);
     }
 
     /* Save state back to panel */
@@ -10325,6 +11062,51 @@ document.addEventListener("DOMContentLoaded", () => {
       autoApplyRecommended = UI.autoApplyRecToggle.checked;
       saveSettings();
       if (autoApplyRecommended) applyRecommendedSettings();
+    });
+  }
+
+  /* Strategy 1: Liquidity Sweep listener */
+  if (UI.liquiditySweepToggle) {
+    UI.liquiditySweepToggle.addEventListener("change", () => {
+      liquiditySweepEnabled = UI.liquiditySweepToggle.checked;
+      saveSettings();
+      if (liquiditySweepEnabled) {
+        addLog("🌊 Liquidity Sweep strategy enabled — scanning for range sweep patterns");
+        showToast("Liquidity Sweep Enabled", "Scanning for 15m→1m liquidity sweep patterns.", "info", 5000);
+      } else {
+        addLog("🌊 Liquidity Sweep strategy disabled");
+      }
+      drawChart();
+    });
+  }
+
+  /* Strategy 2: Stop Loss Hunt listener */
+  if (UI.stopLossHuntToggle) {
+    UI.stopLossHuntToggle.addEventListener("change", () => {
+      stopLossHuntEnabled = UI.stopLossHuntToggle.checked;
+      saveSettings();
+      if (stopLossHuntEnabled) {
+        addLog("🎯 Stop Loss Hunt strategy enabled — scanning for stop hunts at key S/R levels");
+        showToast("Stop Loss Hunt Enabled", "Scanning for stop loss hunts at key support/resistance.", "info", 5000);
+      } else {
+        addLog("🎯 Stop Loss Hunt strategy disabled");
+      }
+      drawChart();
+    });
+  }
+
+  /* Strategy 3: Failed Pin Bar listener */
+  if (UI.failedPinBarToggle) {
+    UI.failedPinBarToggle.addEventListener("change", () => {
+      failedPinBarEnabled = UI.failedPinBarToggle.checked;
+      saveSettings();
+      if (failedPinBarEnabled) {
+        addLog("📌 Failed Pin Bar strategy enabled — scanning for pin bar failures in fear/greed");
+        showToast("Failed Pin Bar Enabled", "Scanning for pin bar failures against market fear/greed.", "info", 5000);
+      } else {
+        addLog("📌 Failed Pin Bar strategy disabled");
+      }
+      drawChart();
     });
   }
 
