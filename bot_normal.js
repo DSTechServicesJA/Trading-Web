@@ -1260,18 +1260,8 @@ function handleResult(contract) {
   sessionPL += profit;
   
   // 🔥 update peak & drawdown immediately
-if (sessionPL > peakPL) peakPL = sessionPL;
-maxDrawdown = Math.min(maxDrawdown, sessionPL - peakPL);
-
-// 🔥 UPDATE UI NOW (before any return)
-updatePerformanceUI();
-
-
-  // ✅ TRACK PEAK & DRAWDOWN
   if (sessionPL > peakPL) peakPL = sessionPL;
   maxDrawdown = Math.min(maxDrawdown, sessionPL - peakPL);
-
-  // rest of your existing logic continues unchanged
 
   // ✅ ALWAYS LOG TRADE FIRST
   const li = document.createElement("li");
@@ -1346,6 +1336,9 @@ logLoss(profit);
 
     adaptiveThreshold = clamp(adaptiveThreshold + 0.02, THRESHOLD_MIN, THRESHOLD_MAX);
   }
+
+  // 🔥 UPDATE UI NOW (after wins/losses are updated)
+  updatePerformanceUI();
 
   if (lossCount >= MAX_LOSSES) {
     botRunning = false;

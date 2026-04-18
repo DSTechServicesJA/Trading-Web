@@ -96,6 +96,7 @@ let lossCount = 0;
 let wins = 0;
 let losses = 0;
 let sessionPL = 0;
+let peakPL = 0;
 let maxDrawdown = 0;
 
 let emaFastArr = [];
@@ -271,9 +272,6 @@ function placeTrade() {
 }
 
 
-let peakPL = 0;
-let maxDrawdown = 0; // negative values indicate drawdown depth
-
 /* ================= RESULT ================= */
 function handleResult(contract) {
   const profit = Number(contract.profit);
@@ -283,7 +281,6 @@ function handleResult(contract) {
   sessionPL += profit;
   peakPL = Math.max(peakPL, sessionPL);
   maxDrawdown = Math.min(maxDrawdown, sessionPL - peakPL); // more negative = deeper DD
-  ...
   statDD.textContent = maxDrawdown.toFixed(2);
 
 
@@ -481,11 +478,6 @@ document.getElementById("oauthLogin").style.display = "none";
                                     placeTrade();
                                   }
                                 
-                                    
-                                    chartPrices.push(price);
-                            if (chartPrices.length > CHART_POINTS) {
-                              chartPrices.shift();
-                            }
                                 }
 
    
@@ -618,6 +610,7 @@ resetSessionBtn?.addEventListener("click", () => {
   sessionPL = 0;
   wins = 0;
   losses = 0;
+  peakPL = 0;
   maxDrawdown = 0;
   currentStake = BASE_STAKE;
   lossCount = 0;
