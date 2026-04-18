@@ -23,6 +23,9 @@ updatePayoutEdgeUI();
 
   syncStakeSettings(true);
 
+  // 3b️⃣ Restore adaptive data (pattern stats, confluence log, hourly stats, etc.)
+  restoreAdaptiveData();
+
   // 4️⃣ Login gate LAST (blocks UI if needed)
   initLoginGate();
 
@@ -84,21 +87,21 @@ const SYMBOL_TUNING = {
   // 🔥 FAST 1s MARKETS — DEFENSIVE
   "1HZ75V": {
     EXPECTANCY_WINDOW: 4,
-    ENTROPY_SLOPE_CUT: 0.06,
+    ENTROPY_SLOPE_CUT: 0.04,   // tightened from 0.06 — reject rising entropy earlier
     STAKE_SCALE: 1.04,
     LOSS_CLUSTER_LIMIT: 1,
     DRAWDOWN_MULTIPLIER: 1.2
   },
   "1HZ50V": {
     EXPECTANCY_WINDOW: 4,
-    ENTROPY_SLOPE_CUT: 0.06,
+    ENTROPY_SLOPE_CUT: 0.04,   // tightened from 0.06
     STAKE_SCALE: 1.04,
     LOSS_CLUSTER_LIMIT: 1,
     DRAWDOWN_MULTIPLIER: 1.2
   },
   "1HZ100V": {
     EXPECTANCY_WINDOW: 4,
-    ENTROPY_SLOPE_CUT: 0.06,
+    ENTROPY_SLOPE_CUT: 0.04,   // tightened from 0.06
     STAKE_SCALE: 1.04,
     LOSS_CLUSTER_LIMIT: 1,
     DRAWDOWN_MULTIPLIER: 1.2
@@ -107,14 +110,14 @@ const SYMBOL_TUNING = {
   // ⚖️ STANDARD VOLATILITY MARKETS — BALANCED
   "R_75": {
     EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.08,
+    ENTROPY_SLOPE_CUT: 0.06,   // tightened from 0.08
     STAKE_SCALE: 1.06,
     LOSS_CLUSTER_LIMIT: 2,
     DRAWDOWN_MULTIPLIER: 1.6
   },
   "R_50": {
     EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.08,
+    ENTROPY_SLOPE_CUT: 0.06,   // tightened from 0.08
     STAKE_SCALE: 1.06,
     LOSS_CLUSTER_LIMIT: 2,
     DRAWDOWN_MULTIPLIER: 1.6
@@ -253,7 +256,7 @@ const CANDLE_HISTORY_MAX  = 60;   // candles to keep
 const SR_LOOKBACK         = 40;   // candles to scan for S/R
 const SR_TOUCH_TOLERANCE  = 0.0004; // 0.04% price tolerance for level touches
 const TRENDLINE_MIN_TOUCHES = 2;
-const CONFLUENCE_MIN_SCORE  = 3;   // minimum confluence points to allow trade
+const CONFLUENCE_MIN_SCORE  = 5;   // minimum confluence points to allow trade (raised from 3 for higher-quality entries)
 const RISK_PER_TRADE_PCT   = 0.02; // 2% of balance per trade (Forex Millionaire rule)
 
 // --- SMA / Bollinger / Fibonacci constants (Forex Millionaire: 8 & 21 SMA, BB, Fib 50/61) ---
@@ -345,6 +348,9 @@ let modeStats = {};  // { MODE: { wins: 0, losses: 0, pl: 0 } }
 
 // --- IMPROVEMENT #11: Trade Journal ---
 let tradeJournal = []; // { time, symbol, mode, pattern, side, stake, profit, confluence, detail }
+
+// --- HOURLY WIN-RATE TRACKING: skip hours with historically poor performance ---
+let hourlyStats = {};  // { hour: { wins: 0, losses: 0 } }  (0-23)
 
 // --- IMPROVEMENT #3: Steep Trendline Protection ---
 const STEEP_TRENDLINE_THRESHOLD = 0.005; // slope > 0.5% per candle = steep
@@ -1657,6 +1663,55 @@ function updateModeStatsTracking(mode, profit) {
   modeStats[mode].pl += profit;
 }
 
+// --- HOURLY WIN-RATE TRACKING ---
+function updateHourlyStats(won) {
+  const hour = new Date().getHours();
+  if (!hourlyStats[hour]) hourlyStats[hour] = { wins: 0, losses: 0 };
+  if (won) hourlyStats[hour].wins++;
+  else hourlyStats[hour].losses++;
+}
+
+// --- PERSIST / RESTORE ADAPTIVE DATA (localStorage) ---
+function persistAdaptiveData() {
+  try {
+    localStorage.setItem("itguru_patternStats", JSON.stringify(patternStats));
+    localStorage.setItem("itguru_confluenceLog", JSON.stringify(
+      confluenceTradeLog.slice(-CONFLUENCE_ADAPT_WINDOW * 2)
+    ));
+    localStorage.setItem("itguru_modeStats", JSON.stringify(modeStats));
+    localStorage.setItem("itguru_hourlyStats", JSON.stringify(hourlyStats));
+    localStorage.setItem("itguru_adaptiveConfMin", String(adaptiveConfluenceMin));
+  } catch (e) {
+    console.warn("persistAdaptiveData failed:", e);
+  }
+}
+
+function restoreAdaptiveData() {
+  try {
+    const ps = localStorage.getItem("itguru_patternStats");
+    if (ps) patternStats = JSON.parse(ps);
+
+    const cl = localStorage.getItem("itguru_confluenceLog");
+    if (cl) confluenceTradeLog = JSON.parse(cl);
+
+    const ms = localStorage.getItem("itguru_modeStats");
+    if (ms) modeStats = JSON.parse(ms);
+
+    const hs = localStorage.getItem("itguru_hourlyStats");
+    if (hs) hourlyStats = JSON.parse(hs);
+
+    const acm = localStorage.getItem("itguru_adaptiveConfMin");
+    if (acm) {
+      const parsed = parseInt(acm, 10);
+      if (!isNaN(parsed) && parsed >= 2 && parsed <= 10) adaptiveConfluenceMin = parsed;
+    }
+
+    console.log("📦 Restored adaptive data from localStorage");
+  } catch (e) {
+    console.warn("restoreAdaptiveData failed:", e);
+  }
+}
+
 // --- #16: Trade Journal ---
 function logToJournal(entry) {
   tradeJournal.push({
@@ -2098,7 +2153,7 @@ const VOLATILITY_MIN    = 0.0014;   // 0.15% cumulative per window (normalized)
 const ENTROPY_MAX       = 0.92;
 let tradeMarkers = [];
 
-const TRADE_COOLDOWN_MS = 3000;
+const TRADE_COOLDOWN_MS = 6000;   // increased from 3000ms for more selective entries
 
 const CONTRACT_ODD  = "DIGITODD";
 const CONTRACT_EVEN = "DIGITEVEN";
@@ -2228,7 +2283,7 @@ let expectancyHistory = [];
 
 // 🔧 Runtime-tuned parameters (default to 1HZ75V safe values)
 let EXPECTANCY_WINDOW = 4;
-let ENTROPY_SLOPE_CUT = 0.06;
+let ENTROPY_SLOPE_CUT = 0.04;   // tightened default (was 0.06)
 let STAKE_SCALE = 1.04;
 let LOSS_CLUSTER_LIMIT = 1;
 let DRAWDOWN_MULTIPLIER = 1.2;
@@ -3343,7 +3398,7 @@ function shouldProbeLowVol(mode, oddRatio, evenRatio, ent, acc, reqVol) {
       return (emaSlope > 0.0007) && (biasMax >= 68) && (ent <= 0.90) && (acc >= reqVol * 0.85);
 
     case "RANDOM":
-      return (ent <= 0.78) && (acc >= reqVol * 0.98);
+      return false;   // RANDOM mode disabled — negative EV
 
     case "CHAOS":
       return false;
@@ -3488,6 +3543,27 @@ function analyzeSignal() {
     return false;
   }
 
+  // --- PROFIT FACTOR GATE: pause when losing more than winning (after 10+ trades) ---
+  const totalTradesForPF = wins + losses;
+  if (totalTradesForPF >= 10 && profitFactor < 1.0 && (grossProfit + grossLoss) > 0) {
+    setStatus("Profit factor < 1.0 — pausing for safety", "#ef4444");
+    return false;
+  }
+
+  // --- HOURLY WIN-RATE GATE: skip hours with historically poor performance ---
+  const currentHour = new Date().getHours();
+  const hourData = hourlyStats[currentHour];
+  if (hourData) {
+    const hourTotal = hourData.wins + hourData.losses;
+    if (hourTotal >= 8) {
+      const hourWinRate = hourData.wins / hourTotal;
+      if (hourWinRate < 0.40) {
+        setStatus(`Blocked: Poor hour ${currentHour}:00 (WR ${Math.round(hourWinRate * 100)}%)`, "#f59e0b");
+        return false;
+      }
+    }
+  }
+
   // 🔪 SCALPING STRATEGY SIGNALS — check EARLY, before volatility/confluence/digit gates
   // Scalping strategies have their own entry logic and should not be blocked by
   // digit-based filters, volatility gates, or confluence minimums.
@@ -3559,7 +3635,7 @@ function analyzeSignal() {
   }
 
   // 🚫 EXECUTION GATE — digit switching chaos
-  if (digitStability() > 0.62) {
+  if (digitStability() > 0.55) {   // tightened from 0.62 — more selective
     setStatus("Blocked: Digit instability", "#ef4444");
     return false;
   }
@@ -3586,7 +3662,7 @@ function analyzeSignal() {
   lastEntropy = ent;
 
   // 🔥 BIAS DECAY — invalidate stale bias
-  if (ent > 0.80 || digitStability() > 0.60) {
+  if (ent > 0.80 || digitStability() > 0.52) {   // tightened from 0.60
     cachedBias = null;
     setStatus("Bias decayed — waiting for clarity", "#f59e0b");
     return false;
@@ -3699,6 +3775,24 @@ function analyzeSignal() {
       ? Math.abs(lastFast2 - lastSlow2) / Math.max(1e-9, Math.abs(lastSlow2)) : 0;
 
     if (okToProbe) {
+      // --- LOW-VOL PROBE CONFLUENCE GATE: require higher confluence for probe trades ---
+      if (candles.length >= 5) {
+        const { score: probeCfScore } = scoreConfluence();
+        const probeCfRequired = adaptiveConfluenceMin + 2;  // stricter than normal
+        if (probeCfScore < probeCfRequired) {
+          logProbeDecision({
+            mode,
+            permitted: false,
+            reason: "low_vol_probe_denied_low_confluence",
+            side: null,
+            acc, reqVol, entropy: ent,
+            oddRatio, evenRatio, emaSlope
+          });
+          setStatus(`Probe blocked: Low confluence ${probeCfScore}/${probeCfRequired}`, "#f59e0b");
+          return false;
+        }
+      }
+
       let chosenSide = CONTRACT_EVEN;
       if (mode === "ODD_EVEN" || mode === "TREND") {
         chosenSide = oddRatio >= evenRatio ? CONTRACT_ODD : CONTRACT_EVEN;
@@ -3710,7 +3804,8 @@ function analyzeSignal() {
         else if (streakEven) chosenSide = CONTRACT_ODD;
         else chosenSide = oddRatio >= evenRatio ? CONTRACT_ODD : CONTRACT_EVEN;
       } else if (mode === "RANDOM") {
-        chosenSide = Math.random() > 0.5 ? CONTRACT_ODD : CONTRACT_EVEN;
+        // RANDOM mode disabled — should not reach here, but safety fallback
+        return false;
       }
 
       logProbeDecision({
@@ -3791,8 +3886,9 @@ function analyzeSignal() {
   }
 
   if (mode === "RANDOM") {
-    currentSide = Math.random() > 0.5 ? CONTRACT_ODD : CONTRACT_EVEN;
-    return true;
+    // RANDOM mode disabled — negative expected value due to broker payout spread
+    setStatus("Blocked: RANDOM mode disabled (negative EV)", "#ef4444");
+    return false;
   }
 
   return false;
@@ -3932,6 +4028,10 @@ function handleResult(contract) {
   if (lossCount >= 3 && !won) {
     setTradingCooldownWindow(10000);
   }
+  // HOURLY WIN-RATE TRACKING
+  updateHourlyStats(won);
+  // PERSIST ADAPTIVE DATA to localStorage
+  persistAdaptiveData();
   // Update advanced stats UI
   updateAdvancedStatsUI();
 
@@ -4552,9 +4652,12 @@ resetSessionBtn?.addEventListener("click", () => {
   grossProfit = 0; grossLoss = 0; profitFactor = 0;
   tradeReturns = []; sharpeRatio = 0; sortinoRatio = 0;
   modeStats = {};
+  // NOTE: hourlyStats intentionally NOT reset — tracks long-term hour performance
   saveSessionSnapshot();
   tradeJournal = [];
   walkForwardCounter = 0;
+  // Persist cleared adaptive data (keep hourlyStats)
+  persistAdaptiveData();
 
 updatePerformanceUI();
   expectancyHistory = [];
