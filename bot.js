@@ -303,6 +303,7 @@ const SCALP_MOMENTUM_BODY_RATIO  = 0.5;    // candle body must be >50% of range 
 // Liquidity Sweep state
 let liqSweepRangeCandle  = null;  // the 15m candle whose H/L form the range
 let liqSweepSignal       = null;  // { direction: 'BULL'|'BEAR', rangeHigh, rangeLow, time }
+let liqSweepTradeActive  = false; // true while a liq sweep trade is in-flight (one-at-a-time)
 
 // Stop Loss Hunt state
 let stopHuntSignal       = null;  // { direction: 'BULL'|'BEAR', level, time, reEntryCount }
@@ -950,6 +951,8 @@ function detectFalseBreakout() {
 function detectLiquiditySweep() {
   liqSweepSignal = null;
   if (!liquiditySweepEnabled) return;
+  /* One-at-a-time: don't scan for new range signals while a trade is active */
+  if (liqSweepTradeActive) return;
   if (candlesLg.length < 2 || candles.length < 2) return;
 
   // Step 1: Identify the range candle (second-to-last long-term candle)
@@ -3521,6 +3524,7 @@ function analyzeSignal() {
     if (forexScalpSig && (Date.now() - forexScalpSig.time < SCALP_SIGNAL_EXPIRY_MS)) {
       currentSide = forexScalpSig.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
       currentTradeMode = forexScalpSig.strategy;
+      if (forexScalpSig.strategy === "LIQ_SWEEP") liqSweepTradeActive = true;
       setStatus(`Forex Scalp: ${forexScalpSig.strategy} ${forexScalpSig.direction}`, "#22c55e");
       return true;
     }
@@ -3581,6 +3585,7 @@ function analyzeSignal() {
           currentSide = earlyScalpSig.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
         }
         currentTradeMode = earlyScalpSig.strategy;
+        if (earlyScalpSig.strategy === "LIQ_SWEEP") liqSweepTradeActive = true;
         setStatus(`Scalp: ${earlyScalpSig.strategy} ${earlyScalpSig.direction}`, "#22c55e");
         return true;
       }
@@ -3998,6 +4003,13 @@ function handleResult(contract) {
   // Stop Loss Hunt re-entry: if a stop hunt trade lost, enable re-entry
   if (!won && currentTradeMode === "STOP_HUNT" && stopHuntSignal) {
     onStopHuntLoss(stopHuntSignal);
+  }
+
+  // Liquidity Sweep one-at-a-time: reset after WIN or LOSS so scanner resumes
+  if (currentTradeMode === "LIQ_SWEEP" && liqSweepTradeActive) {
+    liqSweepTradeActive = false;
+    liqSweepSignal = null;
+    setStatus(`Liq Sweep ${won ? "WIN" : "LOSS"} — scanning for next trade…`, "#38bdf8");
   }
 
   // --- Improvement Integrations ---
@@ -4638,7 +4650,7 @@ resetSessionBtn?.addEventListener("click", () => {
   lastFalseBreakout = null;
 
   // Reset scalping strategy state
-  liqSweepRangeCandle = null; liqSweepSignal = null;
+  liqSweepRangeCandle = null; liqSweepSignal = null; liqSweepTradeActive = false;
   stopHuntSignal = null; stopHuntReEntryState = null;
   failedPinBarSignal = null; momentumState = null;
 

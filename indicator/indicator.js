@@ -5519,6 +5519,10 @@ function getSignalStrength(score) {
  */
 function detectLiquiditySweep() {
   if (!liquiditySweepEnabled) return null;
+
+  /* One-at-a-time: skip detection while any signal is still PENDING */
+  if (liquiditySweepHistory.some(s => s.result === "PENDING")) return null;
+
   const len = candles.length;
   if (len < 3) return null;
 
@@ -5648,6 +5652,9 @@ function monitorLiquiditySweepOutcomes(candle) {
         sendStrategyOutcomeTelegram(s);
       }
     }
+    /* One-at-a-time: reset cooldown so scanner immediately looks for the next trade */
+    lastLiquiditySweepIdx = -999;
+    addLog("🌊 Range signal resolved — scanning for next trade…");
   }
 }
 
