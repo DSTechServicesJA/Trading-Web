@@ -1143,6 +1143,29 @@ button:disabled {
   margin: 0;
 }
 
+/* ---- Lock Row (Timeframe / R:R lock checkboxes) ---- */
+.lock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lock-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.lock-label input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* ---- Utility classes ---- */
 .status-meta {
   margin-top: 4px;
