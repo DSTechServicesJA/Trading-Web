@@ -289,6 +289,11 @@ let liquiditySweepEnabled = false;
 let stopLossHuntEnabled   = false;
 let failedPinBarEnabled   = false;
 
+const SCALP_SIGNAL_EXPIRY_MS     = 30000;  // 30s — signals expire after this
+const SCALP_REENTRY_WINDOW_MS    = 60000;  // 60s — re-entry allowed within this window
+const SCALP_MAX_REENTRY_COUNT    = 2;      // max re-entries for stop hunt of hunters
+const SCALP_MOMENTUM_BODY_RATIO  = 0.5;    // candle body must be >50% of range for momentum
+
 // Liquidity Sweep state
 let liqSweepRangeCandle  = null;  // the 15m candle whose H/L form the range
 let liqSweepSignal       = null;  // { direction: 'BULL'|'BEAR', rangeHigh, rangeLow, time }
@@ -1029,7 +1034,7 @@ function detectStopLossHunt() {
 
   // Re-entry logic: "stop hunt of stop hunters"
   // If we had a recent stop hunt signal that was stopped out, look for re-entry
-  if (stopHuntReEntryState && (Date.now() - stopHuntReEntryState.time < 60000)) {
+  if (stopHuntReEntryState && (Date.now() - stopHuntReEntryState.time < SCALP_REENTRY_WINDOW_MS)) {
     const re = stopHuntReEntryState;
 
     for (const level of respectedLevels.slice(0, 4)) {
@@ -1069,7 +1074,7 @@ function detectStopLossHunt() {
 
 // Called when a stop hunt trade loses — enables re-entry
 function onStopHuntLoss(signal) {
-  if (!signal || signal.reEntryCount >= 2) {
+  if (!signal || signal.reEntryCount >= SCALP_MAX_REENTRY_COUNT) {
     stopHuntReEntryState = null;
     return;
   }
@@ -1098,13 +1103,13 @@ function detectMomentumState() {
   if (avgRange === 0) return;
 
   // Two consecutive strong bearish candles = FEAR state
-  if (isBearish(c1) && isBearish(c2) && b1 > avgRange * 0.5 && b2 > avgRange * 0.5) {
+  if (isBearish(c1) && isBearish(c2) && b1 > avgRange * SCALP_MOMENTUM_BODY_RATIO && b2 > avgRange * SCALP_MOMENTUM_BODY_RATIO) {
     momentumState = "FEAR";
     return;
   }
 
   // Two consecutive strong bullish candles = GREED state
-  if (isBullish(c1) && isBullish(c2) && b1 > avgRange * 0.5 && b2 > avgRange * 0.5) {
+  if (isBullish(c1) && isBullish(c2) && b1 > avgRange * SCALP_MOMENTUM_BODY_RATIO && b2 > avgRange * SCALP_MOMENTUM_BODY_RATIO) {
     momentumState = "GREED";
     return;
   }
@@ -1158,13 +1163,13 @@ function getActiveScalpingSignal() {
   // Returns the strongest active signal, or null
   const signals = [];
 
-  if (liqSweepSignal && (Date.now() - liqSweepSignal.time < 30000)) {
+  if (liqSweepSignal && (Date.now() - liqSweepSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
     signals.push({ ...liqSweepSignal, strategy: "LIQ_SWEEP", priority: 3 });
   }
-  if (stopHuntSignal && (Date.now() - stopHuntSignal.time < 30000)) {
+  if (stopHuntSignal && (Date.now() - stopHuntSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
     signals.push({ ...stopHuntSignal, strategy: "STOP_HUNT", priority: stopHuntSignal.reEntryCount > 0 ? 2 : 3 });
   }
-  if (failedPinBarSignal && (Date.now() - failedPinBarSignal.time < 30000)) {
+  if (failedPinBarSignal && (Date.now() - failedPinBarSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
     signals.push({ ...failedPinBarSignal, strategy: "FAILED_PIN", priority: 2 });
   }
 
@@ -3442,7 +3447,7 @@ function analyzeSignal() {
   if (isForexSymbol(symbol)) {
     // Check scalping strategies first for forex
     const forexScalpSig = getActiveScalpingSignal();
-    if (forexScalpSig && (Date.now() - forexScalpSig.time < 30000)) {
+    if (forexScalpSig && (Date.now() - forexScalpSig.time < SCALP_SIGNAL_EXPIRY_MS)) {
       currentSide = forexScalpSig.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
       currentTradeMode = forexScalpSig.strategy;
       setStatus(`Forex Scalp: ${forexScalpSig.strategy} ${forexScalpSig.direction}`, "#22c55e");
@@ -3702,7 +3707,7 @@ function analyzeSignal() {
 
   // 🔪 SCALPING STRATEGY SIGNALS — check before normal mode flow
   const scalpSignal = getActiveScalpingSignal();
-  if (scalpSignal && (Date.now() - scalpSignal.time < 30000)) {
+  if (scalpSignal && (Date.now() - scalpSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
     // Map directional signal to contract type
     if (isForexSymbol(symbol)) {
       currentSide = scalpSignal.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
