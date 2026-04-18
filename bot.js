@@ -3475,6 +3475,26 @@ function analyzeSignal() {
     return false;
   }
 
+  // 🔪 SCALPING STRATEGY SIGNALS — check EARLY, before volatility/confluence/digit gates
+  // Scalping strategies have their own entry logic and should not be blocked by
+  // digit-based filters, volatility gates, or confluence minimums.
+  if (Date.now() - lastTradeTime >= TRADE_COOLDOWN_MS) {
+    const earlyScalpSig = getActiveScalpingSignal();
+    if (earlyScalpSig && (Date.now() - earlyScalpSig.time < SCALP_SIGNAL_EXPIRY_MS)) {
+      // Require minimum candle data so strategies have real signals
+      if (candles.length >= 3) {
+        if (isForexSymbol(symbol)) {
+          currentSide = earlyScalpSig.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
+        } else {
+          currentSide = earlyScalpSig.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
+        }
+        currentTradeMode = earlyScalpSig.strategy;
+        setStatus(`Scalp: ${earlyScalpSig.strategy} ${earlyScalpSig.direction}`, "#22c55e");
+        return true;
+      }
+    }
+  }
+
   // --- IMPROVEMENT #3: Steep Trendline Protection ---
   if (candles.length >= 5 && isSteepTrendline()) {
     setStatus("Blocked: Steep trendline — waiting for pullback", "#f59e0b");
@@ -3703,20 +3723,6 @@ function analyzeSignal() {
       });
       return false;
     }
-  }
-
-  // 🔪 SCALPING STRATEGY SIGNALS — check before normal mode flow
-  const scalpSignal = getActiveScalpingSignal();
-  if (scalpSignal && (Date.now() - scalpSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
-    // Map directional signal to contract type
-    if (isForexSymbol(symbol)) {
-      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
-    } else {
-      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
-    }
-    currentTradeMode = scalpSignal.strategy;
-    setStatus(`Scalp: ${scalpSignal.strategy} ${scalpSignal.direction}`, "#22c55e");
-    return true;
   }
 
   // Normal flow when volatility OK

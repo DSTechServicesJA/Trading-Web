@@ -520,6 +520,35 @@ input::placeholder { color: var(--text-muted); }
   font-size: var(--font-size-sm);
 }
 
+/* ---- Symbol Section ---- */
+.symbol-section {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--card-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.auto-symbol-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.auto-symbol-label input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: var(--primary);
+}
+
 .symbol-select label {
   display: block;
   margin-bottom: 6px;
@@ -530,7 +559,48 @@ input::placeholder { color: var(--text-muted); }
 
 .symbol-select select {
   width: 100%;
-  padding: 10px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238b95b5' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.symbol-select select:hover {
+  border-color: var(--primary-soft);
+}
+
+.symbol-select select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+.symbol-select select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.symbol-select select optgroup {
+  color: var(--primary-soft);
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+  background: var(--bg-surface);
+}
+
+.symbol-select select option {
+  color: var(--text);
+  background: var(--bg-surface);
+  padding: 6px;
 }
 
 /* ---- Dashboard ---- */
@@ -1256,7 +1326,8 @@ body.light-theme .risk,
 body.light-theme .oauth-box,
 body.light-theme .account-toggle,
 body.light-theme .controls,
-body.light-theme .side-stats {
+body.light-theme .side-stats,
+body.light-theme .symbol-section {
   background: var(--bg-card);
   border-color: var(--glass-border);
 }
