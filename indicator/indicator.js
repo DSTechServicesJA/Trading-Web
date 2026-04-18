@@ -1741,8 +1741,11 @@ function monitorSessionRangeTradeOutcome(candle) {
     setTimeout(() => sendSessionRangeOutcomeTelegram(resolvedTrade, currentPanelSymbol), 100);
   }
 
-  /* Auto-reset: clear the sweep signal and trade so new signals can be detected */
-  londonSweepSignal = null;
+  /* Auto-reset: clear the trade so the session can continue.
+     Keep londonSweepSignal set so detectLondonAsianSweep() won't
+     re-detect the same sweep and loop alerts on every tick.
+     londonSweepSignal is properly cleared at session boundaries
+     via resetSessionRanges(). */
   sessionRangeTrade = null;
 }
 
