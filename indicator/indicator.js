@@ -705,6 +705,8 @@ let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram *
 let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
 let telegramScalpOutcomeSend = false; /* auto-send WIN/LOSS scalp outcome to Telegram */
 let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (tight Asian, London sweep) to Telegram */
+let telegramStrategyAutoSend     = false;  /* auto-send custom strategy alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) to Telegram */
+let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for custom strategies to Telegram */
 
 /* RSI state */
 let rsiValues = [];
@@ -1079,6 +1081,8 @@ function initUI() {
   UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
   UI.telegramScalpOutcomeSendToggle = document.getElementById("telegramScalpOutcomeSendToggle");
   UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
+  UI.telegramStrategyAutoSendToggle    = document.getElementById("telegramStrategyAutoSendToggle");
+  UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -2458,6 +2462,8 @@ function saveSettings() {
       telegramOutcomeSend,
       telegramScalpOutcomeSend,
       telegramSessionRangeAutoSend,
+      telegramStrategyAutoSend,
+      telegramStrategyOutcomeSend,
       accountSize,
       riskPercent
     };
@@ -2630,6 +2636,8 @@ function restoreSettings() {
     if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
     if (s.telegramScalpOutcomeSend != null) telegramScalpOutcomeSend = s.telegramScalpOutcomeSend;
     if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
+    if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
+    if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
@@ -2637,6 +2645,8 @@ function restoreSettings() {
     if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
     if (UI.telegramScalpOutcomeSendToggle) UI.telegramScalpOutcomeSendToggle.checked = telegramScalpOutcomeSend;
     if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
+    if (UI.telegramStrategyAutoSendToggle) UI.telegramStrategyAutoSendToggle.checked = telegramStrategyAutoSend;
+    if (UI.telegramStrategyOutcomeSendToggle) UI.telegramStrategyOutcomeSendToggle.checked = telegramStrategyOutcomeSend;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -5429,6 +5439,7 @@ function processLiquiditySweep() {
 
   lastLiquiditySweepIdx = signal.candleIdx;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   liquiditySweepHistory.unshift(signal);
   if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
 
@@ -5449,6 +5460,11 @@ function processLiquiditySweep() {
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmt(signal.entry, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
     new Notification("IT Guru: Liquidity Sweep!", { body, icon: NOTIF_ICON });
+  }
+
+  /* Telegram alert (delayed to let canvas redraw first) */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
   }
 
   renderStrategyAlerts();
@@ -5477,7 +5493,16 @@ function monitorLiquiditySweepOutcomes(candle) {
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
-  if (changed) renderStrategyAlerts();
+  if (changed) {
+    renderStrategyAlerts();
+    /* Send Telegram outcome for each newly resolved signal */
+    for (const s of liquiditySweepHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+  }
 }
 
 /* ================= STRATEGY 2: STOP LOSS HUNT ================= */
@@ -5618,6 +5643,7 @@ function processStopLossHunt() {
   const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && Math.abs(s.level.level - signal.level.level) <= levelTol);
   const reEntry = !!prevStopped;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   stopLossHuntHistory.unshift(signal);
   if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
 
@@ -5636,6 +5662,11 @@ function processStopLossHunt() {
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)}\nLevel: ${fmt(signal.level.level, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
     new Notification("IT Guru: Stop Loss Hunt!", { body, icon: NOTIF_ICON });
+  }
+
+  /* Telegram alert (delayed to let canvas redraw first) */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
   }
 
   renderStrategyAlerts();
@@ -5664,7 +5695,16 @@ function monitorStopLossHuntOutcomes(candle) {
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
-  if (changed) renderStrategyAlerts();
+  if (changed) {
+    renderStrategyAlerts();
+    /* Send Telegram outcome for each newly resolved signal */
+    for (const s of stopLossHuntHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+  }
 }
 
 /* ================= STRATEGY 3: FAILED PIN BAR (Fear/Greed) ================= */
@@ -5808,6 +5848,7 @@ function processFailedPinBar() {
 
   lastFailedPinBarIdx = signal.candleIdx;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   failedPinBarHistory.unshift(signal);
   if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
 
@@ -5826,6 +5867,11 @@ function processFailedPinBar() {
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmt(signal.entry, 4)}\nState: ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
     new Notification("IT Guru: Failed Pin Bar!", { body, icon: NOTIF_ICON });
+  }
+
+  /* Telegram alert (delayed to let canvas redraw first) */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
   }
 
   renderStrategyAlerts();
@@ -5856,7 +5902,16 @@ function monitorFailedPinBarOutcomes(candle) {
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
-  if (changed) renderStrategyAlerts();
+  if (changed) {
+    renderStrategyAlerts();
+    /* Send Telegram outcome for each newly resolved signal */
+    for (const s of failedPinBarHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+  }
 }
 
 /* ================= SHARED STRATEGY HELPERS ================= */
@@ -6380,6 +6435,223 @@ async function sendScalpOutcomeTelegram(scalp) {
     addLog(`📤 Telegram: scalp outcome (${result}) sent`);
   } catch (err) {
     addLog(`📤 Scalp outcome Telegram error: ${err.message}`);
+  }
+}
+
+/* ================= TELEGRAM: CUSTOM STRATEGY ALERTS (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) ================= */
+
+/**
+ * Build a formatted Telegram message for a custom strategy signal.
+ * Includes direction, entry, SL/TP, R:R, lot size (based on account amount), and symbol.
+ * Uses Telegram HTML parse mode.
+ */
+function buildStrategyTelegramCaption(signal) {
+  const symbol = signal.symbol || getActiveSymbol() || "--";
+  const symLabel = getSymbolLabel ? getSymbolLabel(symbol) : symbol;
+  const gran = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
+  const ts = signal.epoch
+    ? new Date(signal.epoch * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+    : new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  const dirEmoji = signal.dir === "BULL" ? "🟢" : "🔴";
+  const dirArrow = signal.dir === "BULL" ? "▲" : "▼";
+  const dirLabel = signal.dir === "BULL" ? "BUY" : "SELL";
+
+  /* Strategy-specific emoji and label */
+  let stratEmoji = "📊";
+  let stratLabel = "Strategy Signal";
+  if (signal.type === "liquidity_sweep") {
+    stratEmoji = "🌊";
+    stratLabel = "Liquidity Sweep";
+  } else if (signal.type === "stop_loss_hunt") {
+    stratEmoji = "🎯";
+    stratLabel = "Stop Loss Hunt";
+  } else if (signal.type === "failed_pin_bar") {
+    stratEmoji = "📌";
+    stratLabel = "Failed Pin Bar";
+  }
+
+  const lines = [];
+  lines.push(`<b>${stratEmoji} ${stratLabel} Alert</b>`);
+  lines.push(``);
+  lines.push(`<b>Symbol:</b> ${symLabel}`);
+  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+  lines.push(`<b>Direction:</b> ${dirEmoji} ${dirArrow} ${signal.dir} (${dirLabel})`);
+  lines.push(``);
+  lines.push(`<b>📍 Entry:</b> <code>${fmt(signal.entry, 4)}</code>`);
+  lines.push(`<b>🛑 SL:</b> <code>${fmt(signal.sl, 4)}</code>`);
+  lines.push(`<b>🎯 TP:</b> <code>${fmt(signal.tp, 4)}</code>`);
+  if (signal.rr != null) {
+    lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  }
+
+  /* Strategy-specific details */
+  if (signal.type === "liquidity_sweep" && signal.range) {
+    lines.push(``);
+    lines.push(`<b>Range:</b> [${fmt(signal.range.low, 4)} – ${fmt(signal.range.high, 4)}]`);
+  }
+  if (signal.type === "stop_loss_hunt" && signal.level) {
+    lines.push(``);
+    lines.push(`<b>Key Level:</b> ${fmt(signal.level.level, 4)} (${signal.level.touches} touches)`);
+  }
+  if (signal.type === "failed_pin_bar" && signal.state) {
+    lines.push(``);
+    lines.push(`<b>State:</b> ${signal.state === "fear" ? "😱 FEAR" : "🤑 GREED"}`);
+  }
+
+  /* Lot size / position sizing based on account amount */
+  if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
+    const tradeObj = { entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr || 0, symbol };
+    const m = calcPositionMetrics(tradeObj);
+    if (m) {
+      lines.push(``);
+      lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+      if (signal.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+      lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+      if (!m.isSynthetic) {
+        lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+      }
+      lines.push(`<b>📐 Account:</b> $${fmt(accountSize, 2)} (${fmt(riskPercent, 1)}% risk)`);
+    }
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a custom strategy alert to Telegram with chart screenshot.
+ * Called from processLiquiditySweep, processStopLossHunt, processFailedPinBar.
+ */
+async function sendTelegramStrategyAlert(signal) {
+  if (!telegramStrategyAutoSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Check credentials are available */
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Strategy Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending strategy alert…";
+  try {
+    /* In multi-panel mode, capture the correct panel's chart */
+    let blob;
+    if (signal.symbol && multiPanels.has(signal.symbol)) {
+      blob = await capturePanelScreenshot(multiPanels.get(signal.symbol));
+    } else {
+      blob = await captureChartScreenshot();
+    }
+    const caption = buildStrategyTelegramCaption(signal);
+    await sendTelegramPhoto(blob, caption);
+    addLog(`📤 Strategy Telegram alert sent (${signal.type})`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ Strategy alert sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 Strategy Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ Strategy: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Send strategy outcome (WIN / LOSS) via Telegram when enabled.
+ * Called from monitorLiquiditySweepOutcomes, monitorStopLossHuntOutcomes,
+ * monitorFailedPinBarOutcomes after a signal resolves.
+ */
+async function sendStrategyOutcomeTelegram(signal) {
+  if (!telegramStrategyOutcomeSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Strategy outcome Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const sym = getSymbolLabel(signal.symbol || getActiveSymbol() || "");
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = signal.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
+    const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
+    const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
+    const rrStr = signal.rr != null ? "1:" + fmt(signal.rr, 1) : "--";
+
+    /* Strategy-specific emoji and label */
+    let stratEmoji = "📊";
+    let stratLabel = "Strategy";
+    if (signal.type === "liquidity_sweep") { stratEmoji = "🌊"; stratLabel = "Liquidity Sweep"; }
+    else if (signal.type === "stop_loss_hunt") { stratEmoji = "🎯"; stratLabel = "Stop Loss Hunt"; }
+    else if (signal.type === "failed_pin_bar") { stratEmoji = "📌"; stratLabel = "Failed Pin Bar"; }
+
+    const lines = [];
+    lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>📍 Entry:</b> ${entryStr}`);
+    lines.push(`<b>🛑 SL:</b> ${slStr}`);
+    lines.push(`<b>🎯 TP:</b> ${tpStr}`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+
+    if (signal.type === "failed_pin_bar" && signal.state) {
+      lines.push(`<b>State:</b> ${signal.state === "fear" ? "😱 FEAR" : "🤑 GREED"}`);
+    }
+
+    /* Lot size / position sizing based on account amount */
+    if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
+      const tradeObj = { entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr || 0, symbol: signal.symbol || getActiveSymbol() };
+      const m = calcPositionMetrics(tradeObj);
+      if (m) {
+        lines.push(``);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (signal.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        if (!m.isSynthetic) {
+          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+        }
+      }
+    }
+
+    /* Win/loss tally across all 3 strategy histories */
+    let totalW = 0, totalL = 0;
+    for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory]) {
+      for (const s of h) {
+        if (s.result === "WIN") totalW++;
+        else if (s.result === "LOSS") totalL++;
+      }
+    }
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: ${stratLabel} outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Strategy outcome Telegram error: ${err.message}`);
   }
 }
 
@@ -11239,6 +11511,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramSessionRangeAutoSendToggle) {
     UI.telegramSessionRangeAutoSendToggle.addEventListener("change", () => { telegramSessionRangeAutoSend = UI.telegramSessionRangeAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramStrategyAutoSendToggle) {
+    UI.telegramStrategyAutoSendToggle.addEventListener("change", () => { telegramStrategyAutoSend = UI.telegramStrategyAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramStrategyOutcomeSendToggle) {
+    UI.telegramStrategyOutcomeSendToggle.addEventListener("change", () => { telegramStrategyOutcomeSend = UI.telegramStrategyOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());

@@ -711,6 +711,12 @@
               <label class="toggle-row"><input type="checkbox" id="telegramSessionRangeAutoSendToggle" /> Auto-Send Session Range Signals</label>
               <p class="hint">Automatically send chart screenshot + details when a London sweep of the Asian range is detected or tight Asian range is identified.</p>
 
+              <label class="toggle-row"><input type="checkbox" id="telegramStrategyAutoSendToggle" /> Auto-Send Strategy Alerts (Liq Sweep / SL Hunt / Failed Pin Bar)</label>
+              <p class="hint">Automatically send chart screenshot + strategy signal details (entry, SL, TP, lot size) to Telegram when Liquidity Sweep, Stop Loss Hunt, or Failed Pin Bar fires.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramStrategyOutcomeSendToggle" /> Auto-Send Strategy Outcome (WIN/LOSS)</label>
+              <p class="hint">Automatically send a message when a custom strategy signal resolves as WIN or LOSS, with entry, SL, TP, lot size, and running strategy win rate.</p>
+
               <div class="telegram-btn-row">
                 <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
                 <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
