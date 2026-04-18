@@ -5439,6 +5439,7 @@ function processLiquiditySweep() {
 
   lastLiquiditySweepIdx = signal.candleIdx;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   liquiditySweepHistory.unshift(signal);
   if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
 
@@ -5642,6 +5643,7 @@ function processStopLossHunt() {
   const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && Math.abs(s.level.level - signal.level.level) <= levelTol);
   const reEntry = !!prevStopped;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   stopLossHuntHistory.unshift(signal);
   if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
 
@@ -5846,6 +5848,7 @@ function processFailedPinBar() {
 
   lastFailedPinBarIdx = signal.candleIdx;
 
+  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   failedPinBarHistory.unshift(signal);
   if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
 
@@ -6633,9 +6636,13 @@ async function sendStrategyOutcomeTelegram(signal) {
     }
 
     /* Win/loss tally across all 3 strategy histories */
-    const allStrats = [].concat(liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory);
-    const totalW = allStrats.filter(s => s.result === "WIN").length;
-    const totalL = allStrats.filter(s => s.result === "LOSS").length;
+    let totalW = 0, totalL = 0;
+    for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory]) {
+      for (const s of h) {
+        if (s.result === "WIN") totalW++;
+        else if (s.result === "LOSS") totalL++;
+      }
+    }
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
     lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
