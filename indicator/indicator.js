@@ -7854,8 +7854,8 @@ function monitorTradeOutcome(candle) {
     if (candlesSinceEntry >= SCALP_MAX_CANDLES) {
       /* Time-based exit: close at current price (market close) */
       const exitPrice = candle.close;
-      const inProfit = (trade.dir === "BULL" && exitPrice > trade.entry) ||
-                       (trade.dir === "BEAR" && exitPrice < trade.entry);
+      const inProfit = (trade.dir === "BULL" && exitPrice >= trade.entry) ||
+                       (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       if (inProfit) signalWins++; else signalLosses++;
       addLog(`⏱ Scalp TIMEOUT (${SCALP_MAX_CANDLES} candles) — exit at ${fmt(exitPrice, 4)} → ${pending.result}`);
@@ -7875,7 +7875,7 @@ function monitorTradeOutcome(candle) {
   if (trade.dir === "BULL") {
     if (candle.low <= checkSL) {
       /* In pure trailing mode, a trailing stop hit above entry is a WIN */
-      if (pureTrailingEnabled && trailingSL != null && trailingSL > trade.entry) {
+      if (pureTrailingEnabled && trailingSL != null && trailingSL >= trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
@@ -7894,7 +7894,7 @@ function monitorTradeOutcome(candle) {
     }
   } else {
     if (candle.high >= checkSL) {
-      if (pureTrailingEnabled && trailingSL != null && trailingSL < trade.entry) {
+      if (pureTrailingEnabled && trailingSL != null && trailingSL <= trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
