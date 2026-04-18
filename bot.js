@@ -284,6 +284,23 @@ let supplyDemandZones = []; // { top, bottom, type: 'supply'|'demand', strength 
 let flippedLevels   = [];  // S/R levels that flipped role
 let lastFalseBreakout = null; // { direction: 'BULL'|'BEAR', level, time }
 
+// --- Scalping Strategies (enable/disable toggles) ---
+let liquiditySweepEnabled = false;
+let stopLossHuntEnabled   = false;
+let failedPinBarEnabled   = false;
+
+// Liquidity Sweep state
+let liqSweepRangeCandle  = null;  // the 15m candle whose H/L form the range
+let liqSweepSignal       = null;  // { direction: 'BULL'|'BEAR', rangeHigh, rangeLow, time }
+
+// Stop Loss Hunt state
+let stopHuntSignal       = null;  // { direction: 'BULL'|'BEAR', level, time, reEntryCount }
+let stopHuntReEntryState = null;  // tracks re-entry after "hunt of hunters"
+
+// Failed Pin Bar state
+let failedPinBarSignal   = null;  // { direction: 'BULL'|'BEAR', pinBarCandle, time }
+let momentumState        = null;  // 'FEAR' | 'GREED' | null
+
 // --- IMPROVEMENT #1: Adaptive Confluence Threshold ---
 let adaptiveConfluenceMin = CONFLUENCE_MIN_SCORE;
 const CONFLUENCE_ADAPT_WINDOW = 20;  // trades to evaluate
@@ -897,6 +914,286 @@ function detectFalseBreakout() {
   }
 }
 
+// =========================================================
+// SCALPING STRATEGIES (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar)
+// Each can be independently enabled/disabled via UI toggle
+// =========================================================
+
+// --- Strategy 1: Liquidity Sweep Scalping ---
+// Uses long-term candles (candlesLg) as "15m" range and short-term candles as "1m" entry.
+// A liquidity sweep occurs when price breaks the range and closes back inside it.
+
+function detectLiquiditySweep() {
+  liqSweepSignal = null;
+  if (!liquiditySweepEnabled) return;
+  if (candlesLg.length < 2 || candles.length < 2) return;
+
+  // Step 1: Identify the range candle (second-to-last long-term candle)
+  const rangeCandle = candlesLg[candlesLg.length - 2];
+  const nextLgCandle = candlesLg[candlesLg.length - 1];
+  const rangeHigh = rangeCandle.h;
+  const rangeLow  = rangeCandle.l;
+
+  // Step 2: Check if the next long-term candle broke the range then closed back inside
+  const brokeAbove = nextLgCandle.h > rangeHigh && nextLgCandle.c <= rangeHigh && nextLgCandle.c >= rangeLow;
+  const brokeBelow = nextLgCandle.l < rangeLow  && nextLgCandle.c >= rangeLow  && nextLgCandle.c <= rangeHigh;
+
+  if (!brokeAbove && !brokeBelow) return;
+
+  // Step 3: Confirm on short-term candles — look for the same sweep pattern
+  const c1 = candles[candles.length - 1]; // newest 1m candle
+  const c2 = candles[candles.length - 2];
+
+  // Bearish sweep: price broke above range, closed back inside → SELL
+  if (brokeAbove) {
+    if (c2.h > rangeHigh && c1.c <= rangeHigh && c1.c >= rangeLow && isBearish(c1)) {
+      liqSweepSignal = {
+        direction: "BEAR",
+        rangeHigh,
+        rangeLow,
+        stopLoss: c2.h,    // stop above the sweep
+        time: Date.now()
+      };
+      return;
+    }
+  }
+
+  // Bullish sweep: price broke below range, closed back inside → BUY
+  if (brokeBelow) {
+    if (c2.l < rangeLow && c1.c >= rangeLow && c1.c <= rangeHigh && isBullish(c1)) {
+      liqSweepSignal = {
+        direction: "BULL",
+        rangeHigh,
+        rangeLow,
+        stopLoss: c2.l,    // stop below the sweep
+        time: Date.now()
+      };
+      return;
+    }
+  }
+}
+
+// --- Strategy 2: Stop Loss Hunt ---
+// Detects when price hunts stop losses at a key S/R level with 2+ touches,
+// then reverses back. Includes re-entry logic for "hunt of the hunters."
+
+function detectStopLossHunt() {
+  stopHuntSignal = null;
+  if (!stopLossHuntEnabled) return;
+  if (candles.length < 3 || srLevels.length < 1) return;
+
+  const c1 = candles[candles.length - 1]; // newest
+  const c2 = candles[candles.length - 2];
+
+  // Only look at levels with at least 2 touches (clearly respected levels)
+  const respectedLevels = srLevels.filter(l => l.touches >= 2);
+  if (!respectedLevels.length) return;
+
+  for (const level of respectedLevels.slice(0, 4)) {
+    const tolerance = Math.abs(level.price) * SR_TOUCH_TOLERANCE;
+
+    // Bullish stop hunt at support:
+    // c2 broke below support, then c1 closed back above it
+    if (level.type === "support") {
+      if (c2.l < level.price - tolerance && c2.c < level.price &&
+          c1.c > level.price && isBullish(c1)) {
+        stopHuntSignal = {
+          direction: "BULL",
+          level: level.price,
+          stopLoss: c2.l,       // stop below the hunt candle
+          touches: level.touches,
+          time: Date.now(),
+          reEntryCount: 0
+        };
+        return;
+      }
+    }
+
+    // Bearish stop hunt at resistance:
+    // c2 broke above resistance, then c1 closed back below it
+    if (level.type === "resistance") {
+      if (c2.h > level.price + tolerance && c2.c > level.price &&
+          c1.c < level.price && isBearish(c1)) {
+        stopHuntSignal = {
+          direction: "BEAR",
+          level: level.price,
+          stopLoss: c2.h,       // stop above the hunt candle
+          touches: level.touches,
+          time: Date.now(),
+          reEntryCount: 0
+        };
+        return;
+      }
+    }
+  }
+
+  // Re-entry logic: "stop hunt of stop hunters"
+  // If we had a recent stop hunt signal that was stopped out, look for re-entry
+  if (stopHuntReEntryState && (Date.now() - stopHuntReEntryState.time < 60000)) {
+    const re = stopHuntReEntryState;
+
+    for (const level of respectedLevels.slice(0, 4)) {
+      // Same direction re-entry after being hunted
+      if (re.direction === "BULL" && level.type === "support") {
+        if (c2.l < level.price && c1.c > level.price && isBullish(c1)) {
+          stopHuntSignal = {
+            direction: "BULL",
+            level: level.price,
+            stopLoss: c2.l,
+            touches: level.touches,
+            time: Date.now(),
+            reEntryCount: re.reEntryCount + 1
+          };
+          stopHuntReEntryState = null;
+          return;
+        }
+      }
+
+      if (re.direction === "BEAR" && level.type === "resistance") {
+        if (c2.h > level.price && c1.c < level.price && isBearish(c1)) {
+          stopHuntSignal = {
+            direction: "BEAR",
+            level: level.price,
+            stopLoss: c2.h,
+            touches: level.touches,
+            time: Date.now(),
+            reEntryCount: re.reEntryCount + 1
+          };
+          stopHuntReEntryState = null;
+          return;
+        }
+      }
+    }
+  }
+}
+
+// Called when a stop hunt trade loses — enables re-entry
+function onStopHuntLoss(signal) {
+  if (!signal || signal.reEntryCount >= 2) {
+    stopHuntReEntryState = null;
+    return;
+  }
+  stopHuntReEntryState = {
+    direction: signal.direction,
+    level: signal.level,
+    time: Date.now(),
+    reEntryCount: signal.reEntryCount
+  };
+}
+
+// --- Strategy 3: Failed Pin Bar Scalping ---
+// Detects strong momentum (fear/greed), waits for a pin bar forming against it,
+// then enters when the pin bar fails (price breaks through it).
+
+function detectMomentumState() {
+  momentumState = null;
+  if (candlesLg.length < 2) return;
+
+  const c1 = candlesLg[candlesLg.length - 1];
+  const c2 = candlesLg[candlesLg.length - 2];
+
+  const b1 = candleBody(c1);
+  const b2 = candleBody(c2);
+  const avgRange = (candleRange(c1) + candleRange(c2)) / 2;
+  if (avgRange === 0) return;
+
+  // Two consecutive strong bearish candles = FEAR state
+  if (isBearish(c1) && isBearish(c2) && b1 > avgRange * 0.5 && b2 > avgRange * 0.5) {
+    momentumState = "FEAR";
+    return;
+  }
+
+  // Two consecutive strong bullish candles = GREED state
+  if (isBullish(c1) && isBullish(c2) && b1 > avgRange * 0.5 && b2 > avgRange * 0.5) {
+    momentumState = "GREED";
+    return;
+  }
+}
+
+function detectFailedPinBar() {
+  failedPinBarSignal = null;
+  if (!failedPinBarEnabled) return;
+  if (!momentumState) return;
+  if (candles.length < 3) return;
+
+  const c1 = candles[candles.length - 1]; // newest
+  const c2 = candles[candles.length - 2]; // potential pin bar
+  const c3 = candles[candles.length - 3]; // context
+
+  // Check if c2 is a pin bar (resistance to momentum)
+  const pinBarResult = detectPinBar(c2);
+  if (!pinBarResult) return;
+
+  // In FEAR state (bearish momentum), look for bullish pin bar that then fails
+  if (momentumState === "FEAR" && pinBarResult.bias === "BULL") {
+    // Pin bar failed: c1 breaks below the pin bar's low
+    if (c1.c < c2.l && isBearish(c1)) {
+      failedPinBarSignal = {
+        direction: "BEAR",        // trade WITH the momentum (fear)
+        pinBarCandle: c2,
+        stopLoss: c2.h,           // stop above the failed pin bar
+        time: Date.now()
+      };
+      return;
+    }
+  }
+
+  // In GREED state (bullish momentum), look for bearish pin bar that then fails
+  if (momentumState === "GREED" && pinBarResult.bias === "BEAR") {
+    // Pin bar failed: c1 breaks above the pin bar's high
+    if (c1.c > c2.h && isBullish(c1)) {
+      failedPinBarSignal = {
+        direction: "BULL",        // trade WITH the momentum (greed)
+        pinBarCandle: c2,
+        stopLoss: c2.l,           // stop below the failed pin bar
+        time: Date.now()
+      };
+      return;
+    }
+  }
+}
+
+// --- Get the strongest active scalping strategy signal ---
+function getActiveScalpingSignal() {
+  // Returns the strongest active signal, or null
+  const signals = [];
+
+  if (liqSweepSignal && (Date.now() - liqSweepSignal.time < 30000)) {
+    signals.push({ ...liqSweepSignal, strategy: "LIQ_SWEEP", priority: 3 });
+  }
+  if (stopHuntSignal && (Date.now() - stopHuntSignal.time < 30000)) {
+    signals.push({ ...stopHuntSignal, strategy: "STOP_HUNT", priority: stopHuntSignal.reEntryCount > 0 ? 2 : 3 });
+  }
+  if (failedPinBarSignal && (Date.now() - failedPinBarSignal.time < 30000)) {
+    signals.push({ ...failedPinBarSignal, strategy: "FAILED_PIN", priority: 2 });
+  }
+
+  if (!signals.length) return null;
+
+  // Return highest priority signal
+  signals.sort((a, b) => b.priority - a.priority);
+  return signals[0];
+}
+
+// --- Update scalping strategy UI badge ---
+function updateScalpStratBadge() {
+  const el = document.getElementById("scalpStratBadge");
+  if (!el) return;
+
+  const sig = getActiveScalpingSignal();
+  if (!sig) {
+    el.textContent = "NONE";
+    el.className = "status-badge disabled";
+    return;
+  }
+
+  el.textContent = `${sig.strategy} (${sig.direction})`;
+  el.className = "status-badge";
+  if (sig.direction === "BULL") el.classList.add("trend");
+  else if (sig.direction === "BEAR") el.classList.add("reversal");
+  else el.classList.add("bias");
+}
+
 // --- Supply & Demand Zones (Forex Millionaire: 3 defining factors) ---
 
 function detectSupplyDemandZones() {
@@ -1015,7 +1312,7 @@ function isPriceNearTrendline(tl, idx, price) {
 
 function scoreConfluence() {
   let score = 0;
-  let detail = { trend: 0, level: 0, signal: 0, momentum: 0, structure: 0, sma: 0, fib: 0, bb: 0, sd: 0, flip: 0, fb: 0 };
+  let detail = { trend: 0, level: 0, signal: 0, momentum: 0, structure: 0, sma: 0, fib: 0, bb: 0, sd: 0, flip: 0, fb: 0, scalp: 0 };
 
   const currentPrice = candles.length ? candles[candles.length - 1].c : null;
   if (!currentPrice) return { score: 0, detail };
@@ -1168,6 +1465,18 @@ function scoreConfluence() {
     // Recent false breakout is a strong signal
     score += 2;
     detail.fb = 2;
+  }
+
+  // 12. SCALPING STRATEGY SIGNALS (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar)
+  const scalpSig = getActiveScalpingSignal();
+  if (scalpSig) {
+    // Strategy signal aligned with trend direction gets bonus points
+    const aligned =
+      (scalpSig.direction === "BULL" && trendDirection === "UP") ||
+      (scalpSig.direction === "BEAR" && trendDirection === "DOWN");
+    const stratPts = aligned ? 2 : 1;
+    score += stratPts;
+    detail.scalp = stratPts;
   }
 
   confluenceScore = score;
@@ -1720,6 +2029,12 @@ function onTickPriceAction(price) {
     detectLevelFlips();
     detectFalseBreakout();
     detectSupplyDemandZones();
+
+    // Scalping strategies — run on each new short-term candle
+    detectLiquiditySweep();
+    detectStopLossHunt();
+    detectFailedPinBar();
+    updateScalpStratBadge();
   }
 
   // Long-term candle builder (multi-timeframe)
@@ -1731,6 +2046,9 @@ function onTickPriceAction(price) {
       if (candlesLg.length > CANDLE_HISTORY_MAX) candlesLg.shift();
     }
     candleLgBuffer = [];
+
+    // Detect momentum state on new long-term candle (for failed pin bar)
+    detectMomentumState();
   }
 }
 
@@ -2082,11 +2400,65 @@ if (autoSymbolToggle) {
 
 }
 
-
+  // Wire scalping strategy toggles
+  wireScalpingStrategyToggles();
 
   console.log("CONTROLS WIRED");
 }
 
+
+// --- Scalping Strategy Toggle Wiring ---
+function wireScalpingStrategyToggles() {
+  const liqToggle  = document.getElementById("liquiditySweepToggle");
+  const huntToggle = document.getElementById("stopLossHuntToggle");
+  const fpbToggle  = document.getElementById("failedPinBarToggle");
+
+  // Restore saved state from localStorage
+  try {
+    if (localStorage.getItem("itguru_liq_sweep") === "1") {
+      liquiditySweepEnabled = true;
+      if (liqToggle) liqToggle.checked = true;
+    }
+    if (localStorage.getItem("itguru_stop_hunt") === "1") {
+      stopLossHuntEnabled = true;
+      if (huntToggle) huntToggle.checked = true;
+    }
+    if (localStorage.getItem("itguru_failed_pin") === "1") {
+      failedPinBarEnabled = true;
+      if (fpbToggle) fpbToggle.checked = true;
+    }
+  } catch (e) { /* localStorage not available */ }
+
+  if (liqToggle) {
+    liqToggle.addEventListener("change", () => {
+      liquiditySweepEnabled = liqToggle.checked;
+      try { localStorage.setItem("itguru_liq_sweep", liquiditySweepEnabled ? "1" : "0"); } catch (e) {}
+      setStatus(`Liquidity Sweep ${liquiditySweepEnabled ? "enabled" : "disabled"}`, "#38bdf8");
+      if (!liquiditySweepEnabled) liqSweepSignal = null;
+      updateScalpStratBadge();
+    });
+  }
+
+  if (huntToggle) {
+    huntToggle.addEventListener("change", () => {
+      stopLossHuntEnabled = huntToggle.checked;
+      try { localStorage.setItem("itguru_stop_hunt", stopLossHuntEnabled ? "1" : "0"); } catch (e) {}
+      setStatus(`Stop Loss Hunt ${stopLossHuntEnabled ? "enabled" : "disabled"}`, "#38bdf8");
+      if (!stopLossHuntEnabled) { stopHuntSignal = null; stopHuntReEntryState = null; }
+      updateScalpStratBadge();
+    });
+  }
+
+  if (fpbToggle) {
+    fpbToggle.addEventListener("change", () => {
+      failedPinBarEnabled = fpbToggle.checked;
+      try { localStorage.setItem("itguru_failed_pin", failedPinBarEnabled ? "1" : "0"); } catch (e) {}
+      setStatus(`Failed Pin Bar ${failedPinBarEnabled ? "enabled" : "disabled"}`, "#38bdf8");
+      if (!failedPinBarEnabled) { failedPinBarSignal = null; momentumState = null; }
+      updateScalpStratBadge();
+    });
+  }
+}
 
 function updateMarketSignalBySymbol(sym) {
   if (!marketSignalEl) return;
@@ -3068,6 +3440,14 @@ function analyzeSignal() {
 
   // 💱 FOREX PATH — skip digit-based checks, use EMA+RSI direction for MT5 signal
   if (isForexSymbol(symbol)) {
+    // Check scalping strategies first for forex
+    const forexScalpSig = getActiveScalpingSignal();
+    if (forexScalpSig && (Date.now() - forexScalpSig.time < 30000)) {
+      currentSide = forexScalpSig.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
+      currentTradeMode = forexScalpSig.strategy;
+      setStatus(`Forex Scalp: ${forexScalpSig.strategy} ${forexScalpSig.direction}`, "#22c55e");
+      return true;
+    }
     return analyzeForexSignal();
   }
 
@@ -3320,6 +3700,20 @@ function analyzeSignal() {
     }
   }
 
+  // 🔪 SCALPING STRATEGY SIGNALS — check before normal mode flow
+  const scalpSignal = getActiveScalpingSignal();
+  if (scalpSignal && (Date.now() - scalpSignal.time < 30000)) {
+    // Map directional signal to contract type
+    if (isForexSymbol(symbol)) {
+      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_BUY : CONTRACT_SELL;
+    } else {
+      currentSide = scalpSignal.direction === "BULL" ? CONTRACT_ODD : CONTRACT_EVEN;
+    }
+    currentTradeMode = scalpSignal.strategy;
+    setStatus(`Scalp: ${scalpSignal.strategy} ${scalpSignal.direction}`, "#22c55e");
+    return true;
+  }
+
   // Normal flow when volatility OK
   if (mode === "ODD_EVEN") {
     if (oddRatio / 100 >= adaptiveThreshold && rsi < RSI_OVERBOUGHT + 3) {
@@ -3478,6 +3872,11 @@ function handleResult(contract) {
   updateModePerformance(currentTradeMode, profit);
   maybeDisableWorstMode();
 
+  // Stop Loss Hunt re-entry: if a stop hunt trade lost, enable re-entry
+  if (!won && currentTradeMode === "STOP_HUNT" && stopHuntSignal) {
+    onStopHuntLoss(stopHuntSignal);
+  }
+
   // --- Improvement Integrations ---
   // #10: Profit Factor
   updateProfitFactor(profit);
@@ -3547,6 +3946,9 @@ updatePerformanceUI();
   if (currentTradeMode === "TREND") li.style.borderLeft = "4px solid #22c55e";
   if (currentTradeMode === "ODD_EVEN") li.style.borderLeft = "4px solid #3b82f6";
   if (currentTradeMode === "REVERSAL") li.style.borderLeft = "4px solid #f59e0b";
+  if (currentTradeMode === "LIQ_SWEEP") li.style.borderLeft = "4px solid #a855f7";
+  if (currentTradeMode === "STOP_HUNT") li.style.borderLeft = "4px solid #ec4899";
+  if (currentTradeMode === "FAILED_PIN") li.style.borderLeft = "4px solid #14b8a6";
 
   tradeMarkers.push({
     index: chartPrices.length - 1,
@@ -4108,6 +4510,11 @@ resetSessionBtn?.addEventListener("click", () => {
   fibLevels = []; supplyDemandZones = []; flippedLevels = [];
   lastFalseBreakout = null;
 
+  // Reset scalping strategy state
+  liqSweepRangeCandle = null; liqSweepSignal = null;
+  stopHuntSignal = null; stopHuntReEntryState = null;
+  failedPinBarSignal = null; momentumState = null;
+
   // Reset 28-improvement state
   adaptiveConfluenceMin = CONFLUENCE_MIN_SCORE;
   confluenceTradeLog = [];
@@ -4449,6 +4856,7 @@ function updateConfluenceUI(score, detail) {
     if (detail.sd) parts.push(`SD:${detail.sd}`);
     if (detail.flip) parts.push(`FL:${detail.flip}`);
     if (detail.fb) parts.push(`FB:${detail.fb}`);
+    if (detail.scalp) parts.push(`SC:${detail.scalp}`);
     detailEl.textContent = parts.join(" ");
   }
 
