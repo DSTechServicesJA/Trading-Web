@@ -705,6 +705,7 @@ let telegramScalpAutoSend = false;  /* auto-send live scalp alerts to Telegram *
 let telegramOutcomeSend   = false;  /* auto-send WIN/LOSS trade outcome to Telegram */
 let telegramScalpOutcomeSend = false; /* auto-send WIN/LOSS scalp outcome to Telegram */
 let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (tight Asian, London sweep) to Telegram */
+let telegramSessionRangeOutcomeSend = false; /* auto-send WIN/LOSS outcome for session range trades to Telegram */
 let telegramStrategyAutoSend     = false;  /* auto-send custom strategy alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) to Telegram */
 let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for custom strategies to Telegram */
 
@@ -782,6 +783,8 @@ let sessionRangeNY        = null;     /* { high, low, startIdx, endIdx } */
 let asianRangeTight       = false;    /* true when Asian range < ASIAN_TIGHT_ATR_MULT × ATR */
 let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx, price } */
 let sessionRangeTrade     = null;     /* null | { entry, sl, tp, dir, rr, entryIdx, symbol } — computed on London sweep */
+let sessionRangeTradeWins   = 0;     /* running win count for session range trades */
+let sessionRangeTradeLosses = 0;     /* running loss count for session range trades */
 const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 
 /* Auto-apply recommended settings when symbol changes */
@@ -1081,6 +1084,7 @@ function initUI() {
   UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
   UI.telegramScalpOutcomeSendToggle = document.getElementById("telegramScalpOutcomeSendToggle");
   UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
+  UI.telegramSessionRangeOutcomeSendToggle = document.getElementById("telegramSessionRangeOutcomeSendToggle");
   UI.telegramStrategyAutoSendToggle    = document.getElementById("telegramStrategyAutoSendToggle");
   UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
@@ -1685,6 +1689,134 @@ function resetSessionRanges() {
   asianRangeTight     = false;
   londonSweepSignal   = null;
   sessionRangeTrade   = null;
+}
+
+/**
+ * Monitor session range trade outcome on each candle update.
+ * Checks if price has hit SL or TP, records result, sends Telegram
+ * outcome notification, and auto-resets so new signals can be detected.
+ */
+function monitorSessionRangeTradeOutcome(candle) {
+  if (!sessionRangesEnabled || !sessionRangeTrade) return;
+
+  const srt = sessionRangeTrade;
+  let result = null;
+
+  if (srt.dir === "BULL") {
+    /* BUY trade: SL below entry, TP above entry */
+    if (candle.low <= srt.sl) {
+      result = "LOSS";
+    } else if (srt.tp != null && candle.high >= srt.tp) {
+      result = "WIN";
+    }
+  } else {
+    /* SELL trade: SL above entry, TP below entry */
+    if (candle.high >= srt.sl) {
+      result = "LOSS";
+    } else if (srt.tp != null && candle.low <= srt.tp) {
+      result = "WIN";
+    }
+  }
+
+  if (!result) return;
+
+  /* Record outcome */
+  if (result === "WIN") sessionRangeTradeWins++;
+  else sessionRangeTradeLosses++;
+
+  const dirLabel = srt.dir === "BULL" ? "BUY" : "SELL";
+  const icon = result === "WIN" ? "✅" : "❌";
+  addLog(`🌍 Session Range ${icon} ${result} — ${dirLabel} entry ${fmt(srt.entry, 4)}, SL ${fmt(srt.sl, 4)}, TP ${fmt(srt.tp, 4)}`);
+  showToast(
+    `Session Range ${result}`,
+    `${dirLabel} trade hit ${result === "WIN" ? "TP" : "SL"} — Entry: ${fmt(srt.entry, 4)}`,
+    result === "WIN" ? "trade" : "warning", 8000
+  );
+  playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
+
+  /* Send Telegram outcome */
+  if (telegramSessionRangeOutcomeSend && !_historicalProcessing) {
+    const resolvedTrade = { ...srt, result };
+    const currentPanelSymbol = _multiPanelProcessing || null;
+    setTimeout(() => sendSessionRangeOutcomeTelegram(resolvedTrade, currentPanelSymbol), 100);
+  }
+
+  /* Auto-reset: clear the sweep signal and trade so new signals can be detected */
+  londonSweepSignal = null;
+  sessionRangeTrade = null;
+}
+
+/**
+ * Send session range trade outcome (WIN / LOSS) via Telegram.
+ * @param {Object} resolvedTrade  — { entry, sl, tp, dir, rr, symbol, result }
+ * @param {string|null} panelSymbol — if non-null, identifies multi-panel source
+ */
+async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
+  if (!telegramSessionRangeOutcomeSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Session Range outcome Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const sym = getSymbolLabel(resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "");
+    const dir = resolvedTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = resolvedTrade.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = resolvedTrade.entry != null ? fmt(resolvedTrade.entry, 5) : "--";
+    const slStr = resolvedTrade.sl != null ? fmt(resolvedTrade.sl, 5) : "--";
+    const tpStr = resolvedTrade.tp != null ? fmt(resolvedTrade.tp, 5) : "--";
+    const rrStr = resolvedTrade.rr != null ? "1:" + fmt(resolvedTrade.rr, 1) : "--";
+    const risk = Math.abs(resolvedTrade.entry - resolvedTrade.sl);
+
+    const lines = [];
+    lines.push(`${icon} <b>Session Range ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>🌍 London Sweep Trade</b>`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(`<b>🎯 TP:</b> <code>${tpStr}</code>`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    if (risk > 0) {
+      lines.push(`<b>Risk (pips):</b> <code>${fmt(risk, 5)}</code>`);
+    }
+
+    /* Lot size / position sizing based on account amount */
+    if (accountSize > 0 && riskPercent > 0 && resolvedTrade.entry != null && resolvedTrade.sl != null) {
+      const tradeObj = { entry: resolvedTrade.entry, sl: resolvedTrade.sl, tp: resolvedTrade.tp, rr: resolvedTrade.rr || 0, symbol: resolvedTrade.symbol || getActiveSymbol() };
+      const m = calcPositionMetrics(tradeObj);
+      if (m) {
+        lines.push(``);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (resolvedTrade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        if (!m.isSynthetic) {
+          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+        }
+      }
+    }
+
+    /* Win/loss tally */
+    const totalW = sessionRangeTradeWins;
+    const totalL = sessionRangeTradeLosses;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`🌍 <b>Session Range Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: Session Range outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Session Range outcome Telegram error: ${err.message}`);
+  }
 }
 
 /* ================= TELEGRAM INTEGRATION ================= */
@@ -2346,7 +2478,8 @@ function _snapshotChartGlobals() {
     nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
     sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
     sessionRangeNY, asianRangeTight, londonSweepSignal,
-    sessionRangeTrade
+    sessionRangeTrade,
+    sessionRangeTradeWins, sessionRangeTradeLosses
   };
 }
 function _restoreChartGlobals(s) {
@@ -2385,6 +2518,8 @@ function _restoreChartGlobals(s) {
   sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
   londonSweepSignal = s.londonSweepSignal;
   sessionRangeTrade = s.sessionRangeTrade;
+  sessionRangeTradeWins = s.sessionRangeTradeWins;
+  sessionRangeTradeLosses = s.sessionRangeTradeLosses;
 }
 
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
@@ -2462,6 +2597,7 @@ function saveSettings() {
       telegramOutcomeSend,
       telegramScalpOutcomeSend,
       telegramSessionRangeAutoSend,
+      telegramSessionRangeOutcomeSend,
       telegramStrategyAutoSend,
       telegramStrategyOutcomeSend,
       accountSize,
@@ -2636,6 +2772,7 @@ function restoreSettings() {
     if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
     if (s.telegramScalpOutcomeSend != null) telegramScalpOutcomeSend = s.telegramScalpOutcomeSend;
     if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
+    if (s.telegramSessionRangeOutcomeSend != null) telegramSessionRangeOutcomeSend = s.telegramSessionRangeOutcomeSend;
     if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
     if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
@@ -2645,6 +2782,7 @@ function restoreSettings() {
     if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
     if (UI.telegramScalpOutcomeSendToggle) UI.telegramScalpOutcomeSendToggle.checked = telegramScalpOutcomeSend;
     if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
+    if (UI.telegramSessionRangeOutcomeSendToggle) UI.telegramSessionRangeOutcomeSendToggle.checked = telegramSessionRangeOutcomeSend;
     if (UI.telegramStrategyAutoSendToggle) UI.telegramStrategyAutoSendToggle.checked = telegramStrategyAutoSend;
     if (UI.telegramStrategyOutcomeSendToggle) UI.telegramStrategyOutcomeSendToggle.checked = telegramStrategyOutcomeSend;
 
@@ -3984,6 +4122,10 @@ function resetSession() {
   renderScalpTickerBanner();
   if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
 
+  /* Clear session range trade stats */
+  sessionRangeTradeWins = 0;
+  sessionRangeTradeLosses = 0;
+
   /* Clear signal log UI */
   if (UI.signalLog) UI.signalLog.innerHTML = "";
 
@@ -4621,6 +4763,7 @@ function connect() {
       monitorTradeOutcome(c);
       monitorScalpOutcomes(c);
       monitorCustomStrategyOutcomes(c);
+      monitorSessionRangeTradeOutcome(c);
       drawChart();
     }
   };
@@ -10260,6 +10403,8 @@ function activatePanel(p) {
   asianRangeTight     = p.asianRangeTight    || false;
   londonSweepSignal   = p.londonSweepSignal  || null;
   sessionRangeTrade   = p.sessionRangeTrade  || null;
+  sessionRangeTradeWins   = p.sessionRangeTradeWins   || 0;
+  sessionRangeTradeLosses = p.sessionRangeTradeLosses || 0;
 
   /* Activate per-panel filter settings into globals */
   const f = p.filters;
@@ -10357,6 +10502,8 @@ function savePanel(p) {
   p.asianRangeTight     = asianRangeTight;
   p.londonSweepSignal   = londonSweepSignal;
   p.sessionRangeTrade   = sessionRangeTrade;
+  p.sessionRangeTradeWins   = sessionRangeTradeWins;
+  p.sessionRangeTradeLosses = sessionRangeTradeLosses;
 
   /* Save current filter state back to panel */
   p.filters.autoResetEnabled     = autoResetEnabled;
@@ -10717,6 +10864,7 @@ function connectPanel(p) {
       monitorTradeOutcome(c);
       monitorScalpOutcomes(c);
       monitorCustomStrategyOutcomes(c);
+      monitorSessionRangeTradeOutcome(c);
     }
 
     /* Save state back to panel */
@@ -11511,6 +11659,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramSessionRangeAutoSendToggle) {
     UI.telegramSessionRangeAutoSendToggle.addEventListener("change", () => { telegramSessionRangeAutoSend = UI.telegramSessionRangeAutoSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramSessionRangeOutcomeSendToggle) {
+    UI.telegramSessionRangeOutcomeSendToggle.addEventListener("change", () => { telegramSessionRangeOutcomeSend = UI.telegramSessionRangeOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramStrategyAutoSendToggle) {
     UI.telegramStrategyAutoSendToggle.addEventListener("change", () => { telegramStrategyAutoSend = UI.telegramStrategyAutoSendToggle.checked; saveSettings(); });
