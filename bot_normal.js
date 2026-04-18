@@ -98,12 +98,12 @@ const SYMBOL_TUNING = {
 // ================= RSI SLOPE TUNING =================
 const RSI_SLOPE_TUNING = {
   FAST: {
-    MIN: 0.20,
-    CONFIRM: 0.24
+    MIN: 0.24,
+    CONFIRM: 0.30
   },
   STANDARD: {
-    MIN: 0.14,
-    CONFIRM: 0.18
+    MIN: 0.18,
+    CONFIRM: 0.22
   }
 };
 
@@ -130,7 +130,7 @@ const THRESHOLD_MAX = 0.72;
 // === Tuned for responsiveness (adaptive volatility) ===
 const VOLATILITY_WINDOW = 14;       // reacts quicker to bursts
 const VOLATILITY_MIN    = 0.0014;   // 0.15% cumulative per window (normalized)
-const ENTROPY_MAX       = 0.92;
+const ENTROPY_MAX       = 0.88;     // lowered from 0.92 — reject chaotic conditions earlier
 let tradeMarkers = [];
 
 const TRADE_COOLDOWN_MS = 3000;
@@ -538,7 +538,7 @@ function detectMarketRegime() {
   }
 
   // 📈 Strong trend
-  if (spread > 0.00010 && vol && Math.abs(rsiMom) > 0.18) {
+  if (spread > 0.00014 && vol && Math.abs(rsiMom) > 0.22) {
     autoMode = "TREND";
     if (autoModeEl) autoModeEl.textContent = "Mode: " + autoMode;
     updateAutoModeBadge(autoMode);
@@ -547,7 +547,7 @@ function detectMarketRegime() {
 
   // ⚖ Bias imbalance
   const { oddRatio, evenRatio } = getBias();
-  if (Math.max(oddRatio, evenRatio) >= 65 && ent < 0.85) {
+  if (Math.max(oddRatio, evenRatio) >= 70 && ent < 0.82) {
     autoMode = "ODD_EVEN";
     if (autoModeEl) autoModeEl.textContent = "Mode: " + autoMode;
     updateAutoModeBadge(autoMode);
@@ -892,21 +892,22 @@ function shouldProbeLowVol(mode, oddRatio, evenRatio, ent, acc, reqVol) {
 
   switch (mode) {
     case "ODD_EVEN":
-      // DEMO-TUNE: allow strong (not extreme) bias and looser proximity
-      return (biasMax >= 70) && (ent <= 0.85) && (acc >= reqVol * 0.80);
+      // Tightened: require stronger bias (75%+) and lower entropy for low-vol probes
+      return (biasMax >= 75) && (ent <= 0.78) && (acc >= reqVol * 0.85);
 
     case "REVERSAL":
-      if (tickHistory.length < 3) return false;
-      const last3 = tickHistory.slice(-3).map(lastDigit);
-      const streakOdd = last3.every(d => d % 2 === 1);
-      const streakEven = last3.every(d => d % 2 === 0);
-      return (streakOdd || streakEven) && (ent <= 0.80) && (acc >= reqVol * 0.95);
+      if (tickHistory.length < 4) return false;
+      const last4 = tickHistory.slice(-4).map(lastDigit);
+      const streakOdd = last4.every(d => d % 2 === 1);
+      const streakEven = last4.every(d => d % 2 === 0);
+      return (streakOdd || streakEven) && (ent <= 0.75) && (acc >= reqVol * 0.95);
 
     case "TREND":
-      return (emaSlope > 0.0007) && (biasMax >= 68) && (ent <= 0.90) && (acc >= reqVol * 0.85);
+      // Tightened: require stronger EMA slope and lower entropy
+      return (emaSlope > 0.0010) && (biasMax >= 72) && (ent <= 0.84) && (acc >= reqVol * 0.90);
 
     case "RANDOM":
-      return (ent <= 0.78) && (acc >= reqVol * 0.98);
+      return false;   // RANDOM mode disabled — negative EV
 
     case "CHAOS":
       return false;
@@ -1164,14 +1165,14 @@ function analyzeSignal() {
     }
   }
 
-  if (mode === "REVERSAL" && tickHistory.length >= 3) {
-    const last3 = tickHistory.slice(-3).map(lastDigit);
+  if (mode === "REVERSAL" && tickHistory.length >= 4) {
+    const last4 = tickHistory.slice(-4).map(lastDigit);
 
-    if (last3.every(d => d % 2 === 1) && rsi > RSI_OVERBOUGHT) {
+    if (last4.every(d => d % 2 === 1) && rsi > RSI_OVERBOUGHT) {
       currentSide = CONTRACT_EVEN;
       return true;
     }
-    if (last3.every(d => d % 2 === 0) && rsi < RSI_OVERSOLD) {
+    if (last4.every(d => d % 2 === 0) && rsi < RSI_OVERSOLD) {
       currentSide = CONTRACT_ODD;
       return true;
     }

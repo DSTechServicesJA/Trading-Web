@@ -126,8 +126,8 @@ const HHHL_LOOKBACK_PERIOD    = 10;   /* candles to look back for swing structur
 
 /* RSI */
 const RSI_PERIOD = 14;
-const RSI_RETEST_BULL_MAX = 50;  /* RSI at retest should be ≤ this for BULL (room to rise) */
-const RSI_RETEST_BEAR_MIN = 50;  /* RSI at retest should be ≥ this for BEAR (room to fall) */
+const RSI_RETEST_BULL_MAX = 45;  /* RSI at retest should be ≤ this for BULL (require deeper pullback for room to rise) */
+const RSI_RETEST_BEAR_MIN = 55;  /* RSI at retest should be ≥ this for BEAR (require stronger bounce for room to fall) */
 
 /* Volume spike (range-based proxy – synthetic indices have no tick volume) */
 const VOLUME_SPIKE_LOOKBACK = 20;
@@ -596,12 +596,12 @@ let autoResetEnabled    = true;
 let emaFilterEnabled    = false;
 let htfFilterEnabled    = false;
 let atrToleranceEnabled = false;
-let trailingStopEnabled = false;
-let partialTpEnabled    = false;
-let falseBreakoutEnabled = false;
-let minRREnabled         = false;
+let trailingStopEnabled = true;
+let partialTpEnabled    = true;
+let falseBreakoutEnabled = true;
+let minRREnabled         = true;
 let pureTrailingEnabled  = false;
-let minRRValue           = 2.0;
+let minRRValue           = 1.5;
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -713,8 +713,8 @@ let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for cus
 let rsiValues = [];
 
 /* New strategy filter toggles */
-let rsiFilterEnabled     = false;
-let volumeSpikeEnabled   = false;
+let rsiFilterEnabled     = true;
+let volumeSpikeEnabled   = true;
 let sessionFilterEnabled = false;
 let sessionFilterMode    = "london_ny";  /* london | new_york | overlap | asian | london_ny */
 let fibRetestEnabled     = false;
@@ -734,31 +734,31 @@ let stochK = [];
 let stochD = [];
 
 /* GainzAlgo V2 filter toggles */
-let macdFilterEnabled = false;
+let macdFilterEnabled = true;
 let bbSqueezeFilterEnabled = false;
 let adxFilterEnabled = false;
 let stochFilterEnabled = false;
 
 /* Profit-Direction Constraint filters */
-let minConfluenceEnabled = false;
-let minConfluenceValue   = 6;       /* min confluence score (0-16) to allow trade */
+let minConfluenceEnabled = true;
+let minConfluenceValue   = 7;       /* min confluence score (0-16) to allow trade — raised from 6 for higher-quality entries */
 let doubleRetestEnabled  = false;   /* require 2 retests of breakout level */
-let confirmBarEnabled    = false;   /* next candle after confirm must close in direction */
-let divergenceFilterEnabled = false; /* RSI divergence at retest */
+let confirmBarEnabled    = true;    /* next candle after confirm must close in direction */
+let divergenceFilterEnabled = true; /* RSI divergence at retest */
 let adxHardGateEnabled   = false;   /* block when ADX < 20 (ranging) or > 50 (exhausted) */
 let adxMaxThreshold      = 50;      /* upper ADX limit for exhausted trends */
 let breakoutDistEnabled  = false;   /* reject retest if price too far from breakout */
 let breakoutDistATR      = 3.0;     /* max distance in ATR multiples */
-let timeDecayEnabled     = false;   /* max candles between breakout and retest */
+let timeDecayEnabled     = true;    /* max candles between breakout and retest */
 let timeDecayCandles     = 20;      /* staleness threshold */
-let consecutiveDirEnabled = false;  /* 2 of last 3 candles must close in trade direction */
+let consecutiveDirEnabled = true;   /* 2 of last 3 candles must close in trade direction */
 let vwapFilterEnabled    = false;   /* price near/aligned with VWAP */
 let stochCrossEnabled    = false;   /* stochastic K/D crossover from oversold/overbought */
-let rangeSizeEnabled     = false;   /* opening range must be 0.5-3× ATR */
+let rangeSizeEnabled     = true;    /* opening range must be 0.5-3× ATR */
 let rangeSizeMin         = 0.5;     /* min range size in ATR multiples */
 let rangeSizeMax         = 3.0;     /* max range size in ATR multiples */
-let hhhlEnabled          = false;   /* higher-high/higher-low structure check */
-let followThroughEnabled = false;   /* post-breakout follow-through (next candle continues) */
+let hhhlEnabled          = true;    /* higher-high/higher-low structure check */
+let followThroughEnabled = true;    /* post-breakout follow-through (next candle continues) */
 let mtfStructureEnabled  = false;   /* improved MTF via EMA 200 proxy */
 let retestCount          = 0;       /* track number of retests for double-retest filter */
 

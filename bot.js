@@ -142,12 +142,12 @@ const FOREX_TUNING = {
 // ================= RSI SLOPE TUNING =================
 const RSI_SLOPE_TUNING = {
   FAST: {
-    MIN: 0.20,
-    CONFIRM: 0.24
+    MIN: 0.24,
+    CONFIRM: 0.30
   },
   STANDARD: {
-    MIN: 0.14,
-    CONFIRM: 0.18
+    MIN: 0.18,
+    CONFIRM: 0.22
   }
 };
 
@@ -256,7 +256,7 @@ const CANDLE_HISTORY_MAX  = 60;   // candles to keep
 const SR_LOOKBACK         = 40;   // candles to scan for S/R
 const SR_TOUCH_TOLERANCE  = 0.0004; // 0.04% price tolerance for level touches
 const TRENDLINE_MIN_TOUCHES = 2;
-const CONFLUENCE_MIN_SCORE  = 5;   // minimum confluence points to allow trade (raised from 3 for higher-quality entries)
+const CONFLUENCE_MIN_SCORE  = 6;   // minimum confluence points to allow trade (raised from 5 for higher-quality entries)
 const PROBE_CONFLUENCE_BONUS = 2;  // extra confluence required for low-volatility probe trades
 const MIN_HOURLY_SAMPLES    = 8;   // minimum trades per hour before hourly filter activates
 const MIN_HOURLY_WINRATE    = 0.40; // block hours with win rate below this threshold
@@ -2156,7 +2156,7 @@ const THRESHOLD_MAX = 0.72;
 // === Tuned for responsiveness (adaptive volatility) ===
 const VOLATILITY_WINDOW = 14;       // reacts quicker to bursts
 const VOLATILITY_MIN    = 0.0014;   // 0.15% cumulative per window (normalized)
-const ENTROPY_MAX       = 0.92;
+const ENTROPY_MAX       = 0.88;     // lowered from 0.92 — reject chaotic conditions earlier
 let tradeMarkers = [];
 
 const TRADE_COOLDOWN_MS = 6000;   // increased from 3000ms for more selective entries
@@ -2172,8 +2172,8 @@ const PAYOUT_RATIO_CAP = 1.95;
 const MODE_CONFIRM_TICKS = 3;
 const MODE_LOCK_MS = 9000;
 const MODE_SWITCH_COOLDOWN_MS = 5000;
-const ODD_EVEN_BIAS_DELTA_MIN = 18;
-const REVERSAL_STREAK_MIN = 4;
+const ODD_EVEN_BIAS_DELTA_MIN = 22; // raised from 18 — require stronger odd/even bias before trading
+const REVERSAL_STREAK_MIN = 5;     // raised from 4 — require longer streak for reversal confidence
 const MODE_DISABLE_MIN_TRADES = 8;
 const MODE_DISABLE_MIN_LOSS_RATE = 0.62;
 const MODE_DISABLE_COOLDOWN_MS = 10 * 60 * 1000;
@@ -2687,12 +2687,12 @@ function detectMarketRegime() {
   // 🔥 ENTROPY → REGIME ONLY
   if (ent > ENTROPY_MAX) {
     proposedMode = "CHAOS";
-  } else if (spread > 0.00010 && vol && Math.abs(rsiMom) > 0.18) {
+  } else if (spread > 0.00014 && vol && Math.abs(rsiMom) > 0.22) {
     proposedMode = "TREND";
-  } else if (trendDirection !== "NONE" && spread > 0.00006 && vol) {
+  } else if (trendDirection !== "NONE" && spread > 0.00008 && vol) {
     // Price Action Engine: HH/HL or LH/LL structure confirms trend even with weaker EMA
     proposedMode = "TREND";
-  } else if (Math.max(oddRatio, evenRatio) >= 65 && ent < 0.85) {
+  } else if (Math.max(oddRatio, evenRatio) >= 70 && ent < 0.82) {
     proposedMode = "ODD_EVEN";
   } else if (rsi > RSI_OVERBOUGHT || rsi < RSI_OVERSOLD) {
     proposedMode = "REVERSAL";
@@ -2764,7 +2764,7 @@ function hasConsistentTrendMomentum() {
   if (ef == null || es == null || es === 0) return false;
 
   const spread = Math.abs(ef - es) / Math.abs(es);
-  if (spread < 0.00012) return false;
+  if (spread < 0.00016) return false;
 
   const rsiMomNow = rsiArr.at(-1) - rsiArr.at(-3);
   const rsiMomPrev = rsiArr.at(-2) - rsiArr.at(-4);
@@ -2777,17 +2777,17 @@ function hasConsistentTrendMomentum() {
 function passesSignalSpecificGate(mode, oddRatio, evenRatio, ent) {
   if (mode === "ODD_EVEN") {
     const biasDelta = Math.abs(oddRatio - evenRatio);
-    return biasDelta >= ODD_EVEN_BIAS_DELTA_MIN && ent <= 0.78 && digitStability() <= 0.50;
+    return biasDelta >= ODD_EVEN_BIAS_DELTA_MIN && ent <= 0.74 && digitStability() <= 0.50;
   }
 
   if (mode === "REVERSAL") {
     const run = parityRunLength();
     const strongExtreme = rsi >= (RSI_OVERBOUGHT + 4) || rsi <= (RSI_OVERSOLD - 4);
-    return run >= REVERSAL_STREAK_MIN && strongExtreme && ent <= 0.82;
+    return run >= REVERSAL_STREAK_MIN && strongExtreme && ent <= 0.78;
   }
 
   if (mode === "TREND") {
-    return hasConsistentTrendMomentum() && ent <= 0.86;
+    return hasConsistentTrendMomentum() && ent <= 0.82;
   }
 
   return true;
@@ -3390,18 +3390,19 @@ function shouldProbeLowVol(mode, oddRatio, evenRatio, ent, acc, reqVol) {
 
   switch (mode) {
     case "ODD_EVEN":
-      // DEMO-TUNE: allow strong (not extreme) bias and looser proximity
-      return (biasMax >= 70) && (ent <= 0.85) && (acc >= reqVol * 0.80);
+      // Tightened: require stronger bias (75%+) and lower entropy for low-vol probes
+      return (biasMax >= 75) && (ent <= 0.78) && (acc >= reqVol * 0.85);
 
     case "REVERSAL":
-      if (tickHistory.length < 3) return false;
-      const last3 = tickHistory.slice(-3).map(lastDigit);
-      const streakOdd = last3.every(d => d % 2 === 1);
-      const streakEven = last3.every(d => d % 2 === 0);
-      return (streakOdd || streakEven) && (ent <= 0.80) && (acc >= reqVol * 0.95);
+      if (tickHistory.length < 4) return false;
+      const last4 = tickHistory.slice(-4).map(lastDigit);
+      const streakOdd = last4.every(d => d % 2 === 1);
+      const streakEven = last4.every(d => d % 2 === 0);
+      return (streakOdd || streakEven) && (ent <= 0.75) && (acc >= reqVol * 0.95);
 
     case "TREND":
-      return (emaSlope > 0.0007) && (biasMax >= 68) && (ent <= 0.90) && (acc >= reqVol * 0.85);
+      // Tightened: require stronger EMA slope and lower entropy
+      return (emaSlope > 0.0010) && (biasMax >= 72) && (ent <= 0.84) && (acc >= reqVol * 0.90);
 
     case "RANDOM":
       return false;   // RANDOM mode disabled — negative EV
@@ -3853,14 +3854,14 @@ function analyzeSignal() {
     }
   }
 
-  if (mode === "REVERSAL" && tickHistory.length >= 3) {
-    const last3 = tickHistory.slice(-3).map(lastDigit);
+  if (mode === "REVERSAL" && tickHistory.length >= 4) {
+    const last4 = tickHistory.slice(-4).map(lastDigit);
 
-    if (last3.every(d => d % 2 === 1) && rsi > RSI_OVERBOUGHT) {
+    if (last4.every(d => d % 2 === 1) && rsi > RSI_OVERBOUGHT) {
       currentSide = CONTRACT_EVEN;
       return true;
     }
-    if (last3.every(d => d % 2 === 0) && rsi < RSI_OVERSOLD) {
+    if (last4.every(d => d % 2 === 0) && rsi < RSI_OVERSOLD) {
       currentSide = CONTRACT_ODD;
       return true;
     }
