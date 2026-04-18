@@ -5609,7 +5609,8 @@ function processStopLossHunt() {
   lastStopLossHuntIdx = signal.candleIdx;
 
   /* Check for "stop hunt of stop hunters" — re-entry if previous was stopped out */
-  const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && s.level.level === signal.level.level);
+  const levelTol = signal.level.level * SLH_LEVEL_TOLERANCE_PCT;
+  const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && Math.abs(s.level.level - signal.level.level) <= levelTol);
   const reEntry = !!prevStopped;
 
   stopLossHuntHistory.unshift(signal);
@@ -5841,11 +5842,13 @@ function monitorFailedPinBarOutcomes(candle) {
       changed = true; continue;
     }
     if (s.dir === "BULL") {
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`😱 Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`😱 Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const em = s.state === "fear" ? "😱" : "🤑";
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🤑 Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🤑 Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const em = s.state === "fear" ? "😱" : "🤑";
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) renderStrategyAlerts();
