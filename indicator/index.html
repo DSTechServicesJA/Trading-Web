@@ -102,6 +102,12 @@
     <div id="scalpTickerTrack" class="signal-banner-track"></div>
   </div>
 
+  <!-- ===== LIVE STRATEGIES TICKER BANNER ===== -->
+  <div id="strategyTickerBanner" class="signal-banner strategy-ticker-banner">
+    <div class="signal-banner-label strategy-ticker-label">🧠 STRATEGIES</div>
+    <div id="strategyTickerTrack" class="signal-banner-track"></div>
+  </div>
+
   <!-- ========== GRID ========== -->
   <div class="layout-grid">
 
@@ -466,7 +472,14 @@
             <p class="hint" style="margin-bottom:6px;">Reverse the scalp signal direction — if signal says BUY, place SELL and vice versa.</p>
 
             <label class="toggle-row"><input type="checkbox" id="autoTradeStrategyToggle" /> 📊 Strategy Trades</label>
-            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a custom strategy fires (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3).</p>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a strategy fires. Use the sub-toggles below to select which strategies auto-trade.</p>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeLiquiditySweepToggle" checked /> 🌊 Liquidity Sweep</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStopLossHuntToggle" checked /> 🎯 Stop Loss Hunt</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFailedPinBarToggle" checked /> 📌 Failed Pin Bar</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFibScalpToggle" checked /> 📐 Fib Golden Zone</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradePo3Toggle" checked /> ⚡ Power of 3</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeNYOpenRangeToggle" checked /> 🕤 NY Open Range</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeSessionRangeToggle" checked /> 🌍 Session Range (London Sweep)</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
             <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
