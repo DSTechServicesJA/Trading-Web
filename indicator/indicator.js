@@ -778,11 +778,14 @@ let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
 let autoTradeContractId      = null;   /* contract_id of the in-flight auto-trade */
+let autoTradePendingContractId = null; /* contract_id preserved across reconnect for re-subscribe */
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
 let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
 let autoTradePL              = 0;      /* cumulative P/L for auto-trades */
 let autoTradeBalance         = null;   /* latest Deriv account balance */
+let autoTradePendingTimer    = null;   /* timeout timer for stuck PENDING trades */
+const AUTO_TRADE_PENDING_TIMEOUT_MS = 3600000; /* 1 hour max for a pending multiplier trade */
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -4571,6 +4574,9 @@ function resetIndicator() {
   monitoringTrade = false;
   autoTradeInProgress = false;
   autoTradeContractId = null;
+  /* Note: do NOT clear autoTradePendingTimeout or autoTradePendingContractId
+     here — resetIndicator is called during reconnect, and we need those
+     to survive so we can re-subscribe after re-authorization. */
   emaFast = [];
   emaSlow = [];
   emaHTF  = [];
@@ -5189,8 +5195,12 @@ function connect() {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
 
     if (msg.error) {
-      /* Auto-trade errors: handle and reset state before returning */
-      if (msg.passthrough && msg.passthrough.auto_trade) {
+      /* Auto-trade errors: handle and reset state before returning.
+         Match by passthrough OR by contract_id for proposal_open_contract
+         errors (Deriv subscription streams may not echo passthrough). */
+      const isAutoTradeByPassthrough = msg.passthrough && msg.passthrough.auto_trade;
+      const isAutoTradeByContractId  = msg.msg_type === "proposal_open_contract" && autoTradeContractId != null;
+      if (isAutoTradeByPassthrough || isAutoTradeByContractId) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
         autoTradeConsecutiveErrors++;
@@ -5205,6 +5215,8 @@ function connect() {
           autoTradeConsecutiveErrors = 0;
         }
         autoTradeContractId = null;
+        autoTradePendingContractId = null;
+        clearAutoTradePendingTimeout();
         resolveAutoTradeHistoryEntry(0, "ERROR");
         return;
       }
@@ -5237,6 +5249,20 @@ function connect() {
       thisWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
       /* Fetch valid multipliers for the current symbol on connect */
       autoUpdateMultiplier(symbol);
+      /* Re-subscribe to an in-flight contract that survived a reconnect */
+      if (autoTradePendingContractId) {
+        addLog(`🔄 Re-subscribing to contract ${autoTradePendingContractId} after reconnect…`);
+        autoTradeContractId = autoTradePendingContractId;
+        autoTradeInProgress = true;
+        autoTradePendingContractId = null;
+        thisWs.send(JSON.stringify({
+          proposal_open_contract: 1,
+          contract_id: autoTradeContractId,
+          subscribe: 1,
+          passthrough: { auto_trade: true, source: "reconnect" }
+        }));
+        startAutoTradePendingTimeout();
+      }
       addLog(`Subscribing to ${symbol} (${gran}s candles)`);
       subscribeCandles(thisWs, symbol, gran);
       return;
@@ -5322,6 +5348,8 @@ function connect() {
         subscribe: 1,
         passthrough: { auto_trade: true, source: src }
       }));
+      /* Start timeout to detect hung contracts (multiplier contracts can stay open for a long time) */
+      startAutoTradePendingTimeout();
       return;
     }
 
@@ -5340,6 +5368,8 @@ function connect() {
           addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
           autoTradeInProgress = false;
           autoTradeContractId = null;
+          autoTradePendingContractId = null;
+          clearAutoTradePendingTimeout();
           /* Update the most recent PENDING entry in auto-trade history */
           resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
         }
@@ -5372,17 +5402,29 @@ function connect() {
     stopUptimeTimer();
     addLog("WebSocket closed");
 
-    /* Reset auto-trade state on disconnect */
+    /* Reset auto-trade state on disconnect — but preserve contract ID
+       for reconnect if this was an unintentional close (network drop). */
+    if (autoTradeContractId && !intentionalClose) {
+      autoTradePendingContractId = autoTradeContractId;
+      addLog(`📌 Preserving contract ${autoTradeContractId} for re-subscribe after reconnect`);
+    }
     autoTradeInProgress = false;
     autoTradeContractId = null;
 
-    /* Resolve any stuck PENDING entries — the contract subscription is lost */
-    for (const e of autoTradeHistory) {
-      if (e.result === "PENDING") {
-        e.result = "CANCELLED";
-        e.profit = 0;
+    if (intentionalClose) {
+      /* Intentional disconnect — resolve any stuck PENDING entries */
+      clearAutoTradePendingTimeout();
+      for (const e of autoTradeHistory) {
+        if (e.result === "PENDING") {
+          e.result = "CANCELLED";
+          e.profit = 0;
+        }
       }
+      autoTradePendingContractId = null;
     }
+    /* If unintentional close, leave PENDING entries and the pending timeout
+       running — they will be resolved after reconnect via re-subscribe,
+       or time out via the pending timer as a safety net. */
     recalcAutoTradePL();
     renderAutoTradeHistory();
     updateAutoTradePLUI();
@@ -5412,6 +5454,22 @@ function disconnect() {
   stopUptimeTimer();
   stopNyOpenRangeTimer();
   updateAccountBadge(null);
+  clearAutoTradePendingTimeout();
+  autoTradeInProgress = false;
+  autoTradeContractId = null;
+  autoTradePendingContractId = null;
+
+  /* Resolve any stuck PENDING entries on intentional disconnect */
+  for (const e of autoTradeHistory) {
+    if (e.result === "PENDING") {
+      e.result = "CANCELLED";
+      e.profit = 0;
+    }
+  }
+  recalcAutoTradePL();
+  renderAutoTradeHistory();
+  updateAutoTradePLUI();
+  persistAutoTradeHistory();
 
   if (ws) {
     /* Detach handlers so the closing socket can't interfere with future state */
@@ -10495,6 +10553,51 @@ function executeAutoTrade(signal) {
 }
 
 /* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
+
+/** Clear the pending-trade timeout timer. */
+function clearAutoTradePendingTimeout() {
+  if (autoTradePendingTimer) {
+    clearTimeout(autoTradePendingTimer);
+    autoTradePendingTimer = null;
+  }
+}
+
+/** Start a timeout that resolves a stuck PENDING trade after AUTO_TRADE_PENDING_TIMEOUT_MS.
+ *  If the contract hasn't resolved by then, we attempt a one-shot status query;
+ *  if the WS is not available, mark it as CANCELLED. */
+function startAutoTradePendingTimeout() {
+  clearAutoTradePendingTimeout();
+  autoTradePendingTimer = setTimeout(() => {
+    autoTradePendingTimer = null;
+    if (!autoTradeInProgress) return; /* already resolved */
+
+    /* Try one-shot query before giving up */
+    if (ws && ws.readyState === WebSocket.OPEN && autoTradeContractId) {
+      addLog(`⏰ Pending trade timeout — querying contract ${autoTradeContractId} status…`);
+      ws.send(JSON.stringify({
+        proposal_open_contract: 1,
+        contract_id: autoTradeContractId,
+        passthrough: { auto_trade: true, source: "timeout_query" }
+      }));
+      /* Give the one-shot query 15 seconds to resolve, then force-cancel */
+      autoTradePendingTimer = setTimeout(() => {
+        autoTradePendingTimer = null;
+        if (!autoTradeInProgress) return;
+        addLog(`⚠ Contract ${autoTradeContractId} did not resolve after timeout — marking as cancelled`);
+        autoTradeInProgress = false;
+        autoTradeContractId = null;
+        autoTradePendingContractId = null;
+        resolveAutoTradeHistoryEntry(0, "CANCELLED");
+      }, 15000);
+    } else {
+      addLog("⚠ Pending trade timeout — no active connection to query contract status, marking as cancelled");
+      autoTradeInProgress = false;
+      autoTradeContractId = null;
+      autoTradePendingContractId = null;
+      resolveAutoTradeHistoryEntry(0, "CANCELLED");
+    }
+  }, AUTO_TRADE_PENDING_TIMEOUT_MS);
+}
 
 /** Recompute cumulative P/L from actual trade history entries.
  *  This is the source-of-truth — we never rely on an incrementally
