@@ -795,6 +795,7 @@ let autoTradeBalance         = null;   /* latest Deriv account balance */
 let autoTradePendingTimer    = null;   /* timeout timer for stuck PENDING trades */
 const AUTO_TRADE_PENDING_TIMEOUT_MS = 3600000; /* 1 hour max for a pending multiplier trade */
 const AUTO_TRADE_QUERY_TIMEOUT_MS   = 15000;   /* 15s grace period for one-shot status query */
+const AUTO_TRADE_PROPOSAL_TIMEOUT_MS = 30000;  /* 30s max for proposal → buy to complete */
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -5367,10 +5368,16 @@ function connect() {
          errors (Deriv subscription streams may not echo passthrough).
          Since only one auto-trade can be in-flight at a time (guarded by
          autoTradeInProgress), any POC error while we have an active
-         contract ID is necessarily for our trade. */
+         contract ID is necessarily for our trade.
+         Fallback: also catch proposal/buy errors while an auto-trade is
+         in-flight — some Deriv API responses may omit the passthrough
+         object, which previously caused the trade to stay PENDING forever
+         and block all subsequent auto-trades. */
       const isAutoTradeByPassthrough = msg.passthrough && msg.passthrough.auto_trade;
       const isAutoTradeByContractId  = msg.msg_type === "proposal_open_contract" && autoTradeContractId != null;
-      if (isAutoTradeByPassthrough || isAutoTradeByContractId) {
+      const isAutoTradeByInProgress  = autoTradeInProgress &&
+        (msg.msg_type === "proposal" || msg.msg_type === "buy");
+      if (isAutoTradeByPassthrough || isAutoTradeByContractId || isAutoTradeByInProgress) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
         autoTradeConsecutiveErrors++;
@@ -5498,6 +5505,13 @@ function connect() {
         return;
       }
       const proposal = msg.proposal || {};
+      if (!proposal.id) {
+        addLog("⚠ Auto-trade proposal missing ID — cannot buy");
+        autoTradeInProgress = false;
+        clearAutoTradePendingTimeout();
+        resolveAutoTradeHistoryEntry(0, "ERROR");
+        return;
+      }
       const src = msg.passthrough.source || "breakout";
       const label = autoTradeSourceLabel(src, msg.passthrough.strategyName);
       addLog(`🤖 ${label} auto-trade: buying contract — ask $${proposal.ask_price}`);
@@ -10748,6 +10762,23 @@ function executeAutoTrade(signal) {
   if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
 
   ws.send(JSON.stringify(payload));
+
+  /* Start a short safety timeout for the proposal → buy window.
+     If the buy doesn't happen within AUTO_TRADE_PROPOSAL_TIMEOUT_MS
+     (e.g. the proposal errors out without triggering our error handler,
+     or the WS drops silently), this ensures the trade is cleaned up
+     instead of staying PENDING forever and blocking all future trades.
+     Once the buy succeeds, the buy handler replaces this with the
+     longer AUTO_TRADE_PENDING_TIMEOUT_MS via startAutoTradePendingTimeout(). */
+  clearAutoTradePendingTimeout();
+  autoTradePendingTimer = setTimeout(() => {
+    autoTradePendingTimer = null;
+    if (!autoTradeInProgress) return;  /* already resolved */
+    if (autoTradeContractId) return;   /* buy succeeded — longer timeout running */
+    addLog("⚠ Auto-trade proposal/buy timed out — cleaning up");
+    autoTradeInProgress = false;
+    resolveAutoTradeHistoryEntry(0, "CANCELLED");
+  }, AUTO_TRADE_PROPOSAL_TIMEOUT_MS);
 }
 
 /* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
