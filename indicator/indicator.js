@@ -5813,14 +5813,16 @@ function detectLiquiditySweep() {
   const rangeSize = rangeHigh - rangeLow;
   const atr = atrValue > 0 ? atrValue : rangeSize;
 
-  /* SL: just outside the sweep candle extremity (tighter than range edge) */
+  /* SL: pick the closer-to-entry reference (tighter stop) from range vs sweep candle */
   const slBuffer = atr * 0.1;
   let sl;
   if (dir === "BULL") {
-    /* Use the tighter of: range low or sweep candle low */
+    /* For BULL: SL is below entry. Higher value = closer to entry = tighter.
+       sweepCandle.low < rangeLow (by definition), so Math.max picks rangeLow. */
     sl = Math.max(rangeLow, sweepCandle.low) - slBuffer;
   } else {
-    /* Use the tighter of: range high or sweep candle high */
+    /* For BEAR: SL is above entry. Lower value = closer to entry = tighter.
+       sweepCandle.high > rangeHigh (by definition), so Math.min picks rangeHigh. */
     sl = Math.min(rangeHigh, sweepCandle.high) + slBuffer;
   }
 
@@ -5906,8 +5908,8 @@ function monitorLiquiditySweepOutcomes(candle) {
   for (const s of liquiditySweepHistory) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
-    /* Safety: resolve stale signals with invalid candleIdx (e.g. after candle slicing) */
-    if (elapsed < 0 || elapsed >= 30) { /* timeout after 30 candles or stale index */
+    /* Safety: resolve signals with corrupted/future candleIdx (e.g. after candle slicing) or timeout after 30 candles */
+    if (elapsed < 0 || elapsed >= 30) { /* stale/corrupted index or timeout */
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`🌊 Liquidity Sweep ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
