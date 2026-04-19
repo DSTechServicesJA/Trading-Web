@@ -2494,6 +2494,18 @@ function validateTelegramCredentials(token, chatId) {
 }
 
 /**
+ * Build an Authorization header object for the Telegram proxy.
+ * Returns the JWT Bearer token from ITGuruAuth if available.
+ */
+function telegramProxyHeaders(extra = {}) {
+  const h = Object.assign({}, extra);
+  if (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getToken()) {
+    h["Authorization"] = "Bearer " + ITGuruAuth.getToken();
+  }
+  return h;
+}
+
+/**
  * Send a photo (Blob) with caption to Telegram via Bot API.
  */
 async function sendTelegramPhoto(blob, caption) {
@@ -2516,7 +2528,7 @@ async function sendTelegramPhoto(blob, caption) {
     const form = buildPhotoForm();
     form.append("action", "sendPhoto");
     form.append("token", token);
-    resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", body: form });
+    resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
   } catch (_proxyErr) {
     /* Proxy unreachable — try direct Telegram API as fallback */
     resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm() });
@@ -2542,7 +2554,7 @@ async function sendTelegramMessage(text) {
   try {
     resp = await fetch(TELEGRAM_PROXY_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ action: "sendMessage", token, payload })
     });
   } catch (_proxyErr) {
@@ -2625,7 +2637,7 @@ async function testTelegramConnection() {
     try {
       meResp = await fetch(TELEGRAM_PROXY_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action: "getMe", token, payload: {} })
       });
     } catch (_proxyErr) {
@@ -2639,7 +2651,7 @@ async function testTelegramConnection() {
     try {
       chatResp = await fetch(TELEGRAM_PROXY_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action: "getChat", token, payload: { chat_id: chatId } })
       });
     } catch (_proxyErr) {
