@@ -820,14 +820,16 @@ let lockRR        = false;
 let liquiditySweepEnabled = false;       /* master toggle */
 let liquiditySweepHistory = [];          /* alert history */
 const LIQUIDITY_SWEEP_MAX_HISTORY = 30;
-const LIQUIDITY_SWEEP_COOLDOWN = 3;      /* min candles between alerts */
+const LIQUIDITY_SWEEP_COOLDOWN = 10;     /* min candles between alerts (raised from 3 for 1s markets) */
+const LIQUIDITY_SWEEP_MAX_SL_ATR = 1.5;  /* max SL distance as ATR multiple — caps runaway risk */
+const LIQUIDITY_SWEEP_ADAPTIVE_RR_THRESHOLD = 1.0; /* ATR mult: above this use tighter R:R */
 let lastLiquiditySweepIdx = -999;
 
 /* ================= STRATEGY 2: STOP LOSS HUNT ================= */
 let stopLossHuntEnabled = false;         /* master toggle */
 let stopLossHuntHistory = [];            /* alert history */
 const STOP_LOSS_HUNT_MAX_HISTORY = 30;
-const STOP_LOSS_HUNT_COOLDOWN = 3;
+const STOP_LOSS_HUNT_COOLDOWN = 8;       /* raised from 3 for 1s markets */
 const SLH_KEY_LEVEL_TOUCHES = 3;        /* min touches to define key S/R level */
 const SLH_LEVEL_LOOKBACK = 50;          /* candles to scan for S/R */
 const SLH_LEVEL_TOLERANCE_PCT = 0.001;  /* 0.1% tolerance for level matching */
@@ -837,7 +839,7 @@ let lastStopLossHuntIdx = -999;
 let failedPinBarEnabled = false;         /* master toggle */
 let failedPinBarHistory = [];            /* alert history */
 const FAILED_PIN_BAR_MAX_HISTORY = 30;
-const FAILED_PIN_BAR_COOLDOWN = 3;
+const FAILED_PIN_BAR_COOLDOWN = 8;       /* raised from 3 for 1s markets */
 const FPB_CONSECUTIVE_CANDLES = 3;       /* min consecutive candles for fear/greed */
 const FPB_BODY_RATIO_MIN = 0.6;         /* min body/range for strong candle */
 let lastFailedPinBarIdx = -999;
@@ -5078,6 +5080,20 @@ function adjustIndicesAfterSlice(removed) {
   if (retestInfo) retestInfo.candleIdx = Math.max(0, retestInfo.candleIdx - removed);
   if (indecisionInfo) indecisionInfo.candleIdx = Math.max(0, indecisionInfo.candleIdx - removed);
   if (confirmInfo) confirmInfo.candleIdx = Math.max(0, confirmInfo.candleIdx - removed);
+
+  /* Adjust strategy signal indices and cooldown trackers */
+  lastLiquiditySweepIdx = Math.max(-999, lastLiquiditySweepIdx - removed);
+  lastStopLossHuntIdx   = Math.max(-999, lastStopLossHuntIdx - removed);
+  lastFailedPinBarIdx   = Math.max(-999, lastFailedPinBarIdx - removed);
+  lastFibScalpIdx       = Math.max(-999, lastFibScalpIdx - removed);
+  lastPo3Idx            = Math.max(-999, lastPo3Idx - removed);
+  lastScalpCandleIdx    = Math.max(-999, lastScalpCandleIdx - removed);
+
+  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, liveScalpHistory]) {
+    for (const s of h) {
+      if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
+    }
+  }
 }
 
 /* ================= EMA COMPUTATION ================= */
@@ -5780,17 +5796,51 @@ function detectLiquiditySweep() {
 
   if (!dir) return null;
 
-  /* Compute entry / SL / TP */
+  /* ── EMA trend filter: reject signals that fight the short-term trend ── */
+  if (emaFast.length >= idx && emaSlow.length >= idx) {
+    const ef = emaFast[emaFast.length - 1];
+    const es = emaSlow[emaSlow.length - 1];
+    if (ef != null && es != null) {
+      /* BULL signal requires EMA 8 ≥ EMA 21 (not in a clear downtrend) */
+      if (dir === "BULL" && ef < es) return null;
+      /* BEAR signal requires EMA 8 ≤ EMA 21 (not in a clear uptrend) */
+      if (dir === "BEAR" && ef > es) return null;
+    }
+  }
+
+  /* ── Compute entry / SL / TP with ATR-capped risk ── */
   const entry = sweepCandle.close;
   const rangeSize = rangeHigh - rangeLow;
   const atr = atrValue > 0 ? atrValue : rangeSize;
 
-  /* SL: just outside the range on the sweep side */
-  const slBuffer = atr * 0.1; /* small buffer beyond the range */
-  const sl = dir === "BULL" ? rangeLow - slBuffer : rangeHigh + slBuffer;
-  const risk = Math.abs(entry - sl);
-  /* TP: next key level approximated as 2:1 R:R */
-  const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
+  /* SL: pick the closer-to-entry reference (tighter stop) from range vs sweep candle */
+  const slBuffer = atr * 0.1;
+  let sl;
+  if (dir === "BULL") {
+    /* For BULL: SL is below entry. Higher value = closer to entry = tighter.
+       sweepCandle.low < rangeLow (by definition), so Math.max picks rangeLow. */
+    sl = Math.max(rangeLow, sweepCandle.low) - slBuffer;
+  } else {
+    /* For BEAR: SL is above entry. Lower value = closer to entry = tighter.
+       sweepCandle.high > rangeHigh (by definition), so Math.min picks rangeHigh. */
+    sl = Math.min(rangeHigh, sweepCandle.high) + slBuffer;
+  }
+
+  let risk = Math.abs(entry - sl);
+
+  /* Cap SL distance to prevent runaway risk when entry drifts far from range */
+  const maxRisk = atr * LIQUIDITY_SWEEP_MAX_SL_ATR;
+  if (risk > maxRisk) {
+    sl = dir === "BULL" ? entry - maxRisk : entry + maxRisk;
+    risk = maxRisk;
+  }
+
+  /* Reject if risk is negligible (likely noise) */
+  if (risk < atr * 0.05) return null;
+
+  /* Adaptive R:R: use 2:1 for tight setups, reduce to 1.5:1 for wider risk */
+  const rrTarget = (risk > atr * LIQUIDITY_SWEEP_ADAPTIVE_RR_THRESHOLD) ? 1.5 : 2;
+  const tp = dir === "BULL" ? entry + risk * rrTarget : entry - risk * rrTarget;
   const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
 
   return {
@@ -5844,7 +5894,7 @@ function processLiquiditySweep() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the liquidity sweep */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
   }
 }
@@ -5858,7 +5908,8 @@ function monitorLiquiditySweepOutcomes(candle) {
   for (const s of liquiditySweepHistory) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
-    if (elapsed >= 30) { /* timeout after 30 candles */
+    /* Safety: resolve signals with corrupted/future candleIdx (e.g. after candle slicing) or timeout after 30 candles */
+    if (elapsed < 0 || elapsed >= 30) { /* stale/corrupted index or timeout */
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`🌊 Liquidity Sweep ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
@@ -6054,7 +6105,7 @@ function processStopLossHunt() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the stop loss hunt */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
   }
 }
@@ -6068,7 +6119,7 @@ function monitorStopLossHuntOutcomes(candle) {
   for (const s of stopLossHuntHistory) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
-    if (elapsed >= 30) {
+    if (elapsed < 0 || elapsed >= 30) {
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`🎯 Stop Loss Hunt ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
@@ -6264,7 +6315,7 @@ function processFailedPinBar() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the failed pin bar */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
   }
 }
@@ -6278,7 +6329,7 @@ function monitorFailedPinBarOutcomes(candle) {
   for (const s of failedPinBarHistory) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
-    if (elapsed >= 20) { /* shorter timeout — scalp-style */
+    if (elapsed < 0 || elapsed >= 20) { /* shorter timeout — scalp-style; also resolves stale indices */
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`${s.state === "fear" ? "😱" : "🤑"} Failed Pin Bar ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
@@ -6545,7 +6596,7 @@ function processFibScalp() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the fib scalp */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
   }
 }
@@ -6560,8 +6611,8 @@ function monitorFibScalpOutcomes(candle) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
 
-    /* Timeout after FIB_SCALP_MAX_CANDLES */
-    if (elapsed >= FIB_SCALP_MAX_CANDLES) {
+    /* Timeout after FIB_SCALP_MAX_CANDLES or stale index */
+    if (elapsed < 0 || elapsed >= FIB_SCALP_MAX_CANDLES) {
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`📐 Fib Golden Zone ${s.result} (timeout ${FIB_SCALP_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
@@ -6912,7 +6963,7 @@ function processPowerOf3() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for PO3 */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
   }
 }
@@ -6927,8 +6978,8 @@ function monitorPo3Outcomes(candle) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
 
-    /* Timeout after PO3_MAX_CANDLES */
-    if (elapsed >= PO3_MAX_CANDLES) {
+    /* Timeout after PO3_MAX_CANDLES or stale index */
+    if (elapsed < 0 || elapsed >= PO3_MAX_CANDLES) {
       const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
       s.result = inProfit ? "WIN" : "LOSS";
       addLog(`⚡ PO3 ${s.result} (timeout ${PO3_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
@@ -7212,7 +7263,7 @@ function processLiveScalp() {
   addLog(`⚡ SCALP ${scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(scalp.entry, 4)} | Confluence ${scalp.conf}/7 | ${scalp.reasons.join(", ")}`);
 
   /* Auto-trade: place a Deriv multiplier contract for the scalp */
-  if (autoTradeScalpEnabled && !autoTradeInProgress) {
+  if (autoTradeScalpEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: scalp.dir, entry: scalp.entry, sl: scalp.sl, tp: scalp.tp, symbol: scalp.symbol || symbol, source: "scalp" });
   }
 }
@@ -11458,6 +11509,18 @@ function activatePanel(p) {
   lastScalpCandleIdx = p.lastScalpCandleIdx;
   ws             = p.ws;
 
+  /* Custom strategy histories (per-panel isolation) */
+  liquiditySweepHistory = p.liquiditySweepHistory || [];
+  lastLiquiditySweepIdx = p.lastLiquiditySweepIdx != null ? p.lastLiquiditySweepIdx : -999;
+  stopLossHuntHistory   = p.stopLossHuntHistory   || [];
+  lastStopLossHuntIdx   = p.lastStopLossHuntIdx   != null ? p.lastStopLossHuntIdx   : -999;
+  failedPinBarHistory   = p.failedPinBarHistory   || [];
+  lastFailedPinBarIdx   = p.lastFailedPinBarIdx   != null ? p.lastFailedPinBarIdx   : -999;
+  fibScalpHistory       = p.fibScalpHistory       || [];
+  lastFibScalpIdx       = p.lastFibScalpIdx       != null ? p.lastFibScalpIdx       : -999;
+  po3History            = p.po3History            || [];
+  lastPo3Idx            = p.lastPo3Idx            != null ? p.lastPo3Idx            : -999;
+
   /* Session Ranges */
   sessionRangeAsian   = p.sessionRangeAsian  || null;
   sessionRangeLondon  = p.sessionRangeLondon || null;
@@ -11556,6 +11619,18 @@ function savePanel(p) {
   p.liveScalpHistory  = liveScalpHistory;
   p.lastScalpCandleIdx = lastScalpCandleIdx;
   p.ws             = ws;
+
+  /* Custom strategy histories (per-panel isolation) */
+  p.liquiditySweepHistory = liquiditySweepHistory;
+  p.lastLiquiditySweepIdx = lastLiquiditySweepIdx;
+  p.stopLossHuntHistory   = stopLossHuntHistory;
+  p.lastStopLossHuntIdx   = lastStopLossHuntIdx;
+  p.failedPinBarHistory   = failedPinBarHistory;
+  p.lastFailedPinBarIdx   = lastFailedPinBarIdx;
+  p.fibScalpHistory       = fibScalpHistory;
+  p.lastFibScalpIdx       = lastFibScalpIdx;
+  p.po3History            = po3History;
+  p.lastPo3Idx            = lastPo3Idx;
 
   /* Session Ranges */
   p.sessionRangeAsian   = sessionRangeAsian;
@@ -11833,6 +11908,17 @@ function connectPanel(p) {
   p.confluenceScore = 0;
   p.liveScalpHistory = [];
   p.lastScalpCandleIdx = -999;
+  /* Custom strategy histories (per-panel isolation) */
+  p.liquiditySweepHistory = [];
+  p.lastLiquiditySweepIdx = -999;
+  p.stopLossHuntHistory   = [];
+  p.lastStopLossHuntIdx   = -999;
+  p.failedPinBarHistory   = [];
+  p.lastFailedPinBarIdx   = -999;
+  p.fibScalpHistory       = [];
+  p.lastFibScalpIdx       = -999;
+  p.po3History            = [];
+  p.lastPo3Idx            = -999;
   p.connected = false;
 
   const panelWs = new WebSocket(WS_URL);
