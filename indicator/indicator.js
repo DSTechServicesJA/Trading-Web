@@ -168,6 +168,10 @@ const STOCH_SMOOTH = 3;
 const STOCH_OVERSOLD = 20;
 const STOCH_OVERBOUGHT = 80;
 
+/* Auto-trade: minimum stake for Deriv contracts */
+const MIN_AUTO_TRADE_STAKE = 0.35;
+const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
+
 /* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
    larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
 const SCALP_RANGE_MINUTES       = 5;     /* shorter opening range for quick setups */
@@ -613,6 +617,14 @@ let minRREnabled         = true;
 let pureTrailingEnabled  = false;
 let minRRValue           = 1.5;
 
+/* Auto-trade: allow the indicator to place trades on Deriv when a signal fires */
+let autoTradeEnabled         = false;  /* breakout-retest TRADE signals */
+let autoTradeScalpEnabled    = false;  /* live scalp signals */
+let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity sweep, etc.) */
+let autoTradeStake           = 1;      /* USD stake per trade */
+let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
+let autoTradeInProgress      = false;  /* prevents duplicate trades */
+
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
 let riskPercent          = 1.0;   /* default 1% risk per trade */
@@ -920,6 +932,11 @@ function initUI() {
   UI.pipsValue        = document.getElementById("pipsValue");
   UI.accountSizeInput = document.getElementById("accountSizeInput");
   UI.riskPercentInput = document.getElementById("riskPercentInput");
+  UI.autoTradeToggle        = document.getElementById("autoTradeToggle");
+  UI.autoTradeScalpToggle   = document.getElementById("autoTradeScalpToggle");
+  UI.autoTradeStrategyToggle = document.getElementById("autoTradeStrategyToggle");
+  UI.autoTradeStake         = document.getElementById("autoTradeStake");
+  UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
   UI.signalLog      = document.getElementById("signalLog");
   UI.canvas         = document.getElementById("mainChart");
   UI.ctx            = UI.canvas.getContext("2d");
@@ -2706,7 +2723,12 @@ function saveSettings() {
       telegramStrategyAutoSend,
       telegramStrategyOutcomeSend,
       accountSize,
-      riskPercent
+      riskPercent,
+      autoTradeEnabled,
+      autoTradeScalpEnabled,
+      autoTradeStrategyEnabled,
+      autoTradeStake,
+      autoTradeMultiplier
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -2910,6 +2932,18 @@ function restoreSettings() {
     if (s.riskPercent != null) riskPercent = s.riskPercent;
     if (UI.accountSizeInput) UI.accountSizeInput.value = accountSize > 0 ? accountSize : "";
     if (UI.riskPercentInput) UI.riskPercentInput.value = riskPercent;
+
+    /* Auto-trade */
+    if (s.autoTradeEnabled != null) autoTradeEnabled = s.autoTradeEnabled;
+    if (s.autoTradeScalpEnabled != null) autoTradeScalpEnabled = s.autoTradeScalpEnabled;
+    if (s.autoTradeStrategyEnabled != null) autoTradeStrategyEnabled = s.autoTradeStrategyEnabled;
+    if (s.autoTradeStake != null) autoTradeStake = s.autoTradeStake;
+    if (s.autoTradeMultiplier != null) autoTradeMultiplier = s.autoTradeMultiplier;
+    if (UI.autoTradeToggle) UI.autoTradeToggle.checked = autoTradeEnabled;
+    if (UI.autoTradeScalpToggle) UI.autoTradeScalpToggle.checked = autoTradeScalpEnabled;
+    if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
+    if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
+    if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
   } catch (e) { /* storage not available */ }
 }
 
@@ -4199,6 +4233,7 @@ function resetIndicator() {
   confirmInfo = null;
   trade = null;
   monitoringTrade = false;
+  autoTradeInProgress = false;
   emaFast = [];
   emaSlow = [];
   emaHTF  = [];
@@ -4807,6 +4842,12 @@ function connect() {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
 
     if (msg.error) {
+      /* Auto-trade errors: handle and reset state before returning */
+      if (msg.passthrough && msg.passthrough.auto_trade) {
+        addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
+        autoTradeInProgress = false;
+        return;
+      }
       addLog("API error: " + msg.error.message);
       /* If authorization fails, still subscribe to public market data */
       if (msg.msg_type === "authorize") {
@@ -4885,6 +4926,47 @@ function connect() {
       monitorSessionRangeTradeOutcome(c);
       drawChart();
     }
+
+    /* ---- Auto-trade: handle proposal → buy → result ---- */
+    if (msg.msg_type === "proposal" && msg.passthrough && msg.passthrough.auto_trade) {
+      if (!autoTradeInProgress) {
+        addLog("⚠ Auto-trade proposal received but trade was cancelled — ignoring");
+        return;
+      }
+      const proposal = msg.proposal || {};
+      const src = msg.passthrough.source || "breakout";
+      const label = autoTradeSourceLabel(src);
+      addLog(`🤖 ${label} auto-trade: buying contract — ask $${proposal.ask_price}`);
+      ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true, source: src } }));
+      return;
+    }
+
+    if (msg.msg_type === "buy" && msg.passthrough && msg.passthrough.auto_trade) {
+      const b = msg.buy;
+      const src = msg.passthrough.source || "breakout";
+      const label = autoTradeSourceLabel(src);
+      addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
+      ws.send(JSON.stringify({
+        proposal_open_contract: 1,
+        contract_id: b.contract_id,
+        subscribe: 1,
+        passthrough: { auto_trade: true, source: src }
+      }));
+      return;
+    }
+
+    if (msg.msg_type === "proposal_open_contract" && msg.passthrough && msg.passthrough.auto_trade) {
+      const poc = msg.proposal_open_contract;
+      if (poc && poc.is_sold) {
+        const profit = parseFloat(poc.profit) || 0;
+        const won = profit > 0;
+        const src = msg.passthrough.source || "breakout";
+        const label = autoTradeSourceLabel(src);
+        addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
+        autoTradeInProgress = false;
+      }
+      return;
+    }
   };
 
   ws.onclose = () => {
@@ -4897,6 +4979,9 @@ function connect() {
     UI.disconnectBtn.disabled = true;
     stopUptimeTimer();
     addLog("WebSocket closed");
+
+    /* Reset auto-trade state on disconnect */
+    autoTradeInProgress = false;
 
     /* Nullify so connect() guard doesn't block reconnection */
     ws = null;
@@ -5742,6 +5827,11 @@ function processLiquiditySweep() {
   }
 
   renderStrategyAlerts();
+
+  /* Auto-trade: place a Deriv multiplier contract for the liquidity sweep */
+  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  }
 }
 
 /**
@@ -5947,6 +6037,11 @@ function processStopLossHunt() {
   }
 
   renderStrategyAlerts();
+
+  /* Auto-trade: place a Deriv multiplier contract for the stop loss hunt */
+  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  }
 }
 
 /**
@@ -6152,6 +6247,11 @@ function processFailedPinBar() {
   }
 
   renderStrategyAlerts();
+
+  /* Auto-trade: place a Deriv multiplier contract for the failed pin bar */
+  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  }
 }
 
 /**
@@ -6428,6 +6528,11 @@ function processFibScalp() {
   }
 
   renderStrategyAlerts();
+
+  /* Auto-trade: place a Deriv multiplier contract for the fib scalp */
+  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  }
 }
 
 /**
@@ -6790,6 +6895,11 @@ function processPowerOf3() {
   }
 
   renderStrategyAlerts();
+
+  /* Auto-trade: place a Deriv multiplier contract for PO3 */
+  if (autoTradeStrategyEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  }
 }
 
 /**
@@ -7085,6 +7195,11 @@ function processLiveScalp() {
   /* Log to signal log */
   const symbol = getActiveSymbol() || "--";
   addLog(`⚡ SCALP ${scalp.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(scalp.entry, 4)} | Confluence ${scalp.conf}/7 | ${scalp.reasons.join(", ")}`);
+
+  /* Auto-trade: place a Deriv multiplier contract for the scalp */
+  if (autoTradeScalpEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: scalp.dir, entry: scalp.entry, sl: scalp.sl, tp: scalp.tp, symbol: scalp.symbol || symbol, source: "scalp" });
+  }
 }
 
 /**
@@ -9767,6 +9882,87 @@ function recordSignal(confirmPattern) {
   monitoringTrade = true;
   persistSignalHistory();
   updateStatsUI();
+
+  /* Auto-trade: place a Deriv contract when the toggle is enabled */
+  if (autoTradeEnabled && !autoTradeInProgress) {
+    executeAutoTrade({ dir: trade.dir, entry: trade.entry, sl: trade.sl, tp: trade.tp, symbol: trade.symbol || getActiveSymbol(), source: "breakout" });
+  }
+}
+
+/* ================= AUTO-TRADE EXECUTION ================= */
+/**
+ * Place a multiplier trade on Deriv with SL/TP.
+ *
+ * @param {Object} signal - { dir, entry, sl, tp, symbol, source }
+ *   dir    – "BULL" or "BEAR"
+ *   entry  – entry price (used for SL/TP distance calc)
+ *   sl     – stop-loss price
+ *   tp     – take-profit price (may be null for pure trailing)
+ *   symbol – Deriv symbol string
+ *   source – "breakout" | "scalp" | "strategy" (for logging)
+ *
+ * Uses MULTUP/MULTDOWN contracts with limit_order.stop_loss and
+ * limit_order.take_profit expressed as absolute distance from entry.
+ */
+function autoTradeSourceLabel(source) {
+  if (source === "scalp") return "⚡ Scalp";
+  if (source === "strategy") return "📊 Strategy";
+  return "📈 Breakout";
+}
+
+function executeAutoTrade(signal) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    addLog("⚠ Auto-trade skipped — WebSocket not connected");
+    return;
+  }
+  if (!authorized) {
+    addLog("⚠ Auto-trade skipped — not authorized (set Deriv token in Settings)");
+    return;
+  }
+  if (!signal || !signal.dir || (signal.dir !== "BULL" && signal.dir !== "BEAR")) {
+    addLog("⚠ Auto-trade skipped — invalid signal direction");
+    return;
+  }
+  if (autoTradeInProgress) {
+    addLog("⚠ Auto-trade skipped — previous trade still in progress");
+    return;
+  }
+
+  const contractType = signal.dir === "BULL" ? "MULTUP" : "MULTDOWN";
+  const symbol = signal.symbol || getActiveSymbol();
+  const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
+  const multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
+  const label = autoTradeSourceLabel(signal.source);
+
+  /* Build limit_order with SL and optional TP (distance from entry in USD) */
+  const limitOrder = {};
+  if (signal.sl != null && signal.entry != null) {
+    const slDist = Math.abs(signal.entry - signal.sl);
+    if (slDist > 0) limitOrder.stop_loss = +fmt(slDist * multiplier * stake / signal.entry, 2);
+  }
+  if (signal.tp != null && signal.entry != null) {
+    const tpDist = Math.abs(signal.tp - signal.entry);
+    if (tpDist > 0) limitOrder.take_profit = +fmt(tpDist * multiplier * stake / signal.entry, 2);
+  }
+
+  autoTradeInProgress = true;
+  const slLog = limitOrder.stop_loss != null ? ` SL $${limitOrder.stop_loss}` : "";
+  const tpLog = limitOrder.take_profit != null ? ` TP $${limitOrder.take_profit}` : "";
+  addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}`);
+
+  const payload = {
+    proposal: 1,
+    amount: stake,
+    basis: "stake",
+    contract_type: contractType,
+    currency: "USD",
+    symbol,
+    multiplier,
+    passthrough: { auto_trade: true, source: signal.source || "breakout" }
+  };
+  if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
+
+  ws.send(JSON.stringify(payload));
 }
 
 function monitorTradeOutcome(candle) {
@@ -12179,6 +12375,49 @@ document.addEventListener("DOMContentLoaded", () => {
       riskPercent = (!isNaN(v) && v > 0) ? v : 0;
       saveSettings();
       updateStateUI();
+    });
+  }
+
+  /* Auto-trade toggle & stake */
+  if (UI.autoTradeToggle) {
+    UI.autoTradeToggle.addEventListener("change", () => {
+      autoTradeEnabled = UI.autoTradeToggle.checked;
+      if (autoTradeEnabled && !authorized) {
+        addLog("⚠ Auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
+      }
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeScalpToggle) {
+    UI.autoTradeScalpToggle.addEventListener("change", () => {
+      autoTradeScalpEnabled = UI.autoTradeScalpToggle.checked;
+      if (autoTradeScalpEnabled && !authorized) {
+        addLog("⚠ Scalp auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
+      }
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeStrategyToggle) {
+    UI.autoTradeStrategyToggle.addEventListener("change", () => {
+      autoTradeStrategyEnabled = UI.autoTradeStrategyToggle.checked;
+      if (autoTradeStrategyEnabled && !authorized) {
+        addLog("⚠ Strategy auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
+      }
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeStake) {
+    UI.autoTradeStake.addEventListener("input", () => {
+      const v = parseFloat(UI.autoTradeStake.value);
+      autoTradeStake = (!isNaN(v) && v >= MIN_AUTO_TRADE_STAKE) ? v : 1;
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeMultiplier) {
+    UI.autoTradeMultiplier.addEventListener("input", () => {
+      const v = parseInt(UI.autoTradeMultiplier.value, 10);
+      autoTradeMultiplier = (!isNaN(v) && v >= 1) ? v : DEFAULT_AUTO_TRADE_MULTIPLIER;
+      saveSettings();
     });
   }
 
