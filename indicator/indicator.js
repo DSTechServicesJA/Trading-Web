@@ -587,6 +587,12 @@ let candleCountdownInterval = null;
 let soundEnabled = true;
 let notificationsEnabled = false;
 
+/* Global notification throttle — suppress rapid-fire browser notifications */
+const NOTIFICATION_COOLDOWN_MS = 30000;   /* min 30s between browser notifications */
+const NOTIFICATION_BURST_MAX   = 3;       /* max notifications allowed in one burst window */
+const NOTIFICATION_BURST_WINDOW_MS = 60000; /* 60 s sliding window for burst tracking */
+let _notifTimestamps = [];                /* timestamps of recent notifications */
+
 /* Chart interaction state */
 let chartMouseX = -1;
 let chartMouseY = -1;
@@ -1285,25 +1291,49 @@ function playPhaseAlert(phaseName) {
   } catch (e) { /* audio not available */ }
 }
 
+/**
+ * Global notification throttle.  Prevents rapid-fire browser notifications
+ * when multiple strategies / panels fire signals in quick succession.
+ * Rules:
+ *   1. At most NOTIFICATION_BURST_MAX notifications in any sliding
+ *      NOTIFICATION_BURST_WINDOW_MS window.
+ *   2. At least NOTIFICATION_COOLDOWN_MS between consecutive notifications.
+ * Suppressed notifications are silently dropped (toast + sound still fire).
+ */
+function throttledNotification(title, body) {
+  const now = Date.now();
+  /* Prune timestamps outside the burst window */
+  _notifTimestamps = _notifTimestamps.filter(t => now - t < NOTIFICATION_BURST_WINDOW_MS);
+
+  /* Check cooldown since last notification */
+  const lastNotifTime = _notifTimestamps[_notifTimestamps.length - 1];
+  if (lastNotifTime && now - lastNotifTime < NOTIFICATION_COOLDOWN_MS) {
+    return; /* too soon after the last notification */
+  }
+  /* Check burst limit */
+  if (_notifTimestamps.length >= NOTIFICATION_BURST_MAX) {
+    return; /* burst cap reached */
+  }
+
+  _notifTimestamps.push(now);
+  new Notification(title, { body, icon: NOTIF_ICON });
+}
+
 function sendPhaseNotification(phaseName) {
   if (!notificationsEnabled || !("Notification" in window)) return;
-  if (Notification.permission === "granted") {
-    const symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
-    let body = `${symbol} moved to ${phaseName} phase`;
-    /*
-     * Append order-type hint for actionable phases:
-     *   RETEST phase  = breakout just happened, waiting for retest → STOP orders
-     *   INDECISION    = retest found, waiting for indecision       → LIMIT orders
-     */
-    const orderType = getRecommendedOrderType();
-    if (orderType && (phaseName === "RETEST" || phaseName === "INDECISION")) {
-      body += ` — ${orderType}`;
-    }
-    new Notification(`IT Guru Indicator: ${phaseName}`, {
-      body,
-      icon: NOTIF_ICON
-    });
+  if (Notification.permission !== "granted") return;
+  const symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  let body = `${symbol} moved to ${phaseName} phase`;
+  /*
+   * Append order-type hint for actionable phases:
+   *   RETEST phase  = breakout just happened, waiting for retest → STOP orders
+   *   INDECISION    = retest found, waiting for indecision       → LIMIT orders
+   */
+  const orderType = getRecommendedOrderType();
+  if (orderType && (phaseName === "RETEST" || phaseName === "INDECISION")) {
+    body += ` — ${orderType}`;
   }
+  throttledNotification(`IT Guru Indicator: ${phaseName}`, body);
 }
 
 function requestNotificationPermission() {
@@ -5703,7 +5733,7 @@ function processLiquiditySweep() {
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmt(signal.entry, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
-    new Notification("IT Guru: Liquidity Sweep!", { body, icon: NOTIF_ICON });
+    throttledNotification("IT Guru: Liquidity Sweep!", body);
   }
 
   /* Telegram alert (delayed to let canvas redraw first) */
@@ -5908,7 +5938,7 @@ function processStopLossHunt() {
 
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)}\nLevel: ${fmt(signal.level.level, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
-    new Notification("IT Guru: Stop Loss Hunt!", { body, icon: NOTIF_ICON });
+    throttledNotification("IT Guru: Stop Loss Hunt!", body);
   }
 
   /* Telegram alert (delayed to let canvas redraw first) */
@@ -6113,7 +6143,7 @@ function processFailedPinBar() {
 
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmt(signal.entry, 4)}\nState: ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
-    new Notification("IT Guru: Failed Pin Bar!", { body, icon: NOTIF_ICON });
+    throttledNotification("IT Guru: Failed Pin Bar!", body);
   }
 
   /* Telegram alert (delayed to let canvas redraw first) */
@@ -6389,7 +6419,7 @@ function processFibScalp() {
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `📐 ${signal.dir} Fib Golden Zone — ${symbol} @ ${fmt(signal.entry, 4)}\nGolden Zone: ${fmt(signal.goldenLow, 4)}–${fmt(signal.goldenHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
-    new Notification("IT Guru: Fib Golden Zone Scalp!", { body, icon: NOTIF_ICON });
+    throttledNotification("IT Guru: Fib Golden Zone Scalp!", body);
   }
 
   /* Telegram alert */
@@ -6751,7 +6781,7 @@ function processPowerOf3() {
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
     const body = `⚡ ${signal.dir} Power of 3 — ${symbol} @ ${fmt(signal.entry, 4)}\n1H Open: ${fmt(signal.oneHourOpen, 4)} | Sweep: ${fmt(signal.sweepPrice, 4)}\nFVG: ${fmt(signal.fvgLow, 4)}–${fmt(signal.fvgHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
-    new Notification("IT Guru: Power of 3 Signal!", { body, icon: NOTIF_ICON });
+    throttledNotification("IT Guru: Power of 3 Signal!", body);
   }
 
   /* Telegram alert */
@@ -7176,7 +7206,7 @@ function sendScalpNotification(scalp) {
   if (Notification.permission !== "granted") return;
   const symbol = getActiveSymbol() || "--";
   const body = `⚡ ${scalp.dir} SCALP — ${symbol} @ ${fmt(scalp.entry, 4)}\nConfluence: ${scalp.conf}/7\n${scalp.reasons.slice(0, 3).join(" · ")}`;
-  new Notification("IT Guru: Live Scalp Alert!", { body, icon: NOTIF_ICON });
+  throttledNotification("IT Guru: Live Scalp Alert!", body);
 }
 
 /**

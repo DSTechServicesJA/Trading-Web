@@ -1864,6 +1864,22 @@ function saveSessionSnapshot() {
 let soundEnabled = true;
 let notificationsEnabled = false;
 
+// Global notification throttle — prevent rapid-fire browser notifications
+const BOT_NOTIF_COOLDOWN_MS = 30000;      // min 30s between browser notifications
+const BOT_NOTIF_BURST_MAX   = 3;          // max notifications in one burst window
+const BOT_NOTIF_BURST_WINDOW_MS = 60000;  // 60 s sliding window
+let _botNotifTimestamps = [];
+
+function _throttledBotNotification(title, body, icon) {
+  const now = Date.now();
+  _botNotifTimestamps = _botNotifTimestamps.filter(t => now - t < BOT_NOTIF_BURST_WINDOW_MS);
+  const lastTime = _botNotifTimestamps[_botNotifTimestamps.length - 1];
+  if (lastTime && now - lastTime < BOT_NOTIF_COOLDOWN_MS) return;
+  if (_botNotifTimestamps.length >= BOT_NOTIF_BURST_MAX) return;
+  _botNotifTimestamps.push(now);
+  new Notification(title, { body, icon });
+}
+
 function playTradeSound(won) {
   if (!soundEnabled) return;
   try {
@@ -1883,20 +1899,22 @@ function playTradeSound(won) {
 function sendTradeNotification(won, profit) {
   if (!notificationsEnabled || !("Notification" in window)) return;
   if (Notification.permission === "granted") {
-    new Notification(`IT Guru Bot: ${won ? "WIN" : "LOSS"}`, {
-      body: `P/L: ${profit.toFixed(2)} | Session: ${sessionPL.toFixed(2)}`,
-      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🤖</text></svg>"
-    });
+    _throttledBotNotification(
+      `IT Guru Bot: ${won ? "WIN" : "LOSS"}`,
+      `P/L: ${profit.toFixed(2)} | Session: ${sessionPL.toFixed(2)}`,
+      "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🤖</text></svg>"
+    );
   }
 }
 
 function sendForexSignalNotification(direction, sym, price) {
-  if (!("Notification" in window)) return;
+  if (!notificationsEnabled || !("Notification" in window)) return;
   if (Notification.permission === "granted") {
-    new Notification(`MT5 Signal: ${direction} ${sym}`, {
-      body: `Entry ≈ ${price} | Take on MetaTrader 5`,
-      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📈</text></svg>"
-    });
+    _throttledBotNotification(
+      `MT5 Signal: ${direction} ${sym}`,
+      `Entry ≈ ${price} | Take on MetaTrader 5`,
+      "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📈</text></svg>"
+    );
   }
 }
 
