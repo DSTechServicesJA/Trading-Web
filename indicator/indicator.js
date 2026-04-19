@@ -169,7 +169,9 @@ const STOCH_OVERSOLD = 20;
 const STOCH_OVERBOUGHT = 80;
 
 /* Auto-trade: minimum stake for Deriv contracts */
-const MIN_AUTO_TRADE_STAKE = 0.35;
+const MIN_AUTO_TRADE_STAKE = 0.37;
+const MIN_LIMIT_ORDER_AMOUNT = 0.37;  /* Deriv minimum for SL/TP limit order values */
+const AUTO_TRADE_MAX_CONSECUTIVE_ERRORS = 3; /* pause auto-trading after this many consecutive errors */
 const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
 const MAX_AUTO_TRADE_HISTORY = 100;
 
@@ -625,6 +627,7 @@ let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity swe
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
+let autoTradeConsecutiveErrors = 0;     /* circuit breaker: consecutive API errors */
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
 let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
@@ -4893,6 +4896,17 @@ function connect() {
       if (msg.passthrough && msg.passthrough.auto_trade) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
+        autoTradeConsecutiveErrors++;
+        if (autoTradeConsecutiveErrors >= AUTO_TRADE_MAX_CONSECUTIVE_ERRORS) {
+          addLog(`🛑 Auto-trade paused — ${autoTradeConsecutiveErrors} consecutive errors. Disable and re-enable to resume.`);
+          autoTradeEnabled = false;
+          autoTradeScalpEnabled = false;
+          autoTradeStrategyEnabled = false;
+          if (UI.autoTradeToggle)         UI.autoTradeToggle.checked = false;
+          if (UI.autoTradeScalpToggle)    UI.autoTradeScalpToggle.checked = false;
+          if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = false;
+          autoTradeConsecutiveErrors = 0;
+        }
         return;
       }
       addLog("API error: " + msg.error.message);
@@ -4989,6 +5003,7 @@ function connect() {
       const src = msg.passthrough.source || "breakout";
       const label = autoTradeSourceLabel(src);
       addLog(`🤖 ${label} auto-trade: buying contract — ask $${proposal.ask_price}`);
+      autoTradeConsecutiveErrors = 0;  /* successful proposal — reset error counter */
       ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true, source: src } }));
       return;
     }
@@ -5980,8 +5995,10 @@ function monitorLiquiditySweepOutcomes(candle) {
         sendStrategyOutcomeTelegram(s);
       }
     }
-    /* One-at-a-time: reset cooldown so scanner immediately looks for the next trade */
-    lastLiquiditySweepIdx = -999;
+    /* One-at-a-time: allow the next trade after the cooldown period elapses.
+       Previously this was set to -999, which bypassed the cooldown entirely and
+       caused rapid-fire re-entry loops when signals kept hitting SL. */
+    lastLiquiditySweepIdx = candles.length - 1;
     addLog("🌊 Range signal resolved — scanning for next trade…");
   }
 }
@@ -6695,8 +6712,8 @@ function monitorFibScalpOutcomes(candle) {
         sendStrategyOutcomeTelegram(s);
       }
     }
-    /* Reset cooldown so scanner immediately looks for the next trade */
-    lastFibScalpIdx = -999;
+    /* Allow next trade after cooldown elapses (not immediately) */
+    lastFibScalpIdx = candles.length - 1;
     addLog("📐 Fib Golden Zone signal resolved — scanning for next trade…");
   }
 }
@@ -7052,8 +7069,8 @@ function monitorPo3Outcomes(candle) {
         sendStrategyOutcomeTelegram(s);
       }
     }
-    /* Reset cooldown so scanner immediately looks for the next trade */
-    lastPo3Idx = -999;
+    /* Allow next trade after cooldown elapses (not immediately) */
+    lastPo3Idx = candles.length - 1;
     addLog("⚡ PO3 signal resolved — scanning for next trade…");
   }
 }
@@ -10052,6 +10069,15 @@ function executeAutoTrade(signal) {
     addLog(`🔄 Opposite mode (Strategy): reversed ${signal.dir} → ${effectiveDir}`);
   }
 
+  /* When opposite mode flips direction, swap SL and TP so they are on the
+     correct side of the entry for the reversed trade direction. */
+  let tradeSl = signal.sl;
+  let tradeTp = signal.tp;
+  if (effectiveDir !== signal.dir && tradeSl != null && tradeTp != null) {
+    tradeSl = signal.tp;
+    tradeTp = signal.sl;
+  }
+
   const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
   const symbol = signal.symbol || getActiveSymbol();
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
@@ -10060,13 +10086,19 @@ function executeAutoTrade(signal) {
 
   /* Build limit_order with SL and optional TP (distance from entry in USD) */
   const limitOrder = {};
-  if (signal.sl != null && signal.entry != null) {
-    const slDist = Math.abs(signal.entry - signal.sl);
-    if (slDist > 0) limitOrder.stop_loss = +fmt(slDist * multiplier * stake / signal.entry, 2);
+  if (tradeSl != null && signal.entry != null) {
+    const slDist = Math.abs(signal.entry - tradeSl);
+    if (slDist > 0) {
+      const slVal = +fmt(slDist * multiplier * stake / signal.entry, 2);
+      limitOrder.stop_loss = Math.max(slVal, MIN_LIMIT_ORDER_AMOUNT);
+    }
   }
-  if (signal.tp != null && signal.entry != null) {
-    const tpDist = Math.abs(signal.tp - signal.entry);
-    if (tpDist > 0) limitOrder.take_profit = +fmt(tpDist * multiplier * stake / signal.entry, 2);
+  if (tradeTp != null && signal.entry != null) {
+    const tpDist = Math.abs(tradeTp - signal.entry);
+    if (tpDist > 0) {
+      const tpVal = +fmt(tpDist * multiplier * stake / signal.entry, 2);
+      limitOrder.take_profit = Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT);
+    }
   }
 
   autoTradeInProgress = true;
