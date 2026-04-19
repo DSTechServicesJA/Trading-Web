@@ -4893,6 +4893,7 @@ function connect() {
       if (msg.passthrough && msg.passthrough.auto_trade) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
+        resolveAutoTradeHistoryEntry(0, "ERROR");
         return;
       }
       addLog("API error: " + msg.error.message);
@@ -5007,19 +5008,26 @@ function connect() {
       return;
     }
 
-    if (msg.msg_type === "proposal_open_contract" && msg.passthrough && msg.passthrough.auto_trade) {
-      const poc = msg.proposal_open_contract;
-      if (poc && poc.is_sold) {
-        const profit = parseFloat(poc.profit) || 0;
-        const won = profit > 0;
-        const src = msg.passthrough.source || "breakout";
-        const label = autoTradeSourceLabel(src);
-        addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
-        autoTradeInProgress = false;
-        /* Update the most recent PENDING entry in auto-trade history */
-        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+    if (msg.msg_type === "proposal_open_contract") {
+      /* Accept auto-trade POC with or without passthrough — Deriv subscription
+         streams may not echo passthrough on every update. Only process when
+         we have an in-flight auto-trade so we don't accidentally capture
+         unrelated POC messages. */
+      const isAutoTrade = (msg.passthrough && msg.passthrough.auto_trade) || autoTradeInProgress;
+      if (isAutoTrade) {
+        const poc = msg.proposal_open_contract;
+        if (poc && poc.is_sold) {
+          const profit = parseFloat(poc.profit) || 0;
+          const won = profit > 0;
+          const src = (msg.passthrough && msg.passthrough.source) || "breakout";
+          const label = autoTradeSourceLabel(src);
+          addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
+          autoTradeInProgress = false;
+          /* Update the most recent PENDING entry in auto-trade history */
+          resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+        }
+        return;
       }
-      return;
     }
 
     /* ---- Balance stream: update auto-trade balance display in real-time ---- */
@@ -5046,6 +5054,15 @@ function connect() {
 
     /* Reset auto-trade state on disconnect */
     autoTradeInProgress = false;
+
+    /* Resolve any stuck PENDING entries — the contract subscription is lost */
+    let stuckPending;
+    while ((stuckPending = autoTradeHistory.find(e => e.result === "PENDING"))) {
+      stuckPending.result = "CANCELLED";
+      stuckPending.profit = 0;
+    }
+    renderAutoTradeHistory();
+    persistAutoTradeHistory();
 
     /* Nullify so connect() guard doesn't block reconnection */
     ws = null;
@@ -10115,11 +10132,10 @@ function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
 /** Resolve the most recent PENDING entry with profit and result. */
 function resolveAutoTradeHistoryEntry(profit, result) {
   const pending = autoTradeHistory.find(e => e.result === "PENDING");
-  if (pending) {
-    pending.profit = profit;
-    pending.result = result;
-  }
-  /* Update cumulative P/L */
+  if (!pending) return;  /* nothing to resolve */
+  pending.profit = profit;
+  pending.result = result;
+  /* Update cumulative P/L (only when we actually resolved an entry) */
   autoTradePL += profit;
   renderAutoTradeHistory();
   updateAutoTradePLUI();
@@ -10145,6 +10161,8 @@ function renderAutoTradeHistory() {
     let profitText = "⏳ Pending";
     if (e.result === "WIN") { profitClass = "win"; profitText = `+$${fmt(e.profit, 2)}`; }
     else if (e.result === "LOSS") { profitClass = "loss"; profitText = `−$${fmt(Math.abs(e.profit), 2)}`; }
+    else if (e.result === "ERROR") { profitClass = "error"; profitText = "⚠ Error"; }
+    else if (e.result === "CANCELLED") { profitClass = "cancelled"; profitText = "✖ Cancelled"; }
 
     li.innerHTML =
       `<span class="at-source">${srcLabel}</span>` +
