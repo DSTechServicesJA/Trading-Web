@@ -10429,15 +10429,22 @@ function executeAutoTrade(signal) {
     /* No cached or fallback data yet — try fetching from API before trading */
     addLog(`⏳ Fetching valid multipliers for ${symbol} before placing trade…`);
     fetchValidMultipliers(symbol).then(apiValid => {
-      if (apiValid && apiValid.length > 0 && !apiValid.includes(multiplier)) {
+      autoTradeInProgress = false;
+      if (!apiValid || apiValid.length === 0) {
+        addLog(`⚠ Could not fetch valid multipliers for ${symbol} — skipping trade`);
+        return;
+      }
+      if (!apiValid.includes(multiplier)) {
         const corrected = pickBestMultiplier(apiValid, multiplier);
         autoTradeMultiplier = corrected;
         if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
         saveSettings();
       }
       /* Re-invoke with the (now-cached) data */
-      autoTradeInProgress = false;
       executeAutoTrade(signal);
+    }).catch(err => {
+      autoTradeInProgress = false;
+      addLog(`⚠ Failed to fetch multipliers for ${symbol}: ${err.message || err}`);
     });
     /* Mark in-progress so the re-invocation guard works; return to wait for fetch */
     autoTradeInProgress = true;
