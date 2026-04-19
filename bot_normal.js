@@ -1460,8 +1460,7 @@ logSymbolChange("AUTO:active_symbols", CURRENT_SYMBOL, symbol);
     ws.addEventListener("message", handler);
 
     ws.send(JSON.stringify({
-      active_symbols: "brief",
-      product_type: "basic"
+      active_symbols: "brief"
     }));
   });
 }

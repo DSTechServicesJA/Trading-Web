@@ -869,7 +869,7 @@ function fetchValidMultipliers(sym) {
 
     ws.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "multipliers" }));
+      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD" }));
     } catch (err) {
       console.warn("contracts_for (multipliers) send failed:", err);
       ws.removeEventListener("message", handler);
