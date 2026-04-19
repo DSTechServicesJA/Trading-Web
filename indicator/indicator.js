@@ -5067,7 +5067,9 @@ function connect() {
         e.profit = 0;
       }
     }
+    recalcAutoTradePL();
     renderAutoTradeHistory();
+    updateAutoTradePLUI();
     persistAutoTradeHistory();
 
     /* Nullify so connect() guard doesn't block reconnection */
@@ -10118,6 +10120,18 @@ function executeAutoTrade(signal) {
 
 /* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
 
+/** Recompute cumulative P/L from actual trade history entries.
+ *  This is the source-of-truth — we never rely on an incrementally
+ *  accumulated value that can drift due to bugs or interruptions. */
+function recalcAutoTradePL() {
+  autoTradePL = autoTradeHistory.reduce((sum, e) => {
+    if ((e.result === "WIN" || e.result === "LOSS") && e.profit != null) {
+      return sum + e.profit;
+    }
+    return sum;
+  }, 0);
+}
+
 /** Add a new entry to the auto-trade history array and re-render. */
 function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
   const entry = {
@@ -10141,8 +10155,8 @@ function resolveAutoTradeHistoryEntry(profit, result) {
   if (!pending) return;  /* nothing to resolve */
   pending.profit = profit;
   pending.result = result;
-  /* Update cumulative P/L (only when we actually resolved an entry) */
-  autoTradePL += profit;
+  /* Recompute P/L from all entries (prevents incremental drift) */
+  recalcAutoTradePL();
   renderAutoTradeHistory();
   updateAutoTradePLUI();
   persistAutoTradeHistory();
@@ -10221,13 +10235,30 @@ function restoreAutoTradeHistory() {
       const parsed = JSON.parse(raw);
       autoTradeHistory = Array.isArray(parsed) ? parsed : [];
     }
-    const plRaw = localStorage.getItem(LS_PREFIX + "autoTradePL");
-    if (plRaw != null) {
-      const parsed = JSON.parse(plRaw);
-      autoTradePL = typeof parsed === "number" ? parsed : 0;
+
+    /* Clean up stale PENDING entries from previous sessions.
+       If the page was closed/crashed without a proper WS close, PENDING
+       entries may still be lingering. Mark them CANCELLED since the
+       contract subscription is lost and we can't track them anymore. */
+    let hadStale = false;
+    for (const e of autoTradeHistory) {
+      if (e.result === "PENDING") {
+        e.result = "CANCELLED";
+        e.profit = 0;
+        hadStale = true;
+      }
     }
+
+    /* Always recompute P/L from actual history entries (self-healing).
+       The stored autoTradePL value may have drifted due to bugs or
+       interrupted sessions — the history entries are the source of truth. */
+    recalcAutoTradePL();
+
     renderAutoTradeHistory();
     updateAutoTradePLUI();
+
+    /* Persist cleaned-up state if we fixed stale entries */
+    if (hadStale) persistAutoTradeHistory();
   } catch (e) { /* storage not available */ }
 }
 
