@@ -168,6 +168,9 @@ const STOCH_SMOOTH = 3;
 const STOCH_OVERSOLD = 20;
 const STOCH_OVERBOUGHT = 80;
 
+/* Auto-trade: minimum stake for Deriv contracts */
+const MIN_AUTO_TRADE_STAKE = 0.35;
+
 /* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
    larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
 const SCALP_RANGE_MINUTES       = 5;     /* shorter opening range for quick setups */
@@ -4910,7 +4913,10 @@ function connect() {
 
     /* ---- Auto-trade: handle proposal → buy → result ---- */
     if (msg.msg_type === "proposal" && msg.passthrough && msg.passthrough.auto_trade) {
-      if (!autoTradeInProgress) return;
+      if (!autoTradeInProgress) {
+        addLog("⚠ Auto-trade proposal received but trade was cancelled — ignoring");
+        return;
+      }
       const proposal = msg.proposal || {};
       addLog(`🤖 Auto-trade: buying contract — ask $${proposal.ask_price}`);
       ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true } }));
@@ -9856,7 +9862,7 @@ function executeAutoTrade() {
 
   const contractType = trade.dir === "BULL" ? "CALL" : "PUT";
   const symbol = getActiveSymbol();
-  const stake = Math.max(0.35, parseFloat(autoTradeStake) || 1);
+  const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
 
   autoTradeInProgress = true;
   addLog(`🤖 Auto-trade: placing ${contractType} on ${symbol} — stake $${fmt(stake, 2)}`);
@@ -12300,7 +12306,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeStake) {
     UI.autoTradeStake.addEventListener("input", () => {
       const v = parseFloat(UI.autoTradeStake.value);
-      autoTradeStake = (!isNaN(v) && v > 0) ? v : 1;
+      autoTradeStake = (!isNaN(v) && v >= MIN_AUTO_TRADE_STAKE) ? v : 1;
       saveSettings();
     });
   }
