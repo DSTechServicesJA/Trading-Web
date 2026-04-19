@@ -175,6 +175,10 @@ const AUTO_TRADE_MAX_CONSECUTIVE_ERRORS = 3; /* pause auto-trading after this ma
 const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
 const MAX_AUTO_TRADE_HISTORY = 100;
 
+/* ================= PER-SYMBOL MULTIPLIER CACHE (from contracts_for API) ================= */
+const symbolMultiplierCache = {};  /* { symbol: [50, 100, 150, ...] } */
+let sessionStartBalance = null;    /* balance when session started — for live P/L */
+
 /* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
    larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
 const SCALP_RANGE_MINUTES       = 5;     /* shorter opening range for quick setups */
@@ -656,6 +660,125 @@ function getSymbolSpecs(symbol) {
   /* ↑ commodity uses type:"forex" intentionally — same lot-size math applies;
        the SYMBOL_SPECS table already covers all known commodities with accurate specs */
   return { type: "synthetic" };
+}
+
+/**
+ * Fetch valid multiplier values for a symbol from the Deriv contracts_for API.
+ * Caches the result so we only call once per symbol per session.
+ * Returns a promise that resolves to an array of valid multiplier values (e.g. [20, 50, 100, 200]).
+ */
+function fetchValidMultipliers(sym) {
+  if (symbolMultiplierCache[sym]) return Promise.resolve(symbolMultiplierCache[sym]);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+
+    const handler = (evt) => {
+      const d = JSON.parse(evt.data);
+      if (d.msg_type !== "contracts_for") return;
+      /* Only handle the response for our symbol */
+      if (d.echo_req && d.echo_req.contracts_for !== sym) return;
+      ws.removeEventListener("message", handler);
+
+      if (d.error) {
+        console.warn(`contracts_for (multipliers) error for ${sym}:`, d.error.message);
+        done(null);
+        return;
+      }
+
+      const contracts = d.contracts_for?.available ?? [];
+      /* Find MULTUP / MULTDOWN contracts and extract multiplier_range */
+      const multContracts = contracts.filter(c =>
+        c.contract_type === "MULTUP" || c.contract_type === "MULTDOWN"
+      );
+
+      if (multContracts.length === 0) {
+        console.warn(`No multiplier contracts found for ${sym}`);
+        done(null);
+        return;
+      }
+
+      /* Build a sorted, deduplicated list of valid multipliers across all MULT contracts */
+      const validSet = new Set();
+      for (const c of multContracts) {
+        if (Array.isArray(c.multiplier_range)) {
+          c.multiplier_range.forEach(m => validSet.add(Number(m)));
+        }
+      }
+
+      const validMultipliers = Array.from(validSet).filter(m => m > 0).sort((a, b) => a - b);
+
+      if (validMultipliers.length === 0) {
+        console.warn(`No valid multipliers returned for ${sym}`);
+        done(null);
+        return;
+      }
+
+      symbolMultiplierCache[sym] = validMultipliers;
+      console.log(`📏 Valid multipliers for ${sym}:`, validMultipliers);
+      done(validMultipliers);
+    };
+
+    ws.addEventListener("message", handler);
+    try {
+      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "multipliers" }));
+    } catch (err) {
+      console.warn("contracts_for (multipliers) send failed:", err);
+      ws.removeEventListener("message", handler);
+      done(null);
+      return;
+    }
+
+    /* Timeout after 10 s so we don't hang forever */
+    setTimeout(() => {
+      ws.removeEventListener("message", handler);
+      done(null);
+    }, 10000);
+  });
+}
+
+/**
+ * Pick the best valid multiplier for a symbol.
+ * Prefers the current user-selected value if it's valid;
+ * otherwise picks the closest valid multiplier to the current value.
+ */
+function pickBestMultiplier(validMultipliers, currentValue) {
+  if (!validMultipliers || validMultipliers.length === 0) return currentValue;
+  /* If the current value is already valid, keep it */
+  if (validMultipliers.includes(currentValue)) return currentValue;
+  /* Find the closest valid multiplier */
+  let best = validMultipliers[0];
+  let bestDist = Math.abs(currentValue - best);
+  for (const m of validMultipliers) {
+    const dist = Math.abs(currentValue - m);
+    if (dist < bestDist) { best = m; bestDist = dist; }
+  }
+  return best;
+}
+
+/**
+ * Auto-update the multiplier when the symbol changes.
+ * Fetches valid multipliers from the Deriv API and adjusts the
+ * multiplier input to a valid value for the new symbol.
+ */
+function autoUpdateMultiplier(sym) {
+  fetchValidMultipliers(sym).then(validMultipliers => {
+    if (!validMultipliers || validMultipliers.length === 0) return;
+
+    const current = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
+    const best = pickBestMultiplier(validMultipliers, current);
+
+    if (best !== current) {
+      autoTradeMultiplier = best;
+      if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = best;
+      addLog(`🔧 Multiplier auto-adjusted to ×${best} for ${sym} (valid: ${validMultipliers.join(", ")})`);
+      saveSettings();
+    } else {
+      addLog(`✅ Multiplier ×${current} is valid for ${sym}`);
+    }
+  });
 }
 
 /**
@@ -4345,6 +4468,8 @@ function resetSession() {
   /* Reset auto-trade history */
   autoTradeHistory = [];
   autoTradePL = 0;
+  /* Reset session start balance so P/L recalculates from this point */
+  sessionStartBalance = autoTradeBalance;
   renderAutoTradeHistory();
   updateAutoTradePLUI();
 
@@ -4939,9 +5064,12 @@ function connect() {
       }
       /* Set initial balance and subscribe to live balance stream */
       autoTradeBalance = parseFloat(acct.balance) || null;
+      if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
       updateAutoTradeBalanceUI();
       updateAutoTradeBalanceVisibility();
       thisWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+      /* Fetch valid multipliers for the current symbol on connect */
+      autoUpdateMultiplier(symbol);
       addLog(`Subscribing to ${symbol} (${gran}s candles)`);
       subscribeCandles(thisWs, symbol, gran);
       return;
@@ -5057,7 +5185,10 @@ function connect() {
       const bal = msg.balance;
       if (bal && bal.balance != null) {
         autoTradeBalance = parseFloat(bal.balance);
+        /* Track session start balance for live P/L */
+        if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
         updateAutoTradeBalanceUI();
+        updateAutoTradePLUI();
       }
       return;
     }
@@ -10109,7 +10240,20 @@ function executeAutoTrade(signal) {
   const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
   const symbol = signal.symbol || getActiveSymbol();
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
-  const multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
+
+  /* Validate multiplier against cached valid values for this symbol.
+     If the current multiplier isn't valid, auto-correct it before trading. */
+  let multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
+  const cachedValid = symbolMultiplierCache[symbol];
+  if (cachedValid && cachedValid.length > 0 && !cachedValid.includes(multiplier)) {
+    const corrected = pickBestMultiplier(cachedValid, multiplier);
+    addLog(`⚠ Multiplier ×${multiplier} invalid for ${symbol} — corrected to ×${corrected}`);
+    multiplier = corrected;
+    autoTradeMultiplier = corrected;
+    if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
+    saveSettings();
+  }
+
   const label = autoTradeSourceLabel(signal.source);
 
   /* Build limit_order with SL and optional TP (distance from entry in USD) */
@@ -10239,11 +10383,17 @@ function updateAutoTradeBalanceUI() {
 /** Update the P/L display value. */
 function updateAutoTradePLUI() {
   if (UI.autoTradePLValue) {
-    const prefix = autoTradePL >= 0 ? "+$" : "−$";
-    UI.autoTradePLValue.textContent = `${prefix}${fmt(Math.abs(autoTradePL), 2)}`;
+    /* Use auto-trade history P/L if trades have occurred, otherwise compute
+       a live session P/L from balance changes so the value updates in real-time */
+    let displayPL = autoTradePL;
+    if (displayPL === 0 && sessionStartBalance != null && autoTradeBalance != null) {
+      displayPL = autoTradeBalance - sessionStartBalance;
+    }
+    const prefix = displayPL >= 0 ? "+$" : "−$";
+    UI.autoTradePLValue.textContent = `${prefix}${fmt(Math.abs(displayPL), 2)}`;
     UI.autoTradePLValue.style.color =
-      autoTradePL > 0 ? "var(--success)" :
-      autoTradePL < 0 ? "var(--danger)" : "";
+      displayPL > 0 ? "var(--success)" :
+      displayPL < 0 ? "var(--danger)" : "";
   }
 }
 
@@ -10251,7 +10401,8 @@ function updateAutoTradePLUI() {
 function updateAutoTradeBalanceVisibility() {
   if (!UI.autoTradeBalanceSection) return;
   const anyEnabled = autoTradeEnabled || autoTradeScalpEnabled || autoTradeStrategyEnabled;
-  UI.autoTradeBalanceSection.style.display = anyEnabled ? "" : "none";
+  /* Show balance section whenever authorized OR any auto-trade toggle is on */
+  UI.autoTradeBalanceSection.style.display = (authorized || anyEnabled) ? "" : "none";
 }
 
 /** Persist auto-trade history to localStorage. */
@@ -12709,7 +12860,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); applyRecommendedSettings(); debouncedReconnect(); });
+  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); applyRecommendedSettings(); autoUpdateMultiplier(UI.symbolSelect.value); debouncedReconnect(); });
   UI.granSelect.addEventListener("change",   () => { saveSettings(); updateRecommendedSettings(); debouncedReconnect(); });
 
   /* Recalculate trade when risk/reward inputs change */
