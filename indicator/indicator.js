@@ -1595,6 +1595,11 @@ function processNyOpenRangeCandle(idx) {
         );
         playPhaseAlert("TRADE");
         sendPhaseNotification("TRADE");
+
+        /* Auto-trade: place a Deriv multiplier contract for NY Open Range */
+        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir, entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        }
       }
     }
     return;
@@ -1738,6 +1743,11 @@ function detectLondonAsianSweep() {
           `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmt(aH, 4)} — bearish reversal`,
           "trade", 12000
         );
+
+        /* Auto-trade: place a Deriv multiplier contract for London Sweep SELL */
+        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir: "BEAR", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        }
       } else {
         sessionRangeTrade = null;
         addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
@@ -1774,6 +1784,11 @@ function detectLondonAsianSweep() {
           `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmt(aL, 4)} — bullish reversal`,
           "trade", 12000
         );
+
+        /* Auto-trade: place a Deriv multiplier contract for London Sweep BUY */
+        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir: "BULL", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        }
       } else {
         sessionRangeTrade = null;
         addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
@@ -9884,7 +9899,7 @@ function recordSignal(confirmPattern) {
   updateStatsUI();
 
   /* Auto-trade: place a Deriv contract when the toggle is enabled */
-  if (autoTradeEnabled && !autoTradeInProgress) {
+  if (autoTradeEnabled && !autoTradeInProgress && !_historicalProcessing) {
     executeAutoTrade({ dir: trade.dir, entry: trade.entry, sl: trade.sl, tp: trade.tp, symbol: trade.symbol || getActiveSymbol(), source: "breakout" });
   }
 }
