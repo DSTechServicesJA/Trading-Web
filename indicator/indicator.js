@@ -774,6 +774,14 @@ let minRRValue           = 1.5;
 let autoTradeEnabled         = false;  /* breakout-retest TRADE signals */
 let autoTradeScalpEnabled    = false;  /* live scalp signals */
 let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity sweep, etc.) */
+/* Per-strategy auto-trade sub-toggles (all default ON — gated behind master autoTradeStrategyEnabled) */
+let autoTradeLiquiditySweep  = true;
+let autoTradeStopLossHunt    = true;
+let autoTradeFailedPinBar    = true;
+let autoTradeFibScalp        = true;
+let autoTradePo3             = true;
+let autoTradeNYOpenRange     = true;
+let autoTradeSessionRange    = true;
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
@@ -1242,6 +1250,14 @@ function initUI() {
   UI.autoTradeStrategyToggle = document.getElementById("autoTradeStrategyToggle");
   UI.autoTradeScalpOppositeToggle   = document.getElementById("autoTradeScalpOppositeToggle");
   UI.autoTradeStrategyOppositeToggle = document.getElementById("autoTradeStrategyOppositeToggle");
+  /* Per-strategy auto-trade sub-toggles */
+  UI.autoTradeLiquiditySweepToggle = document.getElementById("autoTradeLiquiditySweepToggle");
+  UI.autoTradeStopLossHuntToggle   = document.getElementById("autoTradeStopLossHuntToggle");
+  UI.autoTradeFailedPinBarToggle   = document.getElementById("autoTradeFailedPinBarToggle");
+  UI.autoTradeFibScalpToggle       = document.getElementById("autoTradeFibScalpToggle");
+  UI.autoTradePo3Toggle            = document.getElementById("autoTradePo3Toggle");
+  UI.autoTradeNYOpenRangeToggle    = document.getElementById("autoTradeNYOpenRangeToggle");
+  UI.autoTradeSessionRangeToggle   = document.getElementById("autoTradeSessionRangeToggle");
   UI.autoTradeStake         = document.getElementById("autoTradeStake");
   UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
   UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
@@ -1913,8 +1929,8 @@ function processNyOpenRangeCandle(idx) {
         sendPhaseNotification("TRADE");
 
         /* Auto-trade: place a Deriv multiplier contract for NY Open Range */
-        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-          executeAutoTrade({ dir, entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        if (autoTradeStrategyEnabled && autoTradeNYOpenRange && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir, entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "nyOpenRange" });
         }
       }
     }
@@ -2061,8 +2077,8 @@ function detectLondonAsianSweep() {
         );
 
         /* Auto-trade: place a Deriv multiplier contract for London Sweep SELL */
-        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-          executeAutoTrade({ dir: "BEAR", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        if (autoTradeStrategyEnabled && autoTradeSessionRange && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir: "BEAR", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
         }
       } else {
         sessionRangeTrade = null;
@@ -2102,8 +2118,8 @@ function detectLondonAsianSweep() {
         );
 
         /* Auto-trade: place a Deriv multiplier contract for London Sweep BUY */
-        if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-          executeAutoTrade({ dir: "BULL", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy" });
+        if (autoTradeStrategyEnabled && autoTradeSessionRange && !autoTradeInProgress && !_historicalProcessing) {
+          executeAutoTrade({ dir: "BULL", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
         }
       } else {
         sessionRangeTrade = null;
@@ -3061,7 +3077,14 @@ function saveSettings() {
       autoTradeStake,
       autoTradeMultiplier,
       autoTradeScalpOpposite,
-      autoTradeStrategyOpposite
+      autoTradeStrategyOpposite,
+      autoTradeLiquiditySweep,
+      autoTradeStopLossHunt,
+      autoTradeFailedPinBar,
+      autoTradeFibScalp,
+      autoTradePo3,
+      autoTradeNYOpenRange,
+      autoTradeSessionRange
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -3281,6 +3304,21 @@ function restoreSettings() {
     if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
     if (UI.autoTradeScalpOppositeToggle) UI.autoTradeScalpOppositeToggle.checked = autoTradeScalpOpposite;
     if (UI.autoTradeStrategyOppositeToggle) UI.autoTradeStrategyOppositeToggle.checked = autoTradeStrategyOpposite;
+    /* Per-strategy auto-trade sub-toggles */
+    if (s.autoTradeLiquiditySweep != null) autoTradeLiquiditySweep = s.autoTradeLiquiditySweep;
+    if (s.autoTradeStopLossHunt != null)   autoTradeStopLossHunt   = s.autoTradeStopLossHunt;
+    if (s.autoTradeFailedPinBar != null)   autoTradeFailedPinBar   = s.autoTradeFailedPinBar;
+    if (s.autoTradeFibScalp != null)       autoTradeFibScalp       = s.autoTradeFibScalp;
+    if (s.autoTradePo3 != null)            autoTradePo3            = s.autoTradePo3;
+    if (s.autoTradeNYOpenRange != null)    autoTradeNYOpenRange    = s.autoTradeNYOpenRange;
+    if (s.autoTradeSessionRange != null)   autoTradeSessionRange   = s.autoTradeSessionRange;
+    if (UI.autoTradeLiquiditySweepToggle) UI.autoTradeLiquiditySweepToggle.checked = autoTradeLiquiditySweep;
+    if (UI.autoTradeStopLossHuntToggle)   UI.autoTradeStopLossHuntToggle.checked   = autoTradeStopLossHunt;
+    if (UI.autoTradeFailedPinBarToggle)   UI.autoTradeFailedPinBarToggle.checked   = autoTradeFailedPinBar;
+    if (UI.autoTradeFibScalpToggle)       UI.autoTradeFibScalpToggle.checked       = autoTradeFibScalp;
+    if (UI.autoTradePo3Toggle)            UI.autoTradePo3Toggle.checked            = autoTradePo3;
+    if (UI.autoTradeNYOpenRangeToggle)    UI.autoTradeNYOpenRangeToggle.checked    = autoTradeNYOpenRange;
+    if (UI.autoTradeSessionRangeToggle)   UI.autoTradeSessionRangeToggle.checked   = autoTradeSessionRange;
     /* Restore auto-trade history */
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
@@ -5449,24 +5487,24 @@ function connect() {
       }
       const proposal = msg.proposal || {};
       const src = msg.passthrough.source || "breakout";
-      const label = autoTradeSourceLabel(src);
+      const label = autoTradeSourceLabel(src, msg.passthrough.strategyName);
       addLog(`🤖 ${label} auto-trade: buying contract — ask $${proposal.ask_price}`);
       autoTradeConsecutiveErrors = 0;  /* successful proposal — reset error counter */
-      ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true, source: src } }));
+      ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null } }));
       return;
     }
 
     if (msg.msg_type === "buy" && msg.passthrough && msg.passthrough.auto_trade) {
       const b = msg.buy;
       const src = msg.passthrough.source || "breakout";
-      const label = autoTradeSourceLabel(src);
+      const label = autoTradeSourceLabel(src, msg.passthrough.strategyName);
       autoTradeContractId = b.contract_id;
       addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
       ws.send(JSON.stringify({
         proposal_open_contract: 1,
         contract_id: b.contract_id,
         subscribe: 1,
-        passthrough: { auto_trade: true, source: src }
+        passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null }
       }));
       /* Start timeout to detect hung contracts (multiplier contracts can stay open for a long time) */
       startAutoTradePendingTimeout();
@@ -5484,7 +5522,7 @@ function connect() {
           const profit = parseFloat(poc.profit) || 0;
           const won = profit > 0;
           const src = (msg.passthrough && msg.passthrough.source) || "breakout";
-          const label = autoTradeSourceLabel(src);
+          const label = autoTradeSourceLabel(src, msg.passthrough && msg.passthrough.strategyName);
           addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
           autoTradeInProgress = false;
           autoTradeContractId = null;
@@ -6461,8 +6499,8 @@ function processLiquiditySweep() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the liquidity sweep */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  if (autoTradeStrategyEnabled && autoTradeLiquiditySweep && !autoTradeInProgress && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "liquiditySweep" });
   }
 }
 
@@ -6674,8 +6712,8 @@ function processStopLossHunt() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the stop loss hunt */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  if (autoTradeStrategyEnabled && autoTradeStopLossHunt && !autoTradeInProgress && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "stopLossHunt" });
   }
 }
 
@@ -6884,8 +6922,8 @@ function processFailedPinBar() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the failed pin bar */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  if (autoTradeStrategyEnabled && autoTradeFailedPinBar && !autoTradeInProgress && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "failedPinBar" });
   }
 }
 
@@ -7165,8 +7203,8 @@ function processFibScalp() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for the fib scalp */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  if (autoTradeStrategyEnabled && autoTradeFibScalp && !autoTradeInProgress && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "fibScalp" });
   }
 }
 
@@ -7532,8 +7570,8 @@ function processPowerOf3() {
   renderStrategyAlerts();
 
   /* Auto-trade: place a Deriv multiplier contract for PO3 */
-  if (autoTradeStrategyEnabled && !autoTradeInProgress && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy" });
+  if (autoTradeStrategyEnabled && autoTradePo3 && !autoTradeInProgress && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "po3" });
   }
 }
 
@@ -10541,9 +10579,20 @@ function recordSignal(confirmPattern) {
  * Uses MULTUP/MULTDOWN contracts with limit_order.stop_loss and
  * limit_order.take_profit expressed as absolute distance from entry.
  */
-function autoTradeSourceLabel(source) {
+function autoTradeSourceLabel(source, strategyName) {
   if (source === "scalp") return "⚡ Scalp";
-  if (source === "strategy") return "📊 Strategy";
+  if (source === "strategy") {
+    const STRAT_LABELS = {
+      liquiditySweep: "🌊 Liquidity Sweep",
+      stopLossHunt:   "🎯 Stop Loss Hunt",
+      failedPinBar:   "📌 Failed Pin Bar",
+      fibScalp:       "📐 Fib Golden Zone",
+      po3:            "⚡ Power of 3",
+      nyOpenRange:    "🕤 NY Open Range",
+      sessionRange:   "🌍 Session Range"
+    };
+    return STRAT_LABELS[strategyName] || "📊 Strategy";
+  }
   return "📈 Breakout";
 }
 
@@ -10631,7 +10680,7 @@ function executeAutoTrade(signal) {
     return;
   }
 
-  const label = autoTradeSourceLabel(signal.source);
+  const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
   /* Build limit_order with SL and optional TP (distance from entry in USD) */
   const limitOrder = {};
@@ -10657,7 +10706,7 @@ function executeAutoTrade(signal) {
   addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}${oppositeTag}`);
 
   /* Record pending trade in history */
-  addAutoTradeHistoryEntry({ source: signal.source, type: contractType, symbol, profit: null, result: "PENDING" });
+  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, profit: null, result: "PENDING" });
 
   const payload = {
     proposal: 1,
@@ -10667,7 +10716,7 @@ function executeAutoTrade(signal) {
     currency: "USD",
     symbol,
     multiplier,
-    passthrough: { auto_trade: true, source: signal.source || "breakout" }
+    passthrough: { auto_trade: true, source: signal.source || "breakout", strategyName: signal.strategyName || null }
   };
   if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
 
@@ -10774,7 +10823,7 @@ function renderAutoTradeHistory() {
   UI.autoTradeHistoryEmpty.style.display = "none";
   for (const e of autoTradeHistory) {
     const li = document.createElement("li");
-    const srcLabel = autoTradeSourceLabel(e.source);
+    const srcLabel = autoTradeSourceLabel(e.source, e.strategyName);
     const isBull = e.type === "MULTUP";
     const timeStr = new Date(e.time).toLocaleTimeString();
 
@@ -11730,11 +11779,12 @@ function drawChart() {
     }
   }
 
-  /* ---- Custom Strategy Markers on Chart (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) ---- */
+  /* ---- Custom Strategy Markers on Chart (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3) ---- */
   const customStratHistories = [
     { history: liquiditySweepHistory, enabled: liquiditySweepEnabled, emoji: "🌊", color: "#3b82f6" },
     { history: stopLossHuntHistory,   enabled: stopLossHuntEnabled,   emoji: "🎯", color: "#f59e0b" },
     { history: failedPinBarHistory,   enabled: failedPinBarEnabled,   emoji: "📌", color: "#a855f7" },
+    { history: fibScalpHistory,       enabled: fibScalpEnabled,       emoji: "📐", color: "#10b981" },
     { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" }
   ];
   for (const strat of customStratHistories) {
@@ -13368,6 +13418,35 @@ document.addEventListener("DOMContentLoaded", () => {
       addLog(`🔄 Strategy opposite mode: ${autoTradeStrategyOpposite ? "ON — signals will be reversed" : "OFF"}`);
       saveSettings();
     });
+  }
+  /* Per-strategy auto-trade sub-toggles */
+  const strategySubToggles = [
+    { ref: "autoTradeLiquiditySweepToggle", varName: "autoTradeLiquiditySweep", label: "🌊 Liquidity Sweep" },
+    { ref: "autoTradeStopLossHuntToggle",   varName: "autoTradeStopLossHunt",   label: "🎯 Stop Loss Hunt" },
+    { ref: "autoTradeFailedPinBarToggle",   varName: "autoTradeFailedPinBar",   label: "📌 Failed Pin Bar" },
+    { ref: "autoTradeFibScalpToggle",       varName: "autoTradeFibScalp",       label: "📐 Fib Golden Zone" },
+    { ref: "autoTradePo3Toggle",            varName: "autoTradePo3",            label: "⚡ Power of 3" },
+    { ref: "autoTradeNYOpenRangeToggle",    varName: "autoTradeNYOpenRange",    label: "🕤 NY Open Range" },
+    { ref: "autoTradeSessionRangeToggle",   varName: "autoTradeSessionRange",   label: "🌍 Session Range" }
+  ];
+  for (const t of strategySubToggles) {
+    if (UI[t.ref]) {
+      UI[t.ref].addEventListener("change", () => {
+        /* Dynamic assignment via eval-free pattern: use a lookup object */
+        const checked = UI[t.ref].checked;
+        switch (t.varName) {
+          case "autoTradeLiquiditySweep": autoTradeLiquiditySweep = checked; break;
+          case "autoTradeStopLossHunt":   autoTradeStopLossHunt   = checked; break;
+          case "autoTradeFailedPinBar":   autoTradeFailedPinBar   = checked; break;
+          case "autoTradeFibScalp":       autoTradeFibScalp       = checked; break;
+          case "autoTradePo3":            autoTradePo3            = checked; break;
+          case "autoTradeNYOpenRange":    autoTradeNYOpenRange    = checked; break;
+          case "autoTradeSessionRange":   autoTradeSessionRange   = checked; break;
+        }
+        addLog(`🤖 ${t.label} auto-trade: ${checked ? "ON" : "OFF"}`);
+        saveSettings();
+      });
+    }
   }
   if (UI.autoTradeStake) {
     UI.autoTradeStake.addEventListener("input", () => {
