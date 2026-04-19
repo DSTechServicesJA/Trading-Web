@@ -5410,7 +5410,7 @@ function connect() {
       /* Re-subscribe to an in-flight contract that survived a reconnect */
       if (autoTradePendingContractId) {
         addLog(`🔄 Re-subscribing to contract ${autoTradePendingContractId} after reconnect…`);
-        autoTradeContractId = autoTradePendingContractId;
+        autoTradeContractId = String(autoTradePendingContractId);
         autoTradeInProgress = true;
         autoTradePendingContractId = null;
         thisWs.send(JSON.stringify({
@@ -5498,7 +5498,10 @@ function connect() {
       const b = msg.buy;
       const src = msg.passthrough.source || "breakout";
       const label = autoTradeSourceLabel(src, msg.passthrough.strategyName);
-      autoTradeContractId = b.contract_id;
+      /* Store contract_id as String — Deriv API may return it as number in
+         buy response but as string in POC subscription updates.  Using String
+         ensures the === comparison in the POC handler always matches. */
+      autoTradeContractId = String(b.contract_id);
       addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
       ws.send(JSON.stringify({
         proposal_open_contract: 1,
@@ -5513,12 +5516,19 @@ function connect() {
 
     if (msg.msg_type === "proposal_open_contract") {
       /* Accept auto-trade POC with passthrough OR matching contract_id.
-         Deriv subscription streams may not echo passthrough on every update. */
+         Deriv subscription streams may not echo passthrough on every update.
+         Compare as strings to avoid number/string type mismatch — the Deriv
+         API may return contract_id as a number in some messages and as a
+         string in subscription stream updates. */
       const poc = msg.proposal_open_contract;
       const hasPassthrough = msg.passthrough && msg.passthrough.auto_trade;
-      const matchesContract = autoTradeContractId && poc && poc.contract_id === autoTradeContractId;
+      const matchesContract = autoTradeContractId && poc &&
+        String(poc.contract_id) === String(autoTradeContractId);
       if (hasPassthrough || matchesContract) {
-        if (poc && poc.is_sold) {
+        /* Detect sold/closed: check is_sold flag (0/1) AND status field
+           ("sold") — multiplier contracts may use either or both. */
+        const isSold = (poc && poc.is_sold) || (poc && poc.status === "sold");
+        if (isSold) {
           const profit = parseFloat(poc.profit) || 0;
           const won = profit > 0;
           const src = (msg.passthrough && msg.passthrough.source) || "breakout";
@@ -5530,6 +5540,11 @@ function connect() {
           clearAutoTradePendingTimeout();
           /* Update the most recent PENDING entry in auto-trade history */
           resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+          /* Request a fresh balance in case the balance subscription missed
+             the update (e.g. brief disconnect during contract settlement). */
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+          }
         }
         return;
       }
@@ -10783,10 +10798,11 @@ function recalcAutoTradePL() {
 }
 
 /** Add a new entry to the auto-trade history array and re-render. */
-function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
+function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, result }) {
   const entry = {
     time: Date.now(),
     source: source || "breakout",
+    strategyName: strategyName || null,
     type,
     symbol: symbol || "--",
     profit: profit != null ? profit : null,
