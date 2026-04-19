@@ -5410,7 +5410,7 @@ function connect() {
       /* Re-subscribe to an in-flight contract that survived a reconnect */
       if (autoTradePendingContractId) {
         addLog(`🔄 Re-subscribing to contract ${autoTradePendingContractId} after reconnect…`);
-        autoTradeContractId = String(autoTradePendingContractId);
+        autoTradeContractId = autoTradePendingContractId;
         autoTradeInProgress = true;
         autoTradePendingContractId = null;
         thisWs.send(JSON.stringify({
