@@ -54,6 +54,8 @@
        profits, max-candle timeout — for 1min/5min chart trading)
      - Fib Golden Zone Scalp strategy (1min micro-trend → break of
        structure → 0.5–0.618 retracement entry → swing TP)
+     - Power of 3 (ICT) strategy (1H open → manipulation sweep →
+       MSS with displacement/FVG → entry on retrace into FVG)
    ========================================================= */
 
 "use strict";
@@ -839,6 +841,35 @@ const FIB_SCALP_TREND_SWINGS = 3;        /* min swing points to confirm micro-tr
 const FIB_SCALP_MAX_CANDLES = 15;        /* timeout: close trade monitoring after N candles */
 let lastFibScalpIdx = -999;
 
+/* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
+/**
+ * Power of 3 (PO3) strategy – Accumulation → Manipulation → Expansion.
+ *
+ * Concept (ICT methodology):
+ *   1. Mark the current 1-hour candle open price.
+ *   2. Use the daily EMA trend (EMA 21 vs EMA 8) to define the day's bias:
+ *      - Bullish day → look for BUY below the 1H open.
+ *      - Bearish day → look for SELL above the 1H open.
+ *   3. Accumulation: price consolidates near the 1H open.
+ *   4. Manipulation: a 15-minute sell-side sweep below the 1H open (bullish)
+ *      or a buy-side sweep above the 1H open (bearish).
+ *   5. Expansion: a 5-minute market structure shift (MSS) with displacement
+ *      (a strong body candle that leaves a Fair Value Gap – FVG).
+ *   6. Entry: when price returns into the FVG.
+ *   7. SL: below the manipulation low (bullish) / above the manipulation high (bearish).
+ *   8. TP1: 1H candle high (bullish) / 1H candle low (bearish) + external liquidity.
+ *   9. Partial at 1–2R, let the rest run.
+ */
+let po3Enabled = false;              /* master toggle */
+let po3History = [];                 /* alert history */
+const PO3_MAX_HISTORY = 30;
+const PO3_COOLDOWN = 5;             /* min candles between alerts */
+const PO3_MAX_CANDLES = 30;         /* timeout: close trade monitoring after N candles */
+const PO3_SWEEP_LOOKBACK = 6;       /* candles to look back for manipulation sweep */
+const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
+const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
+let lastPo3Idx = -999;
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -1014,6 +1045,11 @@ function initUI() {
   UI.fibScalpToggle        = document.getElementById("fibScalpToggle");
   UI.fibScalpAlertList     = document.getElementById("fibScalpAlertList");
   UI.fibScalpCount         = document.getElementById("fibScalpCount");
+
+  /* Strategy 5: Power of 3 (ICT) */
+  UI.po3Toggle             = document.getElementById("po3Toggle");
+  UI.po3AlertList          = document.getElementById("po3AlertList");
+  UI.po3Count              = document.getElementById("po3Count");
 
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
@@ -2013,6 +2049,7 @@ function buildTelegramCaption() {
   if (stopLossHuntEnabled) filters.push("Stop Loss Hunt");
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
+  if (po3Enabled) filters.push("Power of 3");
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -2627,6 +2664,7 @@ function saveSettings() {
       stopLossHuntEnabled,
       failedPinBarEnabled,
       fibScalpEnabled,
+      po3Enabled,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
@@ -2798,6 +2836,10 @@ function restoreSettings() {
     /* Strategy 4: Fib Golden Zone Scalp */
     if (s.fibScalpEnabled != null) fibScalpEnabled = s.fibScalpEnabled;
     if (UI.fibScalpToggle) UI.fibScalpToggle.checked = fibScalpEnabled;
+
+    /* Strategy 5: Power of 3 (ICT) */
+    if (s.po3Enabled != null) po3Enabled = s.po3Enabled;
+    if (UI.po3Toggle) UI.po3Toggle.checked = po3Enabled;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -5474,6 +5516,7 @@ function revertAllSettings() {
   stopLossHuntEnabled   = false;
   failedPinBarEnabled   = false;
   fibScalpEnabled       = false;
+  po3Enabled            = false;
 
   /* Advanced parameter defaults */
   RANGE_MINUTES           = 15;
@@ -5512,6 +5555,7 @@ function revertAllSettings() {
   if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
   if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
+  if (UI.po3Toggle)              UI.po3Toggle.checked              = po3Enabled;
 
   /* Profit-Direction UI sync */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
@@ -6408,6 +6452,358 @@ function monitorFibScalpOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
+/**
+ * Detect a Power of 3 (ICT) setup.
+ *
+ * Steps:
+ *   1. Determine daily bias using EMA 8/21 (or EMA 100 for longer trend):
+ *      - Bullish: EMA 8 > EMA 21 → look for buys below the 1H open.
+ *      - Bearish: EMA 8 < EMA 21 → look for sells above the 1H open.
+ *   2. Compute the 1-hour opening price (the open of the current hourly candle
+ *      based on epoch timestamps).
+ *   3. Manipulation phase: detect a sell-side liquidity sweep — price sweeps
+ *      below the 1H open by at least 0.3× ATR (bullish), or a buy-side sweep
+ *      above the 1H open (bearish) within the last PO3_SWEEP_LOOKBACK candles.
+ *   4. Market Structure Shift (MSS): after the sweep, a displacement candle
+ *      (body ≥ PO3_MSS_BODY_PCT of range, and range ≥ 0.5× ATR) closes back
+ *      above the 1H open (bullish) or below (bearish). This candle should
+ *      leave a Fair Value Gap (FVG) with the candle two bars before.
+ *   5. Entry: price retraces into the FVG (between the prior candle's close
+ *      and the displacement candle's open, i.e. the gap zone).
+ *   6. SL: below the manipulation low (bullish) / above the manipulation high (bearish).
+ *   7. TP: the 1H candle high (bullish) / 1H candle low (bearish) + external liquidity.
+ *
+ * Returns null or { dir, entry, sl, tp, rr, oneHourOpen, sweepPrice, fvgHigh,
+ *                    fvgLow, candleIdx, epoch, symbol, result, type }
+ */
+function detectPowerOf3() {
+  if (!po3Enabled) return null;
+
+  /* One-at-a-time: skip detection while any signal is still PENDING */
+  if (po3History.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < 20) return null;
+
+  const idx = len - 1;
+  if (idx - lastPo3Idx < PO3_COOLDOWN) return null;
+
+  const c = candles[idx];
+
+  /* Require sufficient indicator data */
+  if (emaFast.length <= idx || emaSlow.length <= idx) return null;
+  if (atrValue <= 0) return null;
+
+  /* --- Step 1: Determine daily bias from EMA 8/21 alignment --- */
+  const emaF = emaFast[idx];
+  const emaS = emaSlow[idx];
+  /* Use EMA 100 (HTF proxy) as additional trend confirmation if available */
+  const emaH = emaHTF.length > idx ? emaHTF[idx] : null;
+  let dailyBias = null;
+
+  if (emaF > emaS) dailyBias = "BULL";
+  else if (emaF < emaS) dailyBias = "BEAR";
+
+  /* Optional: strengthen bias with HTF trend — if HTF disagrees, skip */
+  if (emaH != null) {
+    if (dailyBias === "BULL" && c.close < emaH) return null; /* price below EMA100 — bias conflict */
+    if (dailyBias === "BEAR" && c.close > emaH) return null;
+  }
+
+  if (!dailyBias) return null;
+
+  /* --- Step 2: Compute the 1-hour opening price --- */
+  /* Find the candle that started the current 1-hour block.
+     We compute the start-of-hour epoch for the current candle, then walk
+     back to find the first candle at or after that epoch. */
+  const currentEpoch = c.epoch;
+  const hourStart = currentEpoch - (currentEpoch % 3600);  /* floor to the start of the hour */
+
+  let oneHourOpenPrice = null;
+  let oneHourHighPrice = -Infinity;
+  let oneHourLowPrice  = Infinity;
+  let oneHourOpenIdx   = -1;
+
+  for (let i = 0; i < len; i++) {
+    if (candles[i].epoch >= hourStart) {
+      oneHourOpenPrice = candles[i].open;
+      oneHourOpenIdx = i;
+      break;
+    }
+  }
+  if (oneHourOpenPrice == null) return null;
+
+  /* Compute the 1H candle high and low for the current hour */
+  for (let i = oneHourOpenIdx; i < len; i++) {
+    if (candles[i].high > oneHourHighPrice) oneHourHighPrice = candles[i].high;
+    if (candles[i].low < oneHourLowPrice)   oneHourLowPrice = candles[i].low;
+  }
+
+  /* Ensure we have enough candles within this hour for the phases */
+  if (idx - oneHourOpenIdx < 3) return null;
+
+  /* --- Step 3: Manipulation phase — liquidity sweep --- */
+  /* Bullish: look for a candle that swept below the 1H open then reversed.
+     Bearish: look for a candle that swept above the 1H open then reversed. */
+  let sweepCandle = null;
+  let sweepIdx = -1;
+  let sweepPrice = null;
+  const sweepStart = Math.max(oneHourOpenIdx + 1, idx - PO3_SWEEP_LOOKBACK);
+
+  if (dailyBias === "BULL") {
+    /* Sell-side sweep: candle low goes below 1H open by at least PO3_FVG_MIN_ATR × ATR */
+    for (let i = sweepStart; i < idx; i++) {
+      if (candles[i].low < oneHourOpenPrice - atrValue * PO3_FVG_MIN_ATR) {
+        /* Verify it's a sweep (wick below, close can be anywhere) */
+        if (!sweepCandle || candles[i].low < sweepCandle.low) {
+          sweepCandle = candles[i];
+          sweepIdx = i;
+          sweepPrice = candles[i].low;
+        }
+      }
+    }
+  } else {
+    /* Buy-side sweep: candle high goes above 1H open */
+    for (let i = sweepStart; i < idx; i++) {
+      if (candles[i].high > oneHourOpenPrice + atrValue * PO3_FVG_MIN_ATR) {
+        if (!sweepCandle || candles[i].high > sweepCandle.high) {
+          sweepCandle = candles[i];
+          sweepIdx = i;
+          sweepPrice = candles[i].high;
+        }
+      }
+    }
+  }
+
+  if (!sweepCandle) return null;  /* No manipulation detected */
+
+  /* --- Step 4: Market Structure Shift (MSS) with displacement after the sweep --- */
+  /* Look for a displacement candle AFTER the sweep that shifts structure back
+     in the direction of the daily bias. */
+  let mssCandle = null;
+  let mssIdx = -1;
+  let fvgHigh = null;
+  let fvgLow  = null;
+
+  for (let i = sweepIdx + 1; i <= idx; i++) {
+    const mc = candles[i];
+    const body = Math.abs(mc.close - mc.open);
+    const range = mc.high - mc.low;
+
+    /* Displacement: strong body candle (body ≥ PO3_MSS_BODY_PCT of range, range ≥ 0.5 ATR) */
+    if (range < atrValue * 0.5) continue;
+    if (body < range * PO3_MSS_BODY_PCT) continue;
+
+    if (dailyBias === "BULL") {
+      /* Bullish MSS: strong bullish candle that closes above 1H open */
+      if (mc.close <= mc.open) continue;  /* must be bullish candle */
+      if (mc.close <= oneHourOpenPrice) continue;  /* must reclaim 1H open */
+
+      /* Check for Fair Value Gap (FVG):
+         A bullish FVG exists when candle[i].low > candle[i-2].high
+         (there's a gap between the body of 2 candles ago and current) */
+      if (i >= 2) {
+        const twoBack = candles[i - 2];
+        if (mc.low > twoBack.high) {
+          /* True FVG — gap between candle[i-2] high and candle[i] low */
+          fvgHigh = mc.low;
+          fvgLow  = twoBack.high;
+          mssCandle = mc;
+          mssIdx = i;
+          break;
+        }
+        /* Relaxed FVG: use the displacement candle open as upper bound */
+        if (mc.open > twoBack.high) {
+          fvgHigh = mc.open;
+          fvgLow  = twoBack.high;
+          mssCandle = mc;
+          mssIdx = i;
+          break;
+        }
+      }
+    } else {
+      /* Bearish MSS: strong bearish candle that closes below 1H open */
+      if (mc.close >= mc.open) continue;  /* must be bearish candle */
+      if (mc.close >= oneHourOpenPrice) continue;  /* must break below 1H open */
+
+      /* Bearish FVG: candle[i].high < candle[i-2].low */
+      if (i >= 2) {
+        const twoBack = candles[i - 2];
+        if (mc.high < twoBack.low) {
+          fvgLow  = mc.high;
+          fvgHigh = twoBack.low;
+          mssCandle = mc;
+          mssIdx = i;
+          break;
+        }
+        /* Relaxed FVG */
+        if (mc.open < twoBack.low) {
+          fvgLow  = mc.open;
+          fvgHigh = twoBack.low;
+          mssCandle = mc;
+          mssIdx = i;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!mssCandle || fvgHigh == null || fvgLow == null) return null;
+
+  /* Ensure FVG has meaningful size */
+  const fvgSize = Math.abs(fvgHigh - fvgLow);
+  if (fvgSize < atrValue * PO3_FVG_MIN_ATR * 0.5) return null;
+
+  /* --- Step 5: Entry — price returns into the FVG --- */
+  /* Check if the current candle (or one since MSS) has retraced into the FVG */
+  let entryFound = false;
+  const fvgTop = Math.max(fvgHigh, fvgLow);
+  const fvgBottom = Math.min(fvgHigh, fvgLow);
+
+  for (let i = mssIdx + 1; i <= idx; i++) {
+    const ec = candles[i];
+    if (ec.low <= fvgTop && ec.high >= fvgBottom) {
+      entryFound = true;
+      break;
+    }
+  }
+
+  /* Also check if current candle is in the FVG */
+  if (c.close >= fvgBottom && c.close <= fvgTop) entryFound = true;
+  if (c.low <= fvgTop && c.high >= fvgBottom) entryFound = true;
+
+  if (!entryFound) return null;
+
+  /* --- Step 6: Compute entry / SL / TP --- */
+  /* Entry at the midpoint of the FVG (or current close if inside FVG) */
+  const fvgMid = (fvgTop + fvgBottom) / 2;
+  const entry = (c.close >= fvgBottom && c.close <= fvgTop)
+              ? c.close
+              : fvgMid;
+
+  let sl, tp;
+  if (dailyBias === "BULL") {
+    /* SL below the manipulation low with small ATR buffer */
+    sl = sweepPrice - atrValue * 0.15;
+    /* TP at the 1H high or above — external liquidity */
+    tp = oneHourHighPrice;
+    /* If 1H high is too close, extend TP by 1× risk */
+    const risk = Math.abs(entry - sl);
+    if (tp <= entry + risk * 0.5) tp = entry + risk * 2;
+  } else {
+    /* SL above the manipulation high */
+    sl = sweepPrice + atrValue * 0.15;
+    /* TP at the 1H low — external liquidity */
+    tp = oneHourLowPrice;
+    const risk = Math.abs(sl - entry);
+    if (tp >= entry - risk * 0.5) tp = entry - risk * 2;
+  }
+
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  const rr = risk > 0 ? reward / risk : 0;
+
+  /* Reject if R:R is below 1.0 */
+  if (rr < 1.0) return null;
+
+  return {
+    dir: dailyBias,
+    entry, sl, tp, rr,
+    oneHourOpen: oneHourOpenPrice,
+    sweepPrice,
+    fvgHigh: fvgTop,
+    fvgLow: fvgBottom,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "power_of_3"
+  };
+}
+
+/**
+ * Run the Power of 3 scanner and handle alerting.
+ */
+function processPowerOf3() {
+  const signal = detectPowerOf3();
+  if (!signal) return;
+
+  lastPo3Idx = signal.candleIdx;
+
+  signal._stratOutcomeSent = false;
+  po3History.unshift(signal);
+  if (po3History.length > PO3_MAX_HISTORY) po3History.pop();
+
+  /* Audio alert */
+  playStrategyAlert(signal.dir);
+
+  /* Log */
+  const symbol = getActiveSymbol() || "--";
+  addLog(`⚡ PO3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | 1H Open ${fmt(signal.oneHourOpen, 4)} | Sweep ${fmt(signal.sweepPrice, 4)} | FVG [${fmt(signal.fvgLow, 4)}–${fmt(signal.fvgHigh, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `Power of 3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmt(signal.entry, 4)} | 1H Open: ${fmt(signal.oneHourOpen, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  /* Browser notification */
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `⚡ ${signal.dir} Power of 3 — ${symbol} @ ${fmt(signal.entry, 4)}\n1H Open: ${fmt(signal.oneHourOpen, 4)} | Sweep: ${fmt(signal.sweepPrice, 4)}\nFVG: ${fmt(signal.fvgLow, 4)}–${fmt(signal.fvgHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    new Notification("IT Guru: Power of 3 Signal!", { body, icon: NOTIF_ICON });
+  }
+
+  /* Telegram alert */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+}
+
+/**
+ * Monitor pending Power of 3 signals for SL/TP outcome.
+ */
+function monitorPo3Outcomes(candle) {
+  if (!po3Enabled) return;
+  let changed = false;
+  for (const s of po3History) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    /* Timeout after PO3_MAX_CANDLES */
+    if (elapsed >= PO3_MAX_CANDLES) {
+      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
+      s.result = inProfit ? "WIN" : "LOSS";
+      addLog(`⚡ PO3 ${s.result} (timeout ${PO3_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+
+    /* Check SL / TP */
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    /* Send Telegram outcome for each newly resolved signal */
+    for (const s of po3History) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    /* Reset cooldown so scanner immediately looks for the next trade */
+    lastPo3Idx = -999;
+    addLog("⚡ PO3 signal resolved — scanning for next trade…");
+  }
+}
+
 /* ================= SHARED STRATEGY HELPERS ================= */
 /**
  * Audio alert for the 3 custom strategies (triple beep).
@@ -6443,6 +6839,8 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.failedPinBarAlertList, UI.failedPinBarCount, failedPinBarHistory, "📌", "Failed Pin Bar");
   /* Fib Golden Zone Scalp */
   _renderAlertList(UI.fibScalpAlertList, UI.fibScalpCount, fibScalpHistory, "📐", "Fib Golden Zone");
+  /* Power of 3 (ICT) */
+  _renderAlertList(UI.po3AlertList, UI.po3Count, po3History, "⚡", "Power of 3");
 }
 
 function _renderAlertList(listEl, countEl, history, emoji, label) {
@@ -6477,6 +6875,7 @@ function processCustomStrategies() {
   processStopLossHunt();
   processFailedPinBar();
   processFibScalp();
+  processPowerOf3();
 }
 
 /**
@@ -6487,6 +6886,7 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorStopLossHuntOutcomes(candle);
   monitorFailedPinBarOutcomes(candle);
   monitorFibScalpOutcomes(candle);
+  monitorPo3Outcomes(candle);
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -7147,7 +7547,7 @@ async function sendStrategyOutcomeTelegram(signal) {
 
     /* Win/loss tally across all 3 strategy histories */
     let totalW = 0, totalL = 0;
-    for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory]) {
+    for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, po3History]) {
       for (const s of h) {
         if (s.result === "WIN") totalW++;
         else if (s.result === "LOSS") totalL++;
@@ -10199,7 +10599,8 @@ function drawChart() {
   const customStratHistories = [
     { history: liquiditySweepHistory, enabled: liquiditySweepEnabled, emoji: "🌊", color: "#3b82f6" },
     { history: stopLossHuntHistory,   enabled: stopLossHuntEnabled,   emoji: "🎯", color: "#f59e0b" },
-    { history: failedPinBarHistory,   enabled: failedPinBarEnabled,   emoji: "📌", color: "#a855f7" }
+    { history: failedPinBarHistory,   enabled: failedPinBarEnabled,   emoji: "📌", color: "#a855f7" },
+    { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -10274,6 +10675,59 @@ function drawChart() {
         ctx.fillStyle = "#fff";
         ctx.textAlign = "center";
         ctx.fillText(rText, rx + rw / 2, ry + 10);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  /* ---- Power of 3: FVG zone + 1H Open line on Chart ---- */
+  if (po3Enabled && po3History.length > 0) {
+    for (const s of po3History) {
+      if (s.candleIdx < 0 || s.candleIdx >= candles.length) continue;
+      if (s.fvgHigh == null || s.fvgLow == null) continue;
+
+      const sx = xOf(s.candleIdx);
+      const fvgTopY    = yOf(s.fvgHigh);
+      const fvgBottomY = yOf(s.fvgLow);
+
+      ctx.save();
+
+      /* FVG zone (shaded rectangle) */
+      const fvgStartX = Math.max(marginLeft, sx - candleW * 5);
+      const fvgEndX   = Math.min(W - marginRight, sx + candleW * 5);
+      ctx.fillStyle = s.dir === "BULL"
+        ? "rgba(6,182,212,0.12)"   /* cyan-ish for bullish FVG */
+        : "rgba(244,114,182,0.12)"; /* pink-ish for bearish FVG */
+      ctx.fillRect(fvgStartX, fvgTopY, fvgEndX - fvgStartX, fvgBottomY - fvgTopY);
+
+      /* FVG zone border */
+      ctx.strokeStyle = s.dir === "BULL" ? "#06b6d4" : "#f472b6";
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(fvgStartX, fvgTopY, fvgEndX - fvgStartX, fvgBottomY - fvgTopY);
+      ctx.setLineDash([]);
+
+      /* FVG label */
+      ctx.font = "bold 8px Arial";
+      ctx.fillStyle = s.dir === "BULL" ? "#06b6d4" : "#f472b6";
+      ctx.textAlign = "left";
+      ctx.fillText("FVG", fvgStartX + 2, fvgTopY - 2);
+
+      /* 1H Open level (dashed horizontal line spanning chart) */
+      if (s.oneHourOpen != null) {
+        const ohY = yOf(s.oneHourOpen);
+        ctx.strokeStyle = "rgba(251,191,36,0.5)"; /* amber */
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(fvgStartX, ohY);
+        ctx.lineTo(fvgEndX, ohY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "bold 7px Arial";
+        ctx.fillStyle = "rgba(251,191,36,0.8)";
+        ctx.fillText("1H Open", fvgStartX + 2, ohY - 3);
       }
 
       ctx.restore();
@@ -12030,6 +12484,21 @@ document.addEventListener("DOMContentLoaded", () => {
         showToast("Fib Golden Zone Enabled", "Scanning for micro-trend → break of structure → golden zone retracement entries.", "info", 5000);
       } else {
         addLog("📐 Fib Golden Zone Scalp strategy disabled");
+      }
+      drawChart();
+    });
+  }
+
+  /* Strategy 5: Power of 3 (ICT) listener */
+  if (UI.po3Toggle) {
+    UI.po3Toggle.addEventListener("change", () => {
+      po3Enabled = UI.po3Toggle.checked;
+      saveSettings();
+      if (po3Enabled) {
+        addLog("⚡ Power of 3 strategy enabled — scanning for Accumulation → Manipulation → Expansion setups");
+        showToast("Power of 3 Enabled", "Scanning for 1H open → liquidity sweep → MSS with FVG → entry on retrace.", "info", 5000);
+      } else {
+        addLog("⚡ Power of 3 strategy disabled");
       }
       drawChart();
     });
