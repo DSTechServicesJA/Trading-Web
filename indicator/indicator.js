@@ -6162,23 +6162,33 @@ function detectFibScalp() {
     if (isTrueSwingLow(i))  swingLows.push({ idx: i, price: candles[i].low });
   }
 
-  /* Need at least 2 swing points on each side for structure analysis */
+  /* Need enough swing points for structure analysis */
   if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
-  /* --- Detect micro-trend --- */
+  /* --- Detect micro-trend using FIB_SCALP_TREND_SWINGS consecutive points --- */
   let trendDir = null;
 
-  /* Uptrend: consecutive higher lows (most recent 2+ swing lows ascending) */
-  if (swingLows.length >= 2 && swingLows[0].price > swingLows[1].price) {
-    trendDir = "BULL";
+  /* Uptrend: consecutive higher lows */
+  if (swingLows.length >= FIB_SCALP_TREND_SWINGS) {
+    let isUptrend = true;
+    for (let i = 0; i < FIB_SCALP_TREND_SWINGS - 1; i++) {
+      if (swingLows[i].price <= swingLows[i + 1].price) { isUptrend = false; break; }
+    }
+    if (isUptrend) trendDir = "BULL";
   }
-  /* Downtrend: consecutive lower highs (most recent 2+ swing highs descending) */
-  if (swingHighs.length >= 2 && swingHighs[0].price < swingHighs[1].price) {
-    /* If both directions qualify, pick the one with the most recent swing */
-    if (trendDir === "BULL") {
-      trendDir = swingHighs[0].idx > swingLows[0].idx ? "BEAR" : "BULL";
-    } else {
-      trendDir = "BEAR";
+  /* Downtrend: consecutive lower highs */
+  if (swingHighs.length >= FIB_SCALP_TREND_SWINGS) {
+    let isDowntrend = true;
+    for (let i = 0; i < FIB_SCALP_TREND_SWINGS - 1; i++) {
+      if (swingHighs[i].price >= swingHighs[i + 1].price) { isDowntrend = false; break; }
+    }
+    if (isDowntrend) {
+      /* If both directions qualify, pick the one with the most recent swing */
+      if (trendDir === "BULL") {
+        trendDir = swingHighs[0].idx > swingLows[0].idx ? "BEAR" : "BULL";
+      } else {
+        trendDir = "BEAR";
+      }
     }
   }
 
@@ -6206,12 +6216,12 @@ function detectFibScalp() {
     fibLow  = recentSL.price;
     fibHigh = bosCandle.high;
 
-    /* TP = previous swing high (the one before the BOS high), or the BOS high itself */
+    /* TP = the swing high before the most recent one (prior resistance), or the BOS high */
     targetPrice = recentSH.price;
     if (swingHighs.length >= 2) {
-      /* Use the next swing high beyond the one just broken, if higher */
-      const furtherSH = swingHighs[0].price;
-      if (furtherSH > fibHigh) targetPrice = furtherSH;
+      /* Use the prior swing high (the one before the BOS level), if higher */
+      const priorSH = swingHighs[1].price;
+      if (priorSH > fibHigh) targetPrice = priorSH;
       else targetPrice = fibHigh;
     }
   } else {
@@ -6230,11 +6240,11 @@ function detectFibScalp() {
     fibHigh = recentSH.price;
     fibLow  = bosCandle.low;
 
-    /* TP = previous swing low or the BOS low */
+    /* TP = the prior swing low (the one before the BOS level), or the BOS low */
     targetPrice = recentSL.price;
     if (swingLows.length >= 2) {
-      const furtherSL = swingLows[0].price;
-      if (furtherSL < fibLow) targetPrice = furtherSL;
+      const priorSL = swingLows[1].price;
+      if (priorSL < fibLow) targetPrice = priorSL;
       else targetPrice = fibLow;
     }
   }
@@ -6460,7 +6470,7 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
 }
 
 /**
- * Process all three custom strategies. Called from the main candle pipeline.
+ * Process all custom strategies. Called from the main candle pipeline.
  */
 function processCustomStrategies() {
   processLiquiditySweep();
