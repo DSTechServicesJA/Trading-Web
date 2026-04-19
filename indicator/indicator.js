@@ -52,6 +52,8 @@
      - Reset session button (clears all stats/signals/log)
      - Scalping mode (from MD: shorter range, tighter SL/TP, quick
        profits, max-candle timeout — for 1min/5min chart trading)
+     - Fib Golden Zone Scalp strategy (1min micro-trend → break of
+       structure → 0.5–0.618 retracement entry → swing TP)
    ========================================================= */
 
 "use strict";
@@ -820,6 +822,23 @@ const FPB_CONSECUTIVE_CANDLES = 3;       /* min consecutive candles for fear/gre
 const FPB_BODY_RATIO_MIN = 0.6;         /* min body/range for strong candle */
 let lastFailedPinBarIdx = -999;
 
+/* ================= STRATEGY 4: FIB GOLDEN ZONE SCALP ================= */
+/**
+ * 1-minute Fibonacci Golden Zone scalping strategy.
+ * Detects micro-trend → break of structure → waits for price to retrace
+ * into the 0.5–0.618 Fibonacci zone (the "Golden Zone") → enters in the
+ * trend direction → exits at the previous swing low (downtrend) or swing
+ * high (uptrend).  No indicators — pure price action + Fibonacci.
+ */
+let fibScalpEnabled = false;              /* master toggle */
+let fibScalpHistory = [];                 /* alert history */
+const FIB_SCALP_MAX_HISTORY = 30;
+const FIB_SCALP_COOLDOWN = 3;            /* min candles between alerts */
+const FIB_SCALP_SWING_LOOKBACK = 30;     /* candles to scan for swing points */
+const FIB_SCALP_TREND_SWINGS = 3;        /* min swing points to confirm micro-trend */
+const FIB_SCALP_MAX_CANDLES = 15;        /* timeout: close trade monitoring after N candles */
+let lastFibScalpIdx = -999;
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -990,6 +1009,11 @@ function initUI() {
   UI.failedPinBarToggle    = document.getElementById("failedPinBarToggle");
   UI.failedPinBarAlertList = document.getElementById("failedPinBarAlertList");
   UI.failedPinBarCount     = document.getElementById("failedPinBarCount");
+
+  /* Strategy 4: Fib Golden Zone Scalp */
+  UI.fibScalpToggle        = document.getElementById("fibScalpToggle");
+  UI.fibScalpAlertList     = document.getElementById("fibScalpAlertList");
+  UI.fibScalpCount         = document.getElementById("fibScalpCount");
 
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
@@ -1988,6 +2012,7 @@ function buildTelegramCaption() {
   if (liquiditySweepEnabled) filters.push("Liquidity Sweep");
   if (stopLossHuntEnabled) filters.push("Stop Loss Hunt");
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
+  if (fibScalpEnabled) filters.push("Fib Golden Zone");
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -2601,6 +2626,7 @@ function saveSettings() {
       liquiditySweepEnabled,
       stopLossHuntEnabled,
       failedPinBarEnabled,
+      fibScalpEnabled,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
@@ -2768,6 +2794,10 @@ function restoreSettings() {
     /* Strategy 3: Failed Pin Bar */
     if (s.failedPinBarEnabled != null) failedPinBarEnabled = s.failedPinBarEnabled;
     if (UI.failedPinBarToggle) UI.failedPinBarToggle.checked = failedPinBarEnabled;
+
+    /* Strategy 4: Fib Golden Zone Scalp */
+    if (s.fibScalpEnabled != null) fibScalpEnabled = s.fibScalpEnabled;
+    if (UI.fibScalpToggle) UI.fibScalpToggle.checked = fibScalpEnabled;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -5443,6 +5473,7 @@ function revertAllSettings() {
   liquiditySweepEnabled = false;
   stopLossHuntEnabled   = false;
   failedPinBarEnabled   = false;
+  fibScalpEnabled       = false;
 
   /* Advanced parameter defaults */
   RANGE_MINUTES           = 15;
@@ -5480,6 +5511,7 @@ function revertAllSettings() {
   if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
   if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
+  if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
 
   /* Profit-Direction UI sync */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
@@ -6085,6 +6117,287 @@ function monitorFailedPinBarOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 4: FIB GOLDEN ZONE SCALP ================= */
+/**
+ * Detect a Fibonacci Golden Zone scalp setup on the 1-minute chart.
+ *
+ * Steps:
+ *   1. Identify a micro-trend using recent swing points:
+ *      - Uptrend: at least 2 consecutive higher lows
+ *      - Downtrend: at least 2 consecutive lower highs
+ *   2. Detect a break of structure (BOS):
+ *      - Uptrend BOS: price breaks above the most recent swing high
+ *      - Downtrend BOS: price breaks below the most recent swing low
+ *   3. Draw Fibonacci retracement from the swing that started the impulse
+ *      to the BOS extreme.
+ *   4. Wait for price to retrace into the 0.5–0.618 zone (Golden Zone).
+ *   5. Enter in the trend direction.
+ *   6. TP at the previous swing low (downtrend) or swing high (uptrend).
+ *   7. SL just beyond the 0.786 Fibonacci level.
+ *
+ * Returns null or { dir, entry, sl, tp, rr, fibHigh, fibLow, goldenHigh,
+ *                    goldenLow, candleIdx, epoch, symbol, result, type }
+ */
+function detectFibScalp() {
+  if (!fibScalpEnabled) return null;
+
+  /* One-at-a-time: skip detection while any signal is still PENDING */
+  if (fibScalpHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < 10) return null;
+
+  const idx = len - 1;
+  if (idx - lastFibScalpIdx < FIB_SCALP_COOLDOWN) return null;
+
+  const c = candles[idx];
+
+  /* --- Collect recent swing highs and swing lows --- */
+  const lookbackStart = Math.max(0, idx - FIB_SCALP_SWING_LOOKBACK);
+  const swingHighs = [];  /* { idx, price } most recent first */
+  const swingLows  = [];
+
+  for (let i = idx - 1; i >= lookbackStart; i--) {
+    if (isTrueSwingHigh(i)) swingHighs.push({ idx: i, price: candles[i].high });
+    if (isTrueSwingLow(i))  swingLows.push({ idx: i, price: candles[i].low });
+  }
+
+  /* Need at least 2 swing points on each side for structure analysis */
+  if (swingHighs.length < 2 || swingLows.length < 2) return null;
+
+  /* --- Detect micro-trend --- */
+  let trendDir = null;
+
+  /* Uptrend: consecutive higher lows (most recent 2+ swing lows ascending) */
+  if (swingLows.length >= 2 && swingLows[0].price > swingLows[1].price) {
+    trendDir = "BULL";
+  }
+  /* Downtrend: consecutive lower highs (most recent 2+ swing highs descending) */
+  if (swingHighs.length >= 2 && swingHighs[0].price < swingHighs[1].price) {
+    /* If both directions qualify, pick the one with the most recent swing */
+    if (trendDir === "BULL") {
+      trendDir = swingHighs[0].idx > swingLows[0].idx ? "BEAR" : "BULL";
+    } else {
+      trendDir = "BEAR";
+    }
+  }
+
+  if (!trendDir) return null;
+
+  /* --- Detect break of structure (BOS) --- */
+  let fibLow, fibHigh, bosConfirmed = false;
+  let targetPrice;  /* TP target: previous swing low (bear) or swing high (bull) */
+
+  if (trendDir === "BULL") {
+    /* BOS: current or recent candle closed above the most recent swing high */
+    const recentSH = swingHighs[0];
+    /* The impulse runs from the most recent swing low up to the BOS level */
+    const recentSL = swingLows[0];
+
+    /* BOS must be recent (within last few candles) */
+    let bosCandle = null;
+    for (let i = idx; i >= Math.max(recentSH.idx + 1, idx - 5); i--) {
+      if (candles[i].close > recentSH.price) { bosCandle = candles[i]; break; }
+    }
+    if (!bosCandle) return null;
+
+    bosConfirmed = true;
+    /* Fib from the swing low (start of impulse) to the BOS high */
+    fibLow  = recentSL.price;
+    fibHigh = bosCandle.high;
+
+    /* TP = previous swing high (the one before the BOS high), or the BOS high itself */
+    targetPrice = recentSH.price;
+    if (swingHighs.length >= 2) {
+      /* Use the next swing high beyond the one just broken, if higher */
+      const furtherSH = swingHighs[0].price;
+      if (furtherSH > fibHigh) targetPrice = furtherSH;
+      else targetPrice = fibHigh;
+    }
+  } else {
+    /* BEAR: BOS below the most recent swing low */
+    const recentSL = swingLows[0];
+    const recentSH = swingHighs[0];
+
+    let bosCandle = null;
+    for (let i = idx; i >= Math.max(recentSL.idx + 1, idx - 5); i--) {
+      if (candles[i].close < recentSL.price) { bosCandle = candles[i]; break; }
+    }
+    if (!bosCandle) return null;
+
+    bosConfirmed = true;
+    /* Fib from the swing high (start of impulse) down to the BOS low */
+    fibHigh = recentSH.price;
+    fibLow  = bosCandle.low;
+
+    /* TP = previous swing low or the BOS low */
+    targetPrice = recentSL.price;
+    if (swingLows.length >= 2) {
+      const furtherSL = swingLows[0].price;
+      if (furtherSL < fibLow) targetPrice = furtherSL;
+      else targetPrice = fibLow;
+    }
+  }
+
+  if (!bosConfirmed) return null;
+
+  /* --- Calculate Golden Zone (0.5 – 0.618 retracement) --- */
+  const fibRange = fibHigh - fibLow;
+  if (fibRange <= 0) return null;
+
+  let goldenHigh, goldenLow;
+  if (trendDir === "BULL") {
+    /* Retracement pulls back down from the high */
+    goldenHigh = fibHigh - fibRange * 0.5;
+    goldenLow  = fibHigh - fibRange * 0.618;
+  } else {
+    /* Retracement pulls back up from the low */
+    goldenLow  = fibLow + fibRange * 0.5;
+    goldenHigh = fibLow + fibRange * 0.618;
+  }
+
+  /* --- Check if current price is in the Golden Zone --- */
+  const price = c.close;
+  const inGoldenZone = price >= Math.min(goldenLow, goldenHigh)
+                    && price <= Math.max(goldenLow, goldenHigh);
+
+  if (!inGoldenZone) return null;
+
+  /* --- Compute entry / SL / TP --- */
+  const entry = price;
+  let sl, tp;
+
+  if (trendDir === "BULL") {
+    /* SL just below the 0.786 retracement (beyond the golden zone for protection) */
+    sl = fibHigh - fibRange * 0.786;
+    /* Add a small ATR buffer for safety */
+    if (atrValue > 0) sl -= atrValue * 0.15;
+    /* TP at the previous BOS high or next swing high */
+    tp = targetPrice;
+    /* Ensure TP is above entry */
+    if (tp <= entry) tp = entry + fibRange * 0.5;
+  } else {
+    /* SL just above the 0.786 retracement */
+    sl = fibLow + fibRange * 0.786;
+    if (atrValue > 0) sl += atrValue * 0.15;
+    /* TP at the previous BOS low or next swing low */
+    tp = targetPrice;
+    /* Ensure TP is below entry */
+    if (tp >= entry) tp = entry - fibRange * 0.5;
+  }
+
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  const rr = risk > 0 ? reward / risk : 0;
+
+  /* Reject if R:R is too low */
+  if (rr < 1.0) return null;
+
+  return {
+    dir: trendDir,
+    entry, sl, tp, rr,
+    fibHigh, fibLow,
+    goldenHigh, goldenLow,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "fib_scalp"
+  };
+}
+
+/**
+ * Run the Fib Golden Zone scalp scanner and handle alerting.
+ */
+function processFibScalp() {
+  const signal = detectFibScalp();
+  if (!signal) return;
+
+  lastFibScalpIdx = signal.candleIdx;
+
+  signal._stratOutcomeSent = false;
+  fibScalpHistory.unshift(signal);
+  if (fibScalpHistory.length > FIB_SCALP_MAX_HISTORY) fibScalpHistory.pop();
+
+  /* Audio alert */
+  playStrategyAlert(signal.dir);
+
+  /* Log */
+  const symbol = getActiveSymbol() || "--";
+  addLog(`📐 FIB GOLDEN ZONE ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | Golden Zone [${fmt(signal.goldenLow, 4)}–${fmt(signal.goldenHigh, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `Fib Golden Zone ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  /* Browser notification */
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `📐 ${signal.dir} Fib Golden Zone — ${symbol} @ ${fmt(signal.entry, 4)}\nGolden Zone: ${fmt(signal.goldenLow, 4)}–${fmt(signal.goldenHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    new Notification("IT Guru: Fib Golden Zone Scalp!", { body, icon: NOTIF_ICON });
+  }
+
+  /* Telegram alert */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+}
+
+/**
+ * Monitor pending Fib Golden Zone scalp signals for SL/TP outcome.
+ */
+function monitorFibScalpOutcomes(candle) {
+  if (!fibScalpEnabled) return;
+  let changed = false;
+  for (const s of fibScalpHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    /* Timeout after FIB_SCALP_MAX_CANDLES */
+    if (elapsed >= FIB_SCALP_MAX_CANDLES) {
+      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
+      s.result = inProfit ? "WIN" : "LOSS";
+      addLog(`📐 Fib Golden Zone ${s.result} (timeout ${FIB_SCALP_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+
+    /* Check SL / TP */
+    if (s.dir === "BULL") {
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+
+    /* If momentum stalls (price stuck near entry for several candles), exit */
+    if (s.result === "PENDING" && elapsed >= 8) {
+      const stalledRange = atrValue > 0 ? atrValue * 0.3 : Math.abs(s.tp - s.entry) * 0.1;
+      if (Math.abs(candle.close - s.entry) < stalledRange) {
+        s.result = "LOSS";
+        addLog(`📐 Fib Golden Zone LOSS (momentum stalled) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    /* Send Telegram outcome for each newly resolved signal */
+    for (const s of fibScalpHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    /* Reset cooldown so scanner immediately looks for the next trade */
+    lastFibScalpIdx = -999;
+    addLog("📐 Fib Golden Zone signal resolved — scanning for next trade…");
+  }
+}
+
 /* ================= SHARED STRATEGY HELPERS ================= */
 /**
  * Audio alert for the 3 custom strategies (triple beep).
@@ -6118,6 +6431,8 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.stopLossHuntAlertList, UI.stopLossHuntCount, stopLossHuntHistory, "🎯", "Stop Loss Hunt");
   /* Failed Pin Bar */
   _renderAlertList(UI.failedPinBarAlertList, UI.failedPinBarCount, failedPinBarHistory, "📌", "Failed Pin Bar");
+  /* Fib Golden Zone Scalp */
+  _renderAlertList(UI.fibScalpAlertList, UI.fibScalpCount, fibScalpHistory, "📐", "Fib Golden Zone");
 }
 
 function _renderAlertList(listEl, countEl, history, emoji, label) {
@@ -6151,15 +6466,17 @@ function processCustomStrategies() {
   processLiquiditySweep();
   processStopLossHunt();
   processFailedPinBar();
+  processFibScalp();
 }
 
 /**
- * Monitor all three custom strategy outcomes. Called from the main candle pipeline.
+ * Monitor all custom strategy outcomes. Called from the main candle pipeline.
  */
 function monitorCustomStrategyOutcomes(candle) {
   monitorLiquiditySweepOutcomes(candle);
   monitorStopLossHuntOutcomes(candle);
   monitorFailedPinBarOutcomes(candle);
+  monitorFibScalpOutcomes(candle);
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -6640,6 +6957,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "failed_pin_bar") {
     stratEmoji = "📌";
     stratLabel = "Failed Pin Bar";
+  } else if (signal.type === "fib_scalp") {
+    stratEmoji = "📐";
+    stratLabel = "Fib Golden Zone Scalp";
   }
 
   const lines = [];
@@ -6668,6 +6988,11 @@ function buildStrategyTelegramCaption(signal) {
   if (signal.type === "failed_pin_bar" && signal.state) {
     lines.push(``);
     lines.push(`<b>State:</b> ${signal.state === "fear" ? "😱 FEAR" : "🤑 GREED"}`);
+  }
+  if (signal.type === "fib_scalp" && signal.goldenLow != null) {
+    lines.push(``);
+    lines.push(`<b>Golden Zone:</b> [${fmt(signal.goldenLow, 4)} – ${fmt(signal.goldenHigh, 4)}]`);
+    lines.push(`<b>Fib Range:</b> [${fmt(signal.fibLow, 4)} – ${fmt(signal.fibHigh, 4)}]`);
   }
 
   /* Lot size / position sizing based on account amount */
@@ -6778,6 +7103,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     if (signal.type === "liquidity_sweep") { stratEmoji = "🌊"; stratLabel = "Liquidity Sweep"; }
     else if (signal.type === "stop_loss_hunt") { stratEmoji = "🎯"; stratLabel = "Stop Loss Hunt"; }
     else if (signal.type === "failed_pin_bar") { stratEmoji = "📌"; stratLabel = "Failed Pin Bar"; }
+    else if (signal.type === "fib_scalp") { stratEmoji = "📐"; stratLabel = "Fib Golden Zone"; }
 
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
@@ -6789,6 +7115,9 @@ async function sendStrategyOutcomeTelegram(signal) {
 
     if (signal.type === "failed_pin_bar" && signal.state) {
       lines.push(`<b>State:</b> ${signal.state === "fear" ? "😱 FEAR" : "🤑 GREED"}`);
+    }
+    if (signal.type === "fib_scalp" && signal.goldenLow != null) {
+      lines.push(`<b>Golden Zone:</b> [${fmt(signal.goldenLow, 4)} – ${fmt(signal.goldenHigh, 4)}]`);
     }
 
     /* Lot size / position sizing based on account amount */
@@ -11676,6 +12005,21 @@ document.addEventListener("DOMContentLoaded", () => {
         showToast("Failed Pin Bar Enabled", "Scanning for pin bar failures against market fear/greed.", "info", 5000);
       } else {
         addLog("📌 Failed Pin Bar strategy disabled");
+      }
+      drawChart();
+    });
+  }
+
+  /* Strategy 4: Fib Golden Zone Scalp listener */
+  if (UI.fibScalpToggle) {
+    UI.fibScalpToggle.addEventListener("change", () => {
+      fibScalpEnabled = UI.fibScalpToggle.checked;
+      saveSettings();
+      if (fibScalpEnabled) {
+        addLog("📐 Fib Golden Zone Scalp strategy enabled — scanning for 0.5–0.618 retracement entries");
+        showToast("Fib Golden Zone Enabled", "Scanning for micro-trend → break of structure → golden zone retracement entries.", "info", 5000);
+      } else {
+        addLog("📐 Fib Golden Zone Scalp strategy disabled");
       }
       drawChart();
     });
