@@ -40,6 +40,17 @@ if (!rateLimit(30, 60)) {
     jsonResponse(['ok' => false, 'description' => 'Rate limit exceeded — try again shortly'], 429);
 }
 
+/* ── Require authenticated user (JWT) ── */
+$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+    $jwtPayload = jwtDecode($matches[1]);
+} else {
+    $jwtPayload = null;
+}
+if (!$jwtPayload) {
+    jsonResponse(['ok' => false, 'description' => 'Authentication required'], 401);
+}
+
 /* ── Allowed Telegram Bot API actions ── */
 $ALLOWED_ACTIONS = ['getMe', 'getChat', 'sendMessage', 'sendPhoto'];
 

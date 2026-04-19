@@ -7,6 +7,10 @@
 
 RewriteEngine On
 
+# ── Force HTTPS ──
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
 # ── Block access to dotfiles (.env, .git, etc.) ──
 RewriteRule (^\.|/\.) - [F,L]
 

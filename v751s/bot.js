@@ -95,7 +95,14 @@ function updateMarketSignal(text) {
 }
 function addTradeHistory({ type, result, info }) {
   const li = document.createElement("li");
-  li.innerHTML = `<strong>${type}</strong> — ${result} <span class="text-soft">${info ?? ""}</span>`;
+  const strong = document.createElement("strong");
+  strong.textContent = type;
+  li.appendChild(strong);
+  li.appendChild(document.createTextNode(" — " + result + " "));
+  const span = document.createElement("span");
+  span.className = "text-soft";
+  span.textContent = info ?? "";
+  li.appendChild(span);
   $("tradeHistory").prepend(li);
 }
 

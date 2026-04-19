@@ -4190,7 +4190,11 @@ function updateRecommendedSettings() {
 
   /* ---- Hint text ---- */
   if (UI.recHintText) {
-    UI.recHintText.innerHTML = "<strong>Why:</strong> " + rec.hint;
+    UI.recHintText.textContent = "";
+    const strong = document.createElement("strong");
+    strong.textContent = "Why:";
+    UI.recHintText.appendChild(strong);
+    UI.recHintText.appendChild(document.createTextNode(" " + rec.hint));
   }
 }
 

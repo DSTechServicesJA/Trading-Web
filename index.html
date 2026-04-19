@@ -57,8 +57,6 @@
     <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
     <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)</a></li>
     <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
-    <li><a href="#">1HZ75</a></li>
-    <li><a href="#">1HZ100</a></li>
   </ul>
 </nav>
 
@@ -161,8 +159,8 @@
         <!-- Risk Controls-->
         <section class="risk dashboard">
           <!-- compact TP/SL rows -->
-          <div><strong for="takeProfit">TP ($)</strong> <span><input type="number" id="takeProfit" placeholder="e.g. 10" /></span></div>
-          <div><strong for="takeProfit">SL ($)</strong> <span><input type="number" id="stopLoss" placeholder="e.g. 10" /></span></div>
+          <div><strong><label for="takeProfit">TP ($)</label></strong> <span><input type="number" id="takeProfit" min="0.01" step="0.01" placeholder="e.g. 10" /></span></div>
+          <div><strong><label for="stopLoss">SL ($)</label></strong> <span><input type="number" id="stopLoss" min="0.01" step="0.01" placeholder="e.g. 10" /></span></div>
 
           <div class="risk-row">
             <label>
