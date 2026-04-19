@@ -2214,6 +2214,126 @@ body.light-theme .ms-card-footer {
 .scalp-card.scalp-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
 .scalp-card.scalp-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }
 
+/* ================================================================
+   LIVE STRATEGIES TICKER BANNER
+   ================================================================ */
+.strategy-ticker-banner {
+  border-color: rgba(99,102,241,0.18);
+}
+.strategy-ticker-label {
+  color: var(--cyan, #22d3ee) !important;
+  border-right-color: rgba(99,102,241,0.25) !important;
+}
+
+/* Individual strategy card in the ticker */
+.strategy-card {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid rgba(99,102,241,0.12);
+  background: rgba(99,102,241,0.04);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  cursor: pointer;
+}
+.strategy-card:hover {
+  border-color: rgba(99,102,241,0.3);
+  box-shadow: 0 0 12px rgba(99,102,241,0.1);
+  transform: translateY(-1px);
+}
+.strategy-card:active {
+  transform: scale(0.97);
+}
+.strategy-card.strategy-card-bull {
+  border-color: rgba(34,197,94,0.2);
+  background: rgba(34,197,94,0.04);
+}
+.strategy-card.strategy-card-bear {
+  border-color: rgba(244,63,94,0.2);
+  background: rgba(244,63,94,0.04);
+}
+
+.strategy-card-dir {
+  font-weight: 800;
+  font-size: var(--fs-sm);
+}
+.strategy-card-dir.bull { color: var(--success-soft); }
+.strategy-card-dir.bear { color: var(--danger-soft); }
+
+.strategy-card-symbol {
+  color: var(--heading);
+  font-weight: 700;
+}
+.strategy-card-price { color: var(--text-soft); }
+.strategy-card-levels { color: var(--text-muted); font-size: 10px; }
+.strategy-card-sep { color: var(--text-muted); font-size: 10px; opacity: 0.5; }
+.strategy-card-rr { color: var(--cyan, #22d3ee); }
+.strategy-card-time { color: var(--text-muted); font-size: 10px; }
+
+.strategy-card-type {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(99,102,241,0.12);
+  color: var(--primary-soft, #818cf8);
+  border: 1px solid rgba(99,102,241,0.25);
+}
+
+/* Strategy card result badge */
+.strategy-card-result {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.strategy-card-result.pending {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning-soft);
+  border: 1px solid rgba(245,158,11,0.3);
+  animation: signalPendingPulse 2s ease-in-out infinite;
+}
+.strategy-card-result.win {
+  background: rgba(16,185,129,0.15);
+  color: var(--success-soft);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.strategy-card-result.loss {
+  background: rgba(244,63,94,0.15);
+  color: var(--danger-soft);
+  border: 1px solid rgba(244,63,94,0.3);
+}
+
+/* Strategy card border tint by result */
+.strategy-card.strategy-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
+.strategy-card.strategy-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }
+
+/* New strategy entrance animation */
+.strategy-card-new {
+  animation: strategyCardFlash 1.5s ease-out;
+}
+@keyframes strategyCardFlash {
+  0%   { box-shadow: 0 0 16px rgba(99,102,241,0.5); }
+  100% { box-shadow: none; }
+}
+
+.strategy-ticker-empty {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  padding: 4px 0;
+}
+
 /* ===== Toast Notification System ===== */
 .toast-container {
   position: fixed;

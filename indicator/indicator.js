@@ -1413,6 +1413,10 @@ function initUI() {
   UI.scalpTickerBanner = document.getElementById("scalpTickerBanner");
   UI.scalpTickerTrack  = document.getElementById("scalpTickerTrack");
 
+  /* Live Strategies Ticker Banner */
+  UI.strategyTickerBanner = document.getElementById("strategyTickerBanner");
+  UI.strategyTickerTrack  = document.getElementById("strategyTickerTrack");
+
   /* Tool buttons */
   UI.exportBtn        = document.getElementById("exportSignalsBtn");
   UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
@@ -3350,6 +3354,7 @@ function updateStatsUI() {
   updateScalpStatsUI();
   renderSignalBanner();
   renderScalpTickerBanner();
+  renderStrategyTickerBanner();
 }
 
 /* ---- Switch sidebar to a specific tab programmatically ---- */
@@ -3536,6 +3541,116 @@ function renderScalpTickerBanner() {
 
   /* Auto-scroll to show the newest scalp (leftmost) */
   UI.scalpTickerTrack.scrollLeft = 0;
+}
+
+/* ---- Handle strategy card click from banner ---- */
+function handleStrategyCardClick(signal) {
+  const sym = signal.symbol || getActiveSymbol();
+  /* If multi-symbol, focus the panel for this signal's symbol */
+  if (multiPanels.size > 0 && sym && multiPanels.has(sym)) {
+    focusPanel(sym);
+  }
+  /* Scroll to chart view so the user can see the signal on the chart */
+  scrollToChartView();
+}
+
+/* ---- Aggregate strategy signals from ALL panels (+ single-mode globals) ---- */
+function getAggregatedStrategyHistory() {
+  const histories = [
+    { history: liquiditySweepHistory, label: "🌊 Liquidity Sweep" },
+    { history: stopLossHuntHistory,   label: "🎯 Stop Loss Hunt" },
+    { history: failedPinBarHistory,   label: "📌 Failed Pin Bar" },
+    { history: fibScalpHistory,       label: "📐 Fib Golden Zone" },
+    { history: po3History,            label: "⚡ Power of 3" }
+  ];
+
+  if (multiPanels.size === 0) {
+    /* Single-symbol mode: merge global strategy histories */
+    const all = [];
+    for (const { history, label } of histories) {
+      for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
+    }
+    all.sort((a, b) => (b.epoch || 0) - (a.epoch || 0));
+    return all;
+  }
+
+  /* Multi-symbol mode: aggregate from all panels */
+  const all = [];
+  for (const p of multiPanels.values()) {
+    const panelHistories = [
+      { history: p.liquiditySweepHistory || [], label: "🌊 Liquidity Sweep" },
+      { history: p.stopLossHuntHistory   || [], label: "🎯 Stop Loss Hunt" },
+      { history: p.failedPinBarHistory   || [], label: "📌 Failed Pin Bar" },
+      { history: p.fibScalpHistory       || [], label: "📐 Fib Golden Zone" },
+      { history: p.po3History            || [], label: "⚡ Power of 3" }
+    ];
+    for (const { history, label } of panelHistories) {
+      for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
+    }
+  }
+  all.sort((a, b) => (b.epoch || 0) - (a.epoch || 0));
+  return all;
+}
+
+/* ---- Live Strategies Ticker Banner ---- */
+function renderStrategyTickerBanner() {
+  if (!UI.strategyTickerTrack) return;
+  UI.strategyTickerTrack.innerHTML = "";
+
+  const allStrategies = getAggregatedStrategyHistory();
+
+  if (allStrategies.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "strategy-ticker-empty";
+    empty.textContent = "No strategy signals yet — scanners active…";
+    UI.strategyTickerTrack.appendChild(empty);
+    return;
+  }
+
+  /* Render newest first (aggregated list is already newest-first) */
+  for (let i = 0; i < allStrategies.length; i++) {
+    const s = allStrategies[i];
+    const card = document.createElement("div");
+    const isBull = s.dir === "BULL";
+    const resultLower = (s.result || "PENDING").toLowerCase();
+    card.className = `strategy-card ${isBull ? "strategy-card-bull" : "strategy-card-bear"}${i === 0 ? " strategy-card-new" : ""}${resultLower === "win" ? " strategy-card-win" : resultLower === "loss" ? " strategy-card-loss" : ""}`;
+
+    const dirLabel = isBull ? "▲" : "▼";
+    const dirClass = isBull ? "bull" : "bear";
+    const t = new Date(s.epoch * 1000);
+    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const sym = s.symbol || getActiveSymbol() || "--";
+    const entryStr = fmt(s.entry, 4);
+    const slStr = fmt(s.sl, 4);
+    const tpStr = fmt(s.tp, 4);
+    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
+    const typeLabel = s._stratLabel || s.type || "--";
+
+    const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
+    card.appendChild(mkSpan("strategy-card-dir " + dirClass, dirLabel));
+    card.appendChild(mkSpan("strategy-card-symbol", sym));
+    card.appendChild(mkSpan("strategy-card-type", typeLabel));
+    card.appendChild(mkSpan("strategy-card-price", "@ " + entryStr));
+    card.appendChild(mkSpan("strategy-card-levels", "SL " + slStr + " · TP " + tpStr));
+    card.appendChild(mkSpan("strategy-card-sep", "·"));
+    card.appendChild(mkSpan("strategy-card-rr", rrStr));
+    card.appendChild(mkSpan("strategy-card-time", ts));
+    card.appendChild(mkSpan("strategy-card-result " + resultLower, s.result || "PENDING"));
+
+    card.title = `Click to view details · ${typeLabel} ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nResult: ${s.result || "PENDING"}`;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} ${typeLabel} details`);
+
+    /* Clickable — focuses the panel and scrolls to chart */
+    card.addEventListener("click", () => handleStrategyCardClick(s));
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleStrategyCardClick(s); } });
+
+    UI.strategyTickerTrack.appendChild(card);
+  }
+
+  /* Auto-scroll to show the newest signal (leftmost) */
+  UI.strategyTickerTrack.scrollLeft = 0;
 }
 
 /* ---- Live Scalp Stats ---- */
@@ -4618,6 +4733,7 @@ function resetSession() {
   renderScalpAlerts();
   updateScalpStatsUI();
   renderScalpTickerBanner();
+  renderStrategyTickerBanner();
   if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
 
   /* Clear session range trade stats */
@@ -7500,6 +7616,8 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.fibScalpAlertList, UI.fibScalpCount, fibScalpHistory, "📐", "Fib Golden Zone");
   /* Power of 3 (ICT) */
   _renderAlertList(UI.po3AlertList, UI.po3Count, po3History, "⚡", "Power of 3");
+  /* Update the strategies ticker banner */
+  renderStrategyTickerBanner();
 }
 
 function _renderAlertList(listEl, countEl, history, emoji, label) {
@@ -12091,6 +12209,7 @@ function getAggregatedScalpHistory() {
 function updateSignalBanners() {
   renderSignalBanner();
   renderScalpTickerBanner();
+  renderStrategyTickerBanner();
   /* Aggregated signal count */
   if (UI.signalCount) {
     const agg = getAggregatedSignalHistory();
@@ -12492,8 +12611,8 @@ function focusPanel(symbol) {
   updateStatsUI();
   renderScalpAlerts();
   renderScalpTickerBanner();
+  renderStrategyTickerBanner();
 }
-
 /**
  * Sync all filter checkbox / input UI elements from current global filter variables.
  * Called when focusing a panel to reflect that panel's per-symbol settings.
