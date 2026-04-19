@@ -10125,7 +10125,7 @@ function executeAutoTrade(signal) {
  *  accumulated value that can drift due to bugs or interruptions. */
 function recalcAutoTradePL() {
   autoTradePL = autoTradeHistory.reduce((sum, e) => {
-    if ((e.result === "WIN" || e.result === "LOSS") && e.profit != null) {
+    if ((e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number") {
       return sum + e.profit;
     }
     return sum;
