@@ -10242,7 +10242,10 @@ function executeAutoTrade(signal) {
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
 
   /* Validate multiplier against cached valid values for this symbol.
-     If the current multiplier isn't valid, auto-correct it before trading. */
+     If the current multiplier isn't valid, auto-correct it before trading.
+     This is a safety net: autoUpdateMultiplier() runs on symbol change and
+     connect, but it's async — so this check catches the edge case where the
+     cache populated after the symbol changed but before the first trade fires. */
   let multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
   const cachedValid = symbolMultiplierCache[symbol];
   if (cachedValid && cachedValid.length > 0 && !cachedValid.includes(multiplier)) {
@@ -10383,10 +10386,12 @@ function updateAutoTradeBalanceUI() {
 /** Update the P/L display value. */
 function updateAutoTradePLUI() {
   if (UI.autoTradePLValue) {
-    /* Use auto-trade history P/L if trades have occurred, otherwise compute
-       a live session P/L from balance changes so the value updates in real-time */
+    /* Use auto-trade history P/L if any trades have completed; otherwise show
+       a live session P/L computed from balance changes so the display updates
+       in real-time even before the first auto-trade resolves. */
+    const hasCompletedTrades = autoTradeHistory.some(e => e.result === "WIN" || e.result === "LOSS");
     let displayPL = autoTradePL;
-    if (displayPL === 0 && sessionStartBalance != null && autoTradeBalance != null) {
+    if (!hasCompletedTrades && sessionStartBalance != null && autoTradeBalance != null) {
       displayPL = autoTradeBalance - sessionStartBalance;
     }
     const prefix = displayPL >= 0 ? "+$" : "−$";
@@ -10397,7 +10402,9 @@ function updateAutoTradePLUI() {
   }
 }
 
-/** Show/hide the balance section based on whether any auto-trade toggle is on. */
+/** Show/hide the balance section.
+ *  Visible whenever the user is authorized (so they always see their balance
+ *  and live session P/L) OR when any auto-trade toggle is on. */
 function updateAutoTradeBalanceVisibility() {
   if (!UI.autoTradeBalanceSection) return;
   const anyEnabled = autoTradeEnabled || autoTradeScalpEnabled || autoTradeStrategyEnabled;
