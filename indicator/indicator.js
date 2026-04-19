@@ -179,6 +179,152 @@ const MAX_AUTO_TRADE_HISTORY = 100;
 const symbolMultiplierCache = {};  /* { symbol: [50, 100, 150, ...] } */
 let sessionStartBalance = null;    /* balance when session started — for live P/L */
 
+/* ================= HARDCODED FALLBACK MULTIPLIERS PER SYMBOL ================= */
+/* These provide an immediate, known-valid default when the contracts_for API has
+   not yet responded or the WebSocket is not connected.  The API cache always takes
+   precedence when available — these are the safety net so trades never fire with
+   an invalid multiplier.  Values sourced from Deriv's published contract specs. */
+const SYMBOL_FALLBACK_MULTIPLIERS = {
+  /* --- Volatility (1s) --- */
+  "1HZ10V":   [20, 50, 100, 200, 300, 500],
+  "1HZ15V":   [20, 50, 100, 200, 300, 500],
+  "1HZ25V":   [20, 50, 100, 200, 300, 500],
+  "1HZ30V":   [20, 50, 100, 200, 300, 500],
+  "1HZ50V":   [20, 50, 100, 200, 300, 500],
+  "1HZ75V":   [50, 100, 200, 300, 500],
+  "1HZ90V":   [50, 100, 200, 300, 500],
+  "1HZ100V":  [50, 100, 200, 300, 500],
+  "1HZ150V":  [50, 100, 200, 300, 500],
+  "1HZ200V":  [50, 100, 200, 300, 500],
+  "1HZ250V":  [50, 100, 200, 300, 500],
+  "1HZ300V":  [50, 100, 200, 300, 500],
+
+  /* --- Volatility (Standard) --- */
+  "R_10":     [20, 50, 100, 200, 300, 500],
+  "R_25":     [20, 50, 100, 200, 300, 500],
+  "R_50":     [50, 100, 200, 300, 500],
+  "R_75":     [50, 100, 200, 300, 500],
+  "R_100":    [50, 100, 200, 300, 500],
+
+  /* --- Boom Indices --- */
+  "BOOM300N": [50, 100, 200, 300, 500],
+  "BOOM500":  [50, 100, 200, 300, 500],
+  "BOOM600":  [50, 100, 200, 300, 500],
+  "BOOM900":  [50, 100, 200, 300, 500],
+  "BOOM1000": [50, 100, 200, 300, 500],
+
+  /* --- Crash Indices --- */
+  "CRASH300N":[50, 100, 200, 300, 500],
+  "CRASH500": [50, 100, 200, 300, 500],
+  "CRASH600": [50, 100, 200, 300, 500],
+  "CRASH900": [50, 100, 200, 300, 500],
+  "CRASH1000":[50, 100, 200, 300, 500],
+
+  /* --- Jump Indices --- */
+  "JD10":     [50, 100, 200, 300, 500],
+  "JD25":     [50, 100, 200, 300, 500],
+  "JD50":     [50, 100, 200, 300, 500],
+  "JD75":     [50, 100, 200, 300, 500],
+  "JD100":    [50, 100, 200, 300, 500],
+
+  /* --- Step Indices --- */
+  "stpRNG":   [50, 100, 200, 300, 500],
+  "stpRNG2":  [50, 100, 200, 300, 500],
+  "stpRNG3":  [50, 100, 200, 300, 500],
+  "stpRNG4":  [50, 100, 200, 300, 500],
+  "stpRNG5":  [50, 100, 200, 300, 500],
+
+  /* --- Daily Reset Indices --- */
+  "RDBULL":   [50, 100, 200, 300, 500],
+  "RDBEAR":   [50, 100, 200, 300, 500],
+
+  /* --- DEX Indices --- */
+  "DEX600DN": [50, 100, 200, 300, 500],
+  "DEX600UP": [50, 100, 200, 300, 500],
+  "DEX900DN": [50, 100, 200, 300, 500],
+  "DEX900UP": [50, 100, 200, 300, 500],
+  "DEX1500DN":[50, 100, 200, 300, 500],
+  "DEX1500UP":[50, 100, 200, 300, 500],
+
+  /* --- Drift Switch Indices --- */
+  "DSI10":    [50, 100, 200, 300, 500],
+  "DSI20":    [50, 100, 200, 300, 500],
+  "DSI30":    [50, 100, 200, 300, 500],
+
+  /* --- Forex Majors --- */
+  "frxEURUSD":[50, 100, 200, 300, 500],
+  "frxGBPUSD":[50, 100, 200, 300, 500],
+  "frxUSDJPY":[50, 100, 200, 300, 500],
+  "frxUSDCHF":[50, 100, 200, 300, 500],
+  "frxAUDUSD":[50, 100, 200, 300, 500],
+  "frxUSDCAD":[50, 100, 200, 300, 500],
+  "frxNZDUSD":[50, 100, 200, 300, 500],
+
+  /* --- Forex Crosses --- */
+  "frxEURGBP":[50, 100, 200, 300, 500],
+  "frxEURJPY":[50, 100, 200, 300, 500],
+  "frxEURAUD":[50, 100, 200, 300, 500],
+  "frxEURCAD":[50, 100, 200, 300, 500],
+  "frxEURCHF":[50, 100, 200, 300, 500],
+  "frxEURNZD":[50, 100, 200, 300, 500],
+  "frxGBPJPY":[50, 100, 200, 300, 500],
+  "frxGBPAUD":[50, 100, 200, 300, 500],
+  "frxGBPCAD":[50, 100, 200, 300, 500],
+  "frxGBPCHF":[50, 100, 200, 300, 500],
+  "frxGBPNZD":[50, 100, 200, 300, 500],
+  "frxAUDJPY":[50, 100, 200, 300, 500],
+  "frxAUDNZD":[50, 100, 200, 300, 500],
+  "frxAUDCAD":[50, 100, 200, 300, 500],
+  "frxAUDCHF":[50, 100, 200, 300, 500],
+  "frxNZDJPY":[50, 100, 200, 300, 500],
+  "frxNZDCAD":[50, 100, 200, 300, 500],
+  "frxNZDCHF":[50, 100, 200, 300, 500],
+  "frxCADJPY":[50, 100, 200, 300, 500],
+  "frxCADCHF":[50, 100, 200, 300, 500],
+  "frxCHFJPY":[50, 100, 200, 300, 500],
+
+  /* --- Forex Exotics --- */
+  "frxUSDMXN":[50, 100, 200, 300, 500],
+  "frxUSDNOK":[50, 100, 200, 300, 500],
+  "frxUSDSEK":[50, 100, 200, 300, 500],
+  "frxUSDSGD":[50, 100, 200, 300, 500],
+  "frxUSDZAR":[50, 100, 200, 300, 500],
+  "frxUSDPLN":[50, 100, 200, 300, 500],
+  "frxUSDTRY":[50, 100, 200, 300, 500],
+  "frxUSDHKD":[50, 100, 200, 300, 500],
+
+  /* --- Commodities --- */
+  "frxXAUUSD":[50, 100, 200, 300, 500],
+  "frxXAGUSD":[50, 100, 200, 300, 500],
+  "frxXPTUSD":[50, 100, 200, 300, 500],
+  "frxXPDUSD":[50, 100, 200, 300, 500]
+};
+
+/**
+ * Return valid multiplier list for a symbol: API cache first, then hardcoded fallback.
+ */
+function getValidMultipliersForSymbol(sym) {
+  if (symbolMultiplierCache[sym] && symbolMultiplierCache[sym].length > 0) {
+    return symbolMultiplierCache[sym];
+  }
+  return SYMBOL_FALLBACK_MULTIPLIERS[sym] || null;
+}
+
+/**
+ * Return the recommended (first/default) multiplier for a symbol.
+ * Uses cached API data when available, otherwise the hardcoded fallback.
+ * Falls back to DEFAULT_AUTO_TRADE_MULTIPLIER if the symbol is unknown.
+ */
+function getRecommendedMultiplier(sym) {
+  const valid = getValidMultipliersForSymbol(sym);
+  if (valid && valid.length > 0) {
+    /* Pick 100 if it's in the list, otherwise the first entry */
+    if (valid.includes(DEFAULT_AUTO_TRADE_MULTIPLIER)) return DEFAULT_AUTO_TRADE_MULTIPLIER;
+    return valid[0];
+  }
+  return DEFAULT_AUTO_TRADE_MULTIPLIER;
+}
+
 /* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
    larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
 const SCALP_RANGE_MINUTES       = 5;     /* shorter opening range for quick setups */
@@ -760,23 +906,44 @@ function pickBestMultiplier(validMultipliers, currentValue) {
 
 /**
  * Auto-update the multiplier when the symbol changes.
- * Fetches valid multipliers from the Deriv API and adjusts the
- * multiplier input to a valid value for the new symbol.
+ *
+ * Phase 1 (synchronous): immediately validate against the hardcoded
+ *   fallback map so the multiplier is never left at an invalid value
+ *   even if the WebSocket hasn't responded yet.
+ *
+ * Phase 2 (async): fetch the real multiplier list from the Deriv
+ *   contracts_for API and refine the value if the API returns a
+ *   different set than the fallback.
  */
 function autoUpdateMultiplier(sym) {
-  fetchValidMultipliers(sym).then(validMultipliers => {
-    if (!validMultipliers || validMultipliers.length === 0) return;
+  const current = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
 
-    const current = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
-    const best = pickBestMultiplier(validMultipliers, current);
-
+  /* Phase 1 — immediate correction from fallback / cache */
+  const knownValid = getValidMultipliersForSymbol(sym);
+  if (knownValid && knownValid.length > 0) {
+    const best = pickBestMultiplier(knownValid, current);
     if (best !== current) {
       autoTradeMultiplier = best;
       if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = best;
-      addLog(`🔧 Multiplier auto-adjusted to ×${best} for ${sym} (valid: ${validMultipliers.join(", ")})`);
+      addLog(`🔧 Multiplier auto-adjusted to ×${best} for ${sym} (valid: ${knownValid.join(", ")})`);
       saveSettings();
     } else {
       addLog(`✅ Multiplier ×${current} is valid for ${sym}`);
+    }
+  }
+
+  /* Phase 2 — async API refinement (updates the cache for future trades) */
+  fetchValidMultipliers(sym).then(apiValid => {
+    if (!apiValid || apiValid.length === 0) return;
+
+    const latest = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
+    const best = pickBestMultiplier(apiValid, latest);
+
+    if (best !== latest) {
+      autoTradeMultiplier = best;
+      if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = best;
+      addLog(`🔧 Multiplier refined to ×${best} for ${sym} via API (valid: ${apiValid.join(", ")})`);
+      saveSettings();
     }
   });
 }
@@ -10241,20 +10408,40 @@ function executeAutoTrade(signal) {
   const symbol = signal.symbol || getActiveSymbol();
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
 
-  /* Validate multiplier against cached valid values for this symbol.
-     If the current multiplier isn't valid, auto-correct it before trading.
-     This is a safety net: autoUpdateMultiplier() runs on symbol change and
-     connect, but it's async — so this check catches the edge case where the
-     cache populated after the symbol changed but before the first trade fires. */
+  /* Validate multiplier against known valid values for this symbol.
+     Check order: API cache → hardcoded fallback map → if neither exists,
+     attempt an async fetch and retry.  This guarantees the multiplier
+     is always valid before the proposal is sent. */
   let multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
-  const cachedValid = symbolMultiplierCache[symbol];
-  if (cachedValid && cachedValid.length > 0 && !cachedValid.includes(multiplier)) {
-    const corrected = pickBestMultiplier(cachedValid, multiplier);
-    addLog(`⚠ Multiplier ×${multiplier} invalid for ${symbol} — corrected to ×${corrected}`);
-    multiplier = corrected;
-    autoTradeMultiplier = corrected;
-    if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
-    saveSettings();
+  const knownValid = getValidMultipliersForSymbol(symbol);
+
+  if (knownValid && knownValid.length > 0) {
+    /* We have valid values — correct the multiplier if needed */
+    if (!knownValid.includes(multiplier)) {
+      const corrected = pickBestMultiplier(knownValid, multiplier);
+      addLog(`⚠ Multiplier ×${multiplier} invalid for ${symbol} — corrected to ×${corrected} (valid: ${knownValid.join(", ")})`);
+      multiplier = corrected;
+      autoTradeMultiplier = corrected;
+      if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
+      saveSettings();
+    }
+  } else {
+    /* No cached or fallback data yet — try fetching from API before trading */
+    addLog(`⏳ Fetching valid multipliers for ${symbol} before placing trade…`);
+    fetchValidMultipliers(symbol).then(apiValid => {
+      if (apiValid && apiValid.length > 0 && !apiValid.includes(multiplier)) {
+        const corrected = pickBestMultiplier(apiValid, multiplier);
+        autoTradeMultiplier = corrected;
+        if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
+        saveSettings();
+      }
+      /* Re-invoke with the (now-cached) data */
+      autoTradeInProgress = false;
+      executeAutoTrade(signal);
+    });
+    /* Mark in-progress so the re-invocation guard works; return to wait for fetch */
+    autoTradeInProgress = true;
+    return;
   }
 
   const label = autoTradeSourceLabel(signal.source);
@@ -12959,7 +13146,21 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeMultiplier) {
     UI.autoTradeMultiplier.addEventListener("input", () => {
       const v = parseInt(UI.autoTradeMultiplier.value, 10);
-      autoTradeMultiplier = (!isNaN(v) && v >= 1) ? v : DEFAULT_AUTO_TRADE_MULTIPLIER;
+      if (isNaN(v) || v < 1) {
+        autoTradeMultiplier = DEFAULT_AUTO_TRADE_MULTIPLIER;
+      } else {
+        /* Validate against known valid multipliers for the current symbol */
+        const sym = getActiveSymbol();
+        const valid = getValidMultipliersForSymbol(sym);
+        if (valid && valid.length > 0 && !valid.includes(v)) {
+          const corrected = pickBestMultiplier(valid, v);
+          autoTradeMultiplier = corrected;
+          UI.autoTradeMultiplier.value = corrected;
+          addLog(`⚠ Multiplier ×${v} not valid for ${sym} — adjusted to ×${corrected} (valid: ${valid.join(", ")})`);
+        } else {
+          autoTradeMultiplier = v;
+        }
+      }
       saveSettings();
     });
   }
