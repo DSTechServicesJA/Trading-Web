@@ -624,6 +624,11 @@ let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity swe
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
+let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
+let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
+let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
+let autoTradePL              = 0;      /* cumulative P/L for auto-trades */
+let autoTradeBalance         = null;   /* latest Deriv account balance */
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -937,8 +942,15 @@ function initUI() {
   UI.autoTradeToggle        = document.getElementById("autoTradeToggle");
   UI.autoTradeScalpToggle   = document.getElementById("autoTradeScalpToggle");
   UI.autoTradeStrategyToggle = document.getElementById("autoTradeStrategyToggle");
+  UI.autoTradeScalpOppositeToggle   = document.getElementById("autoTradeScalpOppositeToggle");
+  UI.autoTradeStrategyOppositeToggle = document.getElementById("autoTradeStrategyOppositeToggle");
   UI.autoTradeStake         = document.getElementById("autoTradeStake");
   UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
+  UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
+  UI.autoTradeBalanceValue   = document.getElementById("autoTradeBalanceValue");
+  UI.autoTradePLValue        = document.getElementById("autoTradePLValue");
+  UI.autoTradeHistoryList    = document.getElementById("autoTradeHistoryList");
+  UI.autoTradeHistoryEmpty   = document.getElementById("autoTradeHistoryEmpty");
   UI.signalLog      = document.getElementById("signalLog");
   UI.canvas         = document.getElementById("mainChart");
   UI.ctx            = UI.canvas.getContext("2d");
@@ -2745,7 +2757,9 @@ function saveSettings() {
       autoTradeScalpEnabled,
       autoTradeStrategyEnabled,
       autoTradeStake,
-      autoTradeMultiplier
+      autoTradeMultiplier,
+      autoTradeScalpOpposite,
+      autoTradeStrategyOpposite
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) { /* storage not available */ }
@@ -2961,6 +2975,13 @@ function restoreSettings() {
     if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
     if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
     if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
+    if (s.autoTradeScalpOpposite != null) autoTradeScalpOpposite = s.autoTradeScalpOpposite;
+    if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
+    if (UI.autoTradeScalpOppositeToggle) UI.autoTradeScalpOppositeToggle.checked = autoTradeScalpOpposite;
+    if (UI.autoTradeStrategyOppositeToggle) UI.autoTradeStrategyOppositeToggle.checked = autoTradeStrategyOpposite;
+    /* Restore auto-trade history */
+    restoreAutoTradeHistory();
+    updateAutoTradeBalanceVisibility();
   } catch (e) { /* storage not available */ }
 }
 
@@ -4308,7 +4329,15 @@ function resetSession() {
   try {
     localStorage.removeItem(LS_PREFIX + "signalLog");
     localStorage.removeItem(LS_PREFIX + "signalHistory");
+    localStorage.removeItem(LS_PREFIX + "autoTradeHistory");
+    localStorage.removeItem(LS_PREFIX + "autoTradePL");
   } catch (e) { /* storage not available */ }
+
+  /* Reset auto-trade history */
+  autoTradeHistory = [];
+  autoTradePL = 0;
+  renderAutoTradeHistory();
+  updateAutoTradePLUI();
 
   /* Redraw chart (cleared state) */
   drawChart();
@@ -4886,6 +4915,11 @@ function connect() {
       if (!isReal) {
         addLog("⚠ Demo account detected – switch to a real account token for live market data");
       }
+      /* Set initial balance and subscribe to live balance stream */
+      autoTradeBalance = parseFloat(acct.balance) || null;
+      updateAutoTradeBalanceUI();
+      updateAutoTradeBalanceVisibility();
+      thisWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
       addLog(`Subscribing to ${symbol} (${gran}s candles)`);
       subscribeCandles(thisWs, symbol, gran);
       return;
@@ -4981,6 +5015,18 @@ function connect() {
         const label = autoTradeSourceLabel(src);
         addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
         autoTradeInProgress = false;
+        /* Update the most recent PENDING entry in auto-trade history */
+        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+      }
+      return;
+    }
+
+    /* ---- Balance stream: update auto-trade balance display in real-time ---- */
+    if (msg.msg_type === "balance") {
+      const bal = msg.balance;
+      if (bal && bal.balance != null) {
+        autoTradeBalance = parseFloat(bal.balance);
+        updateAutoTradeBalanceUI();
       }
       return;
     }
@@ -5036,6 +5082,7 @@ function disconnect() {
       if (dyingWs.readyState === WebSocket.OPEN) {
         dyingWs.send(JSON.stringify({ forget_all: "candles" }));
         dyingWs.send(JSON.stringify({ forget_all: "ticks" }));
+        dyingWs.send(JSON.stringify({ forget_all: "balance" }));
       }
     } catch (e) { /* ignore send errors during teardown */ }
 
@@ -9994,7 +10041,17 @@ function executeAutoTrade(signal) {
     return;
   }
 
-  const contractType = signal.dir === "BULL" ? "MULTUP" : "MULTDOWN";
+  /* Apply opposite mode: reverse direction for scalp / strategy if enabled */
+  let effectiveDir = signal.dir;
+  if (signal.source === "scalp" && autoTradeScalpOpposite) {
+    effectiveDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    addLog(`🔄 Opposite mode (Scalp): reversed ${signal.dir} → ${effectiveDir}`);
+  } else if (signal.source === "strategy" && autoTradeStrategyOpposite) {
+    effectiveDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    addLog(`🔄 Opposite mode (Strategy): reversed ${signal.dir} → ${effectiveDir}`);
+  }
+
+  const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
   const symbol = signal.symbol || getActiveSymbol();
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
   const multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
@@ -10014,7 +10071,11 @@ function executeAutoTrade(signal) {
   autoTradeInProgress = true;
   const slLog = limitOrder.stop_loss != null ? ` SL $${limitOrder.stop_loss}` : "";
   const tpLog = limitOrder.take_profit != null ? ` TP $${limitOrder.take_profit}` : "";
-  addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}`);
+  const oppositeTag = (effectiveDir !== signal.dir) ? " [OPPOSITE]" : "";
+  addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}${oppositeTag}`);
+
+  /* Record pending trade in history */
+  addAutoTradeHistoryEntry({ source: signal.source, type: contractType, symbol, profit: null, result: "PENDING" });
 
   const payload = {
     proposal: 1,
@@ -10029,6 +10090,114 @@ function executeAutoTrade(signal) {
   if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
 
   ws.send(JSON.stringify(payload));
+}
+
+/* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
+
+/** Add a new entry to the auto-trade history array and re-render. */
+function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
+  const entry = {
+    time: Date.now(),
+    source: source || "breakout",
+    type,
+    symbol: symbol || "--",
+    profit: profit != null ? profit : null,
+    result: result || "PENDING"
+  };
+  autoTradeHistory.unshift(entry);
+  /* Cap history to 100 entries */
+  if (autoTradeHistory.length > 100) autoTradeHistory.length = 100;
+  renderAutoTradeHistory();
+  persistAutoTradeHistory();
+}
+
+/** Resolve the most recent PENDING entry with profit and result. */
+function resolveAutoTradeHistoryEntry(profit, result) {
+  const pending = autoTradeHistory.find(e => e.result === "PENDING");
+  if (pending) {
+    pending.profit = profit;
+    pending.result = result;
+  }
+  /* Update cumulative P/L */
+  autoTradePL += profit;
+  renderAutoTradeHistory();
+  updateAutoTradePLUI();
+  persistAutoTradeHistory();
+}
+
+/** Render the auto-trade history list in the DOM. */
+function renderAutoTradeHistory() {
+  if (!UI.autoTradeHistoryList || !UI.autoTradeHistoryEmpty) return;
+  UI.autoTradeHistoryList.innerHTML = "";
+  if (autoTradeHistory.length === 0) {
+    UI.autoTradeHistoryEmpty.style.display = "";
+    return;
+  }
+  UI.autoTradeHistoryEmpty.style.display = "none";
+  for (const e of autoTradeHistory) {
+    const li = document.createElement("li");
+    const srcLabel = autoTradeSourceLabel(e.source);
+    const isBull = e.type === "MULTUP";
+    const timeStr = new Date(e.time).toLocaleTimeString();
+
+    let profitClass = "pending";
+    let profitText = "⏳ Pending";
+    if (e.result === "WIN") { profitClass = "win"; profitText = `+$${fmt(e.profit, 2)}`; }
+    else if (e.result === "LOSS") { profitClass = "loss"; profitText = `−$${fmt(Math.abs(e.profit), 2)}`; }
+
+    li.innerHTML =
+      `<span class="at-source">${srcLabel}</span>` +
+      `<span class="at-type ${isBull ? "bull" : "bear"}">${e.type}</span>` +
+      `<span class="at-profit ${profitClass}">${profitText}</span>` +
+      `<span class="at-time">${timeStr}</span>`;
+    UI.autoTradeHistoryList.appendChild(li);
+  }
+}
+
+/** Update the balance display value. */
+function updateAutoTradeBalanceUI() {
+  if (UI.autoTradeBalanceValue) {
+    UI.autoTradeBalanceValue.textContent =
+      autoTradeBalance != null ? `$${fmt(autoTradeBalance, 2)}` : "---";
+  }
+}
+
+/** Update the P/L display value. */
+function updateAutoTradePLUI() {
+  if (UI.autoTradePLValue) {
+    const prefix = autoTradePL >= 0 ? "+$" : "−$";
+    UI.autoTradePLValue.textContent = `${prefix}${fmt(Math.abs(autoTradePL), 2)}`;
+    UI.autoTradePLValue.style.color =
+      autoTradePL > 0 ? "var(--success)" :
+      autoTradePL < 0 ? "var(--danger)" : "";
+  }
+}
+
+/** Show/hide the balance section based on whether any auto-trade toggle is on. */
+function updateAutoTradeBalanceVisibility() {
+  if (!UI.autoTradeBalanceSection) return;
+  const anyEnabled = autoTradeEnabled || autoTradeScalpEnabled || autoTradeStrategyEnabled;
+  UI.autoTradeBalanceSection.style.display = anyEnabled ? "" : "none";
+}
+
+/** Persist auto-trade history to localStorage. */
+function persistAutoTradeHistory() {
+  try {
+    localStorage.setItem(LS_PREFIX + "autoTradeHistory", JSON.stringify(autoTradeHistory));
+    localStorage.setItem(LS_PREFIX + "autoTradePL", JSON.stringify(autoTradePL));
+  } catch (e) { /* storage not available */ }
+}
+
+/** Restore auto-trade history from localStorage. */
+function restoreAutoTradeHistory() {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + "autoTradeHistory");
+    if (raw) autoTradeHistory = JSON.parse(raw) || [];
+    const plRaw = localStorage.getItem(LS_PREFIX + "autoTradePL");
+    if (plRaw) autoTradePL = JSON.parse(plRaw) || 0;
+    renderAutoTradeHistory();
+    updateAutoTradePLUI();
+  } catch (e) { /* storage not available */ }
 }
 
 function monitorTradeOutcome(candle) {
@@ -12486,6 +12655,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (autoTradeEnabled && !authorized) {
         addLog("⚠ Auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
+      updateAutoTradeBalanceVisibility();
       saveSettings();
     });
   }
@@ -12495,6 +12665,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (autoTradeScalpEnabled && !authorized) {
         addLog("⚠ Scalp auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
+      updateAutoTradeBalanceVisibility();
       saveSettings();
     });
   }
@@ -12504,6 +12675,22 @@ document.addEventListener("DOMContentLoaded", () => {
       if (autoTradeStrategyEnabled && !authorized) {
         addLog("⚠ Strategy auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
+      updateAutoTradeBalanceVisibility();
+      saveSettings();
+    });
+  }
+  /* Opposite mode toggles */
+  if (UI.autoTradeScalpOppositeToggle) {
+    UI.autoTradeScalpOppositeToggle.addEventListener("change", () => {
+      autoTradeScalpOpposite = UI.autoTradeScalpOppositeToggle.checked;
+      addLog(`🔄 Scalp opposite mode: ${autoTradeScalpOpposite ? "ON — signals will be reversed" : "OFF"}`);
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeStrategyOppositeToggle) {
+    UI.autoTradeStrategyOppositeToggle.addEventListener("change", () => {
+      autoTradeStrategyOpposite = UI.autoTradeStrategyOppositeToggle.checked;
+      addLog(`🔄 Strategy opposite mode: ${autoTradeStrategyOpposite ? "ON — signals will be reversed" : "OFF"}`);
       saveSettings();
     });
   }

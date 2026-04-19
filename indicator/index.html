@@ -444,15 +444,31 @@
               <h3>Auto-Trade</h3>
             </div>
 
+            <!-- Account Balance (visible when auto-trade enabled + authorized) -->
+            <div id="autoTradeBalanceSection" class="auto-trade-balance-section" style="display:none;">
+              <div class="auto-trade-balance-row">
+                <span class="auto-trade-balance-label">💰 Account Balance</span>
+                <span id="autoTradeBalanceValue" class="auto-trade-balance-value">---</span>
+              </div>
+              <div class="auto-trade-balance-row">
+                <span class="auto-trade-balance-label">📊 Auto-Trade P/L</span>
+                <span id="autoTradePLValue" class="auto-trade-balance-value">$0.00</span>
+              </div>
+            </div>
+
             <p class="param-group-title">Signal Sources</p>
             <label class="toggle-row"><input type="checkbox" id="autoTradeToggle" /> 📈 Breakout-Retest Trades</label>
             <p class="hint" style="margin-bottom:6px;">Place a multiplier contract when a TRADE signal fires from the breakout-retest engine.</p>
 
             <label class="toggle-row"><input type="checkbox" id="autoTradeScalpToggle" /> ⚡ Live Scalp Trades</label>
-            <p class="hint" style="margin-bottom:6px;">Place a multiplier contract when a live scalp signal fires (confluence scanner).</p>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a live scalp signal fires (confluence scanner).</p>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeScalpOppositeToggle" /> 🔄 Opposite Mode (Scalp)</label>
+            <p class="hint" style="margin-bottom:6px;">Reverse the scalp signal direction — if signal says BUY, place SELL and vice versa.</p>
 
             <label class="toggle-row"><input type="checkbox" id="autoTradeStrategyToggle" /> 📊 Strategy Trades</label>
-            <p class="hint" style="margin-bottom:10px;">Place a multiplier contract when a custom strategy fires (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3).</p>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a custom strategy fires (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3).</p>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
+            <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
             <p class="param-group-title">Contract Settings</p>
             <div class="account-inputs">
@@ -467,6 +483,13 @@
             </div>
             <p class="hint" style="margin-bottom:6px;">Uses MULTUP/MULTDOWN contracts with SL &amp; TP from the signal's entry, stop-loss, and take-profit levels. Requires a valid Deriv token.</p>
             <p class="hint" style="color:var(--text-warn, #f59e0b);">⚠ Use with caution — real money will be placed when connected with a live Deriv account.</p>
+
+            <!-- Auto-Trade History -->
+            <p class="param-group-title">Trade History</p>
+            <div id="autoTradeHistorySection" class="auto-trade-history-section">
+              <ul id="autoTradeHistoryList" class="auto-trade-history-list"></ul>
+              <p id="autoTradeHistoryEmpty" class="hint" style="text-align:center;">No auto-trades yet.</p>
+            </div>
           </section>
 
           <!-- Strategy Filters -->

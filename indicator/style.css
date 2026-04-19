@@ -2293,3 +2293,75 @@ body.light-theme .ms-card-footer {
   from { opacity: 1; transform: translateX(0) scale(1); }
   to   { opacity: 0; transform: translateX(40px) scale(0.9); }
 }
+
+/* ---- Auto-Trade Balance Section ---- */
+.auto-trade-balance-section {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+}
+.auto-trade-balance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.auto-trade-balance-row + .auto-trade-balance-row {
+  border-top: 1px solid var(--glass-border);
+}
+.auto-trade-balance-label {
+  font-size: var(--fs-sm);
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.auto-trade-balance-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--heading);
+}
+
+/* ---- Opposite Mode Sub-Toggle ---- */
+.toggle-row-sub {
+  margin-left: 24px;
+  font-size: var(--fs-sm);
+  opacity: 0.85;
+  background: var(--bg-base);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px dashed var(--glass-border);
+}
+
+/* ---- Auto-Trade History ---- */
+.auto-trade-history-section {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: var(--space-xs);
+}
+.auto-trade-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.auto-trade-history-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 8px;
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--glass-border);
+  gap: 6px;
+}
+.auto-trade-history-list li:last-child { border-bottom: none; }
+.auto-trade-history-list .at-source { color: var(--text-soft); flex-shrink: 0; }
+.auto-trade-history-list .at-type { font-weight: 600; flex-shrink: 0; }
+.auto-trade-history-list .at-type.bull { color: var(--success); }
+.auto-trade-history-list .at-type.bear { color: var(--danger); }
+.auto-trade-history-list .at-profit { font-weight: 700; flex-shrink: 0; }
+.auto-trade-history-list .at-profit.win { color: var(--success); }
+.auto-trade-history-list .at-profit.loss { color: var(--danger); }
+.auto-trade-history-list .at-profit.pending { color: var(--warning); }
+.auto-trade-history-list .at-time { color: var(--text-muted); font-size: var(--fs-xs); flex-shrink: 0; }
