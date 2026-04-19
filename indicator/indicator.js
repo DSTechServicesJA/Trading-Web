@@ -588,7 +588,7 @@ let soundEnabled = true;
 let notificationsEnabled = false;
 
 /* Global notification throttle — suppress rapid-fire browser notifications */
-const NOTIFICATION_COOLDOWN_MS = 30000;   /* min 30 s between browser notifications */
+const NOTIFICATION_COOLDOWN_MS = 30000;   /* min 30s between browser notifications */
 const NOTIFICATION_BURST_MAX   = 3;       /* max notifications allowed in one burst window */
 const NOTIFICATION_BURST_WINDOW_MS = 60000; /* 60 s sliding window for burst tracking */
 let _notifTimestamps = [];                /* timestamps of recent notifications */
@@ -1306,7 +1306,8 @@ function throttledNotification(title, body) {
   _notifTimestamps = _notifTimestamps.filter(t => now - t < NOTIFICATION_BURST_WINDOW_MS);
 
   /* Check cooldown since last notification */
-  if (_notifTimestamps.length > 0 && now - _notifTimestamps[_notifTimestamps.length - 1] < NOTIFICATION_COOLDOWN_MS) {
+  const lastNotifTime = _notifTimestamps[_notifTimestamps.length - 1];
+  if (lastNotifTime && now - lastNotifTime < NOTIFICATION_COOLDOWN_MS) {
     return; /* too soon after the last notification */
   }
   /* Check burst limit */

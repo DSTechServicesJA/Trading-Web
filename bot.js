@@ -1865,7 +1865,7 @@ let soundEnabled = true;
 let notificationsEnabled = false;
 
 // Global notification throttle — prevent rapid-fire browser notifications
-const BOT_NOTIF_COOLDOWN_MS = 30000;      // min 30 s between browser notifications
+const BOT_NOTIF_COOLDOWN_MS = 30000;      // min 30s between browser notifications
 const BOT_NOTIF_BURST_MAX   = 3;          // max notifications in one burst window
 const BOT_NOTIF_BURST_WINDOW_MS = 60000;  // 60 s sliding window
 let _botNotifTimestamps = [];
@@ -1873,7 +1873,8 @@ let _botNotifTimestamps = [];
 function _throttledBotNotification(title, body, icon) {
   const now = Date.now();
   _botNotifTimestamps = _botNotifTimestamps.filter(t => now - t < BOT_NOTIF_BURST_WINDOW_MS);
-  if (_botNotifTimestamps.length > 0 && now - _botNotifTimestamps[_botNotifTimestamps.length - 1] < BOT_NOTIF_COOLDOWN_MS) return;
+  const lastTime = _botNotifTimestamps[_botNotifTimestamps.length - 1];
+  if (lastTime && now - lastTime < BOT_NOTIF_COOLDOWN_MS) return;
   if (_botNotifTimestamps.length >= BOT_NOTIF_BURST_MAX) return;
   _botNotifTimestamps.push(now);
   new Notification(title, { body, icon });
