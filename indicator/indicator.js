@@ -786,6 +786,7 @@ let autoTradePL              = 0;      /* cumulative P/L for auto-trades */
 let autoTradeBalance         = null;   /* latest Deriv account balance */
 let autoTradePendingTimer    = null;   /* timeout timer for stuck PENDING trades */
 const AUTO_TRADE_PENDING_TIMEOUT_MS = 3600000; /* 1 hour max for a pending multiplier trade */
+const AUTO_TRADE_QUERY_TIMEOUT_MS   = 15000;   /* 15s grace period for one-shot status query */
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -5196,8 +5197,11 @@ function connect() {
 
     if (msg.error) {
       /* Auto-trade errors: handle and reset state before returning.
-         Match by passthrough OR by contract_id for proposal_open_contract
-         errors (Deriv subscription streams may not echo passthrough). */
+         Match by passthrough OR by msg_type for proposal_open_contract
+         errors (Deriv subscription streams may not echo passthrough).
+         Since only one auto-trade can be in-flight at a time (guarded by
+         autoTradeInProgress), any POC error while we have an active
+         contract ID is necessarily for our trade. */
       const isAutoTradeByPassthrough = msg.passthrough && msg.passthrough.auto_trade;
       const isAutoTradeByContractId  = msg.msg_type === "proposal_open_contract" && autoTradeContractId != null;
       if (isAutoTradeByPassthrough || isAutoTradeByContractId) {
@@ -10588,7 +10592,7 @@ function startAutoTradePendingTimeout() {
         autoTradeContractId = null;
         autoTradePendingContractId = null;
         resolveAutoTradeHistoryEntry(0, "CANCELLED");
-      }, 15000);
+      }, AUTO_TRADE_QUERY_TIMEOUT_MS);
     } else {
       addLog("⚠ Pending trade timeout — no active connection to query contract status, marking as cancelled");
       autoTradeInProgress = false;
