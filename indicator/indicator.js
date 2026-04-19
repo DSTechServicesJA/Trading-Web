@@ -171,6 +171,7 @@ const STOCH_OVERBOUGHT = 80;
 /* Auto-trade: minimum stake for Deriv contracts */
 const MIN_AUTO_TRADE_STAKE = 0.35;
 const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
+const MAX_AUTO_TRADE_HISTORY = 100;
 
 /* Scalping mode (from TRENDLINE_TRADING_STRATEGY.md: "Use 15min or 5min as your
    larger timeframe when scalping 1min or 5min charts" / "5-10 pip profits") */
@@ -10106,7 +10107,7 @@ function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
   };
   autoTradeHistory.unshift(entry);
   /* Cap history to 100 entries */
-  if (autoTradeHistory.length > 100) autoTradeHistory.length = 100;
+  if (autoTradeHistory.length > MAX_AUTO_TRADE_HISTORY) autoTradeHistory.length = MAX_AUTO_TRADE_HISTORY;
   renderAutoTradeHistory();
   persistAutoTradeHistory();
 }
@@ -10192,9 +10193,15 @@ function persistAutoTradeHistory() {
 function restoreAutoTradeHistory() {
   try {
     const raw = localStorage.getItem(LS_PREFIX + "autoTradeHistory");
-    if (raw) autoTradeHistory = JSON.parse(raw) || [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      autoTradeHistory = Array.isArray(parsed) ? parsed : [];
+    }
     const plRaw = localStorage.getItem(LS_PREFIX + "autoTradePL");
-    if (plRaw) autoTradePL = JSON.parse(plRaw) || 0;
+    if (plRaw != null) {
+      const parsed = JSON.parse(plRaw);
+      autoTradePL = typeof parsed === "number" ? parsed : 0;
+    }
     renderAutoTradeHistory();
     updateAutoTradePLUI();
   } catch (e) { /* storage not available */ }
