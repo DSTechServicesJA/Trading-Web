@@ -4935,7 +4935,7 @@ function connect() {
       }
       const proposal = msg.proposal || {};
       const src = msg.passthrough.source || "breakout";
-      const label = src === "scalp" ? "⚡ Scalp" : src === "strategy" ? "📊 Strategy" : "📈 Breakout";
+      const label = autoTradeSourceLabel(src);
       addLog(`🤖 ${label} auto-trade: buying contract — ask $${proposal.ask_price}`);
       ws.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, passthrough: { auto_trade: true, source: src } }));
       return;
@@ -4944,7 +4944,7 @@ function connect() {
     if (msg.msg_type === "buy" && msg.passthrough && msg.passthrough.auto_trade) {
       const b = msg.buy;
       const src = msg.passthrough.source || "breakout";
-      const label = src === "scalp" ? "⚡ Scalp" : src === "strategy" ? "📊 Strategy" : "📈 Breakout";
+      const label = autoTradeSourceLabel(src);
       addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
       ws.send(JSON.stringify({
         proposal_open_contract: 1,
@@ -4961,7 +4961,7 @@ function connect() {
         const profit = parseFloat(poc.profit) || 0;
         const won = profit > 0;
         const src = msg.passthrough.source || "breakout";
-        const label = src === "scalp" ? "⚡ Scalp" : src === "strategy" ? "📊 Strategy" : "📈 Breakout";
+        const label = autoTradeSourceLabel(src);
         addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
         autoTradeInProgress = false;
       }
@@ -9904,6 +9904,12 @@ function recordSignal(confirmPattern) {
  * Uses MULTUP/MULTDOWN contracts with limit_order.stop_loss and
  * limit_order.take_profit expressed as absolute distance from entry.
  */
+function autoTradeSourceLabel(source) {
+  if (source === "scalp") return "⚡ Scalp";
+  if (source === "strategy") return "📊 Strategy";
+  return "📈 Breakout";
+}
+
 function executeAutoTrade(signal) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     addLog("⚠ Auto-trade skipped — WebSocket not connected");
@@ -9913,8 +9919,8 @@ function executeAutoTrade(signal) {
     addLog("⚠ Auto-trade skipped — not authorized (set Deriv token in Settings)");
     return;
   }
-  if (!signal || !signal.dir) {
-    addLog("⚠ Auto-trade skipped — no signal data");
+  if (!signal || !signal.dir || (signal.dir !== "BULL" && signal.dir !== "BEAR")) {
+    addLog("⚠ Auto-trade skipped — invalid signal direction");
     return;
   }
   if (autoTradeInProgress) {
@@ -9926,7 +9932,7 @@ function executeAutoTrade(signal) {
   const symbol = signal.symbol || getActiveSymbol();
   const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
   const multiplier = parseInt(autoTradeMultiplier, 10) || DEFAULT_AUTO_TRADE_MULTIPLIER;
-  const label = signal.source === "scalp" ? "⚡ Scalp" : signal.source === "strategy" ? "📊 Strategy" : "📈 Breakout";
+  const label = autoTradeSourceLabel(signal.source);
 
   /* Build limit_order with SL and optional TP (distance from entry in USD) */
   const limitOrder = {};
