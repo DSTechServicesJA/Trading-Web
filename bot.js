@@ -215,7 +215,7 @@ function fetchStakingLimits(sym) {
 
     ws.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD", product_type: "basic" }));
+      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD" }));
     } catch (err) {
       console.warn("contracts_for send failed:", err);
       ws.removeEventListener("message", handler);
@@ -4283,8 +4283,7 @@ if (CURRENT_SYMBOL !== symbol) {
     ws.addEventListener("message", handler);
 
     ws.send(JSON.stringify({
-      active_symbols: "brief",
-      product_type: "basic"
+      active_symbols: "brief"
     }));
   });
 }
