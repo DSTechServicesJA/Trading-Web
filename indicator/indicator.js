@@ -625,6 +625,7 @@ let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity swe
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
+let autoTradeContractId      = null;   /* contract_id of the in-flight auto-trade */
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
 let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
@@ -4273,6 +4274,7 @@ function resetIndicator() {
   trade = null;
   monitoringTrade = false;
   autoTradeInProgress = false;
+  autoTradeContractId = null;
   emaFast = [];
   emaSlow = [];
   emaHTF  = [];
@@ -4893,6 +4895,7 @@ function connect() {
       if (msg.passthrough && msg.passthrough.auto_trade) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
+        autoTradeContractId = null;
         resolveAutoTradeHistoryEntry(0, "ERROR");
         return;
       }
@@ -4998,6 +5001,7 @@ function connect() {
       const b = msg.buy;
       const src = msg.passthrough.source || "breakout";
       const label = autoTradeSourceLabel(src);
+      autoTradeContractId = b.contract_id;
       addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
       ws.send(JSON.stringify({
         proposal_open_contract: 1,
@@ -5009,13 +5013,12 @@ function connect() {
     }
 
     if (msg.msg_type === "proposal_open_contract") {
-      /* Accept auto-trade POC with or without passthrough — Deriv subscription
-         streams may not echo passthrough on every update. Only process when
-         we have an in-flight auto-trade so we don't accidentally capture
-         unrelated POC messages. */
-      const isAutoTrade = (msg.passthrough && msg.passthrough.auto_trade) || autoTradeInProgress;
-      if (isAutoTrade) {
-        const poc = msg.proposal_open_contract;
+      /* Accept auto-trade POC with passthrough OR matching contract_id.
+         Deriv subscription streams may not echo passthrough on every update. */
+      const poc = msg.proposal_open_contract;
+      const hasPassthrough = msg.passthrough && msg.passthrough.auto_trade;
+      const matchesContract = autoTradeContractId && poc && poc.contract_id === autoTradeContractId;
+      if (hasPassthrough || matchesContract) {
         if (poc && poc.is_sold) {
           const profit = parseFloat(poc.profit) || 0;
           const won = profit > 0;
@@ -5023,6 +5026,7 @@ function connect() {
           const label = autoTradeSourceLabel(src);
           addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
           autoTradeInProgress = false;
+          autoTradeContractId = null;
           /* Update the most recent PENDING entry in auto-trade history */
           resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
         }
@@ -5054,12 +5058,14 @@ function connect() {
 
     /* Reset auto-trade state on disconnect */
     autoTradeInProgress = false;
+    autoTradeContractId = null;
 
     /* Resolve any stuck PENDING entries — the contract subscription is lost */
-    let stuckPending;
-    while ((stuckPending = autoTradeHistory.find(e => e.result === "PENDING"))) {
-      stuckPending.result = "CANCELLED";
-      stuckPending.profit = 0;
+    for (const e of autoTradeHistory) {
+      if (e.result === "PENDING") {
+        e.result = "CANCELLED";
+        e.profit = 0;
+      }
     }
     renderAutoTradeHistory();
     persistAutoTradeHistory();
