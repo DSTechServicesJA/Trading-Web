@@ -625,6 +625,7 @@ let autoTradeStrategyEnabled = false;  /* custom strategy signals (liquidity swe
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let autoTradeInProgress      = false;  /* prevents duplicate trades */
+let autoTradeContractId      = null;   /* contract_id of the in-flight auto-trade */
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
 let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
@@ -4273,6 +4274,7 @@ function resetIndicator() {
   trade = null;
   monitoringTrade = false;
   autoTradeInProgress = false;
+  autoTradeContractId = null;
   emaFast = [];
   emaSlow = [];
   emaHTF  = [];
@@ -4893,6 +4895,8 @@ function connect() {
       if (msg.passthrough && msg.passthrough.auto_trade) {
         addLog(`⚠ Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
         autoTradeInProgress = false;
+        autoTradeContractId = null;
+        resolveAutoTradeHistoryEntry(0, "ERROR");
         return;
       }
       addLog("API error: " + msg.error.message);
@@ -4997,6 +5001,7 @@ function connect() {
       const b = msg.buy;
       const src = msg.passthrough.source || "breakout";
       const label = autoTradeSourceLabel(src);
+      autoTradeContractId = b.contract_id;
       addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price}`);
       ws.send(JSON.stringify({
         proposal_open_contract: 1,
@@ -5007,19 +5012,26 @@ function connect() {
       return;
     }
 
-    if (msg.msg_type === "proposal_open_contract" && msg.passthrough && msg.passthrough.auto_trade) {
+    if (msg.msg_type === "proposal_open_contract") {
+      /* Accept auto-trade POC with passthrough OR matching contract_id.
+         Deriv subscription streams may not echo passthrough on every update. */
       const poc = msg.proposal_open_contract;
-      if (poc && poc.is_sold) {
-        const profit = parseFloat(poc.profit) || 0;
-        const won = profit > 0;
-        const src = msg.passthrough.source || "breakout";
-        const label = autoTradeSourceLabel(src);
-        addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
-        autoTradeInProgress = false;
-        /* Update the most recent PENDING entry in auto-trade history */
-        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+      const hasPassthrough = msg.passthrough && msg.passthrough.auto_trade;
+      const matchesContract = autoTradeContractId && poc && poc.contract_id === autoTradeContractId;
+      if (hasPassthrough || matchesContract) {
+        if (poc && poc.is_sold) {
+          const profit = parseFloat(poc.profit) || 0;
+          const won = profit > 0;
+          const src = (msg.passthrough && msg.passthrough.source) || "breakout";
+          const label = autoTradeSourceLabel(src);
+          addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)}`);
+          autoTradeInProgress = false;
+          autoTradeContractId = null;
+          /* Update the most recent PENDING entry in auto-trade history */
+          resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS");
+        }
+        return;
       }
-      return;
     }
 
     /* ---- Balance stream: update auto-trade balance display in real-time ---- */
@@ -5046,6 +5058,19 @@ function connect() {
 
     /* Reset auto-trade state on disconnect */
     autoTradeInProgress = false;
+    autoTradeContractId = null;
+
+    /* Resolve any stuck PENDING entries — the contract subscription is lost */
+    for (const e of autoTradeHistory) {
+      if (e.result === "PENDING") {
+        e.result = "CANCELLED";
+        e.profit = 0;
+      }
+    }
+    recalcAutoTradePL();
+    renderAutoTradeHistory();
+    updateAutoTradePLUI();
+    persistAutoTradeHistory();
 
     /* Nullify so connect() guard doesn't block reconnection */
     ws = null;
@@ -10095,6 +10120,18 @@ function executeAutoTrade(signal) {
 
 /* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
 
+/** Recompute cumulative P/L from actual trade history entries.
+ *  This is the source-of-truth — we never rely on an incrementally
+ *  accumulated value that can drift due to bugs or interruptions. */
+function recalcAutoTradePL() {
+  autoTradePL = autoTradeHistory.reduce((sum, e) => {
+    if ((e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number") {
+      return sum + e.profit;
+    }
+    return sum;
+  }, 0);
+}
+
 /** Add a new entry to the auto-trade history array and re-render. */
 function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
   const entry = {
@@ -10115,12 +10152,11 @@ function addAutoTradeHistoryEntry({ source, type, symbol, profit, result }) {
 /** Resolve the most recent PENDING entry with profit and result. */
 function resolveAutoTradeHistoryEntry(profit, result) {
   const pending = autoTradeHistory.find(e => e.result === "PENDING");
-  if (pending) {
-    pending.profit = profit;
-    pending.result = result;
-  }
-  /* Update cumulative P/L */
-  autoTradePL += profit;
+  if (!pending) return;  /* nothing to resolve */
+  pending.profit = profit;
+  pending.result = result;
+  /* Recompute P/L from all entries (prevents incremental drift) */
+  recalcAutoTradePL();
   renderAutoTradeHistory();
   updateAutoTradePLUI();
   persistAutoTradeHistory();
@@ -10145,6 +10181,8 @@ function renderAutoTradeHistory() {
     let profitText = "⏳ Pending";
     if (e.result === "WIN") { profitClass = "win"; profitText = `+$${fmt(e.profit, 2)}`; }
     else if (e.result === "LOSS") { profitClass = "loss"; profitText = `−$${fmt(Math.abs(e.profit), 2)}`; }
+    else if (e.result === "ERROR") { profitClass = "error"; profitText = "⚠ Error"; }
+    else if (e.result === "CANCELLED") { profitClass = "cancelled"; profitText = "✖ Cancelled"; }
 
     li.innerHTML =
       `<span class="at-source">${srcLabel}</span>` +
@@ -10197,13 +10235,30 @@ function restoreAutoTradeHistory() {
       const parsed = JSON.parse(raw);
       autoTradeHistory = Array.isArray(parsed) ? parsed : [];
     }
-    const plRaw = localStorage.getItem(LS_PREFIX + "autoTradePL");
-    if (plRaw != null) {
-      const parsed = JSON.parse(plRaw);
-      autoTradePL = typeof parsed === "number" ? parsed : 0;
+
+    /* Clean up stale PENDING entries from previous sessions.
+       If the page was closed/crashed without a proper WS close, PENDING
+       entries may still be lingering. Mark them CANCELLED since the
+       contract subscription is lost and we can't track them anymore. */
+    let hadStale = false;
+    for (const e of autoTradeHistory) {
+      if (e.result === "PENDING") {
+        e.result = "CANCELLED";
+        e.profit = 0;
+        hadStale = true;
+      }
     }
+
+    /* Always recompute P/L from actual history entries (self-healing).
+       The stored autoTradePL value may have drifted due to bugs or
+       interrupted sessions — the history entries are the source of truth. */
+    recalcAutoTradePL();
+
     renderAutoTradeHistory();
     updateAutoTradePLUI();
+
+    /* Persist cleaned-up state if we fixed stale entries */
+    if (hadStale) persistAutoTradeHistory();
   } catch (e) { /* storage not available */ }
 }
 

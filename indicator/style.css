@@ -2364,4 +2364,6 @@ body.light-theme .ms-card-footer {
 .auto-trade-history-list .at-profit.win { color: var(--success); }
 .auto-trade-history-list .at-profit.loss { color: var(--danger); }
 .auto-trade-history-list .at-profit.pending { color: var(--warning); }
+.auto-trade-history-list .at-profit.error { color: var(--danger); opacity: 0.7; }
+.auto-trade-history-list .at-profit.cancelled { color: var(--text-muted); }
 .auto-trade-history-list .at-time { color: var(--text-muted); font-size: var(--fs-xs); flex-shrink: 0; }
