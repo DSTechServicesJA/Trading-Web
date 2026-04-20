@@ -7,7 +7,7 @@
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self';
-                 connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com;
+                 connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com https://api.telegram.org;
                  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
                  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
                  font-src https://fonts.gstatic.com;
@@ -507,6 +507,7 @@
             <div id="autoTradeHistorySection" class="auto-trade-history-section">
               <ul id="autoTradeHistoryList" class="auto-trade-history-list"></ul>
               <p id="autoTradeHistoryEmpty" class="hint" style="text-align:center;">No auto-trades yet.</p>
+              <div id="oppositeModeSummary"></div>
             </div>
           </section>
 

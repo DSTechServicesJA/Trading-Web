@@ -2487,3 +2487,30 @@ body.light-theme .ms-card-footer {
 .auto-trade-history-list .at-profit.error { color: var(--danger); opacity: 0.7; }
 .auto-trade-history-list .at-profit.cancelled { color: var(--text-muted); }
 .auto-trade-history-list .at-time { color: var(--text-muted); font-size: var(--fs-xs); flex-shrink: 0; }
+.auto-trade-history-list .at-opposite { color: var(--warning); font-size: var(--fs-xs); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+
+/* Opposite Mode Effectiveness Summary */
+.opposite-summary {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-alt, rgba(255,255,255,0.03));
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.opposite-summary-title {
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  margin-bottom: 0.35rem;
+  color: var(--text);
+}
+.opposite-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: var(--fs-xs);
+  padding: 0.15rem 0;
+}
+.opposite-row .opp-label { color: var(--text-soft); font-weight: 600; min-width: 6em; }
+.opposite-row .opp-wr { font-weight: 700; color: var(--accent, #4fc3f7); }
+.opposite-row .opp-profit { color: var(--success); font-weight: 600; }
+.opposite-row .opp-loss { color: var(--danger); font-weight: 600; }
