@@ -822,14 +822,14 @@ function findSlotByContractId(contractId) {
   return null;
 }
 
-/* Legacy aliases — kept so single-panel callers that still reference the
-   old globals continue to work.  They now delegate to the slot for the
-   *currently active* symbol (main panel or multi-panel being processed). */
-let autoTradeInProgress        = false; /* shadow — updated by slot helpers */
-let autoTradeContractId        = null;
-let autoTradePendingContractId = null;
-let autoTradePendingTimer      = null;
-let autoTradeConsecutiveErrors = 0;
+/* Legacy global aliases — retained only to avoid "not defined" errors
+   in any code path that reads them (e.g. resetIndicator).  All functional
+   auto-trade state is now in per-symbol slots (autoTradeSlots). */
+let autoTradeInProgress        = false; /* unused shadow */
+let autoTradeContractId        = null;  /* unused shadow */
+let autoTradePendingContractId = null;  /* unused shadow */
+let autoTradePendingTimer      = null;  /* unused shadow */
+let autoTradeConsecutiveErrors = 0;     /* unused shadow */
 
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
@@ -10595,7 +10595,7 @@ function handleAutoTradeMessage(msg, msgWs) {
     const tradeSymbol = msg.passthrough.tradeSymbol;
     const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) : null;
     if (!slot || !slot.inProgress) {
-      addLog(`⚠ Auto-trade proposal received but trade was cancelled — ignoring${tradeSymbol ? ` (${tradeSymbol})` : ""}`);
+      addLog(`⚠ Auto-trade proposal received but trade was cancelled — ignoring (${tradeSymbol || "?"})`);
       return true;
     }
     const proposal = msg.proposal || {};
@@ -10654,6 +10654,7 @@ function handleAutoTradeMessage(msg, msgWs) {
       const sym = tradeSymbol || (byContractId && byContractId.symbol) || "?";
       const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) :
         (byContractId ? byContractId.slot : null);
+      if (!slot) return true; /* matched but no slot — nothing to update */
 
       const isSold = (poc && poc.is_sold) || (poc && poc.status === "sold");
       if (isSold && slot) {
