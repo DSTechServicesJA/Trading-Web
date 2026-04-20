@@ -11037,10 +11037,10 @@ function executeAutoTrade(signal) {
     if (slVal !== null && slVal < MIN_LIMIT_ORDER_AMOUNT) {
       const scale = MIN_LIMIT_ORDER_AMOUNT / slVal;
       if (tpVal !== null) tpVal *= scale;
-      addLog(`ℹ️ SL/TP scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
+      addLog(`ℹ️ ${tpVal !== null ? "SL/TP" : "SL"} scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
       slVal = MIN_LIMIT_ORDER_AMOUNT;
     }
-    if (slVal !== null) limitOrder.stop_loss = +fmt(Math.max(slVal, MIN_LIMIT_ORDER_AMOUNT), 2);
+    if (slVal !== null) limitOrder.stop_loss = +fmt(slVal, 2);
     if (tpVal !== null) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
   }
 
