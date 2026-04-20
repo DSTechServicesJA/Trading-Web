@@ -174,6 +174,8 @@ const MIN_LIMIT_ORDER_AMOUNT = 0.37;  /* Deriv minimum for SL/TP limit order val
 const AUTO_TRADE_MAX_CONSECUTIVE_ERRORS = 3; /* pause auto-trading after this many consecutive errors */
 const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
 const MAX_AUTO_TRADE_HISTORY = 100;
+const DEFAULT_MAX_CONCURRENT_TRADES = 1;  /* default: 1 trade at a time per symbol */
+const MAX_CONCURRENT_TRADES_LIMIT = 10;   /* hard cap to prevent runaway trades */
 
 /* ================= PER-SYMBOL MULTIPLIER CACHE (from contracts_for API) ================= */
 const symbolMultiplierCache = {};  /* { symbol: [50, 100, 150, ...] } */
@@ -784,10 +786,11 @@ let autoTradeNYOpenRange     = true;
 let autoTradeSessionRange    = true;
 let autoTradeStake           = 1;      /* USD stake per trade */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
+let maxConcurrentTrades      = DEFAULT_MAX_CONCURRENT_TRADES; /* max simultaneous trades per symbol */
 /* --- Per-symbol auto-trade slots ---
- * Each symbol can have ONE in-flight trade at a time. This allows
- * multi-panel mode to trade different symbols simultaneously.
- * Key = Deriv symbol string (e.g. "R_100"), value = slot object. */
+ * Each symbol can have multiple in-flight trades (up to maxConcurrentTrades).
+ * Key = Deriv symbol string (e.g. "R_100"), value = slot object.
+ * The slot tracks active trades in the `activeTrades` array. */
 const autoTradeSlots = new Map();
 
 /** Return (or create) the per-symbol auto-trade slot. */
@@ -798,7 +801,9 @@ function getAutoTradeSlot(symbol) {
       contractId: null,
       pendingContractId: null,
       pendingTimer: null,
-      consecutiveErrors: 0
+      consecutiveErrors: 0,
+      fetchingMultiplier: false,
+      activeTrades: []  /* array of { tradeId, contractId, pendingTimer, startTime } for concurrent tracking */
     });
   }
   return autoTradeSlots.get(symbol);
@@ -812,14 +817,45 @@ function isAnyAutoTradeInProgress() {
   return false;
 }
 
-/** Find the slot that owns a given contract ID. */
+/** Find the slot that owns a given contract ID (searches both legacy and activeTrades). */
 function findSlotByContractId(contractId) {
   if (!contractId) return null;
   const cid = String(contractId);
   for (const [sym, slot] of autoTradeSlots.entries()) {
     if (String(slot.contractId) === cid) return { symbol: sym, slot };
+    /* Also search activeTrades array for concurrent trade tracking */
+    const found = slot.activeTrades.find(t => String(t.contractId) === cid);
+    if (found) return { symbol: sym, slot, tradeEntry: found };
   }
   return null;
+}
+
+/** Find a trade entry by tradeId within a symbol's slot. */
+function findTradeByTradeId(symbol, tradeId) {
+  const slot = autoTradeSlots.get(symbol);
+  if (!slot || !tradeId) return null;
+  return slot.activeTrades.find(t => t.tradeId === tradeId);
+}
+
+/** Remove a completed/failed trade from the activeTrades array and update inProgress. */
+function removeActiveTrade(symbol, tradeId) {
+  const slot = autoTradeSlots.get(symbol);
+  if (!slot) return;
+  const idx = slot.activeTrades.findIndex(t => t.tradeId === tradeId);
+  if (idx !== -1) {
+    const entry = slot.activeTrades[idx];
+    if (entry.pendingTimer) {
+      clearTimeout(entry.pendingTimer);
+      entry.pendingTimer = null;
+    }
+    slot.activeTrades.splice(idx, 1);
+  }
+  /* Update legacy inProgress flag: true if any trades still active */
+  slot.inProgress = slot.activeTrades.length > 0;
+  if (!slot.inProgress) {
+    slot.contractId = null;
+    slot.pendingContractId = null;
+  }
 }
 
 /* Legacy global aliases — retained only to avoid "not defined" errors
@@ -1304,6 +1340,7 @@ function initUI() {
   UI.autoTradeSessionRangeToggle   = document.getElementById("autoTradeSessionRangeToggle");
   UI.autoTradeStake         = document.getElementById("autoTradeStake");
   UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
+  UI.maxConcurrentTrades    = document.getElementById("maxConcurrentTrades");
   UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
   UI.autoTradeBalanceValue   = document.getElementById("autoTradeBalanceValue");
   UI.autoTradePLValue        = document.getElementById("autoTradePLValue");
@@ -3132,6 +3169,7 @@ function saveSettings() {
       autoTradeStrategyEnabled,
       autoTradeStake,
       autoTradeMultiplier,
+      maxConcurrentTrades,
       autoTradeScalpOpposite,
       autoTradeStrategyOpposite,
       autoTradeLiquiditySweep,
@@ -3351,11 +3389,15 @@ function restoreSettings() {
     if (s.autoTradeStrategyEnabled != null) autoTradeStrategyEnabled = s.autoTradeStrategyEnabled;
     if (s.autoTradeStake != null) autoTradeStake = s.autoTradeStake;
     if (s.autoTradeMultiplier != null) autoTradeMultiplier = s.autoTradeMultiplier;
+    if (s.maxConcurrentTrades != null) {
+      maxConcurrentTrades = Math.max(1, Math.min(MAX_CONCURRENT_TRADES_LIMIT, parseInt(s.maxConcurrentTrades, 10) || DEFAULT_MAX_CONCURRENT_TRADES));
+    }
     if (UI.autoTradeToggle) UI.autoTradeToggle.checked = autoTradeEnabled;
     if (UI.autoTradeScalpToggle) UI.autoTradeScalpToggle.checked = autoTradeScalpEnabled;
     if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
     if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
     if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
+    if (UI.maxConcurrentTrades) UI.maxConcurrentTrades.value = maxConcurrentTrades;
     if (s.autoTradeScalpOpposite != null) autoTradeScalpOpposite = s.autoTradeScalpOpposite;
     if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
     if (UI.autoTradeScalpOppositeToggle) UI.autoTradeScalpOppositeToggle.checked = autoTradeScalpOpposite;
@@ -5532,6 +5574,11 @@ function connect() {
         slot.pendingContractId = slot.contractId;
         addLog(`📌 Preserving contract ${slot.contractId} for re-subscribe after reconnect (${sym})`);
       }
+      /* Clear all active trade timers */
+      for (const t of slot.activeTrades) {
+        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+      }
+      slot.activeTrades = [];
       slot.inProgress = false;
       slot.contractId = null;
     }
@@ -5584,6 +5631,10 @@ function disconnect() {
   /* Clear all per-symbol auto-trade slots */
   for (const [sym, slot] of autoTradeSlots.entries()) {
     clearAutoTradePendingTimeout(sym);
+    for (const t of slot.activeTrades) {
+      if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+    }
+    slot.activeTrades = [];
     slot.inProgress = false;
     slot.contractId = null;
     slot.pendingContractId = null;
@@ -10566,9 +10617,15 @@ function handleAutoTradeMessage(msg, msgWs) {
         (isAutoTradeByContractId && isAutoTradeByContractId.symbol) || "?";
       const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) :
         (isAutoTradeByContractId ? isAutoTradeByContractId.slot : null);
+      const tradeId = msg.passthrough && msg.passthrough.tradeId;
       addLog(`⚠ [${sym}] Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
       if (slot) {
-        slot.inProgress = false;
+        /* Remove the specific trade from activeTrades if tradeId is available */
+        if (tradeId) {
+          removeActiveTrade(sym, tradeId);
+        } else {
+          slot.inProgress = false;
+        }
         slot.consecutiveErrors++;
         if (slot.consecutiveErrors >= AUTO_TRADE_MAX_CONSECUTIVE_ERRORS) {
           addLog(`🛑 Auto-trade paused — ${slot.consecutiveErrors} consecutive errors on ${sym}. Disable and re-enable to resume.`);
@@ -10580,9 +10637,11 @@ function handleAutoTradeMessage(msg, msgWs) {
           if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = false;
           slot.consecutiveErrors = 0;
         }
-        slot.contractId = null;
-        slot.pendingContractId = null;
-        clearAutoTradePendingTimeout(sym);
+        if (!tradeId) {
+          slot.contractId = null;
+          slot.pendingContractId = null;
+          clearAutoTradePendingTimeout(sym);
+        }
       }
       resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol);
       return true;
@@ -10593,6 +10652,7 @@ function handleAutoTradeMessage(msg, msgWs) {
   /* ---- Proposal response → buy ---- */
   if (msg.msg_type === "proposal" && msg.passthrough && msg.passthrough.auto_trade) {
     const tradeSymbol = msg.passthrough.tradeSymbol;
+    const tradeId = msg.passthrough.tradeId;
     const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) : null;
     if (!slot || !slot.inProgress) {
       addLog(`⚠ Auto-trade proposal received but trade was cancelled — ignoring (${tradeSymbol || "?"})`);
@@ -10601,8 +10661,12 @@ function handleAutoTradeMessage(msg, msgWs) {
     const proposal = msg.proposal || {};
     if (!proposal.id) {
       addLog(`⚠ [${tradeSymbol}] Auto-trade proposal missing ID — cannot buy`);
-      slot.inProgress = false;
-      clearAutoTradePendingTimeout(tradeSymbol);
+      if (tradeId) {
+        removeActiveTrade(tradeSymbol, tradeId);
+      } else {
+        slot.inProgress = false;
+        clearAutoTradePendingTimeout(tradeSymbol);
+      }
       resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol);
       return true;
     }
@@ -10613,7 +10677,7 @@ function handleAutoTradeMessage(msg, msgWs) {
     msgWs.send(JSON.stringify({
       buy: proposal.id,
       price: proposal.ask_price,
-      passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null, tradeSymbol }
+      passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null, tradeSymbol, tradeId }
     }));
     return true;
   }
@@ -10622,22 +10686,33 @@ function handleAutoTradeMessage(msg, msgWs) {
   if (msg.msg_type === "buy" && msg.passthrough && msg.passthrough.auto_trade) {
     const b = msg.buy;
     const tradeSymbol = msg.passthrough.tradeSymbol;
+    const tradeId = msg.passthrough.tradeId;
     const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) : null;
     const src = msg.passthrough.source || "breakout";
     const label = autoTradeSourceLabel(src, msg.passthrough.strategyName);
     const cid = String(b.contract_id);
     if (slot) {
       slot.contractId = cid;
+      /* Update the specific trade entry with the contract ID */
+      const tradeEntry = tradeId ? findTradeByTradeId(tradeSymbol, tradeId) : null;
+      if (tradeEntry) {
+        tradeEntry.contractId = cid;
+        /* Clear the short proposal timeout and start the longer pending timeout */
+        if (tradeEntry.pendingTimer) {
+          clearTimeout(tradeEntry.pendingTimer);
+          tradeEntry.pendingTimer = null;
+        }
+      }
     }
     addLog(`✅ ${label} auto-trade: contract purchased — ID ${b.contract_id}, paid $${b.buy_price} (${tradeSymbol})`);
     msgWs.send(JSON.stringify({
       proposal_open_contract: 1,
       contract_id: b.contract_id,
       subscribe: 1,
-      passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null, tradeSymbol }
+      passthrough: { auto_trade: true, source: src, strategyName: msg.passthrough.strategyName || null, tradeSymbol, tradeId }
     }));
     /* Start timeout to detect hung contracts (multiplier contracts can stay open for a long time) */
-    if (tradeSymbol) startAutoTradePendingTimeout(tradeSymbol, msgWs);
+    if (tradeSymbol) startAutoTradePendingTimeout(tradeSymbol, msgWs, tradeId);
     return true;
   }
 
@@ -10646,6 +10721,7 @@ function handleAutoTradeMessage(msg, msgWs) {
     const poc = msg.proposal_open_contract;
     const pt = msg.passthrough || {};
     const tradeSymbol = pt.tradeSymbol || null;
+    const tradeId = pt.tradeId || null;
 
     /* Match by passthrough OR by contract ID lookup */
     const hasPassthrough = pt.auto_trade;
@@ -10663,10 +10739,23 @@ function handleAutoTradeMessage(msg, msgWs) {
         const src = pt.source || "breakout";
         const label = autoTradeSourceLabel(src, pt.strategyName);
         addLog(`🤖 ${label} auto-trade result: ${won ? "WIN ✅" : "LOSS ❌"} — profit $${fmt(profit, 2)} (${sym})`);
-        slot.inProgress = false;
-        slot.contractId = null;
-        slot.pendingContractId = null;
-        clearAutoTradePendingTimeout(sym);
+        /* Remove the specific trade from activeTrades */
+        const resolveTradeId = tradeId || (byContractId && byContractId.tradeEntry && byContractId.tradeEntry.tradeId);
+        if (resolveTradeId) {
+          removeActiveTrade(sym, resolveTradeId);
+        } else {
+          /* Fallback: remove by contractId match */
+          const cid = poc && String(poc.contract_id);
+          const matchEntry = slot.activeTrades.find(t => String(t.contractId) === cid);
+          if (matchEntry) {
+            removeActiveTrade(sym, matchEntry.tradeId);
+          } else {
+            slot.inProgress = false;
+            slot.contractId = null;
+            slot.pendingContractId = null;
+          }
+        }
+        clearAutoTradePendingTimeout(sym, tradeId);
         resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS", sym);
         /* Request a fresh balance in case the balance subscription missed
            the update (e.g. brief disconnect during contract settlement). */
@@ -10745,8 +10834,16 @@ function executeAutoTrade(signal) {
   const symbol = signal.symbol || getActiveSymbol();
   const slot = getAutoTradeSlot(symbol);
 
-  if (slot.inProgress) {
-    addLog(`⚠ Auto-trade skipped — previous trade still in progress for ${symbol}`);
+  /* Allow multiple concurrent trades up to maxConcurrentTrades per symbol */
+  const activeCount = slot.activeTrades.length;
+  if (activeCount >= maxConcurrentTrades) {
+    addLog(`⚠ Auto-trade skipped — max concurrent trades (${maxConcurrentTrades}) reached for ${symbol} (${activeCount} active)`);
+    return;
+  }
+
+  /* Block if a multiplier fetch is in progress for this symbol */
+  if (slot.fetchingMultiplier) {
+    addLog(`⚠ Auto-trade skipped — fetching multiplier data for ${symbol}`);
     return;
   }
 
@@ -10792,8 +10889,9 @@ function executeAutoTrade(signal) {
   } else {
     /* No cached or fallback data yet — try fetching from API before trading */
     addLog(`⏳ Fetching valid multipliers for ${symbol} before placing trade…`);
+    slot.fetchingMultiplier = true;
     fetchValidMultipliers(symbol).then(apiValid => {
-      slot.inProgress = false;
+      slot.fetchingMultiplier = false;
       if (!apiValid || apiValid.length === 0) {
         addLog(`⚠ Could not fetch valid multipliers for ${symbol} — skipping trade`);
         return;
@@ -10807,11 +10905,9 @@ function executeAutoTrade(signal) {
       /* Re-invoke with the (now-cached) data */
       executeAutoTrade(signal);
     }).catch(err => {
-      slot.inProgress = false;
+      slot.fetchingMultiplier = false;
       addLog(`⚠ Failed to fetch multipliers for ${symbol}: ${err.message || err}`);
     });
-    /* Mark in-progress so the re-invocation guard works; return to wait for fetch */
-    slot.inProgress = true;
     return;
   }
 
@@ -10835,10 +10931,15 @@ function executeAutoTrade(signal) {
   }
 
   slot.inProgress = true;
+  /* Generate unique trade ID for concurrent trade tracking */
+  const tradeId = `${symbol}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const tradeEntry = { tradeId, contractId: null, startTime: Date.now(), pendingTimer: null };
+  slot.activeTrades.push(tradeEntry);
+
   const slLog = limitOrder.stop_loss != null ? ` SL $${limitOrder.stop_loss}` : "";
   const tpLog = limitOrder.take_profit != null ? ` TP $${limitOrder.take_profit}` : "";
   const oppositeTag = (effectiveDir !== signal.dir) ? " [OPPOSITE]" : "";
-  addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}${oppositeTag}`);
+  addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}${oppositeTag}` + (maxConcurrentTrades > 1 ? ` [${slot.activeTrades.length}/${maxConcurrentTrades}]` : ""));
 
   /* Record pending trade in history */
   addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, profit: null, result: "PENDING" });
@@ -10851,7 +10952,7 @@ function executeAutoTrade(signal) {
     currency: "USD",
     symbol,
     multiplier,
-    passthrough: { auto_trade: true, source: signal.source || "breakout", strategyName: signal.strategyName || null, tradeSymbol: symbol }
+    passthrough: { auto_trade: true, source: signal.source || "breakout", strategyName: signal.strategyName || null, tradeSymbol: symbol, tradeId }
   };
   if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
 
@@ -10864,26 +10965,35 @@ function executeAutoTrade(signal) {
      instead of staying PENDING forever and blocking all future trades.
      Once the buy succeeds, the buy handler replaces this with the
      longer AUTO_TRADE_PENDING_TIMEOUT_MS via startAutoTradePendingTimeout(). */
-  clearAutoTradePendingTimeout(symbol);
-  slot.pendingTimer = setTimeout(() => {
-    slot.pendingTimer = null;
-    if (!slot.inProgress) return;  /* already resolved */
-    if (slot.contractId) return;   /* buy succeeded — longer timeout running */
+  tradeEntry.pendingTimer = setTimeout(() => {
+    tradeEntry.pendingTimer = null;
+    if (tradeEntry.contractId) return;   /* buy succeeded — longer timeout running */
     addLog(`⚠ [${symbol}] Auto-trade proposal/buy timed out — cleaning up`);
-    slot.inProgress = false;
+    removeActiveTrade(symbol, tradeId);
     resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
   }, AUTO_TRADE_PROPOSAL_TIMEOUT_MS);
 }
 
 /* ================= AUTO-TRADE HISTORY & BALANCE HELPERS ================= */
 
-/** Clear the pending-trade timeout timer for a specific symbol slot. */
-function clearAutoTradePendingTimeout(symbol) {
+/** Clear the pending-trade timeout timer for a specific symbol slot or trade.
+ *  @param {string} symbol — the symbol
+ *  @param {string} [tradeId] — if provided, only clear the timer for this specific trade */
+function clearAutoTradePendingTimeout(symbol, tradeId) {
   if (symbol) {
     const slot = autoTradeSlots.get(symbol);
-    if (slot && slot.pendingTimer) {
-      clearTimeout(slot.pendingTimer);
-      slot.pendingTimer = null;
+    if (slot) {
+      if (tradeId) {
+        /* Clear timer for a specific trade entry */
+        const entry = slot.activeTrades.find(t => t.tradeId === tradeId);
+        if (entry && entry.pendingTimer) {
+          clearTimeout(entry.pendingTimer);
+          entry.pendingTimer = null;
+        }
+      } else if (slot.pendingTimer) {
+        clearTimeout(slot.pendingTimer);
+        slot.pendingTimer = null;
+      }
     }
   }
   /* Legacy global fallback for callers that don't pass symbol */
@@ -10897,41 +11007,80 @@ function clearAutoTradePendingTimeout(symbol) {
  *  If the contract hasn't resolved by then, we attempt a one-shot status query;
  *  if the WS is not available, mark it as CANCELLED.
  *  @param {string} symbol — the symbol whose slot to use
- *  @param {WebSocket} [tradeWs] — the WS connection to use for the status query */
-function startAutoTradePendingTimeout(symbol, tradeWs) {
+ *  @param {WebSocket} [tradeWs] — the WS connection to use for the status query
+ *  @param {string} [tradeId] — if provided, timeout is for a specific concurrent trade */
+function startAutoTradePendingTimeout(symbol, tradeWs, tradeId) {
   const slot = getAutoTradeSlot(symbol);
-  clearAutoTradePendingTimeout(symbol);
   const wsRef = tradeWs || ws;
-  slot.pendingTimer = setTimeout(() => {
-    slot.pendingTimer = null;
-    if (!slot.inProgress) return; /* already resolved */
+  const tradeEntry = tradeId ? findTradeByTradeId(symbol, tradeId) : null;
 
-    /* Try one-shot query before giving up */
-    if (wsRef && wsRef.readyState === WebSocket.OPEN && slot.contractId) {
-      addLog(`⏰ [${symbol}] Pending trade timeout — querying contract ${slot.contractId} status…`);
-      wsRef.send(JSON.stringify({
-        proposal_open_contract: 1,
-        contract_id: slot.contractId,
-        passthrough: { auto_trade: true, source: "timeout_query", tradeSymbol: symbol }
-      }));
-      /* Give the one-shot query 15 seconds to resolve, then force-cancel */
-      slot.pendingTimer = setTimeout(() => {
-        slot.pendingTimer = null;
-        if (!slot.inProgress) return;
-        addLog(`⚠ [${symbol}] Contract ${slot.contractId} did not resolve after timeout — marking as cancelled`);
+  if (tradeEntry) {
+    /* Per-trade timeout for concurrent mode */
+    if (tradeEntry.pendingTimer) {
+      clearTimeout(tradeEntry.pendingTimer);
+      tradeEntry.pendingTimer = null;
+    }
+    tradeEntry.pendingTimer = setTimeout(() => {
+      tradeEntry.pendingTimer = null;
+      /* Check if this trade is still active */
+      if (!slot.activeTrades.includes(tradeEntry)) return;
+
+      /* Try one-shot query before giving up */
+      if (wsRef && wsRef.readyState === WebSocket.OPEN && tradeEntry.contractId) {
+        addLog(`⏰ [${symbol}] Pending trade timeout — querying contract ${tradeEntry.contractId} status…`);
+        wsRef.send(JSON.stringify({
+          proposal_open_contract: 1,
+          contract_id: tradeEntry.contractId,
+          passthrough: { auto_trade: true, source: "timeout_query", tradeSymbol: symbol, tradeId }
+        }));
+        /* Give the one-shot query 15 seconds to resolve, then force-cancel */
+        tradeEntry.pendingTimer = setTimeout(() => {
+          tradeEntry.pendingTimer = null;
+          if (!slot.activeTrades.includes(tradeEntry)) return;
+          addLog(`⚠ [${symbol}] Contract ${tradeEntry.contractId} did not resolve after timeout — marking as cancelled`);
+          removeActiveTrade(symbol, tradeId);
+          resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+        }, AUTO_TRADE_QUERY_TIMEOUT_MS);
+      } else {
+        addLog(`⚠ [${symbol}] Pending trade timeout — no active connection to query contract status, marking as cancelled`);
+        removeActiveTrade(symbol, tradeId);
+        resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+      }
+    }, AUTO_TRADE_PENDING_TIMEOUT_MS);
+  } else {
+    /* Legacy single-trade timeout */
+    clearAutoTradePendingTimeout(symbol);
+    slot.pendingTimer = setTimeout(() => {
+      slot.pendingTimer = null;
+      if (!slot.inProgress) return; /* already resolved */
+
+      /* Try one-shot query before giving up */
+      if (wsRef && wsRef.readyState === WebSocket.OPEN && slot.contractId) {
+        addLog(`⏰ [${symbol}] Pending trade timeout — querying contract ${slot.contractId} status…`);
+        wsRef.send(JSON.stringify({
+          proposal_open_contract: 1,
+          contract_id: slot.contractId,
+          passthrough: { auto_trade: true, source: "timeout_query", tradeSymbol: symbol }
+        }));
+        /* Give the one-shot query 15 seconds to resolve, then force-cancel */
+        slot.pendingTimer = setTimeout(() => {
+          slot.pendingTimer = null;
+          if (!slot.inProgress) return;
+          addLog(`⚠ [${symbol}] Contract ${slot.contractId} did not resolve after timeout — marking as cancelled`);
+          slot.inProgress = false;
+          slot.contractId = null;
+          slot.pendingContractId = null;
+          resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+        }, AUTO_TRADE_QUERY_TIMEOUT_MS);
+      } else {
+        addLog(`⚠ [${symbol}] Pending trade timeout — no active connection to query contract status, marking as cancelled`);
         slot.inProgress = false;
         slot.contractId = null;
         slot.pendingContractId = null;
         resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
-      }, AUTO_TRADE_QUERY_TIMEOUT_MS);
-    } else {
-      addLog(`⚠ [${symbol}] Pending trade timeout — no active connection to query contract status, marking as cancelled`);
-      slot.inProgress = false;
-      slot.contractId = null;
-      slot.pendingContractId = null;
-      resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
-    }
-  }, AUTO_TRADE_PENDING_TIMEOUT_MS);
+      }
+    }, AUTO_TRADE_PENDING_TIMEOUT_MS);
+  }
 }
 
 /** Recompute cumulative P/L from actual trade history entries.
@@ -13145,6 +13294,10 @@ function connectPanel(p) {
         slot.pendingContractId = slot.contractId;
         addLog(`📌 [Multi] Preserving contract ${slot.contractId} for re-subscribe (${p.symbol})`);
       }
+      for (const t of slot.activeTrades) {
+        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+      }
+      slot.activeTrades = [];
       slot.inProgress = false;
       slot.contractId = null;
     }
@@ -13166,6 +13319,10 @@ function disconnectPanel(p) {
   const slot = autoTradeSlots.get(p.symbol);
   if (slot) {
     clearAutoTradePendingTimeout(p.symbol);
+    for (const t of slot.activeTrades) {
+      if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+    }
+    slot.activeTrades = [];
     slot.inProgress = false;
     slot.contractId = null;
     slot.pendingContractId = null;
@@ -13699,6 +13856,20 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
           autoTradeMultiplier = v;
         }
+      }
+      saveSettings();
+    });
+  }
+  if (UI.maxConcurrentTrades) {
+    UI.maxConcurrentTrades.addEventListener("input", () => {
+      const v = parseInt(UI.maxConcurrentTrades.value, 10);
+      if (isNaN(v) || v < 1) {
+        maxConcurrentTrades = DEFAULT_MAX_CONCURRENT_TRADES;
+      } else {
+        maxConcurrentTrades = Math.min(v, MAX_CONCURRENT_TRADES_LIMIT);
+      }
+      if (maxConcurrentTrades > 1) {
+        addLog(`🔄 Max concurrent trades set to ${maxConcurrentTrades} per symbol — multiple signals can open simultaneously`);
       }
       saveSettings();
     });
