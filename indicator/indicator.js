@@ -784,7 +784,17 @@ let autoTradeFibScalp        = true;
 let autoTradePo3             = true;
 let autoTradeNYOpenRange     = true;
 let autoTradeSessionRange    = true;
-let autoTradeStake           = 1;      /* USD stake per trade */
+let autoTradeStake           = 1;      /* base USD stake per trade (user-configured floor) */
+let autoTradeMaxStake        = 0;      /* max USD stake cap for compounding (0 = no cap) */
+let autoTradeCurrentStake    = 1;      /* live stake — compounds on consecutive wins, resets on loss */
+let autoTradeWinStreak       = 0;      /* consecutive win counter (mirrors bot.js winStreak) */
+let autoTradeLossCount       = 0;      /* consecutive loss counter */
+let autoTradeSessionTP       = 0;      /* stop auto-trading when cumulative P/L >= this (0 = disabled) */
+let autoTradeSessionSL       = 0;      /* stop auto-trading when cumulative P/L <= -this (0 = disabled) */
+let autoTradeHalted          = false;  /* true when session TP/SL has been hit */
+const AUTO_TRADE_STAKE_SCALE = 1.04;   /* per-win compound factor (matches bot.js STAKE_SCALE) */
+const AUTO_TRADE_WIN_STREAK_MIN = 2;   /* consecutive wins required before scaling up */
+const AUTO_TRADE_MAX_LOSSES  = 3;      /* consecutive losses before pausing auto-trades */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let maxConcurrentTrades      = DEFAULT_MAX_CONCURRENT_TRADES; /* max simultaneous trades per symbol */
 /* --- Per-symbol auto-trade slots ---
@@ -1340,11 +1350,15 @@ function initUI() {
   UI.autoTradeNYOpenRangeToggle    = document.getElementById("autoTradeNYOpenRangeToggle");
   UI.autoTradeSessionRangeToggle   = document.getElementById("autoTradeSessionRangeToggle");
   UI.autoTradeStake         = document.getElementById("autoTradeStake");
+  UI.autoTradeMaxStake      = document.getElementById("autoTradeMaxStake");
   UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
   UI.maxConcurrentTrades    = document.getElementById("maxConcurrentTrades");
+  UI.autoTradeSessionTP     = document.getElementById("autoTradeSessionTP");
+  UI.autoTradeSessionSL     = document.getElementById("autoTradeSessionSL");
   UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
   UI.autoTradeBalanceValue   = document.getElementById("autoTradeBalanceValue");
   UI.autoTradePLValue        = document.getElementById("autoTradePLValue");
+  UI.autoTradeCurrentStakeDisplay = document.getElementById("autoTradeCurrentStakeDisplay");
   UI.autoTradeHistoryList    = document.getElementById("autoTradeHistoryList");
   UI.autoTradeHistoryEmpty   = document.getElementById("autoTradeHistoryEmpty");
   UI.signalLog      = document.getElementById("signalLog");
@@ -3217,6 +3231,9 @@ function saveSettings() {
       autoTradeScalpEnabled,
       autoTradeStrategyEnabled,
       autoTradeStake,
+      autoTradeMaxStake,
+      autoTradeSessionTP,
+      autoTradeSessionSL,
       autoTradeMultiplier,
       maxConcurrentTrades,
       autoTradeScalpOpposite,
@@ -3437,6 +3454,11 @@ function restoreSettings() {
     if (s.autoTradeScalpEnabled != null) autoTradeScalpEnabled = s.autoTradeScalpEnabled;
     if (s.autoTradeStrategyEnabled != null) autoTradeStrategyEnabled = s.autoTradeStrategyEnabled;
     if (s.autoTradeStake != null) autoTradeStake = s.autoTradeStake;
+    if (s.autoTradeMaxStake != null) autoTradeMaxStake = s.autoTradeMaxStake;
+    if (s.autoTradeSessionTP != null) autoTradeSessionTP = s.autoTradeSessionTP;
+    if (s.autoTradeSessionSL != null) autoTradeSessionSL = s.autoTradeSessionSL;
+    /* Initialise dynamic stake from restored base */
+    autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
     if (s.autoTradeMultiplier != null) autoTradeMultiplier = s.autoTradeMultiplier;
     if (s.maxConcurrentTrades != null) {
       maxConcurrentTrades = Math.max(1, Math.min(MAX_CONCURRENT_TRADES_LIMIT, parseInt(s.maxConcurrentTrades, 10) || DEFAULT_MAX_CONCURRENT_TRADES));
@@ -3445,8 +3467,12 @@ function restoreSettings() {
     if (UI.autoTradeScalpToggle) UI.autoTradeScalpToggle.checked = autoTradeScalpEnabled;
     if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
     if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
+    if (UI.autoTradeMaxStake) UI.autoTradeMaxStake.value = autoTradeMaxStake > 0 ? autoTradeMaxStake : "";
+    if (UI.autoTradeSessionTP) UI.autoTradeSessionTP.value = autoTradeSessionTP > 0 ? autoTradeSessionTP : "";
+    if (UI.autoTradeSessionSL) UI.autoTradeSessionSL.value = autoTradeSessionSL > 0 ? autoTradeSessionSL : "";
     if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
     if (UI.maxConcurrentTrades) UI.maxConcurrentTrades.value = maxConcurrentTrades;
+    updateAutoTradeCurrentStakeUI();
     if (s.autoTradeScalpOpposite != null) autoTradeScalpOpposite = s.autoTradeScalpOpposite;
     if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
     if (UI.autoTradeScalpOppositeToggle) UI.autoTradeScalpOppositeToggle.checked = autoTradeScalpOpposite;
@@ -4941,6 +4967,12 @@ function resetSession() {
   /* Reset auto-trade history */
   autoTradeHistory = [];
   autoTradePL = 0;
+  /* Reset dynamic stake management state */
+  autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
+  autoTradeWinStreak = 0;
+  autoTradeLossCount = 0;
+  autoTradeHalted = false;
+  updateAutoTradeCurrentStakeUI();
   /* Reset session start balance so P/L recalculates from this point */
   sessionStartBalance = autoTradeBalance;
   renderAutoTradeHistory();
@@ -10918,6 +10950,12 @@ function autoTradeSourceLabel(source, strategyName) {
 }
 
 function executeAutoTrade(signal) {
+  /* Block if session TP/SL has been hit */
+  if (autoTradeHalted) {
+    addLog("⛔ Auto-trade blocked — session limit hit (reset session to resume)");
+    return;
+  }
+
   /* Capture the WS that should carry this trade — in multi-panel mode
      activatePanel() has already set `ws` to the panel's own WS. */
   const tradeWs = ws;
@@ -10970,7 +11008,8 @@ function executeAutoTrade(signal) {
   }
 
   const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
-  const stake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
+  /* Use the dynamic current stake (compounds on wins, resets on losses) */
+  const stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake);
 
   /* Validate multiplier against known valid values for this symbol.
      Check order: API cache → hardcoded fallback map → if neither exists,
@@ -11016,21 +11055,32 @@ function executeAutoTrade(signal) {
 
   const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
-  /* Build limit_order with SL and optional TP (distance from entry in USD) */
+  /* Build limit_order with SL and optional TP (distance from entry in USD).
+     Dollar value formula: priceDist × multiplier × stake / entry
+     When the raw SL value falls below Deriv's minimum, scale BOTH SL and TP
+     proportionally so the strategy's R:R ratio (e.g. 1:2) is preserved. */
   const limitOrder = {};
-  if (tradeSl != null && signal.entry != null) {
-    const slDist = Math.abs(signal.entry - tradeSl);
-    if (slDist > 0) {
-      const slVal = +fmt(slDist * multiplier * stake / signal.entry, 2);
-      limitOrder.stop_loss = Math.max(slVal, MIN_LIMIT_ORDER_AMOUNT);
+  if (signal.entry != null) {
+    let slVal = null;
+    let tpVal = null;
+    if (tradeSl != null) {
+      const slDist = Math.abs(signal.entry - tradeSl);
+      if (slDist > 0) slVal = slDist * multiplier * stake / signal.entry;
     }
-  }
-  if (tradeTp != null && signal.entry != null) {
-    const tpDist = Math.abs(tradeTp - signal.entry);
-    if (tpDist > 0) {
-      const tpVal = +fmt(tpDist * multiplier * stake / signal.entry, 2);
-      limitOrder.take_profit = Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT);
+    if (tradeTp != null) {
+      const tpDist = Math.abs(tradeTp - signal.entry);
+      if (tpDist > 0) tpVal = tpDist * multiplier * stake / signal.entry;
     }
+    /* If the raw SL dollar value is below Deriv's minimum, scale both SL and TP
+       by the same factor to keep the intended R:R ratio intact. */
+    if (slVal !== null && slVal < MIN_LIMIT_ORDER_AMOUNT) {
+      const scale = MIN_LIMIT_ORDER_AMOUNT / slVal;
+      slVal *= scale;
+      if (tpVal !== null) tpVal *= scale;
+      addLog(`ℹ️ ${tpVal !== null ? "SL/TP" : "SL"} scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
+    }
+    if (slVal !== null) limitOrder.stop_loss = +fmt(slVal, 2);
+    if (tpVal !== null) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
   }
 
   slot.inProgress = true;
@@ -11233,9 +11283,66 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol) {
   pending.result = result;
   /* Recompute P/L from all entries (prevents incremental drift) */
   recalcAutoTradePL();
+
+  /* ── Stake management (mirrors bot.js handleResult logic) ── */
+  const baseStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
+  if (result === "WIN") {
+    autoTradeLossCount = 0;
+    autoTradeWinStreak++;
+    /* Pyramid up only after consecutive wins (controlled compounding) */
+    if (autoTradeWinStreak >= AUTO_TRADE_WIN_STREAK_MIN) {
+      const maxStake = (autoTradeMaxStake > 0 && autoTradeMaxStake >= baseStake)
+        ? autoTradeMaxStake
+        : baseStake * 4;  /* soft cap at 4× base when no explicit max set */
+      autoTradeCurrentStake = Math.min(
+        +(autoTradeCurrentStake * AUTO_TRADE_STAKE_SCALE).toFixed(2),
+        maxStake
+      );
+      addLog(`📈 Auto-trade stake compounded → $${fmt(autoTradeCurrentStake, 2)} (${autoTradeWinStreak} consecutive wins)`);
+    }
+  } else if (result === "LOSS") {
+    autoTradeWinStreak = 0;
+    autoTradeLossCount++;
+    autoTradeCurrentStake = baseStake;  /* reset to base stake on every loss */
+    addLog(`🔁 Auto-trade stake reset to $${fmt(baseStake, 2)} after loss`);
+    /* Loss cluster protection — pause after N consecutive losses */
+    if (autoTradeLossCount >= AUTO_TRADE_MAX_LOSSES) {
+      autoTradeHalted = true;
+      addLog(`🛑 Auto-trade paused — ${AUTO_TRADE_MAX_LOSSES} consecutive losses reached. Reset session to resume.`);
+    }
+  }
+  updateAutoTradeCurrentStakeUI();
+
+  /* ── Session TP / SL check ── */
+  checkAutoTradeSessionLimits();
+
   renderAutoTradeHistory();
   updateAutoTradePLUI();
   persistAutoTradeHistory();
+}
+
+/** Check session-level TP/SL — stop all auto-trading when cumulative P/L hits either limit. */
+function checkAutoTradeSessionLimits() {
+  if (autoTradeHalted) return;
+  const tp = parseFloat(autoTradeSessionTP) || 0;
+  const sl = parseFloat(autoTradeSessionSL) || 0;
+  if (tp > 0 && autoTradePL >= tp) {
+    autoTradeHalted = true;
+    addLog(`✅ Auto-trade Session TP $${fmt(tp, 2)} reached — auto-trading halted. Reset session to resume.`);
+  } else if (sl > 0 && autoTradePL <= -sl) {
+    autoTradeHalted = true;
+    addLog(`🛑 Auto-trade Session SL $${fmt(sl, 2)} reached — auto-trading halted. Reset session to resume.`);
+  }
+}
+
+/** Update the live "current stake" display in the auto-trade panel. */
+function updateAutoTradeCurrentStakeUI() {
+  if (UI.autoTradeCurrentStakeDisplay) {
+    UI.autoTradeCurrentStakeDisplay.textContent = `$${fmt(autoTradeCurrentStake, 2)}`;
+    UI.autoTradeCurrentStakeDisplay.style.color =
+      autoTradeCurrentStake > (parseFloat(autoTradeStake) || 1)
+        ? "var(--success)" : "";
+  }
 }
 
 /** Render the auto-trade history list in the DOM. */
@@ -13994,6 +14101,31 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.autoTradeStake.addEventListener("input", () => {
       const v = parseFloat(UI.autoTradeStake.value);
       autoTradeStake = (!isNaN(v) && v >= MIN_AUTO_TRADE_STAKE) ? v : 1;
+      /* Reset current stake to new base whenever the base is changed */
+      autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeStake);
+      autoTradeWinStreak = 0;
+      updateAutoTradeCurrentStakeUI();
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeMaxStake) {
+    UI.autoTradeMaxStake.addEventListener("input", () => {
+      const v = parseFloat(UI.autoTradeMaxStake.value);
+      autoTradeMaxStake = (!isNaN(v) && v > 0) ? v : 0;
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeSessionTP) {
+    UI.autoTradeSessionTP.addEventListener("input", () => {
+      const v = parseFloat(UI.autoTradeSessionTP.value);
+      autoTradeSessionTP = (!isNaN(v) && v > 0) ? v : 0;
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeSessionSL) {
+    UI.autoTradeSessionSL.addEventListener("input", () => {
+      const v = parseFloat(UI.autoTradeSessionSL.value);
+      autoTradeSessionSL = (!isNaN(v) && v > 0) ? v : 0;
       saveSettings();
     });
   }
