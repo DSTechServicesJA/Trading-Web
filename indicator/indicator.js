@@ -866,6 +866,7 @@ let autoTradeContractId        = null;  /* unused shadow */
 let autoTradePendingContractId = null;  /* unused shadow */
 let autoTradePendingTimer      = null;  /* unused shadow */
 let autoTradeConsecutiveErrors = 0;     /* unused shadow */
+let _autoTradeIdCounter = 0;           /* monotonically increasing counter for unique trade IDs */
 
 let autoTradeScalpOpposite   = false;  /* reverse scalp signal direction */
 let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
@@ -10931,8 +10932,8 @@ function executeAutoTrade(signal) {
   }
 
   slot.inProgress = true;
-  /* Generate unique trade ID for concurrent trade tracking */
-  const tradeId = `${symbol}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  /* Generate unique trade ID for concurrent trade tracking (counter + timestamp = guaranteed unique) */
+  const tradeId = `${symbol}_${Date.now()}_${++_autoTradeIdCounter}`;
   const tradeEntry = { tradeId, contractId: null, startTime: Date.now(), pendingTimer: null };
   slot.activeTrades.push(tradeEntry);
 
