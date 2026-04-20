@@ -45,7 +45,7 @@ on the server, fill in the real values, and ensure `.env` is listed in `.gitigno
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;
+  Content-Security-Policy: default-src 'self'; connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com;
   ```
 
 ### Authentication
@@ -56,10 +56,16 @@ on the server, fill in the real values, and ensure `.env` is listed in `.gitigno
 
 ---
 
-### Content Security Policy — known limitation
+### Content Security Policy — known limitations
 The CSP currently allows `'unsafe-inline'` for `script-src` because the existing codebase uses
 inline event handlers and `<script>` blocks. This still blocks external malicious scripts but
 does not fully mitigate reflected/stored XSS.
+
+The CSP also allows `https://cdn.jsdelivr.net` in `script-src` because the app loads the
+[jsPDF](https://github.com/parallax/jsPDF) library from this CDN for PDF export functionality
+(chart screenshots and signal reports). Without this allowance the library is blocked and PDF
+export fails silently.
+
 **Future improvement:** refactor all inline JS into external `.js` files, then replace
 `'unsafe-inline'` with nonce-based (`'nonce-<random>'`) or hash-based CSP for full XSS protection.
 
