@@ -2606,13 +2606,21 @@ async function sendTelegramPhoto(blob, caption) {
 
   /* Try server-side proxy first (avoids CORS), fall back to direct API */
   let resp;
+  let useDirectFallback = false;
   try {
     const form = buildPhotoForm();
     form.append("action", "sendPhoto");
     form.append("token", token);
     resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
+    /* If proxy returns 401/403 (auth issue), fall back to direct API */
+    if (resp.status === 401 || resp.status === 403) {
+      useDirectFallback = true;
+    }
   } catch (_proxyErr) {
     /* Proxy unreachable — try direct Telegram API as fallback */
+    useDirectFallback = true;
+  }
+  if (useDirectFallback) {
     resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm() });
   }
   const data = await safeJson(resp);
@@ -2633,13 +2641,21 @@ async function sendTelegramMessage(text) {
 
   /* Try server-side proxy first (avoids CORS), fall back to direct API */
   let resp;
+  let useDirectFallback = false;
   try {
     resp = await fetch(TELEGRAM_PROXY_URL, {
       method: "POST",
       headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ action: "sendMessage", token, payload })
     });
+    /* If proxy returns 401/403 (auth issue), fall back to direct API */
+    if (resp.status === 401 || resp.status === 403) {
+      useDirectFallback = true;
+    }
   } catch (_proxyErr) {
+    useDirectFallback = true;
+  }
+  if (useDirectFallback) {
     resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2692,6 +2708,24 @@ async function sendTradeOutcomeTelegram(signal) {
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
     lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+
+    /* Opposite mode effectiveness from auto-trade history */
+    const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    const normTrades = autoTradeHistory.filter(e => !e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    if (oppTrades.length > 0 || normTrades.length > 0) {
+      lines.push("");
+      if (normTrades.length > 0) {
+        const nw = normTrades.filter(e => e.result === "WIN").length;
+        const nwr = (nw / normTrades.length * 100).toFixed(1);
+        lines.push(`📈 <b>Normal Trades:</b> ${nw}W / ${normTrades.length - nw}L (${nwr}%)`);
+      }
+      if (oppTrades.length > 0) {
+        const ow = oppTrades.filter(e => e.result === "WIN").length;
+        const owr = (ow / oppTrades.length * 100).toFixed(1);
+        lines.push(`🔄 <b>Opposite Trades:</b> ${ow}W / ${oppTrades.length - ow}L (${owr}%)`);
+      }
+    }
+
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -2716,13 +2750,20 @@ async function testTelegramConnection() {
 
     /* Verify the bot token — proxy first, direct fallback */
     let meResp;
+    let meUseDirectFallback = false;
     try {
       meResp = await fetch(TELEGRAM_PROXY_URL, {
         method: "POST",
         headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action: "getMe", token, payload: {} })
       });
+      if (meResp.status === 401 || meResp.status === 403) {
+        meUseDirectFallback = true;
+      }
     } catch (_proxyErr) {
+      meUseDirectFallback = true;
+    }
+    if (meUseDirectFallback) {
       meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
     }
     const meData = await safeJson(meResp);
@@ -2730,13 +2771,20 @@ async function testTelegramConnection() {
 
     /* Verify the chat ID is reachable — proxy first, direct fallback */
     let chatResp;
+    let chatUseDirectFallback = false;
     try {
       chatResp = await fetch(TELEGRAM_PROXY_URL, {
         method: "POST",
         headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action: "getChat", token, payload: { chat_id: chatId } })
       });
+      if (chatResp.status === 401 || chatResp.status === 403) {
+        chatUseDirectFallback = true;
+      }
     } catch (_proxyErr) {
+      chatUseDirectFallback = true;
+    }
+    if (chatUseDirectFallback) {
       chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -8042,6 +8090,15 @@ function buildScalpTelegramCaption(scalp) {
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirEmoji} ${scalp.dir} (${dirLabel})`);
+
+  /* Indicate if opposite mode will reverse this signal for auto-trading */
+  if (autoTradeScalpOpposite) {
+    const oppDir = scalp.dir === "BULL" ? "BEAR" : "BULL";
+    const oppLabel = oppDir === "BULL" ? "BUY" : "SELL";
+    const oppEmoji = oppDir === "BULL" ? "🟢" : "🔴";
+    lines.push(`<b>🔄 Opposite Mode:</b> Signal ${scalp.dir} → Trading ${oppEmoji} ${oppDir} (${oppLabel})`);
+  }
+
   lines.push(``);
   lines.push(`<b>📍 Entry:</b> <code>${fmt(scalp.entry, 5)}</code>`);
   lines.push(`<b>🛑 SL:</b> <code>${fmt(scalp.sl, 5)}</code>`);
@@ -8171,6 +8228,24 @@ async function sendScalpOutcomeTelegram(scalp) {
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
     lines.push(`📊 <b>Scalp Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+
+    /* Opposite mode effectiveness from auto-trade history */
+    const oppTrades = autoTradeHistory.filter(e => e.isOpposite && e.source === "scalp" && (e.result === "WIN" || e.result === "LOSS"));
+    const normTrades = autoTradeHistory.filter(e => !e.isOpposite && e.source === "scalp" && (e.result === "WIN" || e.result === "LOSS"));
+    if (oppTrades.length > 0 || normTrades.length > 0) {
+      lines.push("");
+      if (normTrades.length > 0) {
+        const nw = normTrades.filter(e => e.result === "WIN").length;
+        const nwr = (nw / normTrades.length * 100).toFixed(1);
+        lines.push(`📈 <b>Normal:</b> ${nw}W / ${normTrades.length - nw}L (${nwr}%)`);
+      }
+      if (oppTrades.length > 0) {
+        const ow = oppTrades.filter(e => e.result === "WIN").length;
+        const owr = (ow / oppTrades.length * 100).toFixed(1);
+        lines.push(`🔄 <b>Opposite:</b> ${ow}W / ${oppTrades.length - ow}L (${owr}%)`);
+      }
+    }
+
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -8222,6 +8297,15 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirEmoji} ${dirArrow} ${signal.dir} (${dirLabel})`);
+
+  /* Indicate if opposite mode will reverse this signal for auto-trading */
+  if (autoTradeStrategyOpposite) {
+    const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    const oppLabel = oppDir === "BULL" ? "BUY" : "SELL";
+    const oppEmoji = oppDir === "BULL" ? "🟢" : "🔴";
+    lines.push(`<b>🔄 Opposite Mode:</b> Signal ${signal.dir} → Trading ${oppEmoji} ${oppDir} (${oppLabel})`);
+  }
+
   lines.push(``);
   lines.push(`<b>📍 Entry:</b> <code>${fmt(signal.entry, 4)}</code>`);
   lines.push(`<b>🛑 SL:</b> <code>${fmt(signal.sl, 4)}</code>`);
@@ -8400,6 +8484,24 @@ async function sendStrategyOutcomeTelegram(signal) {
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
     lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+
+    /* Opposite mode effectiveness from auto-trade history */
+    const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    const normTrades = autoTradeHistory.filter(e => !e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    if (oppTrades.length > 0 || normTrades.length > 0) {
+      lines.push("");
+      if (normTrades.length > 0) {
+        const nw = normTrades.filter(e => e.result === "WIN").length;
+        const nwr = (nw / normTrades.length * 100).toFixed(1);
+        lines.push(`📈 <b>Normal Trades:</b> ${nw}W / ${normTrades.length - nw}L (${nwr}%)`);
+      }
+      if (oppTrades.length > 0) {
+        const ow = oppTrades.filter(e => e.result === "WIN").length;
+        const owr = (ow / oppTrades.length * 100).toFixed(1);
+        lines.push(`🔄 <b>Opposite Trades:</b> ${ow}W / ${oppTrades.length - ow}L (${owr}%)`);
+      }
+    }
+
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -10943,7 +11045,8 @@ function executeAutoTrade(signal) {
   addLog(`🤖 ${label} auto-trade: ${contractType} on ${symbol} — $${fmt(stake, 2)} ×${multiplier}${slLog}${tpLog}${oppositeTag}` + (maxConcurrentTrades > 1 ? ` [${slot.activeTrades.length}/${maxConcurrentTrades}]` : ""));
 
   /* Record pending trade in history */
-  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, profit: null, result: "PENDING" });
+  const isOpposite = (effectiveDir !== signal.dir);
+  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, profit: null, result: "PENDING", originalDir: signal.dir, tradedDir: effectiveDir, isOpposite });
 
   const payload = {
     proposal: 1,
@@ -11097,7 +11200,7 @@ function recalcAutoTradePL() {
 }
 
 /** Add a new entry to the auto-trade history array and re-render. */
-function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, result }) {
+function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, result, originalDir, tradedDir, isOpposite }) {
   const entry = {
     time: Date.now(),
     source: source || "breakout",
@@ -11105,7 +11208,10 @@ function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, 
     type,
     symbol: symbol || "--",
     profit: profit != null ? profit : null,
-    result: result || "PENDING"
+    result: result || "PENDING",
+    originalDir: originalDir || null,
+    tradedDir: tradedDir || null,
+    isOpposite: !!isOpposite
   };
   autoTradeHistory.unshift(entry);
   /* Cap history to 100 entries */
@@ -11154,13 +11260,64 @@ function renderAutoTradeHistory() {
     else if (e.result === "ERROR") { profitClass = "error"; profitText = "⚠ Error"; }
     else if (e.result === "CANCELLED") { profitClass = "cancelled"; profitText = "✖ Cancelled"; }
 
+    /* Show opposite mode info: original signal → actual trade */
+    let oppositeInfo = "";
+    if (e.isOpposite && e.originalDir && e.tradedDir) {
+      oppositeInfo = `<span class="at-opposite" title="Original signal: ${e.originalDir}, Traded: ${e.tradedDir}">🔄 ${e.originalDir}→${e.tradedDir}</span>`;
+    }
+
     li.innerHTML =
       `<span class="at-source">${srcLabel}</span>` +
       `<span class="at-type ${isBull ? "bull" : "bear"}">${e.type}</span>` +
+      oppositeInfo +
       `<span class="at-profit ${profitClass}">${profitText}</span>` +
       `<span class="at-time">${timeStr}</span>`;
     UI.autoTradeHistoryList.appendChild(li);
   }
+
+  /* Render opposite mode effectiveness summary */
+  renderOppositeModeSummary();
+}
+
+/**
+ * Render opposite mode effectiveness summary.
+ * Shows win rate for trades taken with opposite mode vs normal mode.
+ */
+function renderOppositeModeSummary() {
+  const container = document.getElementById("oppositeModeSummary");
+  if (!container) return;
+
+  const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+  const normalTrades = autoTradeHistory.filter(e => !e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+
+  if (oppTrades.length === 0 && normalTrades.length === 0) {
+    container.innerHTML = "";
+    container.style.display = "none";
+    return;
+  }
+
+  container.style.display = "";
+
+  const oppWins = oppTrades.filter(e => e.result === "WIN").length;
+  const oppLosses = oppTrades.filter(e => e.result === "LOSS").length;
+  const oppWR = oppTrades.length > 0 ? (oppWins / oppTrades.length * 100).toFixed(1) : "0.0";
+  const oppPL = oppTrades.reduce((sum, e) => sum + (e.profit || 0), 0);
+
+  const normWins = normalTrades.filter(e => e.result === "WIN").length;
+  const normLosses = normalTrades.filter(e => e.result === "LOSS").length;
+  const normWR = normalTrades.length > 0 ? (normWins / normalTrades.length * 100).toFixed(1) : "0.0";
+  const normPL = normalTrades.reduce((sum, e) => sum + (e.profit || 0), 0);
+
+  let html = `<div class="opposite-summary">`;
+  html += `<div class="opposite-summary-title">📊 Signal Accuracy</div>`;
+  if (normalTrades.length > 0) {
+    html += `<div class="opposite-row"><span class="opp-label">Normal:</span> <span>${normWins}W / ${normLosses}L</span> <span class="opp-wr">${normWR}%</span> <span class="${normPL >= 0 ? 'opp-profit' : 'opp-loss'}">${normPL >= 0 ? '+' : ''}$${fmt(normPL, 2)}</span></div>`;
+  }
+  if (oppTrades.length > 0) {
+    html += `<div class="opposite-row"><span class="opp-label">🔄 Opposite:</span> <span>${oppWins}W / ${oppLosses}L</span> <span class="opp-wr">${oppWR}%</span> <span class="${oppPL >= 0 ? 'opp-profit' : 'opp-loss'}">${oppPL >= 0 ? '+' : ''}$${fmt(oppPL, 2)}</span></div>`;
+  }
+  html += `</div>`;
+  container.innerHTML = html;
 }
 
 /** Update the balance display value. */
