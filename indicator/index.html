@@ -493,8 +493,13 @@
                 <label class="hint" for="autoTradeMultiplier">Multiplier (×)</label>
                 <input type="number" id="autoTradeMultiplier" min="1" max="1000" step="1" value="100" placeholder="100" />
               </div>
+              <div class="account-input-row">
+                <label class="hint" for="maxConcurrentTrades">Max Concurrent Trades</label>
+                <input type="number" id="maxConcurrentTrades" min="1" max="10" step="1" value="1" placeholder="1" />
+              </div>
             </div>
             <p class="hint" style="margin-bottom:6px;">Uses MULTUP/MULTDOWN contracts with SL &amp; TP from the signal's entry, stop-loss, and take-profit levels. Requires a valid Deriv token.</p>
+            <p class="hint" style="margin-bottom:2px;">Max Concurrent Trades: allow multiple trades to run simultaneously per symbol when signals fire (1 = one trade at a time, like before).</p>
             <p class="hint" style="color:var(--text-warn, #f59e0b);">⚠ Use with caution — real money will be placed when connected with a live Deriv account.</p>
 
             <!-- Auto-Trade History -->
