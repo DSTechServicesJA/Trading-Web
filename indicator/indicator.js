@@ -11075,9 +11075,9 @@ function executeAutoTrade(signal) {
        by the same factor to keep the intended R:R ratio intact. */
     if (slVal !== null && slVal < MIN_LIMIT_ORDER_AMOUNT) {
       const scale = MIN_LIMIT_ORDER_AMOUNT / slVal;
+      slVal *= scale;
       if (tpVal !== null) tpVal *= scale;
       addLog(`ℹ️ ${tpVal !== null ? "SL/TP" : "SL"} scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
-      slVal = MIN_LIMIT_ORDER_AMOUNT;
     }
     if (slVal !== null) limitOrder.stop_loss = +fmt(slVal, 2);
     if (tpVal !== null) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
@@ -11285,15 +11285,15 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol) {
   recalcAutoTradePL();
 
   /* ── Stake management (mirrors bot.js handleResult logic) ── */
+  const baseStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
   if (result === "WIN") {
     autoTradeLossCount = 0;
     autoTradeWinStreak++;
     /* Pyramid up only after consecutive wins (controlled compounding) */
     if (autoTradeWinStreak >= AUTO_TRADE_WIN_STREAK_MIN) {
-      const base = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
-      const maxStake = (autoTradeMaxStake > 0)
-        ? Math.max(base, autoTradeMaxStake)
-        : base * 4;  /* soft cap at 4× base when no explicit max set */
+      const maxStake = (autoTradeMaxStake > 0 && autoTradeMaxStake >= baseStake)
+        ? autoTradeMaxStake
+        : baseStake * 4;  /* soft cap at 4× base when no explicit max set */
       autoTradeCurrentStake = Math.min(
         +(autoTradeCurrentStake * AUTO_TRADE_STAKE_SCALE).toFixed(2),
         maxStake
@@ -11303,9 +11303,8 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol) {
   } else if (result === "LOSS") {
     autoTradeWinStreak = 0;
     autoTradeLossCount++;
-    const base = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
-    autoTradeCurrentStake = base;  /* reset to base stake on every loss */
-    addLog(`🔁 Auto-trade stake reset to $${fmt(base, 2)} after loss`);
+    autoTradeCurrentStake = baseStake;  /* reset to base stake on every loss */
+    addLog(`🔁 Auto-trade stake reset to $${fmt(baseStake, 2)} after loss`);
     /* Loss cluster protection — pause after N consecutive losses */
     if (autoTradeLossCount >= AUTO_TRADE_MAX_LOSSES) {
       autoTradeHalted = true;
