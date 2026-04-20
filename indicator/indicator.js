@@ -11016,21 +11016,32 @@ function executeAutoTrade(signal) {
 
   const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
-  /* Build limit_order with SL and optional TP (distance from entry in USD) */
+  /* Build limit_order with SL and optional TP (distance from entry in USD).
+     Dollar value formula: priceDist × multiplier × stake / entry
+     When the raw SL value falls below Deriv's minimum, scale BOTH SL and TP
+     proportionally so the strategy's R:R ratio (e.g. 1:2) is preserved. */
   const limitOrder = {};
-  if (tradeSl != null && signal.entry != null) {
-    const slDist = Math.abs(signal.entry - tradeSl);
-    if (slDist > 0) {
-      const slVal = +fmt(slDist * multiplier * stake / signal.entry, 2);
-      limitOrder.stop_loss = Math.max(slVal, MIN_LIMIT_ORDER_AMOUNT);
+  if (signal.entry != null) {
+    let slVal = null;
+    let tpVal = null;
+    if (tradeSl != null) {
+      const slDist = Math.abs(signal.entry - tradeSl);
+      if (slDist > 0) slVal = slDist * multiplier * stake / signal.entry;
     }
-  }
-  if (tradeTp != null && signal.entry != null) {
-    const tpDist = Math.abs(tradeTp - signal.entry);
-    if (tpDist > 0) {
-      const tpVal = +fmt(tpDist * multiplier * stake / signal.entry, 2);
-      limitOrder.take_profit = Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT);
+    if (tradeTp != null) {
+      const tpDist = Math.abs(tradeTp - signal.entry);
+      if (tpDist > 0) tpVal = tpDist * multiplier * stake / signal.entry;
     }
+    /* If the raw SL dollar value is below Deriv's minimum, scale both SL and TP
+       by the same factor to keep the intended R:R ratio intact. */
+    if (slVal !== null && slVal < MIN_LIMIT_ORDER_AMOUNT) {
+      const scale = MIN_LIMIT_ORDER_AMOUNT / slVal;
+      if (tpVal !== null) tpVal *= scale;
+      addLog(`ℹ️ SL/TP scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
+      slVal = MIN_LIMIT_ORDER_AMOUNT;
+    }
+    if (slVal !== null) limitOrder.stop_loss = +fmt(Math.max(slVal, MIN_LIMIT_ORDER_AMOUNT), 2);
+    if (tpVal !== null) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
   }
 
   slot.inProgress = true;
