@@ -3247,7 +3247,10 @@ function saveSettings() {
       autoTradeSessionRange
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
-  } catch (e) { /* storage not available */ }
+  } catch (e) {
+    console.warn("Failed to save settings to localStorage:", e.message);
+    addLog("⚠️ Settings could not be saved (storage unavailable)");
+  }
 }
 
 function restoreSettings() {
@@ -3507,7 +3510,9 @@ function persistSignalLog() {
       }
     }
     localStorage.setItem(LS_PREFIX + "signalLog", JSON.stringify(items));
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Failed to persist signal log:", e.message);
+  }
 }
 
 function restoreSignalLog() {
@@ -3515,36 +3520,47 @@ function restoreSignalLog() {
     const raw = localStorage.getItem(LS_PREFIX + "signalLog");
     if (!raw || !UI.signalLog) return;
     const items = JSON.parse(raw);
-    items.reverse().forEach(text => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      UI.signalLog.prepend(li);
-    });
-  } catch (e) {}
+    if (Array.isArray(items)) {
+      items.reverse().forEach(text => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        UI.signalLog.prepend(li);
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to restore signal log:", e.message);
+  }
 }
 
 function persistSignalHistory() {
   try {
     /* Strip chartImage data URLs to avoid exceeding localStorage quota */
     const stripped = signalHistory.slice(-50).map(s => {
-      if (!s.chartImage) return s;
+      if (!s || !s.chartImage) return s;
       const copy = Object.assign({}, s);
       delete copy.chartImage;
       return copy;
     });
     localStorage.setItem(LS_PREFIX + "signalHistory", JSON.stringify(stripped));
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Failed to persist signal history:", e.message);
+  }
 }
 
 function restoreSignalHistory() {
   try {
     const raw = localStorage.getItem(LS_PREFIX + "signalHistory");
     if (!raw) return;
-    signalHistory = JSON.parse(raw);
-    signalWins = signalHistory.filter(s => s.result === "WIN").length;
-    signalLosses = signalHistory.filter(s => s.result === "LOSS").length;
-    updateStatsUI();
-  } catch (e) {}
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      signalHistory = parsed;
+      signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
+      signalLosses = signalHistory.filter(s => s && s.result === "LOSS").length;
+      updateStatsUI();
+    }
+  } catch (e) {
+    console.warn("Failed to restore signal history:", e.message);
+  }
 }
 
 /* ================= STATS ================= */
@@ -5696,7 +5712,14 @@ function connect() {
 
   ws.onerror = (evt) => {
     if (thisWs !== ws) return; /* stale connection */
-    addLog("WebSocket error: " + (evt.message || "connection failed"));
+    const errorMsg = evt.message || evt.reason || "connection failed";
+    addLog("WebSocket error: " + errorMsg);
+    console.error("WebSocket error details:", evt);
+    
+    /* Show user-friendly error notification */
+    if (!intentionalClose) {
+      showToast("Connection Error", "WebSocket connection failed. Reconnecting...", "warning", 4000);
+    }
   };
 }
 
@@ -5762,13 +5785,33 @@ function disconnect() {
 
 function scheduleReconnect() {
   if (intentionalClose) return;
+  
   const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY);
   reconnectAttempts++;
+  
+  /* Cap reconnect attempts and provide user feedback */
+  if (reconnectAttempts > 10) {
+    addLog("⚠️ Max reconnection attempts reached. Please check your connection and click Connect.");
+    UI.wsStatus.textContent = "FAILED";
+    UI.wsStatus.className = "status-badge error";
+    showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", 10000);
+    return;
+  }
+  
   addLog(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
   UI.wsStatus.textContent = "RECONNECTING";
   UI.wsStatus.className = "status-badge warning";
+  
   reconnectTimer = setTimeout(() => {
-    if (!intentionalClose) connect();
+    if (!intentionalClose) {
+      try {
+        connect();
+      } catch (err) {
+        console.error("Reconnection error:", err);
+        addLog(`Reconnection failed: ${err.message}`);
+        scheduleReconnect(); /* Try again with exponential backoff */
+      }
+    }
   }, delay);
 }
 
@@ -5814,7 +5857,7 @@ function computeEMAs() {
 }
 
 function computeEMA(data, period) {
-  if (data.length === 0) return [];
+  if (!data || data.length === 0 || period <= 0) return [];
   const result = [];
   const multiplier = 2 / (period + 1);
   let sum = 0;
@@ -5822,7 +5865,7 @@ function computeEMA(data, period) {
     if (i < period) {
       sum += data[i];
       if (i === period - 1) {
-        result.push(sum / period);
+        result.push(period > 0 ? sum / period : 0);
       } else {
         result.push(null);
       }
@@ -5836,11 +5879,12 @@ function computeEMA(data, period) {
 
 /* ================= ATR COMPUTATION ================= */
 function computeATR() {
-  if (candles.length < 2) { atrValue = 0; atrValues = []; return; }
+  if (!candles || candles.length < 2) { atrValue = 0; atrValues = []; return; }
   const trueRanges = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const prev = candles[i - 1];
+    if (!c || !prev) continue;
     const tr = Math.max(
       c.high - c.low,
       Math.abs(c.high - prev.close),
@@ -5851,19 +5895,19 @@ function computeATR() {
   /* Simple moving average for initial ATR, then EMA-smooth */
   atrValues = [];
   if (trueRanges.length < ATR_PERIOD) {
-    const avg = trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
+    const avg = trueRanges.length > 0 ? trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length : 0;
     atrValue = avg;
     atrValues = trueRanges.map(() => avg);
     return;
   }
   let sum = 0;
   for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
-  let prevATR = sum / ATR_PERIOD;
+  let prevATR = ATR_PERIOD > 0 ? sum / ATR_PERIOD : 0;
   for (let i = 0; i < trueRanges.length; i++) {
     if (i < ATR_PERIOD) {
       atrValues.push(i === ATR_PERIOD - 1 ? prevATR : null);
     } else {
-      prevATR = (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD;
+      prevATR = ATR_PERIOD > 0 ? (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD : 0;
       atrValues.push(prevATR);
     }
   }
@@ -12686,19 +12730,39 @@ function drawHLine(ctx, y, x1, x2, color, label, W, mr) {
 function syncConfigFromUI() {
   if (UI.rangeDuration) {
     const v = parseInt(UI.rangeDuration.value, 10);
-    if (v > 0) RANGE_MINUTES = v;
+    if (!isNaN(v) && v > 0 && v <= 120) {
+      RANGE_MINUTES = v;
+    } else {
+      addLog("⚠️ Invalid range duration. Must be between 1-120 minutes.");
+      UI.rangeDuration.value = RANGE_MINUTES; /* Reset to valid value */
+    }
   }
   if (UI.touchTolerance) {
     const v = parseInt(UI.touchTolerance.value, 10);
-    if (v > 0) LEVEL_TOUCH_TOLERANCE = v / 100;
+    if (!isNaN(v) && v >= 0 && v <= 100) {
+      LEVEL_TOUCH_TOLERANCE = v / 100;
+    } else {
+      addLog("⚠️ Invalid touch tolerance. Must be between 0-100%.");
+      UI.touchTolerance.value = Math.round(LEVEL_TOUCH_TOLERANCE * 100);
+    }
   }
   if (UI.dojiRatio) {
     const v = parseInt(UI.dojiRatio.value, 10);
-    if (v > 0) DOJI_BODY_RATIO = v / 100;
+    if (!isNaN(v) && v >= 0 && v <= 100) {
+      DOJI_BODY_RATIO = v / 100;
+    } else {
+      addLog("⚠️ Invalid doji ratio. Must be between 0-100%.");
+      UI.dojiRatio.value = Math.round(DOJI_BODY_RATIO * 100);
+    }
   }
   if (UI.lookbackPeriod) {
     const v = parseInt(UI.lookbackPeriod.value, 10);
-    if (v > 0) SWING_LOOKBACK_PERIOD = v;
+    if (!isNaN(v) && v > 0 && v <= 100) {
+      SWING_LOOKBACK_PERIOD = v;
+    } else {
+      addLog("⚠️ Invalid lookback period. Must be between 1-100.");
+      UI.lookbackPeriod.value = SWING_LOOKBACK_PERIOD;
+    }
   }
   saveSettings();
 }
