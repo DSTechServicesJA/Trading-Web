@@ -706,6 +706,41 @@ let chartRedrawTimer = null;
 const CHART_REDRAW_DEBOUNCE_MS = 16; /* ~60fps */
 let chartRedrawPending = false;
 
+/* API rate limiting */
+const apiCallTimestamps = new Map(); /* endpoint -> array of timestamps */
+const API_RATE_LIMIT_WINDOW_MS = 60000; /* 1 minute window */
+const API_RATE_LIMIT_MAX_CALLS = 30; /* max calls per window */
+
+/**
+ * Check if an API call is allowed based on rate limiting.
+ * @param {string} endpoint - The API endpoint identifier (e.g., "telegram", "contracts_for")
+ * @returns {boolean} - True if the call is allowed, false if rate limited
+ */
+function isApiCallAllowed(endpoint) {
+  const now = Date.now();
+  if (!apiCallTimestamps.has(endpoint)) {
+    apiCallTimestamps.set(endpoint, []);
+  }
+  
+  const timestamps = apiCallTimestamps.get(endpoint);
+  
+  /* Remove timestamps outside the window */
+  const validTimestamps = timestamps.filter(t => now - t < API_RATE_LIMIT_WINDOW_MS);
+  apiCallTimestamps.set(endpoint, validTimestamps);
+  
+  /* Check if we've exceeded the limit */
+  if (validTimestamps.length >= API_RATE_LIMIT_MAX_CALLS) {
+    const oldestCall = validTimestamps[0];
+    const waitTime = Math.ceil((API_RATE_LIMIT_WINDOW_MS - (now - oldestCall)) / 1000);
+    addLog(`⚠️ Rate limit reached for ${endpoint}. Please wait ${waitTime}s.`);
+    return false;
+  }
+  
+  /* Record this call */
+  validTimestamps.push(now);
+  return true;
+}
+
 /* ================= STATE ================= */
 let authorized    = false;
 let ws            = null;
@@ -2610,6 +2645,11 @@ function telegramProxyHeaders(extra = {}) {
  * Send a photo (Blob) with caption to Telegram via Bot API.
  */
 async function sendTelegramPhoto(blob, caption) {
+  /* Check rate limit before making API call */
+  if (!isApiCallAllowed("telegram")) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
@@ -2653,6 +2693,11 @@ async function sendTelegramPhoto(blob, caption) {
  * Send a text-only message to Telegram via Bot API (HTML parse mode).
  */
 async function sendTelegramMessage(text) {
+  /* Check rate limit before making API call */
+  if (!isApiCallAllowed("telegram")) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
