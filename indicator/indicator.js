@@ -701,6 +701,11 @@ let pingTimer = null;
 let reconnectDebounceTimer = null;
 const RECONNECT_DEBOUNCE_MS = 400;
 
+/* Chart redraw optimization */
+let chartRedrawTimer = null;
+const CHART_REDRAW_DEBOUNCE_MS = 16; /* ~60fps */
+let chartRedrawPending = false;
+
 /* ================= STATE ================= */
 let authorized    = false;
 let ws            = null;
@@ -5727,6 +5732,8 @@ function disconnect() {
   intentionalClose = true;
   authorized = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (chartRedrawTimer) { cancelAnimationFrame(chartRedrawTimer); chartRedrawTimer = null; }
+  chartRedrawPending = false;
   stopPing();
   stopCandleCountdown();
   stopUptimeTimer();
@@ -5916,8 +5923,8 @@ function computeATR() {
 
 /* ================= RSI COMPUTATION ================= */
 function computeRSI() {
-  const closes = candles.map(c => c.close);
-  if (closes.length < RSI_PERIOD + 1) { rsiValues = []; return; }
+  if (!candles || candles.length < RSI_PERIOD + 1) { rsiValues = []; return; }
+  const closes = candles.map(c => c && c.close != null ? c.close : 0);
   rsiValues = [];
 
   let gains = 0, losses = 0;
@@ -5926,8 +5933,8 @@ function computeRSI() {
     if (change > 0) gains += change;
     else losses -= change;
   }
-  let avgGain = gains / RSI_PERIOD;
-  let avgLoss = losses / RSI_PERIOD;
+  let avgGain = RSI_PERIOD > 0 ? gains / RSI_PERIOD : 0;
+  let avgLoss = RSI_PERIOD > 0 ? losses / RSI_PERIOD : 0;
 
   for (let i = 0; i < RSI_PERIOD; i++) rsiValues.push(null);
 
@@ -5938,8 +5945,8 @@ function computeRSI() {
     const change = closes[i] - closes[i - 1];
     const gain = change > 0 ? change : 0;
     const loss = change < 0 ? -change : 0;
-    avgGain = (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD;
-    avgLoss = (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD;
+    avgGain = RSI_PERIOD > 0 ? (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD : 0;
+    avgLoss = RSI_PERIOD > 0 ? (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD : 0;
     rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
   }
 }
@@ -5994,17 +6001,21 @@ function isMACDAligned(dir) {
 
 /* ================= BOLLINGER BANDS COMPUTATION ================= */
 function computeBollingerBands() {
-  const closes = candles.map(c => c.close);
+  if (!candles || candles.length < BB_PERIOD) {
+    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+    return;
+  }
+  const closes = candles.map(c => c && c.close != null ? c.close : 0);
   bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
-  if (closes.length < BB_PERIOD) return;
+  
   for (let i = 0; i < closes.length; i++) {
     if (i < BB_PERIOD - 1) {
       bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
       continue;
     }
     const slice = closes.slice(i - BB_PERIOD + 1, i + 1);
-    const mean = slice.reduce((a, b) => a + b, 0) / BB_PERIOD;
-    const variance = slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD;
+    const mean = BB_PERIOD > 0 ? slice.reduce((a, b) => a + b, 0) / BB_PERIOD : 0;
+    const variance = BB_PERIOD > 0 ? slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD : 0;
     const stdDev = Math.sqrt(variance);
     bbMiddle.push(mean);
     bbUpper.push(mean + BB_STD_DEV * stdDev);
@@ -12657,6 +12668,25 @@ function drawChart() {
   }
 }
 
+/**
+ * Debounced version of drawChart for non-critical redraws.
+ * Use this for mouse movements, window resizes, and other frequent events.
+ * Critical updates (new candle data) should still call drawChart() directly.
+ */
+function debouncedDrawChart() {
+  if (chartRedrawPending) return;
+  chartRedrawPending = true;
+  
+  if (chartRedrawTimer) {
+    cancelAnimationFrame(chartRedrawTimer);
+  }
+  
+  chartRedrawTimer = requestAnimationFrame(() => {
+    chartRedrawPending = false;
+    drawChart();
+  });
+}
+
 function drawEMALine(ctx, emaData, xOf, yOf, color) {
   if (!emaData || emaData.length === 0) return;
   ctx.strokeStyle = color;
@@ -14676,19 +14706,19 @@ document.addEventListener("DOMContentLoaded", () => {
       chartMouseX = e.clientX - rect.left;
       chartMouseY = e.clientY - rect.top;
       chartMouseActive = true;
-      drawChart();
+      debouncedDrawChart(); /* Use debounced version for mouse movements */
     });
     UI.canvas.addEventListener("mouseleave", () => {
       chartMouseActive = false;
       chartMouseX = -1;
       chartMouseY = -1;
-      drawChart();
+      debouncedDrawChart(); /* Use debounced version for mouse movements */
     });
   }
 
   /* Resize redraw */
   window.addEventListener("resize", () => {
-    drawChart();
+    debouncedDrawChart(); /* Use debounced version for resize events */
     /* Invalidate cached canvas sizes and redraw all multi-symbol mini-charts */
     for (const p of multiPanels.values()) {
       p._cachedW = null;
