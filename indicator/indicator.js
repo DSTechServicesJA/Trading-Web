@@ -689,9 +689,14 @@ function getMarketTuning() {
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
+const MAX_RECONNECT_ATTEMPTS = 10;
 let reconnectAttempts = 0;
 let reconnectTimer    = null;
 let intentionalClose  = false;
+
+/* Toast notification durations */
+const TOAST_WARNING_DURATION_MS = 4000;
+const TOAST_ERROR_DURATION_MS = 10000;
 
 /* Ping/keepalive (Deriv WS sessions time out after inactivity) */
 const PING_INTERVAL_MS = 30000;
@@ -5768,7 +5773,7 @@ function connect() {
     
     /* Show user-friendly error notification */
     if (!intentionalClose) {
-      showToast("Connection Error", "WebSocket connection failed. Reconnecting...", "warning", 4000);
+      showToast("Connection Error", "WebSocket connection failed. Reconnecting...", "warning", TOAST_WARNING_DURATION_MS);
     }
   };
 }
@@ -5842,11 +5847,11 @@ function scheduleReconnect() {
   reconnectAttempts++;
   
   /* Cap reconnect attempts and provide user feedback */
-  if (reconnectAttempts > 10) {
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
     addLog("⚠️ Max reconnection attempts reached. Please check your connection and click Connect.");
     UI.wsStatus.textContent = "FAILED";
     UI.wsStatus.className = "status-badge error";
-    showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", 10000);
+    showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", TOAST_ERROR_DURATION_MS);
     return;
   }
   
