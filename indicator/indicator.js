@@ -689,9 +689,14 @@ function getMarketTuning() {
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
+const MAX_RECONNECT_ATTEMPTS = 10;
 let reconnectAttempts = 0;
 let reconnectTimer    = null;
 let intentionalClose  = false;
+
+/* Toast notification durations */
+const TOAST_WARNING_DURATION_MS = 4000;
+const TOAST_ERROR_DURATION_MS = 10000;
 
 /* Ping/keepalive (Deriv WS sessions time out after inactivity) */
 const PING_INTERVAL_MS = 30000;
@@ -700,6 +705,46 @@ let pingTimer = null;
 /* Debounce */
 let reconnectDebounceTimer = null;
 const RECONNECT_DEBOUNCE_MS = 400;
+
+/* Chart redraw optimization */
+let chartRedrawTimer = null;
+const CHART_REDRAW_DEBOUNCE_MS = 16; /* ~60fps */
+let chartRedrawPending = false;
+
+/* API rate limiting */
+const apiCallTimestamps = new Map(); /* endpoint -> array of timestamps */
+const API_RATE_LIMIT_WINDOW_MS = 60000; /* 1 minute window */
+const API_RATE_LIMIT_MAX_CALLS = 30; /* max calls per window */
+
+/**
+ * Check if an API call is allowed based on rate limiting.
+ * @param {string} endpoint - The API endpoint identifier (e.g., "telegram", "contracts_for")
+ * @returns {boolean} - True if the call is allowed, false if rate limited
+ */
+function isApiCallAllowed(endpoint) {
+  const now = Date.now();
+  if (!apiCallTimestamps.has(endpoint)) {
+    apiCallTimestamps.set(endpoint, []);
+  }
+  
+  const timestamps = apiCallTimestamps.get(endpoint);
+  
+  /* Remove timestamps outside the window */
+  const validTimestamps = timestamps.filter(t => now - t < API_RATE_LIMIT_WINDOW_MS);
+  apiCallTimestamps.set(endpoint, validTimestamps);
+  
+  /* Check if we've exceeded the limit */
+  if (validTimestamps.length >= API_RATE_LIMIT_MAX_CALLS) {
+    const oldestCall = validTimestamps[0];
+    const waitTime = Math.ceil((API_RATE_LIMIT_WINDOW_MS - (now - oldestCall)) / 1000);
+    addLog(`⚠️ Rate limit reached for ${endpoint}. Please wait ${waitTime}s.`);
+    return false;
+  }
+  
+  /* Record this call */
+  validTimestamps.push(now);
+  return true;
+}
 
 /* ================= STATE ================= */
 let authorized    = false;
@@ -2605,6 +2650,11 @@ function telegramProxyHeaders(extra = {}) {
  * Send a photo (Blob) with caption to Telegram via Bot API.
  */
 async function sendTelegramPhoto(blob, caption) {
+  /* Check rate limit before making API call */
+  if (!isApiCallAllowed("telegram")) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
@@ -2648,6 +2698,11 @@ async function sendTelegramPhoto(blob, caption) {
  * Send a text-only message to Telegram via Bot API (HTML parse mode).
  */
 async function sendTelegramMessage(text) {
+  /* Check rate limit before making API call */
+  if (!isApiCallAllowed("telegram")) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
@@ -3247,7 +3302,10 @@ function saveSettings() {
       autoTradeSessionRange
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
-  } catch (e) { /* storage not available */ }
+  } catch (e) {
+    console.warn("Failed to save settings to localStorage:", e.message);
+    addLog("⚠️ Settings could not be saved (storage unavailable)");
+  }
 }
 
 function restoreSettings() {
@@ -3507,7 +3565,9 @@ function persistSignalLog() {
       }
     }
     localStorage.setItem(LS_PREFIX + "signalLog", JSON.stringify(items));
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Failed to persist signal log:", e.message);
+  }
 }
 
 function restoreSignalLog() {
@@ -3515,36 +3575,47 @@ function restoreSignalLog() {
     const raw = localStorage.getItem(LS_PREFIX + "signalLog");
     if (!raw || !UI.signalLog) return;
     const items = JSON.parse(raw);
-    items.reverse().forEach(text => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      UI.signalLog.prepend(li);
-    });
-  } catch (e) {}
+    if (Array.isArray(items)) {
+      items.reverse().forEach(text => {
+        const li = document.createElement("li");
+        li.textContent = text;
+        UI.signalLog.prepend(li);
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to restore signal log:", e.message);
+  }
 }
 
 function persistSignalHistory() {
   try {
     /* Strip chartImage data URLs to avoid exceeding localStorage quota */
     const stripped = signalHistory.slice(-50).map(s => {
-      if (!s.chartImage) return s;
+      if (!s || !s.chartImage) return s;
       const copy = Object.assign({}, s);
       delete copy.chartImage;
       return copy;
     });
     localStorage.setItem(LS_PREFIX + "signalHistory", JSON.stringify(stripped));
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Failed to persist signal history:", e.message);
+  }
 }
 
 function restoreSignalHistory() {
   try {
     const raw = localStorage.getItem(LS_PREFIX + "signalHistory");
     if (!raw) return;
-    signalHistory = JSON.parse(raw);
-    signalWins = signalHistory.filter(s => s.result === "WIN").length;
-    signalLosses = signalHistory.filter(s => s.result === "LOSS").length;
-    updateStatsUI();
-  } catch (e) {}
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      signalHistory = parsed;
+      signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
+      signalLosses = signalHistory.filter(s => s && s.result === "LOSS").length;
+      updateStatsUI();
+    }
+  } catch (e) {
+    console.warn("Failed to restore signal history:", e.message);
+  }
 }
 
 /* ================= STATS ================= */
@@ -5696,7 +5767,14 @@ function connect() {
 
   ws.onerror = (evt) => {
     if (thisWs !== ws) return; /* stale connection */
-    addLog("WebSocket error: " + (evt.message || "connection failed"));
+    const errorMsg = evt.message || evt.reason || "connection failed";
+    addLog("WebSocket error: " + errorMsg);
+    console.error("WebSocket error details:", evt);
+    
+    /* Show user-friendly error notification */
+    if (!intentionalClose) {
+      showToast("Connection Error", "WebSocket connection failed. Reconnecting...", "warning", TOAST_WARNING_DURATION_MS);
+    }
   };
 }
 
@@ -5704,6 +5782,8 @@ function disconnect() {
   intentionalClose = true;
   authorized = false;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (chartRedrawTimer) { cancelAnimationFrame(chartRedrawTimer); chartRedrawTimer = null; }
+  chartRedrawPending = false;
   stopPing();
   stopCandleCountdown();
   stopUptimeTimer();
@@ -5762,13 +5842,33 @@ function disconnect() {
 
 function scheduleReconnect() {
   if (intentionalClose) return;
+  
   const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY);
   reconnectAttempts++;
+  
+  /* Cap reconnect attempts and provide user feedback */
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    addLog("⚠️ Max reconnection attempts reached. Please check your connection and click Connect.");
+    UI.wsStatus.textContent = "FAILED";
+    UI.wsStatus.className = "status-badge error";
+    showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", TOAST_ERROR_DURATION_MS);
+    return;
+  }
+  
   addLog(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
   UI.wsStatus.textContent = "RECONNECTING";
   UI.wsStatus.className = "status-badge warning";
+  
   reconnectTimer = setTimeout(() => {
-    if (!intentionalClose) connect();
+    if (!intentionalClose) {
+      try {
+        connect();
+      } catch (err) {
+        console.error("Reconnection error:", err);
+        addLog(`Reconnection failed: ${err.message}`);
+        scheduleReconnect(); /* Try again with exponential backoff */
+      }
+    }
   }, delay);
 }
 
@@ -5814,7 +5914,7 @@ function computeEMAs() {
 }
 
 function computeEMA(data, period) {
-  if (data.length === 0) return [];
+  if (!data || data.length === 0 || period <= 0) return [];
   const result = [];
   const multiplier = 2 / (period + 1);
   let sum = 0;
@@ -5822,7 +5922,7 @@ function computeEMA(data, period) {
     if (i < period) {
       sum += data[i];
       if (i === period - 1) {
-        result.push(sum / period);
+        result.push(period > 0 ? sum / period : 0);
       } else {
         result.push(null);
       }
@@ -5836,11 +5936,12 @@ function computeEMA(data, period) {
 
 /* ================= ATR COMPUTATION ================= */
 function computeATR() {
-  if (candles.length < 2) { atrValue = 0; atrValues = []; return; }
+  if (!candles || candles.length < 2) { atrValue = 0; atrValues = []; return; }
   const trueRanges = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const prev = candles[i - 1];
+    if (!c || !prev) continue;
     const tr = Math.max(
       c.high - c.low,
       Math.abs(c.high - prev.close),
@@ -5851,19 +5952,19 @@ function computeATR() {
   /* Simple moving average for initial ATR, then EMA-smooth */
   atrValues = [];
   if (trueRanges.length < ATR_PERIOD) {
-    const avg = trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length;
+    const avg = trueRanges.length > 0 ? trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length : 0;
     atrValue = avg;
     atrValues = trueRanges.map(() => avg);
     return;
   }
   let sum = 0;
   for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
-  let prevATR = sum / ATR_PERIOD;
+  let prevATR = ATR_PERIOD > 0 ? sum / ATR_PERIOD : 0;
   for (let i = 0; i < trueRanges.length; i++) {
     if (i < ATR_PERIOD) {
       atrValues.push(i === ATR_PERIOD - 1 ? prevATR : null);
     } else {
-      prevATR = (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD;
+      prevATR = ATR_PERIOD > 0 ? (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD : 0;
       atrValues.push(prevATR);
     }
   }
@@ -5872,8 +5973,8 @@ function computeATR() {
 
 /* ================= RSI COMPUTATION ================= */
 function computeRSI() {
-  const closes = candles.map(c => c.close);
-  if (closes.length < RSI_PERIOD + 1) { rsiValues = []; return; }
+  if (!candles || candles.length < RSI_PERIOD + 1) { rsiValues = []; return; }
+  const closes = candles.map(c => c && c.close != null ? c.close : 0);
   rsiValues = [];
 
   let gains = 0, losses = 0;
@@ -5882,8 +5983,8 @@ function computeRSI() {
     if (change > 0) gains += change;
     else losses -= change;
   }
-  let avgGain = gains / RSI_PERIOD;
-  let avgLoss = losses / RSI_PERIOD;
+  let avgGain = RSI_PERIOD > 0 ? gains / RSI_PERIOD : 0;
+  let avgLoss = RSI_PERIOD > 0 ? losses / RSI_PERIOD : 0;
 
   for (let i = 0; i < RSI_PERIOD; i++) rsiValues.push(null);
 
@@ -5894,8 +5995,8 @@ function computeRSI() {
     const change = closes[i] - closes[i - 1];
     const gain = change > 0 ? change : 0;
     const loss = change < 0 ? -change : 0;
-    avgGain = (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD;
-    avgLoss = (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD;
+    avgGain = RSI_PERIOD > 0 ? (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD : 0;
+    avgLoss = RSI_PERIOD > 0 ? (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD : 0;
     rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
   }
 }
@@ -5950,17 +6051,21 @@ function isMACDAligned(dir) {
 
 /* ================= BOLLINGER BANDS COMPUTATION ================= */
 function computeBollingerBands() {
-  const closes = candles.map(c => c.close);
+  if (!candles || candles.length < BB_PERIOD) {
+    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+    return;
+  }
+  const closes = candles.map(c => c && c.close != null ? c.close : 0);
   bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
-  if (closes.length < BB_PERIOD) return;
+  
   for (let i = 0; i < closes.length; i++) {
     if (i < BB_PERIOD - 1) {
       bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
       continue;
     }
     const slice = closes.slice(i - BB_PERIOD + 1, i + 1);
-    const mean = slice.reduce((a, b) => a + b, 0) / BB_PERIOD;
-    const variance = slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD;
+    const mean = BB_PERIOD > 0 ? slice.reduce((a, b) => a + b, 0) / BB_PERIOD : 0;
+    const variance = BB_PERIOD > 0 ? slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD : 0;
     const stdDev = Math.sqrt(variance);
     bbMiddle.push(mean);
     bbUpper.push(mean + BB_STD_DEV * stdDev);
@@ -12613,6 +12718,25 @@ function drawChart() {
   }
 }
 
+/**
+ * Debounced version of drawChart for non-critical redraws.
+ * Use this for mouse movements, window resizes, and other frequent events.
+ * Critical updates (new candle data) should still call drawChart() directly.
+ */
+function debouncedDrawChart() {
+  if (chartRedrawPending) return;
+  chartRedrawPending = true;
+  
+  if (chartRedrawTimer) {
+    cancelAnimationFrame(chartRedrawTimer);
+  }
+  
+  chartRedrawTimer = requestAnimationFrame(() => {
+    chartRedrawPending = false;
+    drawChart();
+  });
+}
+
 function drawEMALine(ctx, emaData, xOf, yOf, color) {
   if (!emaData || emaData.length === 0) return;
   ctx.strokeStyle = color;
@@ -12686,19 +12810,39 @@ function drawHLine(ctx, y, x1, x2, color, label, W, mr) {
 function syncConfigFromUI() {
   if (UI.rangeDuration) {
     const v = parseInt(UI.rangeDuration.value, 10);
-    if (v > 0) RANGE_MINUTES = v;
+    if (!isNaN(v) && v > 0 && v <= 120) {
+      RANGE_MINUTES = v;
+    } else {
+      addLog("⚠️ Invalid range duration. Must be between 1-120 minutes.");
+      UI.rangeDuration.value = RANGE_MINUTES; /* Reset to valid value */
+    }
   }
   if (UI.touchTolerance) {
     const v = parseInt(UI.touchTolerance.value, 10);
-    if (v > 0) LEVEL_TOUCH_TOLERANCE = v / 100;
+    if (!isNaN(v) && v >= 0 && v <= 100) {
+      LEVEL_TOUCH_TOLERANCE = v / 100;
+    } else {
+      addLog("⚠️ Invalid touch tolerance. Must be between 0-100%.");
+      UI.touchTolerance.value = Math.round(LEVEL_TOUCH_TOLERANCE * 100);
+    }
   }
   if (UI.dojiRatio) {
     const v = parseInt(UI.dojiRatio.value, 10);
-    if (v > 0) DOJI_BODY_RATIO = v / 100;
+    if (!isNaN(v) && v >= 0 && v <= 100) {
+      DOJI_BODY_RATIO = v / 100;
+    } else {
+      addLog("⚠️ Invalid doji ratio. Must be between 0-100%.");
+      UI.dojiRatio.value = Math.round(DOJI_BODY_RATIO * 100);
+    }
   }
   if (UI.lookbackPeriod) {
     const v = parseInt(UI.lookbackPeriod.value, 10);
-    if (v > 0) SWING_LOOKBACK_PERIOD = v;
+    if (!isNaN(v) && v > 0 && v <= 100) {
+      SWING_LOOKBACK_PERIOD = v;
+    } else {
+      addLog("⚠️ Invalid lookback period. Must be between 1-100.");
+      UI.lookbackPeriod.value = SWING_LOOKBACK_PERIOD;
+    }
   }
   saveSettings();
 }
@@ -14612,19 +14756,19 @@ document.addEventListener("DOMContentLoaded", () => {
       chartMouseX = e.clientX - rect.left;
       chartMouseY = e.clientY - rect.top;
       chartMouseActive = true;
-      drawChart();
+      debouncedDrawChart(); /* Use debounced version for mouse movements */
     });
     UI.canvas.addEventListener("mouseleave", () => {
       chartMouseActive = false;
       chartMouseX = -1;
       chartMouseY = -1;
-      drawChart();
+      debouncedDrawChart(); /* Use debounced version for mouse movements */
     });
   }
 
   /* Resize redraw */
   window.addEventListener("resize", () => {
-    drawChart();
+    debouncedDrawChart(); /* Use debounced version for resize events */
     /* Invalidate cached canvas sizes and redraw all multi-symbol mini-charts */
     for (const p of multiPanels.values()) {
       p._cachedW = null;
