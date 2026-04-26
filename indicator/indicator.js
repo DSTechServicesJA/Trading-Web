@@ -86,7 +86,7 @@ let MAX_CANDLE_HISTORY        = 200;
 let LEVEL_TOUCH_TOLERANCE     = 0.15;
 let DOJI_BODY_RATIO           = 0.2;
 let SPINNING_TOP_BODY_RATIO   = 0.35;
-let SWING_LOOKBACK_PERIOD     = 20;
+let SWING_LOOKBACK_PERIOD     = 35;  /* widened from 20 — gives trades more breathing room */
 const CHART_PRICE_PADDING     = 0.08;
 
 /* EMA periods */
@@ -807,7 +807,7 @@ let currentTheme = "dark";
 
 /* Strategy filter toggles */
 let autoResetEnabled    = true;
-let emaFilterEnabled    = false;
+let emaFilterEnabled    = true;    /* EMA 8/21 trend alignment mandatory by default */
 let htfFilterEnabled    = false;
 let atrToleranceEnabled = false;
 let trailingStopEnabled = true;
@@ -815,7 +815,7 @@ let partialTpEnabled    = true;
 let falseBreakoutEnabled = true;
 let minRREnabled         = true;
 let pureTrailingEnabled  = false;
-let minRRValue           = 1.5;
+let minRRValue           = 2.0;    /* raised from 1.5 — require better reward per unit of risk */
 
 /* Auto-trade: allow the indicator to place trades on Deriv when a signal fires */
 let autoTradeEnabled         = false;  /* breakout-retest TRADE signals */
@@ -1210,7 +1210,7 @@ let stochFilterEnabled = false;
 
 /* Profit-Direction Constraint filters */
 let minConfluenceEnabled = true;
-let minConfluenceValue   = 7;       /* min confluence score (0-16) to allow trade — raised from 6 for higher-quality entries */
+let minConfluenceValue   = 10;      /* min confluence score (0-16) to allow trade — raised to 10 to filter weak setups */
 let doubleRetestEnabled  = false;   /* require 2 retests of breakout level */
 let confirmBarEnabled    = true;    /* next candle after confirm must close in direction */
 let divergenceFilterEnabled = true; /* RSI divergence at retest */
@@ -6482,7 +6482,7 @@ function revertAllSettings() {
   RANGE_MINUTES           = 15;
   LEVEL_TOUCH_TOLERANCE   = 0.15;
   DOJI_BODY_RATIO         = 0.2;
-  SWING_LOOKBACK_PERIOD   = 20;
+  SWING_LOOKBACK_PERIOD   = 35;
 
   /* Sync all UI elements */
   if (UI.appIdInput)             UI.appIdInput.value               = APP_ID;
@@ -10612,7 +10612,8 @@ function buildTrade(confirmCandle, confirmIdx) {
 
   if (breakout.dir === "BULL") {
     const entry = confirmCandle.close;
-    const sl = findSwingLow(confirmIdx);
+    const swingLow = findSwingLow(confirmIdx);
+    const sl = swingLow - atrValue * 0.5;  /* ATR buffer below swing low — wider room before invalidation */
     const risk = entry - sl;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry + risk * rr;
@@ -10626,7 +10627,8 @@ function buildTrade(confirmCandle, confirmIdx) {
     trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
   } else {
     const entry = confirmCandle.close;
-    const sl = findSwingHigh(confirmIdx);
+    const swingHigh = findSwingHigh(confirmIdx);
+    const sl = swingHigh + atrValue * 0.5;  /* ATR buffer above swing high — wider room before invalidation */
     const risk = sl - entry;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry - risk * rr;
