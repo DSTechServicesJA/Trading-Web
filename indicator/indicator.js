@@ -13170,50 +13170,54 @@ function activatePanel(p) {
   sessionRangeTradeWins   = p.sessionRangeTradeWins   || 0;
   sessionRangeTradeLosses = p.sessionRangeTradeLosses || 0;
 
-  /* Activate per-panel filter settings into globals */
+  /* Activate per-panel filter settings into globals —
+     skip when the indicator-filters lock is active so that manually-set
+     filter states are preserved when the user switches panels. */
   const f = p.filters;
-  autoResetEnabled     = f.autoResetEnabled;
-  emaFilterEnabled     = f.emaFilterEnabled;
-  htfFilterEnabled     = f.htfFilterEnabled;
-  atrToleranceEnabled  = f.atrToleranceEnabled;
-  trailingStopEnabled  = f.trailingStopEnabled;
-  partialTpEnabled     = f.partialTpEnabled;
-  falseBreakoutEnabled = f.falseBreakoutEnabled;
-  minRREnabled         = f.minRREnabled;
-  minRRValue           = f.minRRValue;
-  pureTrailingEnabled  = f.pureTrailingEnabled;
-  rsiFilterEnabled     = f.rsiFilterEnabled;
-  volumeSpikeEnabled   = f.volumeSpikeEnabled;
-  sessionFilterEnabled = f.sessionFilterEnabled;
-  sessionFilterMode    = f.sessionFilterMode;
-  fibRetestEnabled     = f.fibRetestEnabled;
-  macdFilterEnabled      = f.macdFilterEnabled;
-  bbSqueezeFilterEnabled = f.bbSqueezeFilterEnabled;
-  adxFilterEnabled       = f.adxFilterEnabled;
-  stochFilterEnabled     = f.stochFilterEnabled;
-  scalpingModeEnabled    = f.scalpingModeEnabled;
-  RANGE_MINUTES        = f.RANGE_MINUTES;
-  /* Profit-Direction Constraints */
-  minConfluenceEnabled    = f.minConfluenceEnabled;
-  minConfluenceValue      = f.minConfluenceValue;
-  doubleRetestEnabled     = f.doubleRetestEnabled;
-  confirmBarEnabled       = f.confirmBarEnabled;
-  divergenceFilterEnabled = f.divergenceFilterEnabled;
-  adxHardGateEnabled      = f.adxHardGateEnabled;
-  adxMaxThreshold         = f.adxMaxThreshold;
-  breakoutDistEnabled     = f.breakoutDistEnabled;
-  breakoutDistATR         = f.breakoutDistATR;
-  timeDecayEnabled        = f.timeDecayEnabled;
-  timeDecayCandles        = f.timeDecayCandles;
-  consecutiveDirEnabled   = f.consecutiveDirEnabled;
-  vwapFilterEnabled       = f.vwapFilterEnabled;
-  stochCrossEnabled       = f.stochCrossEnabled;
-  rangeSizeEnabled        = f.rangeSizeEnabled;
-  rangeSizeMin            = f.rangeSizeMin;
-  rangeSizeMax            = f.rangeSizeMax;
-  hhhlEnabled             = f.hhhlEnabled;
-  followThroughEnabled    = f.followThroughEnabled;
-  mtfStructureEnabled     = f.mtfStructureEnabled;
+  if (!lockIndicatorFilters) {
+    autoResetEnabled     = f.autoResetEnabled;
+    emaFilterEnabled     = f.emaFilterEnabled;
+    htfFilterEnabled     = f.htfFilterEnabled;
+    atrToleranceEnabled  = f.atrToleranceEnabled;
+    trailingStopEnabled  = f.trailingStopEnabled;
+    partialTpEnabled     = f.partialTpEnabled;
+    falseBreakoutEnabled = f.falseBreakoutEnabled;
+    minRREnabled         = f.minRREnabled;
+    minRRValue           = f.minRRValue;
+    pureTrailingEnabled  = f.pureTrailingEnabled;
+    rsiFilterEnabled     = f.rsiFilterEnabled;
+    volumeSpikeEnabled   = f.volumeSpikeEnabled;
+    sessionFilterEnabled = f.sessionFilterEnabled;
+    sessionFilterMode    = f.sessionFilterMode;
+    fibRetestEnabled     = f.fibRetestEnabled;
+    macdFilterEnabled      = f.macdFilterEnabled;
+    bbSqueezeFilterEnabled = f.bbSqueezeFilterEnabled;
+    adxFilterEnabled       = f.adxFilterEnabled;
+    stochFilterEnabled     = f.stochFilterEnabled;
+    scalpingModeEnabled    = f.scalpingModeEnabled;
+    RANGE_MINUTES        = f.RANGE_MINUTES;
+    /* Profit-Direction Constraints */
+    minConfluenceEnabled    = f.minConfluenceEnabled;
+    minConfluenceValue      = f.minConfluenceValue;
+    doubleRetestEnabled     = f.doubleRetestEnabled;
+    confirmBarEnabled       = f.confirmBarEnabled;
+    divergenceFilterEnabled = f.divergenceFilterEnabled;
+    adxHardGateEnabled      = f.adxHardGateEnabled;
+    adxMaxThreshold         = f.adxMaxThreshold;
+    breakoutDistEnabled     = f.breakoutDistEnabled;
+    breakoutDistATR         = f.breakoutDistATR;
+    timeDecayEnabled        = f.timeDecayEnabled;
+    timeDecayCandles        = f.timeDecayCandles;
+    consecutiveDirEnabled   = f.consecutiveDirEnabled;
+    vwapFilterEnabled       = f.vwapFilterEnabled;
+    stochCrossEnabled       = f.stochCrossEnabled;
+    rangeSizeEnabled        = f.rangeSizeEnabled;
+    rangeSizeMin            = f.rangeSizeMin;
+    rangeSizeMax            = f.rangeSizeMax;
+    hhhlEnabled             = f.hhhlEnabled;
+    followThroughEnabled    = f.followThroughEnabled;
+    mtfStructureEnabled     = f.mtfStructureEnabled;
+  }
 }
 
 /* ---- Copy globals → panel state (save) ---- */
