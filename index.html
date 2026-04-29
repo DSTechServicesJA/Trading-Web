@@ -101,6 +101,10 @@
 
         <!-- Account type toggle -->
         <section class="account-toggle" aria-labelledby="acct-label">
+          <div class="section-header-mini">
+            <span class="section-icon">🏦</span>
+            <span class="section-title">Account</span>
+          </div>
           <label id="acct-label">
             <input type="checkbox" id="liveToggle" />
             <span>Live Account (Real Money)</span>
@@ -110,6 +114,10 @@
 
         <!-- OAuth Login -->
         <section class="oauth-box">
+          <div class="section-header-mini">
+            <span class="section-icon">🔑</span>
+            <span class="section-title">Deriv Login</span>
+          </div>
           <button id="oauthLogin" type="button">Login with Deriv</button>
           <button id="logoutBtn" type="button" style="display:none;">Logout (Deriv)</button>
           <button id="authLogoutBtn" type="button" class="btn-logout">Logout (Account)</button>
@@ -117,47 +125,60 @@
 
         <!-- Manual Token -->
         <section class="box">
-          <label for="token">Deriv API Token (optional)</label>
+          <div class="section-header-mini" style="grid-column:1/-1;">
+            <span class="section-icon">🔐</span>
+            <span class="section-title">API Token</span>
+            <span class="hint" style="margin:0 0 0 auto;">Optional</span>
+          </div>
+          <label for="token" style="grid-column:1/-1;">Deriv API Token</label>
           <input type="password" id="token" placeholder="Enter Deriv API Token" />
-          <p class="hint">Use only if OAuth is not available.</p>
+          <p class="hint" style="grid-column:1/-1;">Use only if OAuth is not available.</p>
           <button id="connectBtn" type="button">Connect</button>
         </section>
 
-<section class="symbol-section">
-    
-    <label class="auto-symbol-label">
-      <input type="checkbox" id="autoSymbolToggle" checked />
-      Auto Symbol
-    </label>
+        <section class="symbol-section">
+          <div class="section-header-mini">
+            <span class="section-icon">📊</span>
+            <span class="section-title">Market Symbol</span>
+          </div>
 
-    <div class="symbol-select">
-      <label for="symbolSelect">Market Symbol</label>
-      <select id="symbolSelect" class="status-badge enabled">
-        <optgroup label="FAST 1s">
-          <option value="1HZ75V">1HZ75V</option>
-          <option value="1HZ50V">1HZ50V</option>
-          <option value="1HZ100V">1HZ100V</option>
-        </optgroup>
-        <optgroup label="STANDARD">
-          <option value="R_75">R_75</option>
-          <option value="R_100">R_100</option>
-          <option value="R_50">R_50</option>
-        </optgroup>
-        <optgroup label="FOREX">
-          <option value="frxEURUSD">EUR/USD</option>
-          <option value="frxGBPUSD">GBP/USD</option>
-          <option value="frxAUDUSD">AUD/USD</option>
-          <option value="frxUSDJPY">USD/JPY</option>
-          <option value="frxUSDCAD">USD/CAD</option>
-          <option value="frxUSDCHF">USD/CHF</option>
-          <option value="frxNZDUSD">NZD/USD</option>
-        </optgroup>
-      </select>
-    </div>
-</section>
+          <label class="auto-symbol-label">
+            <input type="checkbox" id="autoSymbolToggle" checked />
+            Auto Symbol
+          </label>
+
+          <div class="symbol-select">
+            <label for="symbolSelect">Select Symbol</label>
+            <select id="symbolSelect" class="status-badge enabled">
+              <optgroup label="FAST 1s">
+                <option value="1HZ75V">1HZ75V</option>
+                <option value="1HZ50V">1HZ50V</option>
+                <option value="1HZ100V">1HZ100V</option>
+              </optgroup>
+              <optgroup label="STANDARD">
+                <option value="R_75">R_75</option>
+                <option value="R_100">R_100</option>
+                <option value="R_50">R_50</option>
+              </optgroup>
+              <optgroup label="FOREX">
+                <option value="frxEURUSD">EUR/USD</option>
+                <option value="frxGBPUSD">GBP/USD</option>
+                <option value="frxAUDUSD">AUD/USD</option>
+                <option value="frxUSDJPY">USD/JPY</option>
+                <option value="frxUSDCAD">USD/CAD</option>
+                <option value="frxUSDCHF">USD/CHF</option>
+                <option value="frxNZDUSD">NZD/USD</option>
+              </optgroup>
+            </select>
+          </div>
+        </section>
 
         <!-- Risk Controls-->
         <section class="risk dashboard">
+          <div class="dash-title-row" style="grid-column:1/-1;">
+            <span class="section-icon">⚖️</span>
+            <h3 class="dash-title" style="margin:0;">RISK CONTROLS</h3>
+          </div>
           <!-- compact TP/SL rows -->
           <div><strong><label for="takeProfit">TP ($)</label></strong> <span><input type="number" id="takeProfit" min="0.01" step="0.01" placeholder="e.g. 10" /></span></div>
           <div><strong><label for="stopLoss">SL ($)</label></strong> <span><input type="number" id="stopLoss" min="0.01" step="0.01" placeholder="e.g. 10" /></span></div>
@@ -200,28 +221,49 @@
 
         <!-- Scalping Strategies -->
         <section class="risk dashboard strategy-toggles">
-          <h3 class="dash-title">SCALPING STRATEGIES</h3>
-          <label class="strategy-toggle-label">
-            <input type="checkbox" id="liquiditySweepToggle" />
-            <span>Liquidity Sweep</span>
-          </label>
-          <p class="hint">15m range break &amp; close-back entry on 1m.</p>
+          <div class="strategy-section-header" style="grid-column:1/-1;">
+            <span class="section-icon">⚡</span>
+            <h3 class="dash-title" style="margin:0;flex:1;">SCALPING STRATEGIES</h3>
+            <label class="lock-label-main" title="Lock disabled strategies — they stay OFF even when the symbol or regime changes" id="lockStrategiesLabel">
+              <input type="checkbox" id="lockStrategiesToggle" />
+              🔒 Lock
+            </label>
+          </div>
 
-          <label class="strategy-toggle-label">
-            <input type="checkbox" id="stopLossHuntToggle" />
-            <span>Stop Loss Hunt</span>
-          </label>
-          <p class="hint">S/R level hunt with re-entry logic.</p>
+          <div class="strategy-toggle-row">
+            <label class="strategy-toggle-label">
+              <input type="checkbox" id="liquiditySweepToggle" />
+              <span>🌊 Liquidity Sweep</span>
+            </label>
+            <span class="strategy-status-dot" id="liqSweepDot" title="Disabled"></span>
+          </div>
+          <p class="hint strategy-hint">15m range break &amp; close-back entry on 1m.</p>
 
-          <label class="strategy-toggle-label">
-            <input type="checkbox" id="failedPinBarToggle" />
-            <span>Failed Pin Bar</span>
-          </label>
-          <p class="hint">Momentum pin bar failure entry.</p>
+          <div class="strategy-toggle-row">
+            <label class="strategy-toggle-label">
+              <input type="checkbox" id="stopLossHuntToggle" />
+              <span>🎯 Stop Loss Hunt</span>
+            </label>
+            <span class="strategy-status-dot" id="slHuntDot" title="Disabled"></span>
+          </div>
+          <p class="hint strategy-hint">S/R level hunt with re-entry logic.</p>
+
+          <div class="strategy-toggle-row">
+            <label class="strategy-toggle-label">
+              <input type="checkbox" id="failedPinBarToggle" />
+              <span>📌 Failed Pin Bar</span>
+            </label>
+            <span class="strategy-status-dot" id="fpbDot" title="Disabled"></span>
+          </div>
+          <p class="hint strategy-hint">Momentum pin bar failure entry.</p>
         </section>
 
         <!-- Connection Info -->
         <section class="info">
+          <div class="section-header-mini">
+            <span class="section-icon">📡</span>
+            <span class="section-title">Connection</span>
+          </div>
           <p class="env-label" id="environmentLabel">Environment: DEMO</p>
           <div id="liveStatus" class="env-label">Live: Locked</div>
         </section>
@@ -441,8 +483,45 @@
               <button id="soundToggleBtn" type="button" class="tool-btn">🔊 Sound ON</button>
               <button id="notifToggleBtn" type="button" class="tool-btn">🔕 Notif OFF</button>
             </div>
-            <div class="shortcut-hints">
-              <small>Alt+S Start/Stop | Alt+R Reset | Alt+T Theme | Alt+E Export CSV | Alt+P Export PDF | Alt+N Notifications</small>
+          </section>
+
+          <!-- Quick Keys Reference -->
+          <section class="dashboard quick-keys-panel">
+            <h3 class="dash-title">⌨️ QUICK KEYS</h3>
+            <div class="quick-keys-grid">
+              <div class="qk-item"><kbd>Alt+S</kbd><span>Start / Stop Bot</span></div>
+              <div class="qk-item"><kbd>Alt+R</kbd><span>Reset Session</span></div>
+              <div class="qk-item"><kbd>Alt+T</kbd><span>Toggle Theme</span></div>
+              <div class="qk-item"><kbd>Alt+E</kbd><span>Export CSV</span></div>
+              <div class="qk-item"><kbd>Alt+P</kbd><span>Export PDF</span></div>
+              <div class="qk-item"><kbd>Alt+N</kbd><span>Toggle Notifications</span></div>
+            </div>
+          </section>
+
+          <!-- Feature Guide -->
+          <section class="dashboard feature-guide-panel">
+            <h3 class="dash-title">📖 FEATURE GUIDE</h3>
+            <div class="feature-guide-list">
+              <div class="fg-item">
+                <span class="fg-icon">🌊</span>
+                <div><strong>Liquidity Sweep</strong><p class="hint">Detects when price sweeps a range high/low then closes back inside. Enter at close, SL just outside the range.</p></div>
+              </div>
+              <div class="fg-item">
+                <span class="fg-icon">🎯</span>
+                <div><strong>Stop Loss Hunt</strong><p class="hint">Finds key S/R levels tested 3+ times. Enters when price breaks beyond the level then reverses back inside.</p></div>
+              </div>
+              <div class="fg-item">
+                <span class="fg-icon">📌</span>
+                <div><strong>Failed Pin Bar</strong><p class="hint">Spots pin bars against dominant momentum (fear/greed), then enters when the pin bar fails in trend direction.</p></div>
+              </div>
+              <div class="fg-item">
+                <span class="fg-icon">⚡</span>
+                <div><strong>Auto Symbol</strong><p class="hint">Automatically selects the best-performing symbol based on real-time regime analysis (Odd/Even/Chaos).</p></div>
+              </div>
+              <div class="fg-item">
+                <span class="fg-icon">🔒</span>
+                <div><strong>Lock Strategies</strong><p class="hint">When enabled, disabled strategies remain OFF even if the auto-symbol or regime changes. Protects your manual settings.</p></div>
+              </div>
             </div>
           </section>
 
@@ -477,13 +556,62 @@
         updateLabel();
       }
     })();
-    
-      document.querySelectorAll(".bot-links a").forEach(link => {
-    if (link.href === window.location.href) {
-      link.style.background = "#1e293b";
-      link.style.color = "#38bdf8";
-    }
-  });
+
+    document.querySelectorAll(".bot-links a").forEach(link => {
+      if (link.href === window.location.href) {
+        link.style.background = "#1e293b";
+        link.style.color = "#38bdf8";
+      }
+    });
+
+    /* ---- Strategy Status Dots ---- */
+    (function () {
+      const strategies = [
+        { toggle: 'liquiditySweepToggle', dot: 'liqSweepDot' },
+        { toggle: 'stopLossHuntToggle',   dot: 'slHuntDot'   },
+        { toggle: 'failedPinBarToggle',   dot: 'fpbDot'      },
+      ];
+      function updateDot(dot, checked) {
+        dot.className = 'strategy-status-dot' + (checked ? ' active-dot' : '');
+        dot.title = checked ? 'Enabled' : 'Disabled';
+      }
+      strategies.forEach(({ toggle, dot }) => {
+        const cb  = document.getElementById(toggle);
+        const dot_ = document.getElementById(dot);
+        if (!cb || !dot_) return;
+        updateDot(dot_, cb.checked);
+        cb.addEventListener('change', () => updateDot(dot_, cb.checked));
+      });
+    })();
+
+    /* ---- Lock Strategies Toggle ---- */
+    (function () {
+      const LS_KEY = 'itguru_lockStrategies';
+      const lockToggle = document.getElementById('lockStrategiesToggle');
+      const lockLabel  = document.getElementById('lockStrategiesLabel');
+      if (!lockToggle) return;
+
+      /* Restore saved state */
+      try {
+        const saved = localStorage.getItem(LS_KEY);
+        if (saved !== null) lockToggle.checked = JSON.parse(saved);
+      } catch (_) {}
+
+      function applyLockVisual() {
+        if (lockLabel) {
+          lockLabel.style.color = lockToggle.checked ? 'var(--primary-soft)' : '';
+        }
+      }
+      applyLockVisual();
+
+      lockToggle.addEventListener('change', () => {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(lockToggle.checked)); } catch (_) {}
+        applyLockVisual();
+      });
+
+      /* Expose a helper so bot.js can check the lock state */
+      window.strategiesLocked = () => lockToggle.checked;
+    })();
 
     /* ---- Tab Switching with ARIA keyboard support ---- */
     (function () {

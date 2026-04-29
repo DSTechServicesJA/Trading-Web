@@ -2510,21 +2510,26 @@ function wireScalpingStrategyToggles() {
   const huntToggle = document.getElementById("stopLossHuntToggle");
   const fpbToggle  = document.getElementById("failedPinBarToggle");
 
-  // Restore saved state from localStorage
-  try {
-    if (localStorage.getItem("itguru_liq_sweep") === "1") {
-      liquiditySweepEnabled = true;
-      if (liqToggle) liqToggle.checked = true;
-    }
-    if (localStorage.getItem("itguru_stop_hunt") === "1") {
-      stopLossHuntEnabled = true;
-      if (huntToggle) huntToggle.checked = true;
-    }
-    if (localStorage.getItem("itguru_failed_pin") === "1") {
-      failedPinBarEnabled = true;
-      if (fpbToggle) fpbToggle.checked = true;
-    }
-  } catch (e) { /* localStorage not available */ }
+  // Helper: check if strategies are locked (respect the lock toggle in index.html)
+  function strategiesLocked() {
+    return typeof window.strategiesLocked === "function"
+      ? window.strategiesLocked()
+      : false;
+  }
+
+  // Restore saved state from localStorage (only enable if not locked-while-disabled)
+  function restoreStrategyToggle(lsKey, flagSetter, toggle) {
+    try {
+      if (localStorage.getItem(lsKey) === "1" && !strategiesLocked()) {
+        flagSetter(true);
+        if (toggle) toggle.checked = true;
+      }
+    } catch (e) { /* localStorage not available */ }
+  }
+
+  restoreStrategyToggle("itguru_liq_sweep",  (v) => { liquiditySweepEnabled = v; }, liqToggle);
+  restoreStrategyToggle("itguru_stop_hunt",   (v) => { stopLossHuntEnabled   = v; }, huntToggle);
+  restoreStrategyToggle("itguru_failed_pin",  (v) => { failedPinBarEnabled   = v; }, fpbToggle);
 
   if (liqToggle) {
     liqToggle.addEventListener("change", () => {

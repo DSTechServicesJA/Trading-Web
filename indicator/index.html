@@ -534,8 +534,11 @@
             <h3 class="collapsible">⚙️ Strategy Filters</h3>
             <div class="collapsible-body">
 
-              <label class="toggle-row" style="background:var(--bg-base);padding:6px 8px;border-radius:6px;margin-bottom:8px;border:1px solid var(--glass-border);"><input type="checkbox" id="autoApplyRecToggle" /> 🔄 Auto-Apply Recommended</label>
-              <p class="hint" style="margin-bottom:10px;">Automatically apply recommended strategy filters when the symbol changes.</p>
+              <div class="lock-row" style="margin-bottom:10px;">
+                <label class="toggle-row" style="background:var(--bg-base);padding:6px 8px;border-radius:6px;border:1px solid var(--glass-border);flex:1;"><input type="checkbox" id="autoApplyRecToggle" /> 🔄 Auto-Apply Recommended</label>
+                <label class="lock-label" title="Lock all strategy filter states — symbol changes won't override your manual settings"><input type="checkbox" id="lockIndicatorFiltersToggle" /> 🔒 Lock Filters</label>
+              </div>
+              <p class="hint" style="margin-bottom:10px;">Auto-Apply: apply recommended filters on symbol change. <b>Lock Filters</b>: prevent symbol changes from overriding your current filter settings — disabled indicators stay disabled.</p>
 
               <p class="param-group-title">Core Filters</p>
 
