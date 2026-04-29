@@ -1513,6 +1513,167 @@ body.light-theme button {
   margin-bottom: var(--space-1);
 }
 
+/* ---- Section Header Mini (left panel icons) ---- */
+.section-header-mini {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.section-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+}
+
+/* ---- Strategy Section Header Row ---- */
+.strategy-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- Lock Label (main page strategies) ---- */
+.lock-label-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  transition: all 0.2s;
+}
+
+.lock-label-main:hover {
+  color: var(--primary-soft);
+  border-color: rgba(99, 102, 241, 0.25);
+  background: var(--primary-glow);
+}
+
+.lock-label-main input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* ---- Strategy Toggle Row (with status dot) ---- */
+.strategy-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.strategy-toggle-row .strategy-toggle-label { flex: 1; }
+
+.strategy-hint { padding-left: 2px; }
+
+/* ---- Strategy Status Dot ---- */
+.strategy-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(92, 100, 132, 0.3);
+  border: 1px solid rgba(92, 100, 132, 0.4);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.strategy-status-dot.active-dot {
+  background: var(--success);
+  border-color: var(--success-strong);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+/* ---- Quick Keys Panel ---- */
+.quick-keys-panel {
+  display: block !important;
+}
+
+.quick-keys-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: var(--space-2);
+}
+
+.qk-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid var(--glass-border);
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
+}
+
+kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid rgba(99, 128, 255, 0.25);
+  border-radius: 4px;
+  background: rgba(6, 8, 15, 0.6);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--primary-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ---- Feature Guide Panel ---- */
+.feature-guide-panel {
+  display: block !important;
+}
+
+.feature-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: var(--space-2);
+}
+
+.fg-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.fg-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.fg-item strong {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--heading);
+  margin-bottom: 2px;
+}
+
 @media (max-width: 480px) {
   .pa-dashboard .side-row span:first-child {
     min-width: 70px;

@@ -2510,17 +2510,24 @@ function wireScalpingStrategyToggles() {
   const huntToggle = document.getElementById("stopLossHuntToggle");
   const fpbToggle  = document.getElementById("failedPinBarToggle");
 
-  // Restore saved state from localStorage
+  // Helper: check if strategies are locked (respect the lock toggle in index.html)
+  function strategiesLocked() {
+    return typeof window.strategiesLocked === "function"
+      ? window.strategiesLocked()
+      : false;
+  }
+
+  // Restore saved state from localStorage (only enable if not locked-while-disabled)
   try {
-    if (localStorage.getItem("itguru_liq_sweep") === "1") {
+    if (localStorage.getItem("itguru_liq_sweep") === "1" && !strategiesLocked()) {
       liquiditySweepEnabled = true;
       if (liqToggle) liqToggle.checked = true;
     }
-    if (localStorage.getItem("itguru_stop_hunt") === "1") {
+    if (localStorage.getItem("itguru_stop_hunt") === "1" && !strategiesLocked()) {
       stopLossHuntEnabled = true;
       if (huntToggle) huntToggle.checked = true;
     }
-    if (localStorage.getItem("itguru_failed_pin") === "1") {
+    if (localStorage.getItem("itguru_failed_pin") === "1" && !strategiesLocked()) {
       failedPinBarEnabled = true;
       if (fpbToggle) fpbToggle.checked = true;
     }

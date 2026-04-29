@@ -1263,6 +1263,10 @@ let autoApplyRecommended = true;
 let lockTimeframe = false;
 let lockRR        = false;
 
+/* Lock strategy filters — prevent applyRecommendedSettings from re-enabling
+   any filter that the user has explicitly disabled (unchecked) */
+let lockIndicatorFilters = false;
+
 /* ================= STRATEGY 1: LIQUIDITY SWEEP (15m → 1m) ================= */
 let liquiditySweepEnabled = false;       /* master toggle */
 let liquiditySweepHistory = [];          /* alert history */
@@ -1459,6 +1463,7 @@ function initUI() {
   UI.autoApplyRecToggle  = document.getElementById("autoApplyRecToggle");
   UI.lockTimeframeToggle = document.getElementById("lockTimeframeToggle");
   UI.lockRRToggle        = document.getElementById("lockRRToggle");
+  UI.lockIndicatorFiltersToggle = document.getElementById("lockIndicatorFiltersToggle");
   UI.rsiDisplay          = document.getElementById("rsiDisplay");
   UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
   UI.sessionDisplay      = document.getElementById("sessionDisplay");
@@ -3263,6 +3268,7 @@ function saveSettings() {
       autoApplyRecommended,
       lockTimeframe,
       lockRR,
+      lockIndicatorFilters,
       liveScalpEnabled,
       liveScalpMinConf,
       liquiditySweepEnabled,
@@ -3474,8 +3480,10 @@ function restoreSettings() {
     /* Lock toggles */
     if (s.lockTimeframe != null) lockTimeframe = s.lockTimeframe;
     if (s.lockRR != null) lockRR = s.lockRR;
+    if (s.lockIndicatorFilters != null) lockIndicatorFilters = s.lockIndicatorFilters;
     if (UI.lockTimeframeToggle) UI.lockTimeframeToggle.checked = lockTimeframe;
     if (UI.lockRRToggle) UI.lockRRToggle.checked = lockRR;
+    if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
 
     /* Telegram settings */
     if (s.telegramBotToken != null) {
@@ -4907,51 +4915,57 @@ function applyRecommendedSettings() {
   RANGE_MINUTES = rec.range.minutes;
   if (UI.rangeDuration) UI.rangeDuration.value = rec.range.minutes;
 
-  /* Boolean strategy filter toggles */
-  emaFilterEnabled     = rec.ema;
-  htfFilterEnabled     = rec.htf;
-  atrToleranceEnabled  = rec.atr;
-  trailingStopEnabled  = rec.trailing.rec;
-  partialTpEnabled     = rec.partialTp;
-  falseBreakoutEnabled = rec.falseBreakout;
-  rsiFilterEnabled     = rec.rsi;
-  volumeSpikeEnabled   = rec.volSpike.rec;
-  fibRetestEnabled     = rec.fib;
-  sessionFilterEnabled = rec.session.rec;
+  /* Boolean strategy filter toggles — skip if filters are locked (keep user's disabled state) */
+  if (!lockIndicatorFilters) {
+    emaFilterEnabled     = rec.ema;
+    htfFilterEnabled     = rec.htf;
+    atrToleranceEnabled  = rec.atr;
+    trailingStopEnabled  = rec.trailing.rec;
+    partialTpEnabled     = rec.partialTp;
+    falseBreakoutEnabled = rec.falseBreakout;
+    rsiFilterEnabled     = rec.rsi;
+    volumeSpikeEnabled   = rec.volSpike.rec;
+    fibRetestEnabled     = rec.fib;
+    sessionFilterEnabled = rec.session.rec;
 
-  /* GainzAlgo V2 filter toggles */
-  macdFilterEnabled      = rec.macd;
-  bbSqueezeFilterEnabled = rec.bbSqueeze;
-  adxFilterEnabled       = rec.adx;
-  stochFilterEnabled     = rec.stoch;
+    /* GainzAlgo V2 filter toggles */
+    macdFilterEnabled      = rec.macd;
+    bbSqueezeFilterEnabled = rec.bbSqueeze;
+    adxFilterEnabled       = rec.adx;
+    stochFilterEnabled     = rec.stoch;
 
-  /* Min R:R — skip value update if R:R is locked */
-  minRREnabled = rec.minRR.rec;
-  if (!lockRR) minRRValue = rec.rr.minRR;
+    /* Min R:R — skip value update if R:R is locked */
+    minRREnabled = rec.minRR.rec;
+    if (!lockRR) minRRValue = rec.rr.minRR;
 
-  /* Session mode — if recommended, default to london_ny for forex/commodity */
-  if (rec.session.rec) {
-    sessionFilterMode = "london_ny";
-    if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
+    /* Session mode — if recommended, default to london_ny for forex/commodity */
+    if (rec.session.rec) {
+      sessionFilterMode = "london_ny";
+      if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
+    }
+
+    /* Sync UI checkboxes */
+    if (UI.emaFilterToggle)     UI.emaFilterToggle.checked     = emaFilterEnabled;
+    if (UI.htfFilterToggle)     UI.htfFilterToggle.checked     = htfFilterEnabled;
+    if (UI.atrToleranceToggle)  UI.atrToleranceToggle.checked  = atrToleranceEnabled;
+    if (UI.trailingStopToggle)  UI.trailingStopToggle.checked  = trailingStopEnabled;
+    if (UI.partialTpToggle)     UI.partialTpToggle.checked     = partialTpEnabled;
+    if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
+    if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
+    if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
+    if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
+    if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
+    if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
+    if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
+    if (UI.macdFilterToggle)      UI.macdFilterToggle.checked      = macdFilterEnabled;
+    if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
+    if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
+    if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
+  } else {
+    /* Filters are locked — only update the R:R value (not state) if R:R isn't also locked */
+    if (!lockRR) minRRValue = rec.rr.minRR;
+    if (UI.minRRInput) UI.minRRInput.value = minRRValue;
   }
-
-  /* Sync UI checkboxes */
-  if (UI.emaFilterToggle)     UI.emaFilterToggle.checked     = emaFilterEnabled;
-  if (UI.htfFilterToggle)     UI.htfFilterToggle.checked     = htfFilterEnabled;
-  if (UI.atrToleranceToggle)  UI.atrToleranceToggle.checked  = atrToleranceEnabled;
-  if (UI.trailingStopToggle)  UI.trailingStopToggle.checked  = trailingStopEnabled;
-  if (UI.partialTpToggle)     UI.partialTpToggle.checked     = partialTpEnabled;
-  if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
-  if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
-  if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
-  if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
-  if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
-  if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
-  if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
-  if (UI.macdFilterToggle)      UI.macdFilterToggle.checked      = macdFilterEnabled;
-  if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
-  if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
-  if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
 
   /* Persist + refresh UI */
   saveSettings();
@@ -6511,6 +6525,7 @@ function revertAllSettings() {
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
   if (UI.lockTimeframeToggle)    UI.lockTimeframeToggle.checked    = lockTimeframe;
   if (UI.lockRRToggle)           UI.lockRRToggle.checked           = lockRR;
+  if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
   if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
   if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
@@ -14585,6 +14600,17 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.lockRRToggle.addEventListener("change", () => {
       lockRR = UI.lockRRToggle.checked;
       saveSettings();
+    });
+  }
+  if (UI.lockIndicatorFiltersToggle) {
+    UI.lockIndicatorFiltersToggle.addEventListener("change", () => {
+      lockIndicatorFilters = UI.lockIndicatorFiltersToggle.checked;
+      saveSettings();
+      if (lockIndicatorFilters) {
+        showToast("Indicator Filters Locked 🔒", "Strategy filter states are now locked — symbol changes won't override them.", "info", 4000);
+      } else {
+        showToast("Indicator Filters Unlocked 🔓", "Strategy filters will now update automatically on symbol change.", "info", 3000);
+      }
     });
   }
 
