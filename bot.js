@@ -2518,20 +2518,18 @@ function wireScalpingStrategyToggles() {
   }
 
   // Restore saved state from localStorage (only enable if not locked-while-disabled)
-  try {
-    if (localStorage.getItem("itguru_liq_sweep") === "1" && !strategiesLocked()) {
-      liquiditySweepEnabled = true;
-      if (liqToggle) liqToggle.checked = true;
-    }
-    if (localStorage.getItem("itguru_stop_hunt") === "1" && !strategiesLocked()) {
-      stopLossHuntEnabled = true;
-      if (huntToggle) huntToggle.checked = true;
-    }
-    if (localStorage.getItem("itguru_failed_pin") === "1" && !strategiesLocked()) {
-      failedPinBarEnabled = true;
-      if (fpbToggle) fpbToggle.checked = true;
-    }
-  } catch (e) { /* localStorage not available */ }
+  function restoreStrategyToggle(lsKey, flagSetter, toggle) {
+    try {
+      if (localStorage.getItem(lsKey) === "1" && !strategiesLocked()) {
+        flagSetter(true);
+        if (toggle) toggle.checked = true;
+      }
+    } catch (e) { /* localStorage not available */ }
+  }
+
+  restoreStrategyToggle("itguru_liq_sweep",  (v) => { liquiditySweepEnabled = v; }, liqToggle);
+  restoreStrategyToggle("itguru_stop_hunt",   (v) => { stopLossHuntEnabled   = v; }, huntToggle);
+  restoreStrategyToggle("itguru_failed_pin",  (v) => { failedPinBarEnabled   = v; }, fpbToggle);
 
   if (liqToggle) {
     liqToggle.addEventListener("change", () => {

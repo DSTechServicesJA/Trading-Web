@@ -4962,7 +4962,7 @@ function applyRecommendedSettings() {
     if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
     if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
   } else {
-    /* Filters are locked — only update the R:R value (not state) if R:R isn't also locked */
+    /* Filters are locked — only update the R/R value (not state) if R/R isn't also locked */
     if (!lockRR) minRRValue = rec.rr.minRR;
     if (UI.minRRInput) UI.minRRInput.value = minRRValue;
   }
