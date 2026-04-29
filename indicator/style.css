@@ -2316,6 +2316,7 @@ body.light-theme .ms-card-footer {
 /* Strategy card border tint by result */
 .strategy-card.strategy-card-win  { border-color: rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); }
 .strategy-card.strategy-card-loss { border-color: rgba(244,63,94,0.25);  background: rgba(244,63,94,0.04); }
+.strategy-card.strategy-card-expired { border-color: rgba(245,158,11,0.25); background: rgba(245,158,11,0.04); }
 
 /* New strategy entrance animation */
 .strategy-card-new {

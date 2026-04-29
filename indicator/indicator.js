@@ -3903,7 +3903,7 @@ function renderStrategyTickerBanner() {
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
     const resultLower = (s.result || "PENDING").toLowerCase();
-    card.className = `strategy-card ${isBull ? "strategy-card-bull" : "strategy-card-bear"}${i === 0 ? " strategy-card-new" : ""}${resultLower === "win" ? " strategy-card-win" : resultLower === "loss" ? " strategy-card-loss" : ""}`;
+    card.className = `strategy-card ${isBull ? "strategy-card-bull" : "strategy-card-bear"}${i === 0 ? " strategy-card-new" : ""}${resultLower === "win" ? " strategy-card-win" : resultLower === "loss" ? " strategy-card-loss" : resultLower === "expired" ? " strategy-card-expired" : ""}`;
 
     const dirLabel = isBull ? "▲" : "▼";
     const dirClass = isBull ? "bull" : "bear";
@@ -6738,10 +6738,9 @@ function monitorLiquiditySweepOutcomes(candle) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
     /* Safety: resolve signals with corrupted/future candleIdx (e.g. after candle slicing) or timeout after 30 candles */
-    if (elapsed < 0 || elapsed >= 30) { /* stale/corrupted index or timeout */
-      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
-      s.result = inProfit ? "WIN" : "LOSS";
-      addLog(`🌊 Liquidity Sweep ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+    if (elapsed < 0 || elapsed >= 30) { /* stale/corrupted index or timeout — SL not hit, signal expired */
+      s.result = "EXPIRED";
+      addLog(`🌊 Liquidity Sweep EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
       changed = true; continue;
     }
     if (s.dir === "BULL") {
@@ -6951,9 +6950,8 @@ function monitorStopLossHuntOutcomes(candle) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
     if (elapsed < 0 || elapsed >= 30) {
-      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
-      s.result = inProfit ? "WIN" : "LOSS";
-      addLog(`🎯 Stop Loss Hunt ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      s.result = "EXPIRED";
+      addLog(`🎯 Stop Loss Hunt EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
       changed = true; continue;
     }
     if (s.dir === "BULL") {
@@ -7161,9 +7159,8 @@ function monitorFailedPinBarOutcomes(candle) {
     if (s.result !== "PENDING") continue;
     const elapsed = (candles.length - 1) - s.candleIdx;
     if (elapsed < 0 || elapsed >= 20) { /* shorter timeout — scalp-style; also resolves stale indices */
-      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
-      s.result = inProfit ? "WIN" : "LOSS";
-      addLog(`${s.state === "fear" ? "😱" : "🤑"} Failed Pin Bar ${s.result} (timeout) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      s.result = "EXPIRED";
+      addLog(`${s.state === "fear" ? "😱" : "🤑"} Failed Pin Bar EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
       changed = true; continue;
     }
     if (s.dir === "BULL") {
@@ -7444,9 +7441,8 @@ function monitorFibScalpOutcomes(candle) {
 
     /* Timeout after FIB_SCALP_MAX_CANDLES or stale index */
     if (elapsed < 0 || elapsed >= FIB_SCALP_MAX_CANDLES) {
-      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
-      s.result = inProfit ? "WIN" : "LOSS";
-      addLog(`📐 Fib Golden Zone ${s.result} (timeout ${FIB_SCALP_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      s.result = "EXPIRED";
+      addLog(`📐 Fib Golden Zone EXPIRED (timeout ${FIB_SCALP_MAX_CANDLES} candles) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
       changed = true; continue;
     }
 
@@ -7459,12 +7455,12 @@ function monitorFibScalpOutcomes(candle) {
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
 
-    /* If momentum stalls (price stuck near entry for several candles), exit */
+    /* If momentum stalls (price stuck near entry for several candles), expire the signal */
     if (s.result === "PENDING" && elapsed >= 8) {
       const stalledRange = atrValue > 0 ? atrValue * 0.3 : Math.abs(s.tp - s.entry) * 0.1;
       if (Math.abs(candle.close - s.entry) < stalledRange) {
-        s.result = "LOSS";
-        addLog(`📐 Fib Golden Zone LOSS (momentum stalled) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+        s.result = "EXPIRED";
+        addLog(`📐 Fib Golden Zone EXPIRED (momentum stalled) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
         changed = true;
       }
     }
@@ -7811,9 +7807,8 @@ function monitorPo3Outcomes(candle) {
 
     /* Timeout after PO3_MAX_CANDLES or stale index */
     if (elapsed < 0 || elapsed >= PO3_MAX_CANDLES) {
-      const inProfit = (s.dir === "BULL" && candle.close > s.entry) || (s.dir === "BEAR" && candle.close < s.entry);
-      s.result = inProfit ? "WIN" : "LOSS";
-      addLog(`⚡ PO3 ${s.result} (timeout ${PO3_MAX_CANDLES} candles) — ${s.symbol || ""} exit @ ${fmt(candle.close, 4)}`);
+      s.result = "EXPIRED";
+      addLog(`⚡ PO3 EXPIRED (timeout ${PO3_MAX_CANDLES} candles) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
       changed = true; continue;
     }
 
@@ -7894,6 +7889,7 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
     const dirColor = s.dir === "BULL" ? "#22c55e" : "#ef4444";
     const resultBadge = s.result === "WIN" ? ' <span style="color:#22c55e;">WIN ✓</span>'
                       : s.result === "LOSS" ? ' <span style="color:#ef4444;">LOSS ✗</span>'
+                      : s.result === "EXPIRED" ? ' <span style="color:#f59e0b;">EXPIRED ⏱</span>'
                       : ' <span style="color:#94a3b8;">PENDING…</span>';
     const ts = new Date(s.epoch * 1000).toLocaleTimeString();
     li.innerHTML = `<span style="color:${dirColor};font-weight:700;">${emoji} ${dirIcon} ${s.dir}</span> `
@@ -8625,12 +8621,13 @@ async function sendStrategyOutcomeTelegram(signal) {
       }
     }
 
-    /* Win/loss tally across all 3 strategy histories */
+    /* Win/loss tally across all strategy histories — exclude EXPIRED signals */
     let totalW = 0, totalL = 0;
     for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, po3History]) {
       for (const s of h) {
         if (s.result === "WIN") totalW++;
         else if (s.result === "LOSS") totalL++;
+        /* EXPIRED signals are intentionally excluded — SL was not hit */
       }
     }
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
