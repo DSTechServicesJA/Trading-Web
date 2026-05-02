@@ -1182,6 +1182,7 @@ let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (t
 let telegramSessionRangeOutcomeSend = false; /* auto-send WIN/LOSS outcome for session range trades to Telegram */
 let telegramStrategyAutoSend     = false;  /* auto-send custom strategy alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) to Telegram */
 let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for custom strategies to Telegram */
+let telegramProfitExitAlertEnabled = false;  /* auto-send alert when trade that reached 1:1 profit reverses back to entry */
 
 /* RSI state */
 let rsiValues = [];
@@ -1675,6 +1676,7 @@ function initUI() {
   UI.telegramSessionRangeOutcomeSendToggle = document.getElementById("telegramSessionRangeOutcomeSendToggle");
   UI.telegramStrategyAutoSendToggle    = document.getElementById("telegramStrategyAutoSendToggle");
   UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
+  UI.telegramProfitExitAlertToggle     = document.getElementById("telegramProfitExitAlertToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 }
@@ -2137,6 +2139,12 @@ function monitorNyOpenRangeTradeOutcome(candle) {
   if (nyOpenRangeTrade.result !== "PENDING") return;
 
   const t = nyOpenRangeTrade;
+
+  /* Track 1R profit level and fire exit alert if price reverses to entry */
+  if (_checkProfitExitAlert(t, candle, "NY Open Range")) {
+    /* no `changed` flag needed here — not an array-based monitor */
+  }
+
   let result = null;
 
   if (t.dir === "BULL") {
@@ -2419,6 +2427,12 @@ function monitorSessionRangeTradeOutcome(candle) {
   if (!sessionRangesEnabled || !sessionRangeTrade) return;
 
   const srt = sessionRangeTrade;
+
+  /* Track 1R profit level and fire exit alert if price reverses to entry */
+  if (srt.result === "PENDING") {
+    _checkProfitExitAlert(srt, candle, "Session Range");
+  }
+
   let result = null;
 
   if (srt.dir === "BULL") {
@@ -3445,6 +3459,7 @@ function saveSettings() {
       telegramSessionRangeOutcomeSend,
       telegramStrategyAutoSend,
       telegramStrategyOutcomeSend,
+      telegramProfitExitAlertEnabled,
       accountSize,
       riskPercent,
       autoTradeEnabled,
@@ -3657,6 +3672,7 @@ function restoreSettings() {
     if (s.telegramSessionRangeOutcomeSend != null) telegramSessionRangeOutcomeSend = s.telegramSessionRangeOutcomeSend;
     if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
     if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
+    if (s.telegramProfitExitAlertEnabled != null) telegramProfitExitAlertEnabled = s.telegramProfitExitAlertEnabled;
     if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
@@ -3667,6 +3683,7 @@ function restoreSettings() {
     if (UI.telegramSessionRangeOutcomeSendToggle) UI.telegramSessionRangeOutcomeSendToggle.checked = telegramSessionRangeOutcomeSend;
     if (UI.telegramStrategyAutoSendToggle) UI.telegramStrategyAutoSendToggle.checked = telegramStrategyAutoSend;
     if (UI.telegramStrategyOutcomeSendToggle) UI.telegramStrategyOutcomeSendToggle.checked = telegramStrategyOutcomeSend;
+    if (UI.telegramProfitExitAlertToggle) UI.telegramProfitExitAlertToggle.checked = telegramProfitExitAlertEnabled;
 
     /* Account sizing */
     if (s.accountSize != null) accountSize = s.accountSize;
@@ -6908,9 +6925,13 @@ function monitorLiquiditySweepOutcomes(candle) {
       changed = true; continue;
     }
     if (s.dir === "BULL") {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7119,9 +7140,13 @@ function monitorStopLossHuntOutcomes(candle) {
       changed = true; continue;
     }
     if (s.dir === "BULL") {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7329,10 +7354,14 @@ function monitorFailedPinBarOutcomes(candle) {
     }
     if (s.dir === "BULL") {
       const em = s.state === "fear" ? "😱" : "🤑";
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       const em = s.state === "fear" ? "😱" : "🤑";
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7612,9 +7641,13 @@ function monitorFibScalpOutcomes(candle) {
 
     /* Check SL / TP */
     if (s.dir === "BULL") {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
+      /* Track 1R profit level and fire exit alert if price reverses to entry */
+      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7993,6 +8026,7 @@ function monitorPo3Outcomes(candle) {
       const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
       if (partialHit) {
         s.partialTpHit = true;
+        s._reached1R = true;  /* also mark for profit exit alert tracking */
         s.sl = s.entry;  /* slide SL to breakeven */
         addLog(`⚡ PO3 Partial TP hit (1R) — SL moved to breakeven @ ${fmt(s.entry, 4)}, running to full TP ${fmt(s.tp, 4)}`);
         showToast(
@@ -8004,6 +8038,9 @@ function monitorPo3Outcomes(candle) {
         continue;  /* re-evaluate on next candle with breakeven SL in place */
       }
     }
+
+    /* 1R profit tracking (when partial TP is disabled) + profit exit alert */
+    if (_checkProfitExitAlert(s, candle, "Power of 3")) changed = true;
 
     /* Check SL / TP */
     if (s.dir === "BULL") {
@@ -8034,6 +8071,48 @@ function monitorPo3Outcomes(candle) {
 }
 
 /* ================= SHARED STRATEGY HELPERS ================= */
+/**
+ * Track whether a trade has reached 1× risk in profit (1R) and fire a Telegram
+ * profit exit alert when price subsequently reverses back to the entry price.
+ *
+ * Uses `s._origSl` when present (e.g. PO3 with partial TP) for an accurate risk
+ * calculation that is unaffected by any SL movements made during the trade.
+ *
+ * Note: For PO3 when `partialTpEnabled` is true, `s._reached1R` is set
+ * alongside `s.partialTpHit` in `monitorPo3Outcomes` before this helper is
+ * called, so the helper's own 1R detection step is skipped and the reversal
+ * check proceeds directly.  For all other strategies, this helper manages the
+ * full lifecycle of `s._reached1R` and `s._profitExitAlertSent`.
+ *
+ * Mutates `s._reached1R` and `s._profitExitAlertSent` as side effects.
+ *
+ * @param {Object} s          - trade signal with { dir, entry, sl, _origSl? }
+ * @param {Object} candle     - current OHLC candle
+ * @param {string} stratLabel - human-readable strategy name used in the alert
+ * @returns {boolean}         - true if the alert was fired this tick
+ */
+function _checkProfitExitAlert(s, candle, stratLabel) {
+  const origSl = s._origSl != null ? s._origSl : s.sl;
+  if (!s._reached1R) {
+    const risk = Math.abs(s.entry - origSl);
+    if (risk > 0) {
+      const reached = s.dir === "BULL" ? candle.high >= s.entry + risk : candle.low <= s.entry - risk;
+      if (reached) s._reached1R = true;
+    }
+  }
+  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
+    const atEntry = s.dir === "BULL" ? candle.close <= s.entry : candle.close >= s.entry;
+    if (atEntry) {
+      s._profitExitAlertSent = true;
+      addLog(`${stratLabel}: price returned to entry after 1R — profit exit alert`);
+      showToast("⚠️ Protect Profit", `${stratLabel} reached 1R but reversed to entry — consider exiting`, "warning", 8000);
+      sendProfitExitAlertTelegram(s, stratLabel);
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Audio alert for the 3 custom strategies (triple beep).
  */
@@ -8869,6 +8948,63 @@ async function sendStrategyOutcomeTelegram(signal) {
     addLog(`📤 Telegram: ${stratLabel} outcome (${result}) sent`);
   } catch (err) {
     addLog(`📤 Strategy outcome Telegram error: ${err.message}`);
+  }
+}
+
+/**
+ * Send a profit exit alert via Telegram when a trade that reached 1:1 profit
+ * reverses back to the entry level, warning the trader to protect gains.
+ * @param {Object} signal   — trade signal with { dir, entry, sl, tp, rr, symbol, type }
+ * @param {string} stratLabel — human-readable strategy name (e.g. "Liquidity Sweep")
+ */
+async function sendProfitExitAlertTelegram(signal, stratLabel) {
+  if (!telegramProfitExitAlertEnabled) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Profit exit alert Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const sym = getSymbolLabel(signal.symbol || getActiveSymbol() || "");
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const entryStr = signal.entry != null ? fmt(signal.entry, 5) : "--";
+    const slStr    = signal.sl    != null ? fmt(signal.sl, 5)    : "--";
+    const tpStr    = signal.tp    != null ? fmt(signal.tp, 5)    : "--";
+    const rrStr    = signal.rr    != null ? "1:" + fmt(signal.rr, 1) : "--";
+
+    const origSl = signal._origSl != null ? signal._origSl : signal.sl;
+    const risk   = origSl != null && signal.entry != null ? Math.abs(signal.entry - origSl) : null;
+
+    const lines = [];
+    lines.push(`⚠️ <b>Exit with Profit — ${stratLabel}</b>`);
+    lines.push(``);
+    lines.push(`Trade reached <b>1:1 profit</b> but price has reversed back to entry.`);
+    lines.push(`Consider closing now to protect your gains before it turns into a loss.`);
+    lines.push(``);
+    lines.push(`${dir} ${sym}`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(`<b>🎯 TP:</b> <code>${tpStr}</code>`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    if (risk != null && risk > 0) {
+      const oneRStr = signal.dir === "BULL" ? fmt(signal.entry + risk, 5) : fmt(signal.entry - risk, 5);
+      lines.push(`<b>1R level hit:</b> <code>${oneRStr}</code>`);
+    }
+    lines.push(``);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: Profit exit alert sent for ${stratLabel}`);
+  } catch (err) {
+    addLog(`📤 Profit exit alert Telegram error: ${err.message}`);
   }
 }
 
@@ -14983,6 +15119,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramStrategyOutcomeSendToggle) {
     UI.telegramStrategyOutcomeSendToggle.addEventListener("change", () => { telegramStrategyOutcomeSend = UI.telegramStrategyOutcomeSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramProfitExitAlertToggle) {
+    UI.telegramProfitExitAlertToggle.addEventListener("change", () => { telegramProfitExitAlertEnabled = UI.telegramProfitExitAlertToggle.checked; saveSettings(); });
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());

@@ -853,6 +853,9 @@
               <label class="toggle-row"><input type="checkbox" id="telegramStrategyOutcomeSendToggle" /> Auto-Send Strategy Outcome (WIN/LOSS)</label>
               <p class="hint">Automatically send a message when a custom strategy signal resolves as WIN or LOSS, with entry, SL, TP, lot size, and running strategy win rate.</p>
 
+              <label class="toggle-row"><input type="checkbox" id="telegramProfitExitAlertToggle" /> Auto-Send Profit Exit Alert (protect gains after 1:1 profit)</label>
+              <p class="hint">Send a Telegram alert when a strategy or range trade that previously reached 1:1 profit (1× risk) reverses back to the entry price — reminding you to exit with profit before it turns into a loss. Applies to Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, NY Open Range, and Session Range.</p>
+
               <div class="telegram-btn-row">
                 <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
                 <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
