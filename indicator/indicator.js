@@ -2498,25 +2498,55 @@ function _renderChartToBlob() {
     const offCtx = offscreen.getContext("2d");
     if (!offCtx) return reject(new Error("Canvas context unavailable"));
 
+    /* Override getBoundingClientRect so drawChart() sees the export
+       dimensions rather than 0×0 (the default for an unmounted element). */
     offscreen.getBoundingClientRect = () => ({
       x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
       width: EW, height: EH, toJSON() { return this; }
     });
 
+    /* Freeze the width/height IDL attributes at EW×EH so that even if
+       drawChart() assigns the same numeric value (which some browsers still
+       treat as a resize+clear), the native setter is never called and the
+       canvas bitmap is not wiped after we have drawn on it.  The context
+       is cleared with ctx.clearRect() inside drawChart() anyway. */
+    try {
+      Object.defineProperty(offscreen, "width",  {
+        get() { return EW; }, set() {}, configurable: true
+      });
+      Object.defineProperty(offscreen, "height", {
+        get() { return EH; }, set() {}, configurable: true
+      });
+    } catch (e) {
+      /* If the browser prevents overriding these IDL attributes the native
+         setter may still run, but drawChart()'s getBoundingClientRect fallback
+         (canvas.width / dpr) ensures the canvas is still sized correctly. */
+      console.warn("_renderChartToBlob: could not freeze canvas dimensions:", e.message);
+    }
+
     const origCanvas = UI.canvas;
     const origCtx    = UI.ctx;
     const origDpr    = window.devicePixelRatio;
 
-    Object.defineProperty(window, "devicePixelRatio",
-      { value: 1, writable: true, configurable: true });
+    try {
+      Object.defineProperty(window, "devicePixelRatio",
+        { value: 1, writable: true, configurable: true });
+    } catch (e) {
+      /* Non-configurable in some environments — drawChart() handles this via
+         the canvas.width/dpr fallback and getBoundingClientRect mock. */
+      console.warn("_renderChartToBlob: could not mock devicePixelRatio:", e.message);
+    }
+
     UI.canvas = offscreen;
     UI.ctx    = offCtx;
 
     try { drawChart(); } finally {
       UI.canvas = origCanvas;
       UI.ctx    = origCtx;
-      Object.defineProperty(window, "devicePixelRatio",
-        { value: origDpr, writable: true, configurable: true });
+      try {
+        Object.defineProperty(window, "devicePixelRatio",
+          { value: origDpr, writable: true, configurable: true });
+      } catch (_) { /* ignore restore failure */ }
     }
 
     offscreen.toBlob(blob => {
@@ -11893,14 +11923,17 @@ function drawChart() {
 
   const COLORS = getColors();
 
-  /* High-DPI support */
+  /* High-DPI support.
+     Fall back to the canvas's own pixel dimensions when getBoundingClientRect
+     returns zero — this happens for unmounted offscreen canvases used during
+     Telegram export where the element is never added to the DOM. */
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width  = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  const W = rect.width  || canvas.width  / dpr;
+  const H = rect.height || canvas.height / dpr;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
-  const W = rect.width;
-  const H = rect.height;
 
   ctx.clearRect(0, 0, W, H);
 
