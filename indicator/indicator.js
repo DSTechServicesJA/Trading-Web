@@ -2141,21 +2141,8 @@ function monitorNyOpenRangeTradeOutcome(candle) {
   const t = nyOpenRangeTrade;
 
   /* Track 1R profit level and fire exit alert if price reverses to entry */
-  if (!t._reached1R) {
-    const risk = Math.abs(t.entry - t.sl);
-    if (risk > 0) {
-      const reached = t.dir === "BULL" ? candle.high >= t.entry + risk : candle.low <= t.entry - risk;
-      if (reached) t._reached1R = true;
-    }
-  }
-  if (t._reached1R && !t._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-    const atEntry = t.dir === "BULL" ? candle.close <= t.entry : candle.close >= t.entry;
-    if (atEntry) {
-      t._profitExitAlertSent = true;
-      addLog(`🕤 NY Open Range: price returned to entry after 1R — profit exit alert`);
-      showToast("⚠️ Protect Profit", "NY Open Range trade reached 1R but reversed to entry — consider exiting", "warning", 8000);
-      sendProfitExitAlertTelegram(t, "NY Open Range");
-    }
+  if (_checkProfitExitAlert(t, candle, "NY Open Range")) {
+    /* no `changed` flag needed here — not an array-based monitor */
   }
 
   let result = null;
@@ -2443,23 +2430,7 @@ function monitorSessionRangeTradeOutcome(candle) {
 
   /* Track 1R profit level and fire exit alert if price reverses to entry */
   if (srt.result === "PENDING") {
-    if (!srt._reached1R) {
-      const risk = Math.abs(srt.entry - srt.sl);
-      if (risk > 0) {
-        const reached = srt.dir === "BULL" ? candle.high >= srt.entry + risk : candle.low <= srt.entry - risk;
-        if (reached) srt._reached1R = true;
-      }
-    }
-    if (srt._reached1R && !srt._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-      const atEntry = srt.dir === "BULL" ? candle.close <= srt.entry : candle.close >= srt.entry;
-      if (atEntry) {
-        srt._profitExitAlertSent = true;
-        addLog(`🌍 Session Range: price returned to entry after 1R — profit exit alert`);
-        showToast("⚠️ Protect Profit", "Session Range trade reached 1R but reversed to entry — consider exiting", "warning", 8000);
-        const currentPanelSymbol = _multiPanelProcessing || null;
-        sendProfitExitAlertTelegram({ ...srt, symbol: srt.symbol || currentPanelSymbol || getActiveSymbol() }, "Session Range");
-      }
-    }
+    _checkProfitExitAlert(srt, candle, "Session Range");
   }
 
   let result = null;
@@ -6955,36 +6926,12 @@ function monitorLiquiditySweepOutcomes(candle) {
     }
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.high >= s.entry + risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close <= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`🌊 Liquidity Sweep: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Liquidity Sweep reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Liquidity Sweep");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.low <= s.entry - risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close >= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`🌊 Liquidity Sweep: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Liquidity Sweep reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Liquidity Sweep");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7194,36 +7141,12 @@ function monitorStopLossHuntOutcomes(candle) {
     }
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.high >= s.entry + risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close <= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`🎯 Stop Loss Hunt: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Stop Loss Hunt reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Stop Loss Hunt");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.low <= s.entry - risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close >= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`🎯 Stop Loss Hunt: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Stop Loss Hunt reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Stop Loss Hunt");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7432,37 +7355,13 @@ function monitorFailedPinBarOutcomes(candle) {
     if (s.dir === "BULL") {
       const em = s.state === "fear" ? "😱" : "🤑";
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.high >= s.entry + risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close <= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`${em} Failed Pin Bar: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Failed Pin Bar reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Failed Pin Bar");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       const em = s.state === "fear" ? "😱" : "🤑";
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.low <= s.entry - risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close >= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`${em} Failed Pin Bar: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Failed Pin Bar reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Failed Pin Bar");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -7743,36 +7642,12 @@ function monitorFibScalpOutcomes(candle) {
     /* Check SL / TP */
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.high >= s.entry + risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close <= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`📐 Fib Golden Zone: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Fib Golden Zone reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Fib Golden Zone");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
       if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (!s._reached1R) {
-        const risk = Math.abs(s.entry - s.sl);
-        if (risk > 0 && candle.low <= s.entry - risk) s._reached1R = true;
-      }
-      if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-        if (candle.close >= s.entry) {
-          s._profitExitAlertSent = true;
-          addLog(`📐 Fib Golden Zone: price returned to entry after 1R — profit exit alert`);
-          showToast("⚠️ Protect Profit", "Fib Golden Zone reached 1R but reversed to entry — consider exiting", "warning", 8000);
-          sendProfitExitAlertTelegram(s, "Fib Golden Zone");
-          changed = true;
-        }
-      }
+      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
       if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
@@ -8165,24 +8040,7 @@ function monitorPo3Outcomes(candle) {
     }
 
     /* 1R profit tracking (when partial TP is disabled) + profit exit alert */
-    if (!s._reached1R) {
-      const origSl = s._origSl != null ? s._origSl : s.sl;
-      const risk = Math.abs(s.entry - origSl);
-      if (risk > 0) {
-        const reached = s.dir === "BULL" ? candle.high >= s.entry + risk : candle.low <= s.entry - risk;
-        if (reached) s._reached1R = true;
-      }
-    }
-    if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
-      const atEntry = s.dir === "BULL" ? candle.close <= s.entry : candle.close >= s.entry;
-      if (atEntry) {
-        s._profitExitAlertSent = true;
-        addLog(`⚡ PO3: price returned to entry after 1R — profit exit alert`);
-        showToast("⚠️ Protect Profit", "PO3 trade reached 1R but reversed to entry — consider exiting", "warning", 8000);
-        sendProfitExitAlertTelegram(s, "Power of 3");
-        changed = true;
-      }
-    }
+    if (_checkProfitExitAlert(s, candle, "Power of 3")) changed = true;
 
     /* Check SL / TP */
     if (s.dir === "BULL") {
@@ -8213,6 +8071,42 @@ function monitorPo3Outcomes(candle) {
 }
 
 /* ================= SHARED STRATEGY HELPERS ================= */
+/**
+ * Track whether a trade has reached 1× risk in profit (1R) and fire a Telegram
+ * profit exit alert when price subsequently reverses back to the entry price.
+ *
+ * Uses `s._origSl` when present (e.g. PO3 with partial TP) for an accurate risk
+ * calculation that is unaffected by any SL movements made during the trade.
+ *
+ * Mutates `s._reached1R` and `s._profitExitAlertSent` as side effects.
+ *
+ * @param {Object} s          - trade signal with { dir, entry, sl, _origSl? }
+ * @param {Object} candle     - current OHLC candle
+ * @param {string} stratLabel - human-readable strategy name used in the alert
+ * @returns {boolean}         - true if the alert was fired this tick
+ */
+function _checkProfitExitAlert(s, candle, stratLabel) {
+  const origSl = s._origSl != null ? s._origSl : s.sl;
+  if (!s._reached1R) {
+    const risk = Math.abs(s.entry - origSl);
+    if (risk > 0) {
+      const reached = s.dir === "BULL" ? candle.high >= s.entry + risk : candle.low <= s.entry - risk;
+      if (reached) s._reached1R = true;
+    }
+  }
+  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
+    const atEntry = s.dir === "BULL" ? candle.close <= s.entry : candle.close >= s.entry;
+    if (atEntry) {
+      s._profitExitAlertSent = true;
+      addLog(`${stratLabel}: price returned to entry after 1R — profit exit alert`);
+      showToast("⚠️ Protect Profit", `${stratLabel} reached 1R but reversed to entry — consider exiting`, "warning", 8000);
+      sendProfitExitAlertTelegram(s, stratLabel);
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Audio alert for the 3 custom strategies (triple beep).
  */
