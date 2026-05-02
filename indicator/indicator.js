@@ -8078,6 +8078,12 @@ function monitorPo3Outcomes(candle) {
  * Uses `s._origSl` when present (e.g. PO3 with partial TP) for an accurate risk
  * calculation that is unaffected by any SL movements made during the trade.
  *
+ * Note: For PO3 when `partialTpEnabled` is true, `s._reached1R` is set
+ * alongside `s.partialTpHit` in `monitorPo3Outcomes` before this helper is
+ * called, so the helper's own 1R detection step is skipped and the reversal
+ * check proceeds directly.  For all other strategies, this helper manages the
+ * full lifecycle of `s._reached1R` and `s._profitExitAlertSent`.
+ *
  * Mutates `s._reached1R` and `s._profitExitAlertSent` as side effects.
  *
  * @param {Object} s          - trade signal with { dir, entry, sl, _origSl? }
