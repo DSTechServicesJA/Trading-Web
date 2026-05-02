@@ -102,7 +102,7 @@ const ATR_PERIOD = 14;
 const SWING_NEIGHBOR_BARS = 3;
 
 /* Trailing stop distance in ATR multiples */
-const TRAILING_STOP_ATR_MULT = 1.5;
+const TRAILING_STOP_ATR_MULT = 1.3;  /* tightened from 1.5 — lock in profits sooner */
 
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
@@ -135,7 +135,7 @@ const RSI_RETEST_BEAR_MIN = 55;  /* RSI at retest should be ≥ this for BEAR (r
 
 /* Volume spike (range-based proxy – synthetic indices have no tick volume) */
 const VOLUME_SPIKE_LOOKBACK = 20;
-const VOLUME_SPIKE_MULT = 1.5;   /* breakout candle range must be ≥ this × avg range */
+const VOLUME_SPIKE_MULT = 1.8;   /* raised from 1.5 — require a stronger breakout candle to filter weak/fake breakouts */
 
 /* Session filter (UTC hours) */
 const SESSION_LONDON   = { start: 7, end: 16 };
@@ -1210,7 +1210,7 @@ let stochFilterEnabled = false;
 
 /* Profit-Direction Constraint filters */
 let minConfluenceEnabled = true;
-let minConfluenceValue   = 10;      /* min confluence score (0-16) to allow trade — raised to 10 to filter weak setups */
+let minConfluenceValue   = 11;      /* min confluence score (0-16) to allow trade — raised to 11 to filter weak setups */
 let doubleRetestEnabled  = false;   /* require 2 retests of breakout level */
 let confirmBarEnabled    = true;    /* next candle after confirm must close in direction */
 let divergenceFilterEnabled = true; /* RSI divergence at retest */
@@ -10622,10 +10622,25 @@ function buildTrade(confirmCandle, confirmIdx) {
   /* Scalping mode: cap R:R at SCALP_RR_TARGET for quick profits (from MD: 5-10 pip profits) */
   const rr = scalpingModeEnabled ? Math.min(rewardUnits / riskUnits, SCALP_RR_TARGET) : rewardUnits / riskUnits;
 
+  /* ---- Resolve the retest/indecision zone candles for precise SL placement ----
+   * Using the lowest point of the retest + indecision zone (BULL) or the highest
+   * point (BEAR) with a small ATR buffer gives a structurally meaningful stop that
+   * invalidates the setup exactly when price breaks through the zone.  This is
+   * significantly tighter than a 35-candle swing look-back and reduces initial
+   * risk without sacrificing structural validity.  Fall back to the swing-based SL
+   * when retestInfo / indecisionInfo is unavailable (e.g. historical re-processing
+   * edge cases). */
+  const rtCandle = retestInfo    && retestInfo.candleIdx    < candles.length ? candles[retestInfo.candleIdx]    : null;
+  const inCandle = indecisionInfo && indecisionInfo.candleIdx < candles.length ? candles[indecisionInfo.candleIdx] : null;
+
   if (breakout.dir === "BULL") {
     const entry = confirmCandle.close;
-    const swingLow = findSwingLow(confirmIdx);
-    const sl = swingLow - atrValue * 0.5;  /* ATR buffer below swing low — wider room before invalidation */
+
+    /* SL anchor: lowest low of the retest/indecision zone; fall back to swing */
+    const zoneLows = [rtCandle, inCandle].filter(Boolean).map(c => c.low);
+    const slAnchor = zoneLows.length > 0 ? Math.min(...zoneLows) : findSwingLow(confirmIdx);
+    const sl = slAnchor - atrValue * 0.3;  /* 0.3 ATR buffer below zone — tighter than 0.5×swing */
+
     const risk = entry - sl;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry + risk * rr;
@@ -10639,8 +10654,12 @@ function buildTrade(confirmCandle, confirmIdx) {
     trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
   } else {
     const entry = confirmCandle.close;
-    const swingHigh = findSwingHigh(confirmIdx);
-    const sl = swingHigh + atrValue * 0.5;  /* ATR buffer above swing high — wider room before invalidation */
+
+    /* SL anchor: highest high of the retest/indecision zone; fall back to swing */
+    const zoneHighs = [rtCandle, inCandle].filter(Boolean).map(c => c.high);
+    const slAnchor = zoneHighs.length > 0 ? Math.max(...zoneHighs) : findSwingHigh(confirmIdx);
+    const sl = slAnchor + atrValue * 0.3;  /* 0.3 ATR buffer above zone — tighter than 0.5×swing */
+
     const risk = sl - entry;
     if (risk <= 0) return;
     const tp = pureTrailingEnabled ? null : entry - risk * rr;
