@@ -744,7 +744,7 @@
             </div>
           </section>
 
-          <!-- Strategy Alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone) -->
+          <!-- Strategy Alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, NY Open Range, Session Range) -->
           <section class="box scalp-alerts-section">
             <h3 class="collapsible">🎯 Strategy Alerts <span id="liquiditySweepCount" class="scalp-count-badge">0</span></h3>
             <div class="collapsible-body">
@@ -771,7 +771,17 @@
               <ul id="po3AlertList" class="scalp-alert-list"></ul>
               <span id="po3Count" style="display:none;">0</span>
 
-              <p class="hint" style="margin-top:6px;">Recent signals from the 5 custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
+              <hr class="param-divider" />
+              <p class="param-group-title">🕤 NY Open Range Alerts</p>
+              <ul id="nyOpenRangeAlertList" class="scalp-alert-list"></ul>
+              <span id="nyOpenRangeAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🌍 Session Range Alerts (London Sweep)</p>
+              <ul id="sessionRangeAlertList" class="scalp-alert-list"></ul>
+              <span id="sessionRangeAlertCount" style="display:none;">0</span>
+
+              <p class="hint" style="margin-top:6px;">Recent signals from the 7 custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
             </div>
           </section>
 
