@@ -472,7 +472,7 @@
             <p class="hint" style="margin-bottom:6px;">Reverse the scalp signal direction — if signal says BUY, place SELL and vice versa.</p>
 
             <label class="toggle-row"><input type="checkbox" id="autoTradeStrategyToggle" /> 📊 Strategy Trades</label>
-            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a strategy fires. Covers all 7 strategies: Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, 🕤 NY Open Range, and 🌍 Session Range (London Sweep). Use the sub-toggles below to enable individual strategies.</p>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when any of the 7 strategies fires. Use the sub-toggles below to select which strategies auto-trade.</p>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeLiquiditySweepToggle" checked /> 🌊 Liquidity Sweep</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStopLossHuntToggle" checked /> 🎯 Stop Loss Hunt</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFailedPinBarToggle" checked /> 📌 Failed Pin Bar</label>
@@ -687,13 +687,15 @@
               <p class="param-group-title">🕤 NY Open Range (9:30 AM EST)</p>
 
               <label class="toggle-row"><input type="checkbox" id="nyOpenRangeToggle" /> NY Open Range Strategy</label>
-              <p class="hint">At 9:30 AM EST, analyze the 9:30–9:35 candle to mark the range high/low. Wait for a 5-min candle to close outside the range, then enter on a valid retest (wick back into range without closing inside). SL at midpoint of range, TP at 1:2 R:R. Trade signals appear in the <b>🎯 Strategy Alerts</b> section below. Enable <b>📊 Strategy Trades</b> in the Auto-Trade section to execute Deriv contracts automatically. Enable <b>Auto-Send Strategy Alerts</b> in Telegram to receive trade signals in Telegram.</p>
+              <p class="hint">At 9:30 AM EST, marks the 9:30–9:35 range high/low. Enters on a clean breakout + valid retest (wick into range, close outside). SL at range midpoint, TP at 1:2 R:R.</p>
+              <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) and <b>Auto-Send Strategy Alerts</b> (Telegram) to auto-execute and receive Telegram notifications.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🌍 Session Ranges (Asian / London / NY)</p>
 
               <label class="toggle-row"><input type="checkbox" id="sessionRangesToggle" /> Session Ranges Indicator</label>
-              <p class="hint">Identifies and draws the Asian (00–09 UTC), London (07–16 UTC), and New York (12–21 UTC) session high/low ranges. Detects "tight" Asian ranges (&lt; 1× ATR) and signals when London sweeps the Asian range high or low (liquidity grab → trade signal with entry, SL, TP). Trade signals appear in the <b>🎯 Strategy Alerts</b> section below. Enable <b>📊 Strategy Trades</b> in the Auto-Trade section to execute Deriv contracts automatically. Enable <b>Auto-Send Session Range Signals</b> or <b>Auto-Send Strategy Alerts</b> in Telegram to receive trade signals in Telegram.</p>
+              <p class="hint">Draws Asian (00–09 UTC), London (07–16 UTC), and NY (12–21 UTC) session high/low ranges. Detects tight Asian ranges (&lt;1× ATR) and London sweeps of the Asian range (liquidity grab → trade signal with entry, SL, TP).</p>
+              <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) to auto-execute. Enable <b>Auto-Send Session Range Signals</b> or <b>Auto-Send Strategy Alerts</b> in Telegram for notifications.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">⚡ Scalping Mode</p>
