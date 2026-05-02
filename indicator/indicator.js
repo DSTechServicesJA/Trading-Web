@@ -2458,12 +2458,15 @@ function monitorSessionRangeTradeOutcome(candle) {
     histEntry.result = result;
     if (!histEntry._stratOutcomeSent) {
       histEntry._stratOutcomeSent = true;
+      /* sendStrategyOutcomeTelegram uses the general strategy alert channel (telegramStrategyAutoSend).
+         sendSessionRangeOutcomeTelegram below uses the dedicated session-range channel (telegramSessionRangeOutcomeSend).
+         These are two independent toggles, so both can fire. */
       sendStrategyOutcomeTelegram(histEntry);
     }
   }
   renderStrategyAlerts();
 
-  /* Send Telegram outcome */
+  /* Send dedicated session range outcome via the session-range Telegram channel */
   if (telegramSessionRangeOutcomeSend && !_historicalProcessing) {
     const resolvedTrade = { ...srt, result };
     const currentPanelSymbol = _multiPanelProcessing || null;
