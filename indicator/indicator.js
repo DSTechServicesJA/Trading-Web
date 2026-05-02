@@ -55,7 +55,12 @@
      - Fib Golden Zone Scalp strategy (1min micro-trend → break of
        structure → 0.5–0.618 retracement entry → swing TP)
      - Power of 3 (ICT) strategy (1H open → manipulation sweep →
-       MSS with displacement/FVG → entry on retrace into FVG)
+       MSS with displacement/FVG → entry on retrace into FVG;
+       partial TP at 1R + SL → breakeven, let rest run to full TP)
+     - Liquidity Sweep fixed 2:1 R:R (per strategy spec)
+     - London Sweep: true sweep filter (wick beyond Asian range but
+       close back inside = liquidity grab; ignores clean breakouts)
+     - NY Open Range: WIN/LOSS outcome monitoring with running tally
    ========================================================= */
 
 "use strict";
@@ -1239,8 +1244,10 @@ let nyOpenRangeEnabled   = false;
 let nyOpenRange          = null;   /* { high, low, startIdx, endIdx, startEpoch, endEpoch } */
 let nyOpenRangeBreakout  = null;   /* { dir, candleIdx, level } */
 let nyOpenRangeRetest    = null;   /* { candleIdx } */
-let nyOpenRangeTrade     = null;   /* { entry, sl, tp, dir, rr } */
+let nyOpenRangeTrade     = null;   /* { entry, sl, tp, dir, rr, entryIdx, symbol, result } */
 let nyOpenRangePhase     = "IDLE"; /* IDLE | WAITING | RANGE | BREAKOUT | RETEST | TRADE */
+let nyOpenRangeTradeWins   = 0;   /* running win count */
+let nyOpenRangeTradeLosses = 0;   /* running loss count */
 let _nyOpenRangeNotified = false;  /* prevent duplicate 9:30 notifications per session */
 let _nyOpenRangeTimerInterval = null; /* check-clock interval */
 
@@ -1273,7 +1280,6 @@ let liquiditySweepHistory = [];          /* alert history */
 const LIQUIDITY_SWEEP_MAX_HISTORY = 30;
 const LIQUIDITY_SWEEP_COOLDOWN = 10;     /* min candles between alerts (raised from 3 for 1s markets) */
 const LIQUIDITY_SWEEP_MAX_SL_ATR = 1.5;  /* max SL distance as ATR multiple — caps runaway risk */
-const LIQUIDITY_SWEEP_ADAPTIVE_RR_THRESHOLD = 1.0; /* ATR mult: above this use tighter R:R */
 let lastLiquiditySweepIdx = -999;
 
 /* ================= STRATEGY 2: STOP LOSS HUNT ================= */
@@ -2063,7 +2069,7 @@ function processNyOpenRangeCandle(idx) {
       if (risk > 0) {
         const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
         const rr = 2.0;
-        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, symbol: getActiveSymbol() };
+        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, symbol: getActiveSymbol(), result: "PENDING" };
 
         addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)} (midpoint), TP ${fmt(tp, 4)} (1:2 R:R)`);
         showToast(
@@ -2093,6 +2099,46 @@ function resetNyOpenRange() {
   nyOpenRangeRetest   = null;
   nyOpenRangeTrade    = null;
   nyOpenRangePhase    = nyOpenRangeEnabled ? "WAITING" : "IDLE";
+}
+
+/**
+ * Monitor the NY Open Range trade on each candle tick.
+ * Records WIN when TP is hit, LOSS when SL is hit.
+ * Clears the trade (auto-reset) so the range can be re-used if needed.
+ */
+function monitorNyOpenRangeTradeOutcome(candle) {
+  if (!nyOpenRangeEnabled || !nyOpenRangeTrade) return;
+  if (nyOpenRangeTrade.result !== "PENDING") return;
+
+  const t = nyOpenRangeTrade;
+  let result = null;
+
+  if (t.dir === "BULL") {
+    if (candle.low <= t.sl)        result = "LOSS";
+    else if (candle.high >= t.tp)  result = "WIN";
+  } else {
+    if (candle.high >= t.sl)       result = "LOSS";
+    else if (candle.low  <= t.tp)  result = "WIN";
+  }
+
+  if (!result) return;
+
+  t.result = result;
+  if (result === "WIN") nyOpenRangeTradeWins++;
+  else                  nyOpenRangeTradeLosses++;
+
+  const dirLabel = t.dir === "BULL" ? "BUY" : "SELL";
+  const icon = result === "WIN" ? "✅" : "❌";
+  addLog(`🕤 NY Open Range ${icon} ${result} — ${dirLabel} entry ${fmt(t.entry, 4)}, hit ${result === "WIN" ? "TP" : "SL"} @ ${fmt(result === "WIN" ? t.tp : t.sl, 4)} | W:${nyOpenRangeTradeWins} L:${nyOpenRangeTradeLosses}`);
+  showToast(
+    `NY Range ${result}`,
+    `${dirLabel} trade hit ${result === "WIN" ? "TP" : "SL"} — Entry: ${fmt(t.entry, 4)}`,
+    result === "WIN" ? "trade" : "warning", 8000
+  );
+  playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
+
+  /* Auto-reset so the session can accept a new setup if the trade resolves early */
+  nyOpenRangeTrade = null;
 }
 
 /* ================= SESSION RANGES (Asian / London / NY) ================= */
@@ -2200,8 +2246,11 @@ function detectLondonAsianSweep() {
 
   for (let i = scanStart; i <= scanEnd; i++) {
     const c = candles[i];
-    /* Check sweep of Asian HIGH — bearish reversal (SELL) */
-    if (c.high > aH) {
+    /* Check sweep of Asian HIGH — bearish reversal (SELL).
+       A true liquidity grab requires the wick to exceed the Asian high but the
+       candle to close back at or below it (rejection = bearish reversal signal).
+       A clean close above the Asian high is a breakout, not a sweep. */
+    if (c.high > aH && c.close <= aH) {
       londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
 
       /* Compute trade levels: Entry at candle close, SL above the sweep wick,
@@ -2241,8 +2290,11 @@ function detectLondonAsianSweep() {
       }
       return;
     }
-    /* Check sweep of Asian LOW — bullish reversal (BUY) */
-    if (c.low < aL) {
+    /* Check sweep of Asian LOW — bullish reversal (BUY).
+       A true liquidity grab requires the wick to dip below the Asian low but the
+       candle to close back at or above it (rejection = bullish reversal signal).
+       A clean close below the Asian low is a breakout, not a sweep. */
+    if (c.low < aL && c.close >= aL) {
       londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
 
       /* Compute trade levels: Entry at candle close, SL below the sweep wick,
@@ -5715,6 +5767,7 @@ function connect() {
       monitorScalpOutcomes(c);
       monitorCustomStrategyOutcomes(c);
       monitorSessionRangeTradeOutcome(c);
+      monitorNyOpenRangeTradeOutcome(c);
       drawChart();
     }
 
@@ -6667,8 +6720,8 @@ function detectLiquiditySweep() {
   /* Reject if risk is negligible (likely noise) */
   if (risk < atr * 0.05) return null;
 
-  /* Adaptive R:R: use 2:1 for tight setups, reduce to 1.5:1 for wider risk */
-  const rrTarget = (risk > atr * LIQUIDITY_SWEEP_ADAPTIVE_RR_THRESHOLD) ? 1.5 : 2;
+  /* Fixed 2:1 R:R per strategy spec (entry at candle close, TP at 2× risk) */
+  const rrTarget = 2;
   const tp = dir === "BULL" ? entry + risk * rrTarget : entry - risk * rrTarget;
   const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
 
@@ -7738,6 +7791,8 @@ function detectPowerOf3() {
   return {
     dir: dailyBias,
     entry, sl, tp, rr,
+    _origSl: sl,            /* preserve original SL for partial TP distance calc */
+    partialTpHit: false,    /* true when price hit 1R profit and SL moved to breakeven */
     oneHourOpen: oneHourOpenPrice,
     sweepPrice,
     fvgHigh: fvgTop,
@@ -7797,6 +7852,9 @@ function processPowerOf3() {
 
 /**
  * Monitor pending Power of 3 signals for SL/TP outcome.
+ * Includes partial TP at 1R: when price reaches 1× risk profit, the SL
+ * moves to breakeven (entry) and partialTpHit is flagged. The trade then
+ * runs freely to full TP — "Partial at 1–2R, let the rest run."
  */
 function monitorPo3Outcomes(candle) {
   if (!po3Enabled) return;
@@ -7812,27 +7870,55 @@ function monitorPo3Outcomes(candle) {
       changed = true; continue;
     }
 
+    /* Partial TP at 1R: when price moves 1× risk in our favour, slide SL to
+       breakeven (entry).  This locks in the partial profit and removes risk
+       for the remainder of the trade that runs to full TP.
+       The `continue` is intentional: defer SL/TP check to the next tick so
+       that the newly-moved breakeven SL (not the original SL) governs. */
+    if (!s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s.sl = s.entry;  /* slide SL to breakeven */
+        addLog(`⚡ PO3 Partial TP hit (1R) — SL moved to breakeven @ ${fmt(s.entry, 4)}, running to full TP ${fmt(s.tp, 4)}`);
+        showToast(
+          `PO3 Partial TP ✓`,
+          `1R hit — SL → breakeven @ ${fmt(s.entry, 4)} | Full TP @ ${fmt(s.tp, 4)}`,
+          "info", 6000
+        );
+        changed = true;
+        continue;  /* re-evaluate on next candle with breakeven SL in place */
+      }
+    }
+
     /* Check SL / TP */
     if (s.dir === "BULL") {
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
       else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) {
+    let resolved = false;
     renderStrategyAlerts();
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of po3History) {
       if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
         s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
+        resolved = true;
       }
     }
-    /* Allow next trade after cooldown elapses (not immediately) */
-    lastPo3Idx = candles.length - 1;
-    addLog("⚡ PO3 signal resolved — scanning for next trade…");
+    /* Only reset cooldown when trade fully resolves (not on partial TP) */
+    if (resolved) {
+      lastPo3Idx = candles.length - 1;
+      addLog("⚡ PO3 signal resolved — scanning for next trade…");
+    }
   }
 }
 
@@ -13699,6 +13785,7 @@ function connectPanel(p) {
       monitorScalpOutcomes(c);
       monitorCustomStrategyOutcomes(c);
       monitorSessionRangeTradeOutcome(c);
+      monitorNyOpenRangeTradeOutcome(c);
     }
 
     /* Save state back to panel */
