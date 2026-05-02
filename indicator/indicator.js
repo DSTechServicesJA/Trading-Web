@@ -7872,9 +7872,11 @@ function monitorPo3Outcomes(candle) {
 
     /* Partial TP at 1R: when price moves 1× risk in our favour, slide SL to
        breakeven (entry).  This locks in the partial profit and removes risk
-       for the remainder of the trade that runs to full TP. */
+       for the remainder of the trade that runs to full TP.
+       The `continue` is intentional: defer SL/TP check to the next tick so
+       that the newly-moved breakeven SL (not the original SL) governs. */
     if (!s.partialTpHit) {
-      const origSl = (s._origSl != null) ? s._origSl : s.sl;
+      const origSl = s._origSl;
       const risk = Math.abs(s.entry - origSl);
       const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
       const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
@@ -7888,8 +7890,7 @@ function monitorPo3Outcomes(candle) {
           "info", 6000
         );
         changed = true;
-        /* Do not mark resolved yet — let the trade run to full TP */
-        continue;
+        continue;  /* re-evaluate on next candle with breakeven SL in place */
       }
     }
 
@@ -7902,8 +7903,8 @@ function monitorPo3Outcomes(candle) {
       else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
-  let resolved = false;
   if (changed) {
+    let resolved = false;
     renderStrategyAlerts();
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of po3History) {
