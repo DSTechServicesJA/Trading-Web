@@ -472,7 +472,7 @@
             <p class="hint" style="margin-bottom:6px;">Reverse the scalp signal direction — if signal says BUY, place SELL and vice versa.</p>
 
             <label class="toggle-row"><input type="checkbox" id="autoTradeStrategyToggle" /> 📊 Strategy Trades</label>
-            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a strategy fires. Use the sub-toggles below to select which strategies auto-trade.</p>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a strategy fires. Covers all 7 strategies: Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, 🕤 NY Open Range, and 🌍 Session Range (London Sweep). Use the sub-toggles below to enable individual strategies.</p>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeLiquiditySweepToggle" checked /> 🌊 Liquidity Sweep</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStopLossHuntToggle" checked /> 🎯 Stop Loss Hunt</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFailedPinBarToggle" checked /> 📌 Failed Pin Bar</label>
@@ -687,13 +687,13 @@
               <p class="param-group-title">🕤 NY Open Range (9:30 AM EST)</p>
 
               <label class="toggle-row"><input type="checkbox" id="nyOpenRangeToggle" /> NY Open Range Strategy</label>
-              <p class="hint">At 9:30 AM EST, analyze the 9:30–9:35 candle to mark the range high/low. Wait for a 5-min candle to close outside the range, then enter on a valid retest (wick back into range without closing inside). SL at midpoint of range, TP at 1:2 R:R.</p>
+              <p class="hint">At 9:30 AM EST, analyze the 9:30–9:35 candle to mark the range high/low. Wait for a 5-min candle to close outside the range, then enter on a valid retest (wick back into range without closing inside). SL at midpoint of range, TP at 1:2 R:R. Trade signals appear in the <b>🎯 Strategy Alerts</b> section below. Enable <b>📊 Strategy Trades</b> in the Auto-Trade section to execute Deriv contracts automatically. Enable <b>Auto-Send Strategy Alerts</b> in Telegram to receive trade signals in Telegram.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🌍 Session Ranges (Asian / London / NY)</p>
 
               <label class="toggle-row"><input type="checkbox" id="sessionRangesToggle" /> Session Ranges Indicator</label>
-              <p class="hint">Identifies and draws the Asian (00–09 UTC), London (07–16 UTC), and New York (12–21 UTC) session high/low ranges. Detects "tight" Asian ranges (&lt; 1× ATR) and signals when London sweeps the Asian range high or low (liquidity grab).</p>
+              <p class="hint">Identifies and draws the Asian (00–09 UTC), London (07–16 UTC), and New York (12–21 UTC) session high/low ranges. Detects "tight" Asian ranges (&lt; 1× ATR) and signals when London sweeps the Asian range high or low (liquidity grab → trade signal with entry, SL, TP). Trade signals appear in the <b>🎯 Strategy Alerts</b> section below. Enable <b>📊 Strategy Trades</b> in the Auto-Trade section to execute Deriv contracts automatically. Enable <b>Auto-Send Session Range Signals</b> or <b>Auto-Send Strategy Alerts</b> in Telegram to receive trade signals in Telegram.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">⚡ Scalping Mode</p>
@@ -746,10 +746,11 @@
 
           <!-- Strategy Alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, NY Open Range, Session Range) -->
           <section class="box scalp-alerts-section">
-            <h3 class="collapsible">🎯 Strategy Alerts <span id="liquiditySweepCount" class="scalp-count-badge">0</span></h3>
-            <div class="collapsible-body">
+            <h3 class="collapsible">🎯 Strategy Alerts <span id="strategyAlertTotalCount" class="scalp-count-badge">0</span></h3>
+            <div class="collapsible-body open">
               <p class="param-group-title">🌊 Liquidity Sweep Alerts</p>
               <ul id="liquiditySweepAlertList" class="scalp-alert-list"></ul>
+              <span id="liquiditySweepCount" style="display:none;">0</span>
 
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Stop Loss Hunt Alerts</p>
@@ -845,8 +846,8 @@
               <label class="toggle-row"><input type="checkbox" id="telegramSessionRangeOutcomeSendToggle" /> Auto-Send Session Range Outcome (WIN/LOSS)</label>
               <p class="hint">Automatically send a message when a session range trade (London sweep) resolves as WIN or LOSS. Auto-resets after SL/TP hit so new signals can be detected.</p>
 
-              <label class="toggle-row"><input type="checkbox" id="telegramStrategyAutoSendToggle" /> Auto-Send Strategy Alerts (Liq Sweep / SL Hunt / Failed Pin Bar)</label>
-              <p class="hint">Automatically send chart screenshot + strategy signal details (entry, SL, TP, lot size) to Telegram when Liquidity Sweep, Stop Loss Hunt, or Failed Pin Bar fires.</p>
+              <label class="toggle-row"><input type="checkbox" id="telegramStrategyAutoSendToggle" /> Auto-Send Strategy Alerts (Liq Sweep / SL Hunt / Failed Pin Bar / NY Range / Session Range)</label>
+              <p class="hint">Automatically send chart screenshot + strategy signal details (entry, SL, TP, R:R) to Telegram when any strategy fires — including Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, 🕤 NY Open Range, and 🌍 Session Range (London Sweep).</p>
 
               <label class="toggle-row"><input type="checkbox" id="telegramStrategyOutcomeSendToggle" /> Auto-Send Strategy Outcome (WIN/LOSS)</label>
               <p class="hint">Automatically send a message when a custom strategy signal resolves as WIN or LOSS, with entry, SL, TP, lot size, and running strategy win rate.</p>

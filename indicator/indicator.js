@@ -1566,6 +1566,9 @@ function initUI() {
   UI.sessionRangeAlertList  = document.getElementById("sessionRangeAlertList");
   UI.sessionRangeAlertCount = document.getElementById("sessionRangeAlertCount");
 
+  /* Strategy Alerts header total count badge */
+  UI.strategyAlertTotalCount = document.getElementById("strategyAlertTotalCount");
+
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
   UI.liveScalpMinConf      = document.getElementById("liveScalpMinConf");
@@ -8071,6 +8074,11 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.nyOpenRangeAlertList, UI.nyOpenRangeAlertCount, nyOpenRangeHistory, "🕤", "NY Open Range");
   /* Session Range (London Sweep) */
   _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
+  /* Update the header badge with the total count across all strategies */
+  const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
+    + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
+    + nyOpenRangeHistory.length + sessionRangeHistory.length;
+  if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
 }
