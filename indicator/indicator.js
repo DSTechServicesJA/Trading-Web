@@ -1248,6 +1248,8 @@ let nyOpenRangeTrade     = null;   /* { entry, sl, tp, dir, rr, entryIdx, symbol
 let nyOpenRangePhase     = "IDLE"; /* IDLE | WAITING | RANGE | BREAKOUT | RETEST | TRADE */
 let nyOpenRangeTradeWins   = 0;   /* running win count */
 let nyOpenRangeTradeLosses = 0;   /* running loss count */
+let nyOpenRangeHistory   = [];    /* alert history for strategy alerts panel */
+const NY_OPEN_RANGE_MAX_HISTORY = 20;
 let _nyOpenRangeNotified = false;  /* prevent duplicate 9:30 notifications per session */
 let _nyOpenRangeTimerInterval = null; /* check-clock interval */
 
@@ -1261,6 +1263,8 @@ let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx
 let sessionRangeTrade     = null;     /* null | { entry, sl, tp, dir, rr, entryIdx, symbol } — computed on London sweep */
 let sessionRangeTradeWins   = 0;     /* running win count for session range trades */
 let sessionRangeTradeLosses = 0;     /* running loss count for session range trades */
+let sessionRangeHistory   = [];      /* alert history for strategy alerts panel */
+const SESSION_RANGE_MAX_HISTORY = 20;
 const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 
 /* Auto-apply recommended settings when symbol changes */
@@ -1553,6 +1557,17 @@ function initUI() {
   UI.po3Toggle             = document.getElementById("po3Toggle");
   UI.po3AlertList          = document.getElementById("po3AlertList");
   UI.po3Count              = document.getElementById("po3Count");
+
+  /* NY Open Range alerts */
+  UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
+  UI.nyOpenRangeAlertCount = document.getElementById("nyOpenRangeAlertCount");
+
+  /* Session Range alerts */
+  UI.sessionRangeAlertList  = document.getElementById("sessionRangeAlertList");
+  UI.sessionRangeAlertCount = document.getElementById("sessionRangeAlertCount");
+
+  /* Strategy Alerts header total count badge */
+  UI.strategyAlertTotalCount = document.getElementById("strategyAlertTotalCount");
 
   /* Live Scalp Scanner */
   UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
@@ -2069,7 +2084,11 @@ function processNyOpenRangeCandle(idx) {
       if (risk > 0) {
         const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
         const rr = 2.0;
-        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, symbol: getActiveSymbol(), result: "PENDING" };
+        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false };
+
+        /* Push to history for strategy alerts panel */
+        nyOpenRangeHistory.unshift(nyOpenRangeTrade);
+        if (nyOpenRangeHistory.length > NY_OPEN_RANGE_MAX_HISTORY) nyOpenRangeHistory.pop();
 
         addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)} (midpoint), TP ${fmt(tp, 4)} (1:2 R:R)`);
         showToast(
@@ -2079,6 +2098,13 @@ function processNyOpenRangeCandle(idx) {
         );
         playPhaseAlert("TRADE");
         sendPhaseNotification("TRADE");
+
+        /* Telegram strategy alert */
+        if (telegramStrategyAutoSend && !_historicalProcessing) {
+          setTimeout(() => sendTelegramStrategyAlert(nyOpenRangeTrade), CHART_RENDER_DELAY_MS);
+        }
+
+        renderStrategyAlerts();
 
         /* Auto-trade: place a Deriv multiplier contract for NY Open Range */
         if (autoTradeStrategyEnabled && autoTradeNYOpenRange && !_historicalProcessing) {
@@ -2136,6 +2162,17 @@ function monitorNyOpenRangeTradeOutcome(candle) {
     result === "WIN" ? "trade" : "warning", 8000
   );
   playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
+
+  /* Update the history entry result so the alerts panel shows the outcome */
+  const histEntry = nyOpenRangeHistory.find(h => h === t);
+  if (histEntry) {
+    histEntry.result = result;
+    if (!histEntry._stratOutcomeSent) {
+      histEntry._stratOutcomeSent = true;
+      sendStrategyOutcomeTelegram(histEntry);
+    }
+  }
+  renderStrategyAlerts();
 
   /* Auto-reset so the session can accept a new setup if the trade resolves early */
   nyOpenRangeTrade = null;
@@ -2263,7 +2300,12 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry - risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, symbol: getActiveSymbol() };
+        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false };
+
+        /* Push to history for strategy alerts panel */
+        sessionRangeHistory.unshift(sessionRangeTrade);
+        if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
+
         addLog(`🌍 London Sweep TRADE: SELL entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▼ SELL Signal",
@@ -2275,6 +2317,13 @@ function detectLondonAsianSweep() {
         if (autoTradeStrategyEnabled && autoTradeSessionRange && !_historicalProcessing) {
           executeAutoTrade({ dir: "BEAR", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
         }
+
+        /* Telegram strategy alert */
+        if (telegramStrategyAutoSend && !_historicalProcessing) {
+          setTimeout(() => sendTelegramStrategyAlert(sessionRangeTrade), CHART_RENDER_DELAY_MS);
+        }
+
+        renderStrategyAlerts();
       } else {
         sessionRangeTrade = null;
         addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
@@ -2307,7 +2356,12 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry + risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, symbol: getActiveSymbol() };
+        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false };
+
+        /* Push to history for strategy alerts panel */
+        sessionRangeHistory.unshift(sessionRangeTrade);
+        if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
+
         addLog(`🌍 London Sweep TRADE: BUY entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▲ BUY Signal",
@@ -2319,6 +2373,13 @@ function detectLondonAsianSweep() {
         if (autoTradeStrategyEnabled && autoTradeSessionRange && !_historicalProcessing) {
           executeAutoTrade({ dir: "BULL", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
         }
+
+        /* Telegram strategy alert */
+        if (telegramStrategyAutoSend && !_historicalProcessing) {
+          setTimeout(() => sendTelegramStrategyAlert(sessionRangeTrade), CHART_RENDER_DELAY_MS);
+        }
+
+        renderStrategyAlerts();
       } else {
         sessionRangeTrade = null;
         addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
@@ -2382,6 +2443,8 @@ function monitorSessionRangeTradeOutcome(candle) {
   if (result === "WIN") sessionRangeTradeWins++;
   else sessionRangeTradeLosses++;
 
+  srt.result = result;
+
   const dirLabel = srt.dir === "BULL" ? "BUY" : "SELL";
   const icon = result === "WIN" ? "✅" : "❌";
   addLog(`🌍 Session Range ${icon} ${result} — ${dirLabel} entry ${fmt(srt.entry, 4)}, SL ${fmt(srt.sl, 4)}, TP ${fmt(srt.tp, 4)}`);
@@ -2392,7 +2455,21 @@ function monitorSessionRangeTradeOutcome(candle) {
   );
   playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
 
-  /* Send Telegram outcome */
+  /* Update the history entry and send Telegram outcome */
+  const histEntry = sessionRangeHistory.find(h => h === srt);
+  if (histEntry) {
+    histEntry.result = result;
+    if (!histEntry._stratOutcomeSent) {
+      histEntry._stratOutcomeSent = true;
+      /* sendStrategyOutcomeTelegram uses the general strategy alert channel (telegramStrategyAutoSend).
+         sendSessionRangeOutcomeTelegram below uses the dedicated session-range channel (telegramSessionRangeOutcomeSend).
+         These are two independent toggles, so both can fire. */
+      sendStrategyOutcomeTelegram(histEntry);
+    }
+  }
+  renderStrategyAlerts();
+
+  /* Send dedicated session range outcome via the session-range Telegram channel */
   if (telegramSessionRangeOutcomeSend && !_historicalProcessing) {
     const resolvedTrade = { ...srt, result };
     const currentPanelSymbol = _multiPanelProcessing || null;
@@ -3933,7 +4010,9 @@ function getAggregatedStrategyHistory() {
     { history: stopLossHuntHistory,   label: "🎯 Stop Loss Hunt" },
     { history: failedPinBarHistory,   label: "📌 Failed Pin Bar" },
     { history: fibScalpHistory,       label: "📐 Fib Golden Zone" },
-    { history: po3History,            label: "⚡ Power of 3" }
+    { history: po3History,            label: "⚡ Power of 3" },
+    { history: nyOpenRangeHistory,    label: "🕤 NY Open Range" },
+    { history: sessionRangeHistory,   label: "🌍 Session Range" }
   ];
 
   if (multiPanels.size === 0) {
@@ -3954,7 +4033,9 @@ function getAggregatedStrategyHistory() {
       { history: p.stopLossHuntHistory   || [], label: "🎯 Stop Loss Hunt" },
       { history: p.failedPinBarHistory   || [], label: "📌 Failed Pin Bar" },
       { history: p.fibScalpHistory       || [], label: "📐 Fib Golden Zone" },
-      { history: p.po3History            || [], label: "⚡ Power of 3" }
+      { history: p.po3History            || [], label: "⚡ Power of 3" },
+      { history: p.nyOpenRangeHistory    || [], label: "🕤 NY Open Range" },
+      { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -5995,7 +6076,7 @@ function adjustIndicesAfterSlice(removed) {
   lastPo3Idx            = Math.max(-999, lastPo3Idx - removed);
   lastScalpCandleIdx    = Math.max(-999, lastScalpCandleIdx - removed);
 
-  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, liveScalpHistory]) {
+  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory]) {
     for (const s of h) {
       if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
     }
@@ -7989,6 +8070,15 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.fibScalpAlertList, UI.fibScalpCount, fibScalpHistory, "📐", "Fib Golden Zone");
   /* Power of 3 (ICT) */
   _renderAlertList(UI.po3AlertList, UI.po3Count, po3History, "⚡", "Power of 3");
+  /* NY Open Range */
+  _renderAlertList(UI.nyOpenRangeAlertList, UI.nyOpenRangeAlertCount, nyOpenRangeHistory, "🕤", "NY Open Range");
+  /* Session Range (London Sweep) */
+  _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
+  /* Update the header badge with the total count across all strategies */
+  const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
+    + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
+    + nyOpenRangeHistory.length + sessionRangeHistory.length;
+  if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
 }
@@ -8553,6 +8643,12 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "fib_scalp") {
     stratEmoji = "📐";
     stratLabel = "Fib Golden Zone Scalp";
+  } else if (signal.type === "ny_open_range") {
+    stratEmoji = "🕤";
+    stratLabel = "NY Open Range (9:30 AM EST)";
+  } else if (signal.type === "session_range") {
+    stratEmoji = "🌍";
+    stratLabel = "Session Range (London Sweep)";
   }
 
   const lines = [];
@@ -12626,7 +12722,9 @@ function drawChart() {
     { history: stopLossHuntHistory,   enabled: stopLossHuntEnabled,   emoji: "🎯", color: "#f59e0b" },
     { history: failedPinBarHistory,   enabled: failedPinBarEnabled,   emoji: "📌", color: "#a855f7" },
     { history: fibScalpHistory,       enabled: fibScalpEnabled,       emoji: "📐", color: "#10b981" },
-    { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" }
+    { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" },
+    { history: nyOpenRangeHistory,    enabled: nyOpenRangeEnabled,    emoji: "🕤", color: "#f97316" },
+    { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -13304,6 +13402,17 @@ function activatePanel(p) {
   sessionRangeTrade   = p.sessionRangeTrade  || null;
   sessionRangeTradeWins   = p.sessionRangeTradeWins   || 0;
   sessionRangeTradeLosses = p.sessionRangeTradeLosses || 0;
+  sessionRangeHistory = p.sessionRangeHistory || [];
+
+  /* NY Open Range */
+  nyOpenRange         = p.nyOpenRange        || null;
+  nyOpenRangeBreakout = p.nyOpenRangeBreakout || null;
+  nyOpenRangeRetest   = p.nyOpenRangeRetest  || null;
+  nyOpenRangeTrade    = p.nyOpenRangeTrade   || null;
+  nyOpenRangePhase    = p.nyOpenRangePhase   || "IDLE";
+  nyOpenRangeTradeWins   = p.nyOpenRangeTradeWins   || 0;
+  nyOpenRangeTradeLosses = p.nyOpenRangeTradeLosses || 0;
+  nyOpenRangeHistory  = p.nyOpenRangeHistory || [];
 
   /* Activate per-panel filter settings into globals —
      skip when the indicator-filters lock is active so that manually-set
@@ -13419,6 +13528,17 @@ function savePanel(p) {
   p.sessionRangeTrade   = sessionRangeTrade;
   p.sessionRangeTradeWins   = sessionRangeTradeWins;
   p.sessionRangeTradeLosses = sessionRangeTradeLosses;
+  p.sessionRangeHistory = sessionRangeHistory;
+
+  /* NY Open Range */
+  p.nyOpenRange         = nyOpenRange;
+  p.nyOpenRangeBreakout = nyOpenRangeBreakout;
+  p.nyOpenRangeRetest   = nyOpenRangeRetest;
+  p.nyOpenRangeTrade    = nyOpenRangeTrade;
+  p.nyOpenRangePhase    = nyOpenRangePhase;
+  p.nyOpenRangeTradeWins   = nyOpenRangeTradeWins;
+  p.nyOpenRangeTradeLosses = nyOpenRangeTradeLosses;
+  p.nyOpenRangeHistory  = nyOpenRangeHistory;
 
   /* Save current filter state back to panel */
   p.filters.autoResetEnabled     = autoResetEnabled;
@@ -13697,6 +13817,8 @@ function connectPanel(p) {
   p.lastFibScalpIdx       = -999;
   p.po3History            = [];
   p.lastPo3Idx            = -999;
+  p.nyOpenRangeHistory    = [];
+  p.sessionRangeHistory   = [];
   p.connected = false;
 
   const panelWs = new WebSocket(WS_URL);
