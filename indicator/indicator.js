@@ -3030,7 +3030,8 @@ async function sendTelegramMessage(text) {
 }
 
 /**
- * Send a Telegram alert when the main breakout trade hits the 1:1 partial TP level.
+ * Send a Telegram alert when a trade hits the 1:1 partial TP level.
+ * Applies to both the main breakout strategy and PO3 strategy.
  * Notifies the trader to close a portion of the position to protect profits while
  * the remainder runs toward the full TP (SL moved to breakeven).
  * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
@@ -9488,7 +9489,10 @@ async function sendStrategyOutcomeTelegram(signal) {
       po3History, fibScalpHistory, gridScalperMAHistory,
       nyOpenRangeHistory, sessionRangeHistory
     ];
-    /* Per-strategy breakdown for this specific strategy */
+    /* Per-strategy breakdown for this specific strategy.
+       Note: this function is only called for secondary strategies — the main breakout
+       strategy uses sendTradeOutcomeTelegram(), so signal.type for breakout signals is
+       undefined and thisHistory will correctly be null (no per-strategy row shown). */
     let thisW = 0, thisL = 0;
     const thisHistory = signal.type === "liquidity_sweep" ? liquiditySweepHistory
       : signal.type === "stop_loss_hunt" ? stopLossHuntHistory
@@ -12641,14 +12645,17 @@ function monitorTradeOutcome(candle) {
     const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : TRAILING_STOP_ATR_MULT;
     if (trade.dir === "BULL") {
       const newTrail = candle.high - atrValue * trailMult;
-      /* Only activate/advance trail when it improves (is higher than) the effective SL —
-         never allow the trail to make the stop worse than the original SL. */
+      /* Only activate/advance trail when it strictly improves (is higher than) the effective SL.
+         This intentionally prevents the trail from initialising below the original SL — the
+         trailing stop only engages once price has moved far enough in profit that the ATR-based
+         level exceeds the original SL.  Until that point checkSL falls back to trade.sl,
+         ensuring the original hard stop is always honoured. */
       if (newTrail > effectiveSL) {
         trailingSL = newTrail;
       }
     } else {
       const newTrail = candle.low + atrValue * trailMult;
-      /* Only activate/advance trail when it improves (is lower than) the effective SL. */
+      /* Only activate/advance trail when it strictly improves (is lower than) the effective SL. */
       if (newTrail < effectiveSL) {
         trailingSL = newTrail;
       }
