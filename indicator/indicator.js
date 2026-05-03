@@ -8792,10 +8792,8 @@ function resolveScalpBothHit(s) {
  * to entry is assumed to have been hit first.
  */
 function resolveBothHit(s) {
-  if (s.partialTpHit) return "WIN";
-  const slDist = Math.abs(s.entry - s.sl);
-  const tpDist = Math.abs(s.tp - s.entry);
-  return tpDist <= slDist ? "WIN" : "LOSS";
+  if (s.partialTpHit === true) return "WIN";
+  return resolveScalpBothHit(s);
 }
 
 function monitorScalpOutcomes(candle) {
@@ -12485,7 +12483,7 @@ function monitorTradeOutcome(candle) {
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp;
     if (slHit && tpHit) {
       /* Both levels hit in same candle — closer level was hit first */
-      pending.result = checkSL >= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit });
+      pending.result = checkSL >= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
@@ -12512,7 +12510,7 @@ function monitorTradeOutcome(candle) {
     const slHit = candle.high >= checkSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
     if (slHit && tpHit) {
-      pending.result = checkSL <= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit });
+      pending.result = checkSL <= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
