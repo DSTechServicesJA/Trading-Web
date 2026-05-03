@@ -1121,6 +1121,29 @@
             </div>
           </section>
 
+          <!-- Per-Strategy Stats -->
+          <section class="dashboard">
+            <div class="section-header">
+              <span class="icon">📊</span>
+              <h3>Strategy Win Rates</h3>
+            </div>
+            <div id="strategyWinRateGrid" style="display:flex;flex-direction:column;gap:4px;font-size:0.78rem;">
+              <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px 8px;align-items:center;padding:2px 0;opacity:0.6;font-weight:600;">
+                <span>Strategy</span><span>W</span><span>L</span><span>Rate</span>
+              </div>
+              <div id="stratWR_breakout" class="strat-wr-row" data-label="🔲 Breakout"></div>
+              <div id="stratWR_liquiditySweep" class="strat-wr-row" data-label="🌊 Liq. Sweep"></div>
+              <div id="stratWR_stopLossHunt" class="strat-wr-row" data-label="🎯 SL Hunt"></div>
+              <div id="stratWR_failedPinBar" class="strat-wr-row" data-label="📌 Failed PB"></div>
+              <div id="stratWR_fibScalp" class="strat-wr-row" data-label="📐 Fib Golden"></div>
+              <div id="stratWR_po3" class="strat-wr-row" data-label="⚡ Power of 3"></div>
+              <div id="stratWR_nyOpenRange" class="strat-wr-row" data-label="🕤 NY Open"></div>
+              <div id="stratWR_sessionRange" class="strat-wr-row" data-label="🌍 Session Rng"></div>
+              <div id="stratWR_gridScalper" class="strat-wr-row" data-label="🔲 Grid Scalper"></div>
+              <div id="stratWR_liveScalp" class="strat-wr-row" data-label="⚡ Live Scalp"></div>
+            </div>
+          </section>
+
           <!-- Live Scalp Stats -->
           <section class="dashboard">
             <div class="section-header">

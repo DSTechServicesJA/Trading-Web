@@ -719,7 +719,26 @@ button:disabled {
 }
 .stat-card-primary .stat-card-value { color: var(--primary-soft); }
 
-/* ---- Dashboard / Side Rows ---- */
+/* ---- Per-strategy win rate rows ---- */
+.strat-wr-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  font-size: 0.76rem;
+  min-height: 24px;
+}
+.strat-wr-row:empty { display: none; }
+.strat-wr-name { color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strat-wr-wins { color: var(--success-soft); font-weight: 700; text-align: right; }
+.strat-wr-losses { color: var(--danger-soft); font-weight: 700; text-align: right; }
+.strat-wr-rate { color: var(--primary-soft); font-weight: 700; text-align: right; min-width: 38px; }
+
+
 .dashboard {
   display: flex;
   flex-direction: column;

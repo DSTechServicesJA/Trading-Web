@@ -3030,6 +3030,49 @@ async function sendTelegramMessage(text) {
 }
 
 /**
+ * Send a Telegram alert when a trade hits the 1:1 partial TP level.
+ * Applies to both the main breakout strategy and PO3 strategy.
+ * Notifies the trader to close a portion of the position to protect profits while
+ * the remainder runs toward the full TP (SL moved to breakeven).
+ * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
+ */
+async function sendPartialTpTelegram(signal, partialLevel) {
+  if (!telegramOutcomeSend) return;
+  try {
+    const activeSym = signal.symbol || getActiveSymbol() || "";
+    const sym = getSymbolLabel(activeSym);
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
+    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+    const rrStr    = signal.rr    != null ? "1:" + signal.rr.toFixed(1)       : "--";
+    const lvlStr   = partialLevel != null ? fmtPrice(partialLevel, activeSym) : "--";
+
+    const lines = [];
+    lines.push(`🔔 <b>Partial TP Hit — 1:1 Reached</b>`);
+    lines.push(``);
+    lines.push(`<b>Consider closing a portion of your position now to protect profits.</b>`);
+    lines.push(`SL has been moved to breakeven. Remainder will run to full TP or BE.`);
+    lines.push(``);
+    lines.push(`${dir} ${sym}`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🔔 1:1 Level:</b> <code>${lvlStr}</code>`);
+    lines.push(`<b>🎯 Full TP:</b> <code>${tpStr}</code>`);
+    lines.push(`<b>🛑 Original SL:</b> <code>${slStr}</code>`);
+    lines.push(`<b>🛡️ Breakeven SL:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(``);
+    lines.push(`<i>Monitoring trade for full TP or breakeven exit…</i>`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: partial TP alert (1:1) sent`);
+  } catch (err) {
+    addLog(`📤 Partial TP Telegram error: ${err.message}`);
+  }
+}
+
+/**
  * Send trade outcome (WIN / LOSS) via Telegram when enabled.
  * Called from monitorTradeOutcome after a trade resolves.
  */
@@ -3947,6 +3990,7 @@ function updateStatsUI() {
     if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
     const total = signalWins + signalLosses;
     if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
+    updateStrategyWinRatesUI();
   }
 
   /* Always update aggregated signal count and banners (across all panels) */
@@ -3957,6 +4001,40 @@ function updateStatsUI() {
   renderScalpTickerBanner();
   renderStrategyTickerBanner();
 }
+
+/**
+ * Render the per-strategy win rate grid in the Stats panel.
+ * Shows each active strategy's individual W / L / win-rate.
+ */
+function updateStrategyWinRatesUI() {
+  const rows = [
+    { id: "stratWR_breakout",       history: signalHistory,          label: "🔲 Breakout" },
+    { id: "stratWR_liquiditySweep", history: liquiditySweepHistory,  label: "🌊 Liq. Sweep" },
+    { id: "stratWR_stopLossHunt",   history: stopLossHuntHistory,    label: "🎯 SL Hunt" },
+    { id: "stratWR_failedPinBar",   history: failedPinBarHistory,    label: "📌 Failed Pin Bar" },
+    { id: "stratWR_fibScalp",       history: fibScalpHistory,        label: "📐 Fib Golden" },
+    { id: "stratWR_po3",            history: po3History,             label: "⚡ Power of 3" },
+    { id: "stratWR_nyOpenRange",    history: nyOpenRangeHistory,     label: "🕤 NY Open" },
+    { id: "stratWR_sessionRange",   history: sessionRangeHistory,    label: "🌍 Session Rng" },
+    { id: "stratWR_gridScalper",    history: gridScalperMAHistory,   label: "🔲 Grid Scalper" },
+    { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" }
+  ];
+  for (const r of rows) {
+    const el = document.getElementById(r.id);
+    if (!el) continue;
+    const wins   = r.history.filter(s => s && s.result === "WIN").length;
+    const losses = r.history.filter(s => s && s.result === "LOSS").length;
+    const total  = wins + losses;
+    if (total === 0) { el.innerHTML = ""; el.style.display = "none"; continue; }
+    el.style.display = "";
+    const rate = (wins / total * 100).toFixed(1) + "%";
+    el.innerHTML = `<span class="strat-wr-name">${r.label}</span>`
+      + `<span class="strat-wr-wins">${wins}</span>`
+      + `<span class="strat-wr-losses">${losses}</span>`
+      + `<span class="strat-wr-rate">${rate}</span>`;
+  }
+}
+
 
 /* ---- Switch sidebar to a specific tab programmatically ---- */
 function switchSidebarTab(tabId) {
@@ -8258,6 +8336,7 @@ function monitorPo3Outcomes(candle) {
           `1R hit — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)} | Full TP @ ${fmtPrice(s.tp, s.symbol)}`,
           "info", 6000
         );
+        sendPartialTpTelegram(s, partialLevel);
         changed = true;
         continue;  /* re-evaluate on next candle with breakeven SL in place */
       }
@@ -8276,9 +8355,12 @@ function monitorPo3Outcomes(candle) {
         addLog(`⚡ PO3 ${s.result} — both levels hit (${lbl})`);
         changed = true;
       } else if (po3SlHit) {
-        /* SL hit: if partial TP was already taken, exiting at breakeven is still a WIN */
-        if (s.partialTpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — stopped at breakeven after partial TP @ ${fmtPrice(s.sl, s.symbol)}`); }
-        else { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); }
+        /* SL hit: count as LOSS regardless of whether partial TP was taken.
+           A breakeven exit (SL at entry after partial TP) means no profit on the
+           remaining position — win rate only counts trades that hit the full TP. */
+        s.result = "LOSS";
+        const exitNote = s.partialTpHit ? " (breakeven — stopped at entry after partial TP)" : "";
+        addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${exitNote}`);
         changed = true;
       } else if (po3TpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     } else {
@@ -8289,8 +8371,9 @@ function monitorPo3Outcomes(candle) {
         addLog(`⚡ PO3 ${s.result} — both levels hit (${lbl})`);
         changed = true;
       } else if (po3SlHit) {
-        if (s.partialTpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — stopped at breakeven after partial TP @ ${fmtPrice(s.sl, s.symbol)}`); }
-        else { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); }
+        s.result = "LOSS";
+        const exitNote = s.partialTpHit ? " (breakeven — stopped at entry after partial TP)" : "";
+        addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${exitNote}`);
         changed = true;
       } else if (po3TpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     }
@@ -8410,6 +8493,8 @@ function renderStrategyAlerts() {
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
+  /* Refresh per-strategy win rate grid */
+  updateStrategyWinRatesUI();
 }
 
 function _renderAlertList(listEl, countEl, history, emoji, label) {
@@ -9397,18 +9482,46 @@ async function sendStrategyOutcomeTelegram(signal) {
       }
     }
 
-    /* Win/loss tally across all strategy histories — exclude EXPIRED signals */
+    /* Win/loss tally across ALL strategy histories — exclude EXPIRED signals */
     let totalW = 0, totalL = 0;
-    for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, po3History]) {
+    const allStratHistories = [
+      liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
+      po3History, fibScalpHistory, gridScalperMAHistory,
+      nyOpenRangeHistory, sessionRangeHistory
+    ];
+    /* Per-strategy breakdown for this specific strategy.
+       Note: this function is only called for secondary strategies — the main breakout
+       strategy uses sendTradeOutcomeTelegram(), so signal.type for breakout signals is
+       undefined and thisHistory will correctly be null (no per-strategy row shown). */
+    let thisW = 0, thisL = 0;
+    const thisHistory = signal.type === "liquidity_sweep" ? liquiditySweepHistory
+      : signal.type === "stop_loss_hunt" ? stopLossHuntHistory
+      : signal.type === "failed_pin_bar" ? failedPinBarHistory
+      : signal.type === "fib_scalp" ? fibScalpHistory
+      : signal.type === "grid_scalper_ma" ? gridScalperMAHistory
+      : signal.type === "ny_open_range" ? nyOpenRangeHistory
+      : signal.type === "session_range" ? sessionRangeHistory
+      : signal.type === "po3" ? po3History : null;
+    for (const h of allStratHistories) {
+      const isThis = h === thisHistory;
       for (const s of h) {
-        if (s.result === "WIN") totalW++;
-        else if (s.result === "LOSS") totalL++;
+        if (s.result === "WIN") { totalW++; if (isThis) thisW++; }
+        else if (s.result === "LOSS") { totalL++; if (isThis) thisL++; }
         /* EXPIRED signals are intentionally excluded — SL was not hit */
       }
     }
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
-    lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    /* Show this strategy's own record first, then combined */
+    if (thisHistory && (thisW + thisL) > 0) {
+      const thisWr = (thisW / (thisW + thisL) * 100).toFixed(1) + "%";
+      lines.push(`${stratEmoji} <b>${stratLabel} Record:</b> ${thisW}W / ${thisL}L (${thisWr})`);
+    }
+    if (totalW + totalL > (thisW + thisL)) {
+      lines.push(`📊 <b>All Strategies Combined:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    } else {
+      lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    }
 
     /* Opposite mode effectiveness from auto-trade history */
     const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
@@ -12510,6 +12623,8 @@ function monitorTradeOutcome(candle) {
         trailingSL = trade.entry; /* move SL to breakeven */
         addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
         pending.partialTpHit = true;
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — close portion to protect profits, SL → breakeven`, "trade", 8000);
+        sendPartialTpTelegram(pending, partialLevel);
       }
     } else {
       const partialLevel = trade.entry - risk; /* 1:1 reward */
@@ -12518,6 +12633,8 @@ function monitorTradeOutcome(candle) {
         trailingSL = trade.entry; /* move SL to breakeven */
         addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
         pending.partialTpHit = true;
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — close portion to protect profits, SL → breakeven`, "trade", 8000);
+        sendPartialTpTelegram(pending, partialLevel);
       }
     }
   }
@@ -12528,12 +12645,18 @@ function monitorTradeOutcome(candle) {
     const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : TRAILING_STOP_ATR_MULT;
     if (trade.dir === "BULL") {
       const newTrail = candle.high - atrValue * trailMult;
-      if (trailingSL == null || newTrail > effectiveSL) {
+      /* Only activate/advance trail when it strictly improves (is higher than) the effective SL.
+         This intentionally prevents the trail from initialising below the original SL — the
+         trailing stop only engages once price has moved far enough in profit that the ATR-based
+         level exceeds the original SL.  Until that point checkSL falls back to trade.sl,
+         ensuring the original hard stop is always honoured. */
+      if (newTrail > effectiveSL) {
         trailingSL = newTrail;
       }
     } else {
       const newTrail = candle.low + atrValue * trailMult;
-      if (trailingSL == null || newTrail < effectiveSL) {
+      /* Only activate/advance trail when it strictly improves (is lower than) the effective SL. */
+      if (newTrail < effectiveSL) {
         trailingSL = newTrail;
       }
     }
@@ -12569,22 +12692,25 @@ function monitorTradeOutcome(candle) {
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp;
     if (slHit && tpHit) {
       /* Both levels hit in same candle — closer level was hit first */
-      pending.result = checkSL >= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.result = checkSL > trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
-      /* SL hit: if stop is at or above entry it's a profitable exit (partial TP / trailing) */
-      if (checkSL >= trade.entry) {
+      /* SL hit: only count as WIN if stop locked in genuine profit (strictly above entry).
+         A breakeven exit (stop at entry, after partial TP) is counted as LOSS so that
+         win rate reflects only trades that reached the full TP target. */
+      if (checkSL > trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry${partialTpHit ? ", after partial TP" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
-        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
+        const exitNote = checkSL === trade.entry ? " (breakeven — SL at entry after partial TP)" : trailingSL != null ? " (trailing)" : "";
+        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
@@ -12596,21 +12722,22 @@ function monitorTradeOutcome(candle) {
     const slHit = candle.high >= checkSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
     if (slHit && tpHit) {
-      pending.result = checkSL <= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.result = checkSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
-      if (checkSL <= trade.entry) {
+      if (checkSL < trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry${partialTpHit ? ", after partial TP" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
-        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
+        const exitNote = checkSL === trade.entry ? " (breakeven — SL at entry after partial TP)" : trailingSL != null ? " (trailing)" : "";
+        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
