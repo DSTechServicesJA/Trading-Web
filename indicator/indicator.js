@@ -2152,6 +2152,17 @@ function processNyOpenRangeCandle(idx) {
     if (wicksIntoRange && !closedInsideRange) {
       /* Valid retest! */
       nyOpenRangeRetest = { candleIdx: idx };
+
+      /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+      if (minConfluenceEnabled) {
+        const confScore = computeConfluenceScore(dir, c.close, idx);
+        if (confScore < minConfluenceValue) {
+          addLog(`⚠ NY Open Range REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+          nyOpenRangeRetest = null;
+          return;
+        }
+      }
+
       nyOpenRangePhase = "TRADE";
 
       /* Build the trade: SL at midpoint, TP at 1:2 R:R */
@@ -2384,6 +2395,16 @@ function detectLondonAsianSweep() {
       const sl    = c.high;                        /* SL above the sweep wick */
       const risk  = Math.abs(sl - entry);
       if (risk > 0) {
+        /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+        if (minConfluenceEnabled) {
+          const confScore = computeConfluenceScore("BEAR", entry, i);
+          if (confScore < minConfluenceValue) {
+            addLog(`⚠ London Sweep SELL REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+            londonSweepSignal = null;
+            return;
+          }
+        }
+
         const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
@@ -2440,6 +2461,16 @@ function detectLondonAsianSweep() {
       const sl    = c.low;                         /* SL below the sweep wick */
       const risk  = Math.abs(entry - sl);
       if (risk > 0) {
+        /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+        if (minConfluenceEnabled) {
+          const confScore = computeConfluenceScore("BULL", entry, i);
+          if (confScore < minConfluenceValue) {
+            addLog(`⚠ London Sweep BUY REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+            londonSweepSignal = null;
+            return;
+          }
+        }
+
         const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
@@ -6546,10 +6577,10 @@ function computeVWAP() {
   }
 }
 
-/* 1. Min Confluence Gate — applied after trade is built */
-function isConfluenceSufficient() {
+/* 1. Min Confluence Gate — applied after trade is built (main strategy) or before signal fires (secondary strategies) */
+function isConfluenceSufficient(overrideDir, overrideLevel, overrideCandleIdx) {
   if (!minConfluenceEnabled) return true;
-  const score = computeConfluenceScore();
+  const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
   return score >= minConfluenceValue;
 }
 
@@ -7002,6 +7033,15 @@ function processLiquiditySweep() {
   const signal = detectLiquiditySweep();
   if (!signal) return;
 
+  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Liquidity Sweep REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
   lastLiquiditySweepIdx = signal.candleIdx;
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
@@ -7218,6 +7258,15 @@ function detectStopLossHunt() {
 function processStopLossHunt() {
   const signal = detectStopLossHunt();
   if (!signal) return;
+
+  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Stop Loss Hunt REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastStopLossHuntIdx = signal.candleIdx;
 
@@ -7440,6 +7489,15 @@ function detectFailedPinBar() {
 function processFailedPinBar() {
   const signal = detectFailedPinBar();
   if (!signal) return;
+
+  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Failed Pin Bar REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastFailedPinBarIdx = signal.candleIdx;
 
@@ -7726,6 +7784,15 @@ function detectFibScalp() {
 function processFibScalp() {
   const signal = detectFibScalp();
   if (!signal) return;
+
+  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Fib Golden Zone REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastFibScalpIdx = signal.candleIdx;
 
@@ -8102,6 +8169,15 @@ function detectPowerOf3() {
 function processPowerOf3() {
   const signal = detectPowerOf3();
   if (!signal) return;
+
+  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Power of 3 REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastPo3Idx = signal.candleIdx;
 
@@ -10426,34 +10502,43 @@ function isFalseBreakout(currentIdx) {
  * preferred direction alignment (Boom/Crash), step run / jump impulse.
  * Maximum possible varies by market type (9-12).
  */
-function computeConfluenceScore() {
-  if (!breakout) return 0;
+function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
+  /* When called without args: use main breakout context (full state available).
+     When called with args (secondary strategies): use the provided direction,
+     level, and candle index instead of breakout/retestInfo state. */
+  const dir   = overrideDir   !== undefined ? overrideDir   : (breakout ? breakout.dir   : null);
+  const level = overrideLevel !== undefined ? overrideLevel : (breakout ? breakout.level : null);
+  if (!dir) return 0;
+  /* hasBoCtx: true only when called with no args (main strategy — full breakout state available) */
+  const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && overrideCandleIdx === undefined && !!breakout;
+
   let score = 0;
 
   /* Factor 1: EMA alignment */
   const lastFast = emaFast.length > 0 ? emaFast[emaFast.length - 1] : null;
   const lastSlow = emaSlow.length > 0 ? emaSlow[emaSlow.length - 1] : null;
   if (lastFast != null && lastSlow != null) {
-    if ((breakout.dir === "BULL" && lastFast > lastSlow) ||
-        (breakout.dir === "BEAR" && lastFast < lastSlow)) {
+    if ((dir === "BULL" && lastFast > lastSlow) ||
+        (dir === "BEAR" && lastFast < lastSlow)) {
       score++;
     }
   }
 
   /* Factor 2: HTF trend alignment (only counts if actually aligned, not just FLAT) */
   const htf = getHTFTrend();
-  if (htf === breakout.dir) score++;
+  if (htf === dir) score++;
 
-  /* Factor 3: Strong breakout candle */
-  if (breakout.strong) score++;
+  /* Factor 3: Strong breakout candle (main strategy context only) */
+  if (hasBoCtx && breakout.strong) score++;
 
-  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, tweezers, or railway track at retest */
-  if (retestInfo && retestInfo.candleIdx < candles.length) {
+  /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, tweezers, or railway track at retest
+     (main strategy context only — requires retestInfo from the breakout state machine) */
+  if (hasBoCtx && retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
-    if (isPinBar(rc, breakout.dir) || (prevRC && isInsideBar(prevRC, rc)) ||
-        (breakout.dir === "BULL" && isDragonflyDoji(rc)) ||
-        (breakout.dir === "BEAR" && isGravestoneDoji(rc)) ||
+    if (isPinBar(rc, dir) || (prevRC && isInsideBar(prevRC, rc)) ||
+        (dir === "BULL" && isDragonflyDoji(rc)) ||
+        (dir === "BEAR" && isGravestoneDoji(rc)) ||
         (prevRC && isTweezers(prevRC, rc)) ||
         (prevRC && isRailwayTrack(prevRC, rc))) {
       score++;
@@ -10461,10 +10546,10 @@ function computeConfluenceScore() {
   }
 
   /* Factor 5: S/R confluence */
-  if (hasSRConfluence(breakout.level)) score++;
+  if (level != null && hasSRConfluence(level)) score++;
 
-  /* Factor 5b: Extra confirmation pattern quality (piercing line, dark cloud, tweezers, railway track) */
-  if (confirmInfo && confirmInfo.pattern) {
+  /* Factor 5b: Extra confirmation pattern quality (main strategy context only) */
+  if (hasBoCtx && confirmInfo && confirmInfo.pattern) {
     const p = confirmInfo.pattern;
     if (p === "piercing line" || p === "dark cloud cover" ||
         p === "tweezers bottom" || p === "tweezers top" ||
@@ -10474,27 +10559,28 @@ function computeConfluenceScore() {
     }
   }
 
-  /* Factor 6: RSI favorable at retest */
+  /* Factor 6: RSI favorable */
   if (rsiValues.length > 0) {
     const rsi = rsiValues[rsiValues.length - 1];
     if (rsi != null) {
-      if ((breakout.dir === "BULL" && rsi <= RSI_RETEST_BULL_MAX) ||
-          (breakout.dir === "BEAR" && rsi >= RSI_RETEST_BEAR_MIN)) {
+      if ((dir === "BULL" && rsi <= RSI_RETEST_BULL_MAX) ||
+          (dir === "BEAR" && rsi >= RSI_RETEST_BEAR_MIN)) {
         score++;
       }
     }
   }
 
-  /* Factor 7: Volume spike on breakout */
-  if (breakout.candleIdx < candles.length) {
-    if (hasVolumeSpikeOnBreakout(breakout.candleIdx)) score++;
+  /* Factor 7: Volume spike — use breakout candle for main strategy, signal candle for secondary */
+  {
+    const vIdx = hasBoCtx ? breakout.candleIdx : (overrideCandleIdx !== undefined ? overrideCandleIdx : candles.length - 1);
+    if (vIdx >= 0 && vIdx < candles.length && hasVolumeSpikeOnBreakout(vIdx)) score++;
   }
 
   /* Factor 8: Within active trading session */
   if (isWithinActiveSession()) score++;
 
-  /* Factor 9: Fibonacci confluence at retest level */
-  if (hasFibConfluence(breakout.level)) score++;
+  /* Factor 9: Fibonacci confluence at key level */
+  if (level != null && hasFibConfluence(level)) score++;
 
   /* Factor 10: Market-type-specific signal confluence */
   const mtype = getMarketType();
@@ -10504,54 +10590,54 @@ function computeConfluenceScore() {
     /* Spike rejection or inside bar false breakout at current position */
     const spikeRej = detectSpikeRejection(lastIdx);
     const ibFalse = detectInsideBarFalseBreakout(lastIdx);
-    if ((spikeRej && spikeRej.dir === breakout.dir) || (ibFalse && ibFalse.dir === breakout.dir)) {
+    if ((spikeRej && spikeRej.dir === dir) || (ibFalse && ibFalse.dir === dir)) {
       score++;
     }
   } else if (mtype === "jump") {
     const sdZone = detectSupplyDemandZone(lastIdx);
     const impulse = detectMomentumImpulse(lastIdx);
-    if ((sdZone && ((sdZone.type === "demand" && breakout.dir === "BULL") ||
-                    (sdZone.type === "supply" && breakout.dir === "BEAR"))) ||
-        (impulse && impulse.dir === breakout.dir)) {
+    if ((sdZone && ((sdZone.type === "demand" && dir === "BULL") ||
+                    (sdZone.type === "supply" && dir === "BEAR"))) ||
+        (impulse && impulse.dir === dir)) {
       score++;
     }
   } else if (mtype === "step") {
     const tlTouch = detectTrendlineTouch(lastIdx);
     const maBounce = detectMABounce(lastIdx);
-    if ((tlTouch && tlTouch.dir === breakout.dir) || (maBounce && maBounce.dir === breakout.dir)) {
+    if ((tlTouch && tlTouch.dir === dir) || (maBounce && maBounce.dir === dir)) {
       score++;
     }
   } else if (mtype === "dailyreset") {
     /* Daily Reset: breakout aligned with natural trend direction (RDBULL→BULL, RDBEAR→BEAR) */
     const drPref = getDailyResetPreferredDir();
-    if (drPref && drPref === breakout.dir) {
+    if (drPref && drPref === dir) {
       score++;
     }
   } else if (mtype === "driftswitch") {
     /* Drift Switch: breakout aligned with current EMA crossover regime */
     const dsRegime = detectDriftSwitchRegime();
-    if (dsRegime && dsRegime.regime === breakout.dir) {
+    if (dsRegime && dsRegime.regime === dir) {
       score++;
     }
   }
 
   /* Factor 11: Preferred direction alignment for Boom/Crash/DEX/DriftSwitch */
   const tuning = getMarketTuning();
-  if (tuning.preferredDir && tuning.preferredDir === breakout.dir) {
+  if (tuning.preferredDir && tuning.preferredDir === dir) {
     score++;
   }
   /* DEX direction preference from UP/DN variant (not in tuning.preferredDir which is null) */
   if (mtype === "dex") {
     const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
-    if ((/UP$/i.test(sym) && breakout.dir === "BULL") ||
-        (/DN$/i.test(sym) && breakout.dir === "BEAR")) {
+    if ((/UP$/i.test(sym) && dir === "BULL") ||
+        (/DN$/i.test(sym) && dir === "BEAR")) {
       score++;
     }
   }
   /* Drift Switch: recent regime switch bonus (fresh crossover = strong signal) */
   if (mtype === "driftswitch") {
     const dsRegime = detectDriftSwitchRegime();
-    if (dsRegime && dsRegime.recentSwitch && dsRegime.regime === breakout.dir) {
+    if (dsRegime && dsRegime.recentSwitch && dsRegime.regime === dir) {
       score++;
     }
   }
@@ -10559,13 +10645,13 @@ function computeConfluenceScore() {
   /* Factor 12: Step run momentum or Jump impulse confirmation */
   if (mtype === "step") {
     const run = getStepRunLength();
-    if ((breakout.dir === "BULL" && run >= STEP_RUN_THRESHOLD) ||
-        (breakout.dir === "BEAR" && run <= -STEP_RUN_THRESHOLD)) {
+    if ((dir === "BULL" && run >= STEP_RUN_THRESHOLD) ||
+        (dir === "BEAR" && run <= -STEP_RUN_THRESHOLD)) {
       score++;
     }
   } else if (mtype === "jump") {
     const impulse = detectMomentumImpulse(lastIdx);
-    if (impulse && impulse.dir === breakout.dir && impulse.strength >= 2) {
+    if (impulse && impulse.dir === dir && impulse.strength >= 2) {
       score++;
     }
   }
@@ -10574,7 +10660,7 @@ function computeConfluenceScore() {
   {
     const hist = getCurrentMACD();
     if (hist != null) {
-      if ((breakout.dir === "BULL" && hist > 0) || (breakout.dir === "BEAR" && hist < 0)) score++;
+      if ((dir === "BULL" && hist > 0) || (dir === "BEAR" && hist < 0)) score++;
     }
   }
 
@@ -10588,7 +10674,7 @@ function computeConfluenceScore() {
   {
     const k = getCurrentStoch();
     if (k != null) {
-      if ((breakout.dir === "BULL" && k <= 50) || (breakout.dir === "BEAR" && k >= 50)) score++;
+      if ((dir === "BULL" && k <= 50) || (dir === "BEAR" && k >= 50)) score++;
     }
   }
 
