@@ -2225,11 +2225,15 @@ function monitorNyOpenRangeTradeOutcome(candle) {
   let result = null;
 
   if (t.dir === "BULL") {
-    if (candle.low <= t.sl)        result = "LOSS";
-    else if (candle.high >= t.tp)  result = "WIN";
+    const nySlHit = candle.low <= t.sl, nyTpHit = candle.high >= t.tp;
+    if (nySlHit && nyTpHit)     result = resolveBothHit(t);
+    else if (nySlHit)           result = "LOSS";
+    else if (nyTpHit)           result = "WIN";
   } else {
-    if (candle.high >= t.sl)       result = "LOSS";
-    else if (candle.low  <= t.tp)  result = "WIN";
+    const nySlHit = candle.high >= t.sl, nyTpHit = candle.low <= t.tp;
+    if (nySlHit && nyTpHit)     result = resolveBothHit(t);
+    else if (nySlHit)           result = "LOSS";
+    else if (nyTpHit)           result = "WIN";
   }
 
   if (!result) return;
@@ -2513,18 +2517,18 @@ function monitorSessionRangeTradeOutcome(candle) {
 
   if (srt.dir === "BULL") {
     /* BUY trade: SL below entry, TP above entry */
-    if (candle.low <= srt.sl) {
-      result = "LOSS";
-    } else if (srt.tp != null && candle.high >= srt.tp) {
-      result = "WIN";
-    }
+    const srSlHit = candle.low <= srt.sl;
+    const srTpHit = srt.tp != null && candle.high >= srt.tp;
+    if (srSlHit && srTpHit)     result = resolveBothHit(srt);
+    else if (srSlHit)           result = "LOSS";
+    else if (srTpHit)           result = "WIN";
   } else {
     /* SELL trade: SL above entry, TP below entry */
-    if (candle.high >= srt.sl) {
-      result = "LOSS";
-    } else if (srt.tp != null && candle.low <= srt.tp) {
-      result = "WIN";
-    }
+    const srSlHit = candle.high >= srt.sl;
+    const srTpHit = srt.tp != null && candle.low <= srt.tp;
+    if (srSlHit && srTpHit)     result = resolveBothHit(srt);
+    else if (srSlHit)           result = "LOSS";
+    else if (srTpHit)           result = "WIN";
   }
 
   if (!result) return;
@@ -7055,13 +7059,17 @@ function monitorLiquiditySweepOutcomes(candle) {
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const lsSlHit = candle.low <= s.sl, lsTpHit = candle.high >= s.tp;
+      if (lsSlHit && lsTpHit) { s.result = resolveBothHit(s); addLog(`🌊 Liquidity Sweep ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (lsSlHit) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (lsTpHit) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const lsSlHit = candle.high >= s.sl, lsTpHit = candle.low <= s.tp;
+      if (lsSlHit && lsTpHit) { s.result = resolveBothHit(s); addLog(`🌊 Liquidity Sweep ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (lsSlHit) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (lsTpHit) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) {
@@ -7270,13 +7278,17 @@ function monitorStopLossHuntOutcomes(candle) {
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const slhSlHit = candle.low <= s.sl, slhTpHit = candle.high >= s.tp;
+      if (slhSlHit && slhTpHit) { s.result = resolveBothHit(s); addLog(`🎯 Stop Loss Hunt ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (slhSlHit) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (slhTpHit) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const slhSlHit = candle.high >= s.sl, slhTpHit = candle.low <= s.tp;
+      if (slhSlHit && slhTpHit) { s.result = resolveBothHit(s); addLog(`🎯 Stop Loss Hunt ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (slhSlHit) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (slhTpHit) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) {
@@ -7484,14 +7496,18 @@ function monitorFailedPinBarOutcomes(candle) {
       const em = s.state === "fear" ? "😱" : "🤑";
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const fpbSlHit = candle.low <= s.sl, fpbTpHit = candle.high >= s.tp;
+      if (fpbSlHit && fpbTpHit) { s.result = resolveBothHit(s); addLog(`${em} Failed Pin Bar ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (fpbSlHit) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (fpbTpHit) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       const em = s.state === "fear" ? "😱" : "🤑";
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const fpbSlHit = candle.high >= s.sl, fpbTpHit = candle.low <= s.tp;
+      if (fpbSlHit && fpbTpHit) { s.result = resolveBothHit(s); addLog(`${em} Failed Pin Bar ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (fpbSlHit) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (fpbTpHit) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) {
@@ -7771,13 +7787,17 @@ function monitorFibScalpOutcomes(candle) {
     if (s.dir === "BULL") {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const fibSlHit = candle.low <= s.sl, fibTpHit = candle.high >= s.tp;
+      if (fibSlHit && fibTpHit) { s.result = resolveBothHit(s); addLog(`📐 Fib Golden Zone ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (fibSlHit) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (fibTpHit) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       /* Track 1R profit level and fire exit alert if price reverses to entry */
       if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const fibSlHit = candle.high >= s.sl, fibTpHit = candle.low <= s.tp;
+      if (fibSlHit && fibTpHit) { s.result = resolveBothHit(s); addLog(`📐 Fib Golden Zone ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (fibSlHit) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (fibTpHit) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
 
     /* If momentum stalls (price stuck near entry for several candles), expire the signal */
@@ -8172,11 +8192,31 @@ function monitorPo3Outcomes(candle) {
 
     /* Check SL / TP */
     if (s.dir === "BULL") {
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
+      const po3SlHit = candle.low <= s.sl, po3TpHit = candle.high >= s.tp;
+      if (po3SlHit && po3TpHit) {
+        /* Both levels hit: partial TP already locked profit, or use distance comparison */
+        s.result = resolveBothHit(s);
+        const lbl = s.result === "WIN" ? (s.partialTpHit ? "hit TP after partial TP" : "TP closer") : "SL closer";
+        addLog(`⚡ PO3 ${s.result} — both levels hit (${lbl})`);
+        changed = true;
+      } else if (po3SlHit) {
+        /* SL hit: if partial TP was already taken, exiting at breakeven is still a WIN */
+        if (s.partialTpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — stopped at breakeven after partial TP @ ${fmtPrice(s.sl, s.symbol)}`); }
+        else { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); }
+        changed = true;
+      } else if (po3TpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     } else {
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
+      const po3SlHit = candle.high >= s.sl, po3TpHit = candle.low <= s.tp;
+      if (po3SlHit && po3TpHit) {
+        s.result = resolveBothHit(s);
+        const lbl = s.result === "WIN" ? (s.partialTpHit ? "hit TP after partial TP" : "TP closer") : "SL closer";
+        addLog(`⚡ PO3 ${s.result} — both levels hit (${lbl})`);
+        changed = true;
+      } else if (po3SlHit) {
+        if (s.partialTpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — stopped at breakeven after partial TP @ ${fmtPrice(s.sl, s.symbol)}`); }
+        else { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); }
+        changed = true;
+      } else if (po3TpHit) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     }
   }
   if (changed) {
@@ -8493,12 +8533,16 @@ function monitorGridScalperMAOutcomes(candle) {
     }
     if (s.dir === "BULL") {
       if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
-      if (candle.low <= s.sl)  { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const gsSlHit = candle.low <= s.sl, gsTpHit = candle.high >= s.tp;
+      if (gsSlHit && gsTpHit) { s.result = resolveBothHit(s); addLog(`🔲 Grid Scalper MA ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (gsSlHit)  { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (gsTpHit) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     } else {
       if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      const gsSlHit = candle.high >= s.sl, gsTpHit = candle.low <= s.tp;
+      if (gsSlHit && gsTpHit) { s.result = resolveBothHit(s); addLog(`🔲 Grid Scalper MA ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (gsSlHit) { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (gsTpHit) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
     }
   }
   if (changed) {
@@ -8734,6 +8778,21 @@ function checkScalpSLTP(s, candle) {
  * since the TP was reachable at the same range as the SL.
  */
 function resolveScalpBothHit(s) {
+  const slDist = Math.abs(s.entry - s.sl);
+  const tpDist = Math.abs(s.tp - s.entry);
+  return tpDist <= slDist ? "WIN" : "LOSS";
+}
+
+/**
+ * Generic "both SL and TP hit in same candle" resolver for all strategies.
+ * When `partialTpHit` is set the SL is at breakeven (entry) and the full TP
+ * was also reached in the same candle — the trade is always a WIN in that
+ * case since TP was the meaningful target and partial profit was already
+ * locked in.  Otherwise falls back to distance comparison: the level closer
+ * to entry is assumed to have been hit first.
+ */
+function resolveBothHit(s) {
+  if (s.partialTpHit) return "WIN";
   const slDist = Math.abs(s.entry - s.sl);
   const tpDist = Math.abs(s.tp - s.entry);
   return tpDist <= slDist ? "WIN" : "LOSS";
@@ -12422,39 +12481,54 @@ function monitorTradeOutcome(candle) {
   let resolved = false;
 
   if (trade.dir === "BULL") {
-    if (candle.low <= checkSL) {
-      /* In pure trailing mode, a trailing stop hit above entry is a WIN */
-      if (pureTrailingEnabled && trailingSL != null && trailingSL >= trade.entry) {
+    const slHit = candle.low <= checkSL;
+    const tpHit = !pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp;
+    if (slHit && tpHit) {
+      /* Both levels hit in same candle — closer level was hit first */
+      pending.result = checkSL >= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit });
+      if (pending.result === "WIN") signalWins++; else signalLosses++;
+      resolved = true;
+      addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
+    } else if (slHit) {
+      /* SL hit: if stop is at or above entry it's a profitable exit (partial TP / trailing) */
+      if (checkSL >= trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (pure trailing mode, above entry)`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry${partialTpHit ? ", after partial TP" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
         addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
       }
-    } else if (!pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp) {
+    } else if (tpHit) {
       pending.result = "WIN";
       signalWins++;
       resolved = true;
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
     }
   } else {
-    if (candle.high >= checkSL) {
-      if (pureTrailingEnabled && trailingSL != null && trailingSL <= trade.entry) {
+    const slHit = candle.high >= checkSL;
+    const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
+    if (slHit && tpHit) {
+      pending.result = checkSL <= trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit });
+      if (pending.result === "WIN") signalWins++; else signalLosses++;
+      resolved = true;
+      addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
+    } else if (slHit) {
+      if (checkSL <= trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (pure trailing mode, below entry)`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry${partialTpHit ? ", after partial TP" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
         addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${trailingSL != null ? " (trailing)" : ""}`);
       }
-    } else if (!pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp) {
+    } else if (tpHit) {
       pending.result = "WIN";
       signalWins++;
       resolved = true;
