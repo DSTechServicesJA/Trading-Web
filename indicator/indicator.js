@@ -8053,10 +8053,14 @@ function monitorPo3Outcomes(candle) {
   if (changed) {
     let resolved = false;
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       PO3 is the only strategy with partial TP (which sets changed=true without
+       fully resolving). _po3Resolved tracks first resolution so the cooldown reset
+       and "resolved" log fire exactly once, independently of Telegram state.
+       Other strategies (liquiditySweep, stopLossHunt, etc.) reset their cooldown
+       unconditionally on every changed event, so they don't need this flag. */
     for (const s of po3History) {
       if (s.result === "WIN" || s.result === "LOSS") {
-        /* Track resolution for cooldown reset separately from Telegram state */
         if (!s._po3Resolved) { s._po3Resolved = true; resolved = true; }
         if (!s._stratOutcomeSent) { sendStrategyOutcomeTelegram(s); }
       }
