@@ -1352,6 +1352,25 @@ const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
 const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
 let lastPo3Idx = -999;
 
+/* ================= STRATEGY 8: GRID SCALPER MA ================= */
+/**
+ * Grid Scalper MA — two selectable signal modes:
+ *   "price_vs_ma" : BUY when prev close < MA and current close > MA;
+ *                   SELL when prev close > MA and current close < MA.
+ *   "bos"         : BUY when current close breaks above a confirmed swing high;
+ *                   SELL when current close breaks below a confirmed swing low.
+ */
+let gridScalperMAEnabled   = false;          /* master toggle */
+let gridScalperMAStrategy  = "price_vs_ma";  /* "price_vs_ma" | "bos" */
+let gridScalperMAPeriod    = 21;             /* MA period for Price vs MA mode */
+let gridScalperMAHistory   = [];             /* alert history */
+let lastGridScalperMAIdx   = -999;
+let autoTradeGridScalperMA = true;
+const GRID_SCALPER_MA_MAX_HISTORY = 30;
+const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
+const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
+const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -1558,6 +1577,14 @@ function initUI() {
   UI.po3Toggle             = document.getElementById("po3Toggle");
   UI.po3AlertList          = document.getElementById("po3AlertList");
   UI.po3Count              = document.getElementById("po3Count");
+
+  /* Strategy 8: Grid Scalper MA */
+  UI.gridScalperMAToggle         = document.getElementById("gridScalperMAToggle");
+  UI.gridScalperMAStrategySelect = document.getElementById("gridScalperMAStrategySelect");
+  UI.gridScalperMAPeriodInput    = document.getElementById("gridScalperMAPeriodInput");
+  UI.gridScalperMAAlertList      = document.getElementById("gridScalperMAAlertList");
+  UI.gridScalperMAAlertCount     = document.getElementById("gridScalperMAAlertCount");
+  UI.autoTradeGridScalperMAToggle = document.getElementById("autoTradeGridScalperMAToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -2761,6 +2788,7 @@ function buildTelegramCaption() {
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
   if (po3Enabled) filters.push("Power of 3");
+  if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -3377,6 +3405,12 @@ function _restoreChartGlobals(s) {
 /* ================= LOCALSTORAGE PERSISTENCE ================= */
 const LS_PREFIX = "itguru_indicator_";
 
+/** Show/hide the MA Period input row based on the selected signal strategy. */
+function _updateGridScalperMAPeriodVisibility() {
+  const row = document.getElementById("gridScalperMAPeriodRow");
+  if (row) row.style.display = gridScalperMAStrategy === "price_vs_ma" ? "" : "none";
+}
+
 function saveSettings() {
   try {
     const settings = {
@@ -3477,7 +3511,11 @@ function saveSettings() {
       autoTradeFibScalp,
       autoTradePo3,
       autoTradeNYOpenRange,
-      autoTradeSessionRange
+      autoTradeSessionRange,
+      gridScalperMAEnabled,
+      gridScalperMAStrategy,
+      gridScalperMAPeriod,
+      autoTradeGridScalperMA
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) {
@@ -3725,6 +3763,7 @@ function restoreSettings() {
     if (s.autoTradePo3 != null)            autoTradePo3            = s.autoTradePo3;
     if (s.autoTradeNYOpenRange != null)    autoTradeNYOpenRange    = s.autoTradeNYOpenRange;
     if (s.autoTradeSessionRange != null)   autoTradeSessionRange   = s.autoTradeSessionRange;
+    if (s.autoTradeGridScalperMA != null)  autoTradeGridScalperMA  = s.autoTradeGridScalperMA;
     if (UI.autoTradeLiquiditySweepToggle) UI.autoTradeLiquiditySweepToggle.checked = autoTradeLiquiditySweep;
     if (UI.autoTradeStopLossHuntToggle)   UI.autoTradeStopLossHuntToggle.checked   = autoTradeStopLossHunt;
     if (UI.autoTradeFailedPinBarToggle)   UI.autoTradeFailedPinBarToggle.checked   = autoTradeFailedPinBar;
@@ -3732,6 +3771,16 @@ function restoreSettings() {
     if (UI.autoTradePo3Toggle)            UI.autoTradePo3Toggle.checked            = autoTradePo3;
     if (UI.autoTradeNYOpenRangeToggle)    UI.autoTradeNYOpenRangeToggle.checked    = autoTradeNYOpenRange;
     if (UI.autoTradeSessionRangeToggle)   UI.autoTradeSessionRangeToggle.checked   = autoTradeSessionRange;
+    if (UI.autoTradeGridScalperMAToggle)  UI.autoTradeGridScalperMAToggle.checked  = autoTradeGridScalperMA;
+
+    /* Grid Scalper MA strategy */
+    if (s.gridScalperMAEnabled != null)  gridScalperMAEnabled  = s.gridScalperMAEnabled;
+    if (s.gridScalperMAStrategy != null) gridScalperMAStrategy = s.gridScalperMAStrategy;
+    if (s.gridScalperMAPeriod != null)   gridScalperMAPeriod   = Math.max(2, parseInt(s.gridScalperMAPeriod, 10) || 21);
+    if (UI.gridScalperMAToggle)          UI.gridScalperMAToggle.checked          = gridScalperMAEnabled;
+    if (UI.gridScalperMAStrategySelect)  UI.gridScalperMAStrategySelect.value    = gridScalperMAStrategy;
+    if (UI.gridScalperMAPeriodInput)     UI.gridScalperMAPeriodInput.value       = gridScalperMAPeriod;
+    _updateGridScalperMAPeriodVisibility();
     /* Restore auto-trade history */
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
@@ -4027,7 +4076,8 @@ function getAggregatedStrategyHistory() {
     { history: fibScalpHistory,       label: "📐 Fib Golden Zone" },
     { history: po3History,            label: "⚡ Power of 3" },
     { history: nyOpenRangeHistory,    label: "🕤 NY Open Range" },
-    { history: sessionRangeHistory,   label: "🌍 Session Range" }
+    { history: sessionRangeHistory,   label: "🌍 Session Range" },
+    { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" }
   ];
 
   if (multiPanels.size === 0) {
@@ -4050,7 +4100,8 @@ function getAggregatedStrategyHistory() {
       { history: p.fibScalpHistory       || [], label: "📐 Fib Golden Zone" },
       { history: p.po3History            || [], label: "⚡ Power of 3" },
       { history: p.nyOpenRangeHistory    || [], label: "🕤 NY Open Range" },
-      { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" }
+      { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" },
+      { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -6089,9 +6140,10 @@ function adjustIndicesAfterSlice(removed) {
   lastFailedPinBarIdx   = Math.max(-999, lastFailedPinBarIdx - removed);
   lastFibScalpIdx       = Math.max(-999, lastFibScalpIdx - removed);
   lastPo3Idx            = Math.max(-999, lastPo3Idx - removed);
+  lastGridScalperMAIdx  = Math.max(-999, lastGridScalperMAIdx - removed);
   lastScalpCandleIdx    = Math.max(-999, lastScalpCandleIdx - removed);
 
-  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory]) {
+  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory]) {
     for (const s of h) {
       if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
     }
@@ -6123,6 +6175,22 @@ function computeEMA(data, period) {
       const ema = (data[i] - result[i - 1]) * multiplier + result[i - 1];
       result.push(ema);
     }
+  }
+  return result;
+}
+
+/**
+ * Compute a Simple Moving Average over an array of values.
+ * Returns an array of the same length; positions before period-1 are null.
+ */
+function computeSMA(data, period) {
+  if (!data || data.length === 0 || period <= 0) return [];
+  const result = [];
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i];
+    if (i >= period) sum -= data[i - period];
+    result.push(i >= period - 1 ? sum / period : null);
   }
   return result;
 }
@@ -6670,6 +6738,9 @@ function revertAllSettings() {
   failedPinBarEnabled   = false;
   fibScalpEnabled       = false;
   po3Enabled            = false;
+  gridScalperMAEnabled  = false;
+  gridScalperMAStrategy = "price_vs_ma";
+  gridScalperMAPeriod   = 21;
 
   /* Advanced parameter defaults */
   RANGE_MINUTES           = 15;
@@ -6710,6 +6781,10 @@ function revertAllSettings() {
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
   if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
   if (UI.po3Toggle)              UI.po3Toggle.checked              = po3Enabled;
+  if (UI.gridScalperMAToggle)        UI.gridScalperMAToggle.checked        = gridScalperMAEnabled;
+  if (UI.gridScalperMAStrategySelect) UI.gridScalperMAStrategySelect.value = gridScalperMAStrategy;
+  if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
+  _updateGridScalperMAPeriodVisibility();
 
   /* Profit-Direction UI sync */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
@@ -8156,10 +8231,12 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.nyOpenRangeAlertList, UI.nyOpenRangeAlertCount, nyOpenRangeHistory, "🕤", "NY Open Range");
   /* Session Range (London Sweep) */
   _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
+  /* Grid Scalper MA */
+  _renderAlertList(UI.gridScalperMAAlertList, UI.gridScalperMAAlertCount, gridScalperMAHistory, "🔲", "Grid Scalper MA");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
-    + nyOpenRangeHistory.length + sessionRangeHistory.length;
+    + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -8190,6 +8267,198 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
   }
 }
 
+/* ================= STRATEGY 8: GRID SCALPER MA ================= */
+/**
+ * Detect a Grid Scalper MA signal.
+ *
+ * Two modes (controlled by gridScalperMAStrategy):
+ *   "price_vs_ma" – BUY when previous close crosses above the SMA; SELL when crosses below.
+ *   "bos"         – BUY when current close breaks above the most recent confirmed swing high;
+ *                   SELL when current close breaks below the most recent confirmed swing low.
+ *
+ * Returns null or { dir, entry, sl, tp, rr, candleIdx, epoch, symbol, result, mode }
+ */
+function detectGridScalperMA() {
+  if (!gridScalperMAEnabled) return null;
+
+  /* One-at-a-time: skip while any signal is still PENDING */
+  if (gridScalperMAHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < Math.max(gridScalperMAPeriod + 2, GRID_SCALPER_MA_BOS_LOOKBACK + 2)) return null;
+
+  const idx = len - 1;
+  if (idx - lastGridScalperMAIdx < GRID_SCALPER_MA_COOLDOWN) return null;
+
+  const closes = candles.map(c => c.close);
+  let dir = null;
+  let breakLevel = null; /* used in BOS mode for logging */
+
+  if (gridScalperMAStrategy === "price_vs_ma") {
+    /* ── Price vs MA crossover ── */
+    const maValues = computeSMA(closes, gridScalperMAPeriod);
+    const prevClose = closes[idx - 1];
+    const currClose = closes[idx];
+    const prevMA = maValues[idx - 1];
+    const currMA = maValues[idx];
+
+    if (prevMA == null || currMA == null) return null;
+
+    if (prevClose < prevMA && currClose > currMA) {
+      dir = "BULL";
+    } else if (prevClose > prevMA && currClose < currMA) {
+      dir = "BEAR";
+    }
+  } else {
+    /* ── BOS (Break of Structure) ── */
+    const lookback = Math.max(0, idx - GRID_SCALPER_MA_BOS_LOOKBACK);
+    let latestSwingHigh = null;  /* { idx, price } */
+    let latestSwingLow  = null;
+
+    /* Find the most recent confirmed swing high and low within lookback */
+    for (let i = idx - SWING_NEIGHBOR_BARS - 1; i >= lookback + SWING_NEIGHBOR_BARS; i--) {
+      if (latestSwingHigh === null && isTrueSwingHigh(i)) {
+        latestSwingHigh = { idx: i, price: candles[i].high };
+      }
+      if (latestSwingLow === null && isTrueSwingLow(i)) {
+        latestSwingLow = { idx: i, price: candles[i].low };
+      }
+      if (latestSwingHigh !== null && latestSwingLow !== null) break;
+    }
+
+    const currClose = closes[idx];
+
+    if (latestSwingHigh && currClose > latestSwingHigh.price) {
+      dir = "BULL";
+      breakLevel = latestSwingHigh.price;
+    } else if (latestSwingLow && currClose < latestSwingLow.price) {
+      dir = "BEAR";
+      breakLevel = latestSwingLow.price;
+    }
+  }
+
+  if (!dir) return null;
+
+  /* ── Compute SL using structural swing points ── */
+  const atr = atrValue > 0 ? atrValue : (candles[idx].high - candles[idx].low);
+  const slBuffer = atr * 0.15;
+  const entry = candles[idx].close;
+
+  let sl;
+  if (dir === "BULL") {
+    const swingLow = findSwingLow(idx);
+    sl = swingLow - slBuffer;
+    /* Ensure SL is below entry */
+    if (sl >= entry) sl = entry - atr;
+  } else {
+    const swingHigh = findSwingHigh(idx);
+    sl = swingHigh + slBuffer;
+    /* Ensure SL is above entry */
+    if (sl <= entry) sl = entry + atr;
+  }
+
+  let risk = Math.abs(entry - sl);
+  const maxRisk = atr * GRID_SCALPER_MA_MAX_SL_ATR;
+  if (risk > maxRisk) {
+    sl = dir === "BULL" ? entry - maxRisk : entry + maxRisk;
+    risk = maxRisk;
+  }
+  if (risk < atr * 0.05) return null;
+
+  /* ── TP at 2:1 R:R ── */
+  const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
+  const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
+
+  return {
+    dir, entry, sl, tp, rr,
+    candleIdx: idx,
+    epoch: candles[idx].epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "grid_scalper_ma",
+    mode: gridScalperMAStrategy,
+    breakLevel
+  };
+}
+
+/**
+ * Run the Grid Scalper MA scanner and handle alerting.
+ */
+function processGridScalperMA() {
+  const signal = detectGridScalperMA();
+  if (!signal) return;
+
+  lastGridScalperMAIdx = signal.candleIdx;
+
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  gridScalperMAHistory.unshift(signal);
+  if (gridScalperMAHistory.length > GRID_SCALPER_MA_MAX_HISTORY) gridScalperMAHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
+  addLog(`🔲 GRID SCALPER MA [${modeLabel}] ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+
+  showToast(
+    `Grid Scalper MA ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} [${modeLabel}]`,
+    `${sym} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🔲 ${signal.dir} Grid Scalper MA [${modeLabel}] — ${sym} @ ${fmt(signal.entry, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    throttledNotification("IT Guru: Grid Scalper MA!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeGridScalperMA && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA" });
+  }
+}
+
+/**
+ * Monitor pending Grid Scalper MA signals for SL/TP outcome.
+ */
+function monitorGridScalperMAOutcomes(candle) {
+  if (!gridScalperMAEnabled) return;
+  let changed = false;
+  for (const s of gridScalperMAHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed < 0 || elapsed >= 50) {
+      s.result = "EXPIRED";
+      addLog(`🔲 Grid Scalper MA EXPIRED — ${s.symbol || ""} @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+    if (s.dir === "BULL") {
+      if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
+      if (candle.low <= s.sl)  { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of gridScalperMAHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    lastGridScalperMAIdx = candles.length - 1;
+    addLog("🔲 Grid Scalper MA signal resolved — scanning for next trade…");
+  }
+}
+
 /**
  * Process all custom strategies. Called from the main candle pipeline.
  */
@@ -8199,6 +8468,7 @@ function processCustomStrategies() {
   processFailedPinBar();
   processFibScalp();
   processPowerOf3();
+  processGridScalperMA();
 }
 
 /**
@@ -8210,6 +8480,7 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorFailedPinBarOutcomes(candle);
   monitorFibScalpOutcomes(candle);
   monitorPo3Outcomes(candle);
+  monitorGridScalperMAOutcomes(candle);
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -8731,6 +9002,10 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "session_range") {
     stratEmoji = "🌍";
     stratLabel = "Session Range (London Sweep)";
+  } else if (signal.type === "grid_scalper_ma") {
+    stratEmoji = "🔲";
+    const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
+    stratLabel = `Grid Scalper MA [${modeLabel}]`;
   }
 
   const lines = [];
@@ -8773,6 +9048,14 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(``);
     lines.push(`<b>Golden Zone:</b> [${fmt(signal.goldenLow, 4)} – ${fmt(signal.goldenHigh, 4)}]`);
     lines.push(`<b>Fib Range:</b> [${fmt(signal.fibLow, 4)} – ${fmt(signal.fibHigh, 4)}]`);
+  }
+  if (signal.type === "grid_scalper_ma") {
+    lines.push(``);
+    const modeLabel = signal.mode === "bos" ? "BOS (Break of Structure)" : `Price vs MA (SMA ${gridScalperMAPeriod})`;
+    lines.push(`<b>Mode:</b> ${modeLabel}`);
+    if (signal.mode === "bos" && signal.breakLevel != null) {
+      lines.push(`<b>Break Level:</b> ${fmt(signal.breakLevel, 4)}`);
+    }
   }
 
   /* Lot size / position sizing based on account amount */
@@ -8890,6 +9173,10 @@ async function sendStrategyOutcomeTelegram(signal) {
     else if (signal.type === "stop_loss_hunt") { stratEmoji = "🎯"; stratLabel = "Stop Loss Hunt"; }
     else if (signal.type === "failed_pin_bar") { stratEmoji = "📌"; stratLabel = "Failed Pin Bar"; }
     else if (signal.type === "fib_scalp") { stratEmoji = "📐"; stratLabel = "Fib Golden Zone"; }
+    else if (signal.type === "grid_scalper_ma") {
+      stratEmoji = "🔲";
+      stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
+    }
 
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
@@ -11437,7 +11724,8 @@ function autoTradeSourceLabel(source, strategyName) {
       fibScalp:       "📐 Fib Golden Zone",
       po3:            "⚡ Power of 3",
       nyOpenRange:    "🕤 NY Open Range",
-      sessionRange:   "🌍 Session Range"
+      sessionRange:   "🌍 Session Range",
+      gridScalperMA:  "🔲 Grid Scalper MA"
     };
     return STRAT_LABELS[strategyName] || "📊 Strategy";
   }
@@ -12869,7 +13157,8 @@ function drawChart() {
     { history: fibScalpHistory,       enabled: fibScalpEnabled,       emoji: "📐", color: "#10b981" },
     { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" },
     { history: nyOpenRangeHistory,    enabled: nyOpenRangeEnabled,    emoji: "🕤", color: "#f97316" },
-    { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" }
+    { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" },
+    { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -13537,6 +13826,8 @@ function activatePanel(p) {
   lastFibScalpIdx       = p.lastFibScalpIdx       != null ? p.lastFibScalpIdx       : -999;
   po3History            = p.po3History            || [];
   lastPo3Idx            = p.lastPo3Idx            != null ? p.lastPo3Idx            : -999;
+  gridScalperMAHistory  = p.gridScalperMAHistory  || [];
+  lastGridScalperMAIdx  = p.lastGridScalperMAIdx  != null ? p.lastGridScalperMAIdx  : -999;
 
   /* Session Ranges */
   sessionRangeAsian   = p.sessionRangeAsian  || null;
@@ -13663,6 +13954,8 @@ function savePanel(p) {
   p.lastFibScalpIdx       = lastFibScalpIdx;
   p.po3History            = po3History;
   p.lastPo3Idx            = lastPo3Idx;
+  p.gridScalperMAHistory  = gridScalperMAHistory;
+  p.lastGridScalperMAIdx  = lastGridScalperMAIdx;
 
   /* Session Ranges */
   p.sessionRangeAsian   = sessionRangeAsian;
@@ -13962,6 +14255,8 @@ function connectPanel(p) {
   p.lastFibScalpIdx       = -999;
   p.po3History            = [];
   p.lastPo3Idx            = -999;
+  p.gridScalperMAHistory  = [];
+  p.lastGridScalperMAIdx  = -999;
   p.nyOpenRangeHistory    = [];
   p.sessionRangeHistory   = [];
   p.connected = false;
@@ -14644,7 +14939,8 @@ document.addEventListener("DOMContentLoaded", () => {
     { ref: "autoTradeFibScalpToggle",       varName: "autoTradeFibScalp",       label: "📐 Fib Golden Zone" },
     { ref: "autoTradePo3Toggle",            varName: "autoTradePo3",            label: "⚡ Power of 3" },
     { ref: "autoTradeNYOpenRangeToggle",    varName: "autoTradeNYOpenRange",    label: "🕤 NY Open Range" },
-    { ref: "autoTradeSessionRangeToggle",   varName: "autoTradeSessionRange",   label: "🌍 Session Range" }
+    { ref: "autoTradeSessionRangeToggle",   varName: "autoTradeSessionRange",   label: "🌍 Session Range" },
+    { ref: "autoTradeGridScalperMAToggle",  varName: "autoTradeGridScalperMA",  label: "🔲 Grid Scalper MA" }
   ];
   for (const t of strategySubToggles) {
     if (UI[t.ref]) {
@@ -14659,6 +14955,7 @@ document.addEventListener("DOMContentLoaded", () => {
           case "autoTradePo3":            autoTradePo3            = checked; break;
           case "autoTradeNYOpenRange":    autoTradeNYOpenRange    = checked; break;
           case "autoTradeSessionRange":   autoTradeSessionRange   = checked; break;
+          case "autoTradeGridScalperMA":  autoTradeGridScalperMA  = checked; break;
         }
         addLog(`🤖 ${t.label} auto-trade: ${checked ? "ON" : "OFF"}`);
         saveSettings();
@@ -15096,7 +15393,42 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  /* Telegram listeners – use "input" so variables sync as user types */
+  /* Strategy 8: Grid Scalper MA listener */
+  if (UI.gridScalperMAToggle) {
+    UI.gridScalperMAToggle.addEventListener("change", () => {
+      gridScalperMAEnabled = UI.gridScalperMAToggle.checked;
+      saveSettings();
+      if (gridScalperMAEnabled) {
+        const modeLabel = gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA";
+        addLog(`🔲 Grid Scalper MA strategy enabled [${modeLabel}] — MA period: ${gridScalperMAPeriod}`);
+        showToast("Grid Scalper MA Enabled", `Scanning with ${modeLabel} signal mode.`, "info", 5000);
+      } else {
+        addLog("🔲 Grid Scalper MA strategy disabled");
+      }
+      drawChart();
+    });
+  }
+  if (UI.gridScalperMAStrategySelect) {
+    UI.gridScalperMAStrategySelect.addEventListener("change", () => {
+      gridScalperMAStrategy = UI.gridScalperMAStrategySelect.value;
+      _updateGridScalperMAPeriodVisibility();
+      saveSettings();
+    });
+  }
+  if (UI.gridScalperMAPeriodInput) {
+    UI.gridScalperMAPeriodInput.addEventListener("change", () => {
+      const v = parseInt(UI.gridScalperMAPeriodInput.value, 10);
+      if (!isNaN(v) && v >= 2 && v <= 200) gridScalperMAPeriod = v;
+      UI.gridScalperMAPeriodInput.value = gridScalperMAPeriod;
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeGridScalperMAToggle) {
+    UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
+      autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
+      saveSettings();
+    });
+  }
   if (UI.telegramBotToken) {
     UI.telegramBotToken.addEventListener("input", () => { telegramBotToken = UI.telegramBotToken.value; });
     UI.telegramBotToken.addEventListener("change", saveSettings);
