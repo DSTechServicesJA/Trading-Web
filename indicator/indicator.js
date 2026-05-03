@@ -834,6 +834,7 @@ let autoTradeFibScalp        = true;
 let autoTradePo3             = true;
 let autoTradeNYOpenRange     = true;
 let autoTradeSessionRange    = true;
+let autoTradeFvgStrat        = true;
 let autoTradeStake           = 1;      /* base USD stake per trade (user-configured floor) */
 let autoTradeMaxStake        = 0;      /* max USD stake cap for compounding (0 = no cap) */
 let autoTradeCurrentStake    = 1;      /* live stake — compounds on consecutive wins, resets on loss */
@@ -1371,6 +1372,44 @@ const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
 const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
 const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 
+/* ================= STRATEGY 9: FAIR VALUE GAP (FVG) ================= */
+/**
+ * Fair Value Gap (FVG) Strategy — Supply & Demand with FVG confluence.
+ *
+ * Concept (as described in the strategy guide):
+ *   1. Spot a "big push" — 3+ consecutive strong directional candles (bodies ≥ 60%
+ *      of range and range ≥ 0.5× ATR) that create obvious imbalances.
+ *   2. Identify FVGs within the push: a 3-candle pattern where the middle candle
+ *      moves so aggressively that candle[i].low > candle[i-2].high (bullish FVG)
+ *      or candle[i].high < candle[i-2].low (bearish FVG).
+ *   3. Mark the demand/supply zone: the origin candle BEFORE the big push started.
+ *      This is the most powerful level — not the FVG itself.  The FVG signals that
+ *      price will likely retrace to fill the imbalance, carrying it back to the zone.
+ *   4. Fibonacci: measure from swing low to swing high.  Only enter when price is
+ *      at a "discount" — below the 50% retracement level (bullish) or above it
+ *      (bearish).  Anything below 50% = cheap, above 50% = premium.
+ *   5. Confirmation: wait for a bullish/bearish engulfing pattern at the demand zone,
+ *      indicating real buying/selling momentum at the origin level.
+ *   6. Entry at the confirmation candle close.
+ *   7. SL below the demand zone low (bullish) or above supply zone high (bearish)
+ *      with a small ATR buffer.
+ *   8. TP at the recent swing high (bullish) / swing low (bearish).
+ *   9. Market structure filter: long-term EMA trend must agree with trade direction.
+ */
+let fvgStratEnabled  = false;           /* master toggle */
+let fvgStratHistory  = [];              /* alert history */
+let lastFvgStratIdx  = -999;
+const FVG_STRAT_MAX_HISTORY  = 30;
+const FVG_STRAT_COOLDOWN     = 8;       /* min candles between signals */
+const FVG_STRAT_MAX_CANDLES  = 40;      /* trade monitoring timeout */
+const FVG_PUSH_MIN_CANDLES   = 3;       /* min consecutive strong candles for a "big push" */
+const FVG_PUSH_BODY_PCT      = 0.55;    /* body must be ≥ 55% of range to count as a strong push candle */
+const FVG_PUSH_ATR_MIN       = 0.4;     /* range must be ≥ 0.4× ATR to count as strong */
+const FVG_MIN_SIZE_ATR       = 0.2;     /* FVG gap must be ≥ this fraction of ATR */
+const FVG_ZONE_ATR_BUFFER    = 0.15;    /* ATR buffer below/above demand/supply zone */
+const FVG_LOOKBACK           = 60;      /* candles to scan for push + zone */
+const FVG_FIB_DISCOUNT       = 0.5;     /* below this fib retracement level = discount */
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -1585,6 +1624,12 @@ function initUI() {
   UI.gridScalperMAAlertList      = document.getElementById("gridScalperMAAlertList");
   UI.gridScalperMAAlertCount     = document.getElementById("gridScalperMAAlertCount");
   UI.autoTradeGridScalperMAToggle = document.getElementById("autoTradeGridScalperMAToggle");
+
+  /* Strategy 9: Fair Value Gap (FVG) */
+  UI.fvgStratToggle        = document.getElementById("fvgStratToggle");
+  UI.fvgStratAlertList     = document.getElementById("fvgStratAlertList");
+  UI.fvgStratAlertCount    = document.getElementById("fvgStratAlertCount");
+  UI.autoTradeFvgStratToggle = document.getElementById("autoTradeFvgStratToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -2875,6 +2920,7 @@ function buildTelegramCaption() {
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
   if (po3Enabled) filters.push("Power of 3");
+  if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
@@ -3646,7 +3692,9 @@ function saveSettings() {
       gridScalperMAEnabled,
       gridScalperMAStrategy,
       gridScalperMAPeriod,
-      autoTradeGridScalperMA
+      autoTradeGridScalperMA,
+      fvgStratEnabled,
+      autoTradeFvgStrat
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) {
@@ -3813,6 +3861,12 @@ function restoreSettings() {
     /* Strategy 5: Power of 3 (ICT) */
     if (s.po3Enabled != null) po3Enabled = s.po3Enabled;
     if (UI.po3Toggle) UI.po3Toggle.checked = po3Enabled;
+
+    /* Strategy 9: Fair Value Gap (FVG) */
+    if (s.fvgStratEnabled != null) fvgStratEnabled = s.fvgStratEnabled;
+    if (UI.fvgStratToggle) UI.fvgStratToggle.checked = fvgStratEnabled;
+    if (s.autoTradeFvgStrat != null) autoTradeFvgStrat = s.autoTradeFvgStrat;
+    if (UI.autoTradeFvgStratToggle) UI.autoTradeFvgStratToggle.checked = autoTradeFvgStrat;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -4017,6 +4071,7 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_nyOpenRange",    history: nyOpenRangeHistory,     label: "🕤 NY Open" },
     { id: "stratWR_sessionRange",   history: sessionRangeHistory,    label: "🌍 Session Rng" },
     { id: "stratWR_gridScalper",    history: gridScalperMAHistory,   label: "🔲 Grid Scalper" },
+    { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
     { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" }
   ];
   for (const r of rows) {
@@ -4267,7 +4322,8 @@ function getAggregatedStrategyHistory() {
       { history: p.po3History            || [], label: "⚡ Power of 3" },
       { history: p.nyOpenRangeHistory    || [], label: "🕤 NY Open Range" },
       { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" },
-      { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" }
+      { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
+      { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -6908,6 +6964,7 @@ function revertAllSettings() {
   gridScalperMAEnabled  = false;
   gridScalperMAStrategy = "price_vs_ma";
   gridScalperMAPeriod   = 21;
+  fvgStratEnabled       = false;
 
   /* Advanced parameter defaults */
   RANGE_MINUTES           = 15;
@@ -6952,6 +7009,7 @@ function revertAllSettings() {
   if (UI.gridScalperMAStrategySelect) UI.gridScalperMAStrategySelect.value = gridScalperMAStrategy;
   if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
   _updateGridScalperMAPeriodVisibility();
+  if (UI.fvgStratToggle)         UI.fvgStratToggle.checked         = fvgStratEnabled;
 
   /* Profit-Direction UI sync */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
@@ -8486,10 +8544,13 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
   /* Grid Scalper MA */
   _renderAlertList(UI.gridScalperMAAlertList, UI.gridScalperMAAlertCount, gridScalperMAHistory, "🔲", "Grid Scalper MA");
+  /* Fair Value Gap (FVG) */
+  _renderAlertList(UI.fvgStratAlertList, UI.fvgStratAlertCount, fvgStratHistory, "🎯", "Fair Value Gap");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
-    + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length;
+    + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
+    + fvgStratHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -8719,6 +8780,370 @@ function monitorGridScalperMAOutcomes(candle) {
 }
 
 /**
+ * ================= STRATEGY 9: FAIR VALUE GAP (FVG) DETECTION =================
+ *
+ * Detects high-probability demand/supply zone trades using:
+ *  1. "Big push" identification (3+ consecutive strong directional candles).
+ *  2. FVG detection within the push to confirm the imbalance.
+ *  3. Origin zone = candle BEFORE the push (the most powerful level).
+ *  4. Fibonacci 50% discount filter — only enter when price is at a discount.
+ *  5. Bullish/bearish engulfing confirmation at the origin zone.
+ *  6. Long-term EMA trend alignment to avoid counter-trend entries.
+ *
+ * Returns null or a trade signal object.
+ */
+function detectFVGStrat() {
+  if (!fvgStratEnabled) return null;
+
+  /* One-at-a-time: skip detection while a signal is still PENDING */
+  if (fvgStratHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < FVG_LOOKBACK + 5) return null;
+
+  const idx = len - 1;
+  if (idx - lastFvgStratIdx < FVG_STRAT_COOLDOWN) return null;
+
+  /* Need indicator data */
+  if (atrValue <= 0) return null;
+  const c = candles[idx];
+  const p = candles[idx - 1];  /* previous candle (for engulfing check) */
+  if (!c || !p) return null;
+
+  /* ---- EMA trend filter (long-term direction must agree) ---- */
+  const emaF = emaFast.length > idx ? emaFast[idx] : null;
+  const emaS = emaSlow.length > idx ? emaSlow[idx] : null;
+
+  /* ---- Scan lookback for a "big push" ---- */
+  /* We need to find a block of 3+ consecutive strong-body candles in one direction */
+  const lookbackStart = Math.max(1, idx - FVG_LOOKBACK);
+  let pushFound    = false;
+  let pushDir      = null;   /* "BULL" | "BEAR" */
+  let pushStart    = -1;     /* index of first push candle */
+  let pushEnd      = -1;     /* index of last push candle */
+  let originIdx    = -1;     /* index of the candle BEFORE the push (demand/supply zone) */
+
+  for (let i = lookbackStart; i <= idx - FVG_PUSH_MIN_CANDLES - 1; i++) {
+    /* Count consecutive strong candles starting at i */
+    let consecutive = 0;
+    let dir = null;
+    for (let j = i; j <= idx - 2; j++) {
+      const cv = candles[j];
+      const range = cv.high - cv.low;
+      if (range <= 0) break;
+      const body = Math.abs(cv.close - cv.open);
+      const bodyPct = body / range;
+      const isBull = cv.close > cv.open;
+      const isBear = cv.close < cv.open;
+      if (bodyPct < FVG_PUSH_BODY_PCT) break;
+      if (range < atrValue * FVG_PUSH_ATR_MIN) break;
+      if (dir === null) dir = isBull ? "BULL" : (isBear ? "BEAR" : null);
+      if (!dir) break;
+      if (dir === "BULL" && !isBull) break;
+      if (dir === "BEAR" && !isBear) break;
+      consecutive++;
+      if (consecutive >= FVG_PUSH_MIN_CANDLES) {
+        pushFound = true;
+        pushDir   = dir;
+        pushStart = i;
+        pushEnd   = j;
+        /* Don't break — find the longest / most recent push */
+      }
+    }
+  }
+
+  if (!pushFound) return null;
+
+  /* Use EMA trend to filter direction of trade:
+     For BULL trade: EMA 8 should be >= EMA 21 (or at least neutral).
+     For BEAR trade: EMA 8 should be <= EMA 21. */
+  if (emaF != null && emaS != null) {
+    if (pushDir === "BULL" && emaF < emaS) return null;
+    if (pushDir === "BEAR" && emaF > emaS) return null;
+  }
+
+  /* originIdx is the candle immediately BEFORE the push starts */
+  originIdx = pushStart - 1;
+  if (originIdx < 0) return null;
+
+  const originCandle = candles[originIdx];
+
+  /* ---- Find a Fair Value Gap (FVG) within the push ---- */
+  let fvgHigh = null;
+  let fvgLow  = null;
+  for (let i = pushStart + 1; i <= pushEnd; i++) {
+    if (i < 2) continue;
+    const ci = candles[i];
+    const ciMinus2 = candles[i - 2];
+    if (!ci || !ciMinus2) continue;
+    if (pushDir === "BULL") {
+      /* Bullish FVG: gap between i-2 high and i low */
+      if (ci.low > ciMinus2.high) {
+        const gapSize = ci.low - ciMinus2.high;
+        if (gapSize >= atrValue * FVG_MIN_SIZE_ATR) {
+          fvgHigh = ci.low;
+          fvgLow  = ciMinus2.high;
+        }
+      }
+    } else {
+      /* Bearish FVG: gap between i-2 low and i high */
+      if (ci.high < ciMinus2.low) {
+        const gapSize = ciMinus2.low - ci.high;
+        if (gapSize >= atrValue * FVG_MIN_SIZE_ATR) {
+          fvgLow  = ci.high;
+          fvgHigh = ciMinus2.low;
+        }
+      }
+    }
+  }
+  /* FVG is desirable but not required — the origin zone is the primary entry level */
+
+  /* ---- Determine demand / supply zone from origin candle ---- */
+  let demandZoneHigh, demandZoneLow;
+  if (pushDir === "BULL") {
+    /* Demand zone: the origin (red candle before push) — use full body range */
+    demandZoneHigh = Math.max(originCandle.open, originCandle.close);
+    demandZoneLow  = Math.min(originCandle.open, originCandle.close);
+  } else {
+    /* Supply zone: the origin (green candle before push) */
+    demandZoneHigh = Math.max(originCandle.open, originCandle.close);
+    demandZoneLow  = Math.min(originCandle.open, originCandle.close);
+  }
+
+  /* Make zone at least 0.3× ATR wide */
+  const minZoneSize = atrValue * 0.3;
+  if (demandZoneHigh - demandZoneLow < minZoneSize) {
+    const mid = (demandZoneHigh + demandZoneLow) / 2;
+    demandZoneHigh = mid + minZoneSize / 2;
+    demandZoneLow  = mid - minZoneSize / 2;
+  }
+
+  /* ---- Fibonacci retracement: swing low to swing high ---- */
+  /* Find swing high (max high after push start) and swing low (min low before push start) */
+  let swingLow  = Infinity;
+  let swingHigh = -Infinity;
+  const fibScanStart = Math.max(0, originIdx - 10);
+  for (let i = fibScanStart; i <= pushEnd; i++) {
+    if (candles[i].low  < swingLow)  swingLow  = candles[i].low;
+    if (candles[i].high > swingHigh) swingHigh = candles[i].high;
+  }
+  /* Include any candles after the push up to current */
+  for (let i = pushEnd + 1; i <= idx; i++) {
+    if (candles[i].high > swingHigh) swingHigh = candles[i].high;
+  }
+
+  if (swingHigh === swingLow || swingHigh <= swingLow) return null;
+  const fibRange = swingHigh - swingLow;
+
+  /* Fibonacci 50% level */
+  const fib50Level = pushDir === "BULL"
+    ? swingHigh - fibRange * FVG_FIB_DISCOUNT   /* 50% retracement from high */
+    : swingLow  + fibRange * FVG_FIB_DISCOUNT;  /* 50% retracement from low */
+
+  /* Current price must be at a discount (below 50% for BULL, above 50% for BEAR) */
+  if (pushDir === "BULL" && c.close > fib50Level) return null;
+  if (pushDir === "BEAR" && c.close < fib50Level) return null;
+
+  /* ---- Price must have retraced into the demand/supply zone ---- */
+  const zoneTop    = Math.max(demandZoneHigh, demandZoneLow);
+  const zoneBottom = Math.min(demandZoneHigh, demandZoneLow);
+  /* Allow a small ATR tolerance for the price to be near the zone */
+  const zoneTolerance = atrValue * 0.5;
+
+  const inZone = pushDir === "BULL"
+    ? (c.low <= zoneTop + zoneTolerance && c.close >= zoneBottom - zoneTolerance)
+    : (c.high >= zoneBottom - zoneTolerance && c.close <= zoneTop + zoneTolerance);
+
+  if (!inZone) return null;
+
+  /* Price must not have broken through the zone (still relevant) */
+  if (pushDir === "BULL" && c.close < zoneBottom - atrValue * 0.5) return null;
+  if (pushDir === "BEAR" && c.close > zoneTop + atrValue * 0.5) return null;
+
+  /* ---- Entry Confirmation: bullish/bearish engulfing at the zone ---- */
+  /* p = previous candle, c = current candle */
+  let confirmed = false;
+  if (pushDir === "BULL") {
+    /* Bullish engulfing: previous bearish + current bullish that engulfs */
+    const pBearish = p.close < p.open;
+    const cBullish = c.close > c.open;
+    const engulfs  = c.close > p.open && c.open < p.close;
+    if (pBearish && cBullish && engulfs) confirmed = true;
+
+    /* Also accept a strong bullish close at/above zone top with decent body */
+    if (!confirmed) {
+      const cBody = c.close - c.open;
+      const cRange = c.high - c.low;
+      if (cBullish && cRange > 0 && cBody / cRange >= 0.5 && c.close >= zoneBottom) confirmed = true;
+    }
+  } else {
+    /* Bearish engulfing: previous bullish + current bearish that engulfs */
+    const pBullish = p.close > p.open;
+    const cBearish = c.close < c.open;
+    const engulfs  = c.close < p.open && c.open > p.close;
+    if (pBullish && cBearish && engulfs) confirmed = true;
+
+    if (!confirmed) {
+      const cBody = c.open - c.close;
+      const cRange = c.high - c.low;
+      if (cBearish && cRange > 0 && cBody / cRange >= 0.5 && c.close <= zoneTop) confirmed = true;
+    }
+  }
+
+  if (!confirmed) return null;
+
+  /* ---- Build trade ---- */
+  const entry = c.close;
+  let sl, tp;
+
+  if (pushDir === "BULL") {
+    /* SL: below demand zone low with ATR buffer */
+    sl = zoneBottom - atrValue * FVG_ZONE_ATR_BUFFER;
+    /* TP: swing high (the push high) + small extension */
+    tp = swingHigh;
+    /* Extend TP if too close */
+    const risk = Math.abs(entry - sl);
+    if (tp <= entry + risk * 0.8) tp = entry + risk * 2;
+  } else {
+    /* SL: above supply zone high with ATR buffer */
+    sl = zoneTop + atrValue * FVG_ZONE_ATR_BUFFER;
+    /* TP: swing low */
+    tp = swingLow;
+    const risk = Math.abs(sl - entry);
+    if (tp >= entry - risk * 0.8) tp = entry - risk * 2;
+  }
+
+  const risk   = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  if (risk <= 0) return null;
+  const rr = reward / risk;
+
+  /* Reject if R:R below 1.5 */
+  if (rr < 1.5) return null;
+
+  /* Compute the fib level ratio at current price for display */
+  const fibLevel = pushDir === "BULL"
+    ? (swingHigh - entry) / fibRange
+    : (entry - swingLow) / fibRange;
+
+  return {
+    dir: pushDir,
+    entry, sl, tp, rr,
+    demandZoneHigh: zoneTop,
+    demandZoneLow:  zoneBottom,
+    fvgHigh: (fvgHigh != null && fvgLow != null) ? Math.max(fvgHigh, fvgLow) : (fvgHigh != null ? fvgHigh : fvgLow),
+    fvgLow:  (fvgHigh != null && fvgLow != null) ? Math.min(fvgHigh, fvgLow) : (fvgLow  != null ? fvgLow  : fvgHigh),
+    fibLevel,
+    swingHigh,
+    swingLow,
+    pushStart,
+    pushEnd,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "fvg_strat"
+  };
+}
+
+/**
+ * Run the FVG strategy scanner and handle alerting.
+ */
+function processFVGStrat() {
+  const signal = detectFVGStrat();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ FVG Strategy REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastFvgStratIdx = signal.candleIdx;
+
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  fvgStratHistory.unshift(signal);
+  if (fvgStratHistory.length > FVG_STRAT_MAX_HISTORY) fvgStratHistory.pop();
+
+  /* Audio alert */
+  playStrategyAlert(signal.dir);
+
+  /* Log */
+  const symbol = getActiveSymbol() || "--";
+  addLog(`🎯 FVG ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Zone [${fmtPrice(signal.demandZoneLow, symbol)}–${fmtPrice(signal.demandZoneHigh, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)} | Fib ${fmt(signal.fibLevel * 100, 0)}%`);
+
+  showToast(
+    `Fair Value Gap ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | Zone: ${fmtPrice(signal.demandZoneLow, symbol)}–${fmtPrice(signal.demandZoneHigh, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  /* Browser notification */
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🎯 ${signal.dir} Fair Value Gap — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nZone: [${fmtPrice(signal.demandZoneLow, symbol)}–${fmtPrice(signal.demandZoneHigh, symbol)}]\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | Fib: ${fmt(signal.fibLevel * 100, 0)}%`;
+    throttledNotification("IT Guru: FVG Signal!", body);
+  }
+
+  /* Telegram alert */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  /* Auto-trade */
+  if (autoTradeStrategyEnabled && autoTradeFvgStrat && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "fvgStrat" });
+  }
+}
+
+/**
+ * Monitor pending FVG strategy signals for SL/TP outcome.
+ */
+function monitorFVGStratOutcomes(candle) {
+  if (!fvgStratEnabled) return;
+  let changed = false;
+  for (const s of fvgStratHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    if (elapsed < 0 || elapsed >= FVG_STRAT_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      addLog(`🎯 FVG EXPIRED (timeout ${FVG_STRAT_MAX_CANDLES} candles) — ${s.symbol || ""}`);
+      changed = true; continue;
+    }
+
+    if (_checkProfitExitAlert(s, candle, "Fair Value Gap")) changed = true;
+
+    if (s.dir === "BULL") {
+      const slHit = candle.low <= s.sl, tpHit = candle.high >= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`🎯 FVG ${s.result} — both levels hit`); changed = true; }
+      else if (slHit)     { s.result = "LOSS"; addLog(`🎯 FVG LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); changed = true; }
+      else if (tpHit)     { s.result = "WIN";  addLog(`🎯 FVG WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
+    } else {
+      const slHit = candle.high >= s.sl, tpHit = candle.low <= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`🎯 FVG ${s.result} — both levels hit`); changed = true; }
+      else if (slHit)     { s.result = "LOSS"; addLog(`🎯 FVG LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}`); changed = true; }
+      else if (tpHit)     { s.result = "WIN";  addLog(`🎯 FVG WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of fvgStratHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    lastFvgStratIdx = candles.length - 1;
+    addLog("🎯 FVG signal resolved — scanning for next trade…");
+  }
+}
+
+/**
  * Process all custom strategies. Called from the main candle pipeline.
  */
 function processCustomStrategies() {
@@ -8728,6 +9153,7 @@ function processCustomStrategies() {
   processFibScalp();
   processPowerOf3();
   processGridScalperMA();
+  processFVGStrat();
 }
 
 /**
@@ -8740,6 +9166,7 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorFibScalpOutcomes(candle);
   monitorPo3Outcomes(candle);
   monitorGridScalperMAOutcomes(candle);
+  monitorFVGStratOutcomes(candle);
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -9279,6 +9706,9 @@ function buildStrategyTelegramCaption(signal) {
     stratEmoji = "🔲";
     const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
     stratLabel = `Grid Scalper MA [${modeLabel}]`;
+  } else if (signal.type === "fvg_strat") {
+    stratEmoji = "🎯";
+    stratLabel = "Fair Value Gap";
   }
 
   const lines = [];
@@ -9328,6 +9758,18 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`<b>Mode:</b> ${modeLabel}`);
     if (signal.mode === "bos" && signal.breakLevel != null) {
       lines.push(`<b>Break Level:</b> ${fmt(signal.breakLevel, 4)}`);
+    }
+  }
+  if (signal.type === "fvg_strat") {
+    lines.push(``);
+    if (signal.demandZoneHigh != null) {
+      lines.push(`<b>📦 Demand/Supply Zone:</b> [${fmtPrice(signal.demandZoneLow, symbol)} – ${fmtPrice(signal.demandZoneHigh, symbol)}]`);
+    }
+    if (signal.fvgHigh != null) {
+      lines.push(`<b>📊 FVG:</b> [${fmtPrice(signal.fvgLow, symbol)} – ${fmtPrice(signal.fvgHigh, symbol)}]`);
+    }
+    if (signal.fibLevel != null) {
+      lines.push(`<b>📐 Fib Level:</b> ${fmt(signal.fibLevel * 100, 0)}% (discount zone ≤ ${fmt(FVG_FIB_DISCOUNT * 100, 0)}%)`);
     }
   }
 
@@ -9451,6 +9893,7 @@ async function sendStrategyOutcomeTelegram(signal) {
       stratEmoji = "🔲";
       stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
     }
+    else if (signal.type === "fvg_strat") { stratEmoji = "🎯"; stratLabel = "Fair Value Gap"; }
 
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
@@ -9487,7 +9930,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     const allStratHistories = [
       liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
       po3History, fibScalpHistory, gridScalperMAHistory,
-      nyOpenRangeHistory, sessionRangeHistory
+      nyOpenRangeHistory, sessionRangeHistory, fvgStratHistory
     ];
     /* Per-strategy breakdown for this specific strategy.
        Note: this function is only called for secondary strategies — the main breakout
@@ -9501,7 +9944,8 @@ async function sendStrategyOutcomeTelegram(signal) {
       : signal.type === "grid_scalper_ma" ? gridScalperMAHistory
       : signal.type === "ny_open_range" ? nyOpenRangeHistory
       : signal.type === "session_range" ? sessionRangeHistory
-      : signal.type === "po3" ? po3History : null;
+      : signal.type === "po3" ? po3History
+      : signal.type === "fvg_strat" ? fvgStratHistory : null;
     for (const h of allStratHistories) {
       const isThis = h === thisHistory;
       for (const s of h) {
@@ -13504,7 +13948,8 @@ function drawChart() {
     { history: po3History,            enabled: po3Enabled,            emoji: "⚡", color: "#06b6d4" },
     { history: nyOpenRangeHistory,    enabled: nyOpenRangeEnabled,    emoji: "🕤", color: "#f97316" },
     { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" },
-    { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" }
+    { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" },
+    { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -13632,6 +14077,55 @@ function drawChart() {
         ctx.font = "bold 7px Arial";
         ctx.fillStyle = "rgba(251,191,36,0.8)";
         ctx.fillText("1H Open", fvgStartX + 2, ohY - 3);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  /* ---- Fair Value Gap Strategy: Demand/Supply zone + FVG zone on Chart ---- */
+  if (fvgStratEnabled && fvgStratHistory.length > 0) {
+    for (const s of fvgStratHistory) {
+      if (s.candleIdx < 0 || s.candleIdx >= candles.length) continue;
+      if (s.demandZoneHigh == null) continue;
+
+      const sx = xOf(s.candleIdx);
+      const zoneStartX = Math.max(marginLeft, sx - candleW * 8);
+      const zoneEndX   = Math.min(W - marginRight, sx + candleW * 8);
+
+      ctx.save();
+
+      /* Demand / Supply zone (shaded rectangle) */
+      const zTopY    = yOf(s.demandZoneHigh);
+      const zBottomY = yOf(s.demandZoneLow);
+      ctx.fillStyle = s.dir === "BULL"
+        ? "rgba(34,197,94,0.10)"    /* green for demand */
+        : "rgba(239,68,68,0.10)";   /* red for supply */
+      ctx.fillRect(zoneStartX, zTopY, zoneEndX - zoneStartX, zBottomY - zTopY);
+      ctx.strokeStyle = s.dir === "BULL" ? "#22c55e" : "#ef4444";
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(zoneStartX, zTopY, zoneEndX - zoneStartX, zBottomY - zTopY);
+      ctx.setLineDash([]);
+      ctx.font = "bold 7px Arial";
+      ctx.fillStyle = s.dir === "BULL" ? "#22c55e" : "#ef4444";
+      ctx.textAlign = "left";
+      ctx.fillText(s.dir === "BULL" ? "Demand" : "Supply", zoneStartX + 2, zTopY - 2);
+
+      /* FVG zone */
+      if (s.fvgHigh != null) {
+        const fvgTopY    = yOf(s.fvgHigh);
+        const fvgBottomY = yOf(s.fvgLow);
+        ctx.fillStyle = "rgba(251,191,36,0.10)";
+        ctx.fillRect(zoneStartX, fvgTopY, zoneEndX - zoneStartX, fvgBottomY - fvgTopY);
+        ctx.strokeStyle = "rgba(251,191,36,0.5)";
+        ctx.lineWidth = 0.6;
+        ctx.setLineDash([2, 2]);
+        ctx.strokeRect(zoneStartX, fvgTopY, zoneEndX - zoneStartX, fvgBottomY - fvgTopY);
+        ctx.setLineDash([]);
+        ctx.font = "bold 7px Arial";
+        ctx.fillStyle = "rgba(251,191,36,0.9)";
+        ctx.fillText("FVG", zoneStartX + 2, fvgTopY - 2);
       }
 
       ctx.restore();
@@ -14174,6 +14668,8 @@ function activatePanel(p) {
   lastPo3Idx            = p.lastPo3Idx            != null ? p.lastPo3Idx            : -999;
   gridScalperMAHistory  = p.gridScalperMAHistory  || [];
   lastGridScalperMAIdx  = p.lastGridScalperMAIdx  != null ? p.lastGridScalperMAIdx  : -999;
+  fvgStratHistory       = p.fvgStratHistory       || [];
+  lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
 
   /* Session Ranges */
   sessionRangeAsian   = p.sessionRangeAsian  || null;
@@ -14302,6 +14798,8 @@ function savePanel(p) {
   p.lastPo3Idx            = lastPo3Idx;
   p.gridScalperMAHistory  = gridScalperMAHistory;
   p.lastGridScalperMAIdx  = lastGridScalperMAIdx;
+  p.fvgStratHistory       = fvgStratHistory;
+  p.lastFvgStratIdx       = lastFvgStratIdx;
 
   /* Session Ranges */
   p.sessionRangeAsian   = sessionRangeAsian;
@@ -14603,6 +15101,8 @@ function connectPanel(p) {
   p.lastPo3Idx            = -999;
   p.gridScalperMAHistory  = [];
   p.lastGridScalperMAIdx  = -999;
+  p.fvgStratHistory       = [];
+  p.lastFvgStratIdx       = -999;
   p.nyOpenRangeHistory    = [];
   p.sessionRangeHistory   = [];
   p.connected = false;
@@ -15772,6 +16272,27 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeGridScalperMAToggle) {
     UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
       autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
+      saveSettings();
+    });
+  }
+
+  /* Strategy 9: Fair Value Gap (FVG) listener */
+  if (UI.fvgStratToggle) {
+    UI.fvgStratToggle.addEventListener("change", () => {
+      fvgStratEnabled = UI.fvgStratToggle.checked;
+      saveSettings();
+      if (fvgStratEnabled) {
+        addLog("🎯 Fair Value Gap strategy enabled — scanning for big-push origin zones at discount levels");
+        showToast("Fair Value Gap Enabled", "Scanning for demand/supply zones at Fibonacci discounts with FVG confluence.", "info", 5000);
+      } else {
+        addLog("🎯 Fair Value Gap strategy disabled");
+      }
+      drawChart();
+    });
+  }
+  if (UI.autoTradeFvgStratToggle) {
+    UI.autoTradeFvgStratToggle.addEventListener("change", () => {
+      autoTradeFvgStrat = UI.autoTradeFvgStratToggle.checked;
       saveSettings();
     });
   }
