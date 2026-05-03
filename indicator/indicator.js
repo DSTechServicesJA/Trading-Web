@@ -2086,7 +2086,7 @@ function processNyOpenRangeCandle(idx) {
       if (risk > 0) {
         const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
         const rr = 2.0;
-        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false };
+        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
 
         /* Push to history for strategy alerts panel */
         nyOpenRangeHistory.unshift(nyOpenRangeTrade);
@@ -2176,7 +2176,6 @@ function monitorNyOpenRangeTradeOutcome(candle) {
   if (histEntry) {
     histEntry.result = result;
     if (!histEntry._stratOutcomeSent) {
-      histEntry._stratOutcomeSent = true;
       sendStrategyOutcomeTelegram(histEntry);
     }
   }
@@ -2308,7 +2307,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry - risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false };
+        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -2364,7 +2363,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry + risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false };
+        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -2474,7 +2473,6 @@ function monitorSessionRangeTradeOutcome(candle) {
   if (histEntry) {
     histEntry.result = result;
     if (!histEntry._stratOutcomeSent) {
-      histEntry._stratOutcomeSent = true;
       /* sendStrategyOutcomeTelegram uses the general strategy alert channel (telegramStrategyAutoSend).
          sendSessionRangeOutcomeTelegram below uses the dedicated session-range channel (telegramSessionRangeOutcomeSend).
          These are two independent toggles, so both can fire. */
@@ -6874,6 +6872,7 @@ function processLiquiditySweep() {
   lastLiquiditySweepIdx = signal.candleIdx;
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   liquiditySweepHistory.unshift(signal);
   if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
 
@@ -6941,7 +6940,6 @@ function monitorLiquiditySweepOutcomes(candle) {
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of liquiditySweepHistory) {
       if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7092,6 +7090,7 @@ function processStopLossHunt() {
   const reEntry = !!prevStopped;
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   stopLossHuntHistory.unshift(signal);
   if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
 
@@ -7156,7 +7155,6 @@ function monitorStopLossHuntOutcomes(candle) {
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of stopLossHuntHistory) {
       if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7305,6 +7303,7 @@ function processFailedPinBar() {
   lastFailedPinBarIdx = signal.candleIdx;
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   failedPinBarHistory.unshift(signal);
   if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
 
@@ -7371,7 +7370,6 @@ function monitorFailedPinBarOutcomes(candle) {
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of failedPinBarHistory) {
       if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7587,6 +7585,7 @@ function processFibScalp() {
   lastFibScalpIdx = signal.candleIdx;
 
   signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   fibScalpHistory.unshift(signal);
   if (fibScalpHistory.length > FIB_SCALP_MAX_HISTORY) fibScalpHistory.pop();
 
@@ -7667,7 +7666,6 @@ function monitorFibScalpOutcomes(candle) {
     /* Send Telegram outcome for each newly resolved signal */
     for (const s of fibScalpHistory) {
       if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7959,6 +7957,7 @@ function processPowerOf3() {
   lastPo3Idx = signal.candleIdx;
 
   signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   po3History.unshift(signal);
   if (po3History.length > PO3_MAX_HISTORY) po3History.pop();
 
@@ -8054,12 +8053,16 @@ function monitorPo3Outcomes(candle) {
   if (changed) {
     let resolved = false;
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       PO3 is the only strategy with partial TP (which sets changed=true without
+       fully resolving). _po3Resolved tracks first resolution so the cooldown reset
+       and "resolved" log fire exactly once, independently of Telegram state.
+       Other strategies (liquiditySweep, stopLossHunt, etc.) reset their cooldown
+       unconditionally on every changed event, so they don't need this flag. */
     for (const s of po3History) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
-        sendStrategyOutcomeTelegram(s);
-        resolved = true;
+      if (s.result === "WIN" || s.result === "LOSS") {
+        if (!s._po3Resolved) { s._po3Resolved = true; resolved = true; }
+        if (!s._stratOutcomeSent) { sendStrategyOutcomeTelegram(s); }
       }
     }
     /* Only reset cooldown when trade fully resolves (not on partial TP) */
@@ -8100,7 +8103,7 @@ function _checkProfitExitAlert(s, candle, stratLabel) {
       if (reached) s._reached1R = true;
     }
   }
-  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && !_historicalProcessing) {
+  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && s._sentViaTelegram && !_historicalProcessing) {
     const atEntry = s.dir === "BULL" ? candle.close <= s.entry : candle.close >= s.entry;
     if (atEntry) {
       s._profitExitAlertSent = true;
@@ -8851,6 +8854,12 @@ async function sendTelegramStrategyAlert(signal) {
  */
 async function sendStrategyOutcomeTelegram(signal) {
   if (!telegramStrategyOutcomeSend) return;
+
+  /* Mark as sent now (while toggle is on) to prevent duplicate sends.
+     This is intentionally inside the toggle check so that if the toggle was off
+     when the outcome fired, the flag stays false and the notification can still
+     be sent later once the toggle is enabled. */
+  signal._stratOutcomeSent = true;
 
   /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
