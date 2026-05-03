@@ -8913,8 +8913,9 @@ function detectFVGStrat() {
   /* Make zone at least 0.3× ATR wide */
   const minZoneSize = atrValue * 0.3;
   if (demandZoneHigh - demandZoneLow < minZoneSize) {
-    demandZoneHigh = (demandZoneHigh + demandZoneLow) / 2 + minZoneSize / 2;
-    demandZoneLow  = (demandZoneHigh + demandZoneLow) / 2 - minZoneSize / 2;
+    const mid = (demandZoneHigh + demandZoneLow) / 2;
+    demandZoneHigh = mid + minZoneSize / 2;
+    demandZoneLow  = mid - minZoneSize / 2;
   }
 
   /* ---- Fibonacci retracement: swing low to swing high ---- */
@@ -9030,8 +9031,8 @@ function detectFVGStrat() {
     entry, sl, tp, rr,
     demandZoneHigh: zoneTop,
     demandZoneLow:  zoneBottom,
-    fvgHigh: fvgHigh != null ? Math.max(fvgHigh, fvgLow != null ? fvgLow : fvgHigh) : null,
-    fvgLow:  fvgLow  != null ? Math.min(fvgHigh != null ? fvgHigh : fvgLow, fvgLow)  : null,
+    fvgHigh: (fvgHigh != null && fvgLow != null) ? Math.max(fvgHigh, fvgLow) : (fvgHigh != null ? fvgHigh : fvgLow),
+    fvgLow:  (fvgHigh != null && fvgLow != null) ? Math.min(fvgHigh, fvgLow) : (fvgLow  != null ? fvgLow  : fvgHigh),
     fibLevel,
     swingHigh,
     swingLow,
@@ -14115,7 +14116,7 @@ function drawChart() {
       if (s.fvgHigh != null) {
         const fvgTopY    = yOf(s.fvgHigh);
         const fvgBottomY = yOf(s.fvgLow);
-        ctx.fillStyle = s.dir === "BULL" ? "rgba(251,191,36,0.10)" : "rgba(251,191,36,0.10)";
+        ctx.fillStyle = "rgba(251,191,36,0.10)";
         ctx.fillRect(zoneStartX, fvgTopY, zoneEndX - zoneStartX, fvgBottomY - fvgTopY);
         ctx.strokeStyle = "rgba(251,191,36,0.5)";
         ctx.lineWidth = 0.6;
