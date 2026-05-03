@@ -10503,13 +10503,14 @@ function isFalseBreakout(currentIdx) {
  * Maximum possible varies by market type (9-12).
  */
 function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
-  /* When called without args use main breakout context; with args (secondary strategies)
-     use the provided direction and level instead. */
+  /* When called without args: use main breakout context (full state available).
+     When called with args (secondary strategies): use the provided direction,
+     level, and candle index instead of breakout/retestInfo state. */
   const dir   = overrideDir   !== undefined ? overrideDir   : (breakout ? breakout.dir   : null);
   const level = overrideLevel !== undefined ? overrideLevel : (breakout ? breakout.level : null);
   if (!dir) return 0;
   /* hasBoCtx: true only when called with no args (main strategy — full breakout state available) */
-  const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && !!breakout;
+  const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && overrideCandleIdx === undefined && !!breakout;
 
   let score = 0;
 
