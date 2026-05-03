@@ -1689,6 +1689,56 @@ function fmt(v, d) {
 }
 
 /**
+ * Returns the correct number of decimal places to display a price for the
+ * given symbol, matching the precision accepted by MT5 for that instrument.
+ *
+ * Logic:
+ *   - For known forex pairs (pipSize ≤ 0.0001): d+1 (5-digit MT5 standard)
+ *   - For metal commodities (XAU, XAG, XPT, XPD): exact pip decimal places
+ *   - For forex pairs with pipSize > 0.0001 (e.g. JPY, 0.01): exact pip decimal places
+ *   - For synthetics / unknown symbols without a pipSize: inferred from
+ *     priceSample magnitude (≥10 000 → 2 dp, ≥1 000 → 3 dp, ≥100 → 4 dp, else 5 dp)
+ *
+ * @param {string}  symbol       – Deriv symbol identifier
+ * @param {number}  [priceSample] – a representative price used as fallback for synthetics
+ * @returns {number} number of decimal places
+ */
+function getSymbolDigits(symbol, priceSample) {
+  const sp = getSymbolSpecs(symbol);
+  if (sp && sp.pipSize) {
+    const d = Math.round(-Math.log10(sp.pipSize));
+    const isMetal = /^frx(XAU|XAG|XPT|XPD)/i.test(symbol || "");
+    /* Standard forex pairs use 5-digit (fractional pip) precision on MT5 */
+    if (!isMetal && sp.type === "forex" && sp.pipSize <= 0.0001) return d + 1;
+    return d;
+  }
+  /* Synthetics / unknown: infer from price magnitude */
+  if (priceSample != null && priceSample > 0) {
+    if (priceSample >= 10000) return 2;
+    if (priceSample >= 1000)  return 3;
+    if (priceSample >= 100)   return 4;
+    return 5;
+  }
+  return 5;
+}
+
+/**
+ * Format a price value to the correct decimal places for the given symbol.
+ * Uses getSymbolDigits() with the price itself as the fallback magnitude hint.
+ *
+ * @param {number} price  – the price to format
+ * @param {string} symbol – Deriv symbol identifier
+ * @returns {string}
+ */
+function fmtPrice(price, symbol) {
+  if (price == null) return "--";
+  const n = Number(price);
+  if (isNaN(n)) return "--";
+  const d = getSymbolDigits(symbol, n);
+  return n.toFixed(d);
+}
+
+/**
  * Returns the recommended MT5 order type based on entry price vs current price.
  *
  * MT5 pending-order rules:
@@ -2092,10 +2142,10 @@ function processNyOpenRangeCandle(idx) {
         nyOpenRangeHistory.unshift(nyOpenRangeTrade);
         if (nyOpenRangeHistory.length > NY_OPEN_RANGE_MAX_HISTORY) nyOpenRangeHistory.pop();
 
-        addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)} (midpoint), TP ${fmt(tp, 4)} (1:2 R:R)`);
+        addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())} (midpoint), TP ${fmtPrice(tp, getActiveSymbol())} (1:2 R:R)`);
         showToast(
           `NY Range Entry ${dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:2`,
+          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:2`,
           "trade", 12000
         );
         playPhaseAlert("TRADE");
@@ -2313,10 +2363,10 @@ function detectLondonAsianSweep() {
         sessionRangeHistory.unshift(sessionRangeTrade);
         if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
 
-        addLog(`🌍 London Sweep TRADE: SELL entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
+        addLog(`🌍 London Sweep TRADE: SELL entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())}, TP ${fmtPrice(tp, getActiveSymbol())} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▼ SELL Signal",
-          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmt(aH, 4)} — bearish reversal`,
+          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmtPrice(aH, getActiveSymbol())} — bearish reversal`,
           "trade", 12000
         );
 
@@ -2369,10 +2419,10 @@ function detectLondonAsianSweep() {
         sessionRangeHistory.unshift(sessionRangeTrade);
         if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
 
-        addLog(`🌍 London Sweep TRADE: BUY entry ${fmt(entry, 4)}, SL ${fmt(sl, 4)}, TP ${fmt(tp, 4)} (1:${fmt(rr, 1)} R:R)`);
+        addLog(`🌍 London Sweep TRADE: BUY entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())}, TP ${fmtPrice(tp, getActiveSymbol())} (1:${fmt(rr, 1)} R:R)`);
         showToast(
           "London Sweep ▲ BUY Signal",
-          `Entry: ${fmt(entry, 4)} | SL: ${fmt(sl, 4)} | TP: ${fmt(tp, 4)} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmt(aL, 4)} — bullish reversal`,
+          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmtPrice(aL, getActiveSymbol())} — bullish reversal`,
           "trade", 12000
         );
 
@@ -2518,12 +2568,13 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
 
   try {
     const sym = getSymbolLabel(resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "");
+    const activeSym = resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "";
     const dir = resolvedTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = resolvedTrade.result;
     const icon = result === "WIN" ? "✅" : "❌";
-    const entryStr = resolvedTrade.entry != null ? fmt(resolvedTrade.entry, 5) : "--";
-    const slStr = resolvedTrade.sl != null ? fmt(resolvedTrade.sl, 5) : "--";
-    const tpStr = resolvedTrade.tp != null ? fmt(resolvedTrade.tp, 5) : "--";
+    const entryStr = resolvedTrade.entry != null ? fmtPrice(resolvedTrade.entry, activeSym) : "--";
+    const slStr = resolvedTrade.sl != null ? fmtPrice(resolvedTrade.sl, activeSym) : "--";
+    const tpStr = resolvedTrade.tp != null ? fmtPrice(resolvedTrade.tp, activeSym) : "--";
     const rrStr = resolvedTrade.rr != null ? "1:" + fmt(resolvedTrade.rr, 1) : "--";
     const risk = Math.abs(resolvedTrade.entry - resolvedTrade.sl);
 
@@ -2658,6 +2709,7 @@ function captureChartScreenshot() {
  * Uses Telegram HTML parse mode for formatting.
  */
 function buildTelegramCaption() {
+  const activeSym = getActiveSymbol() || "";
   const symbol = UI.symbolSelect
     ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
        ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
@@ -2680,10 +2732,10 @@ function buildTelegramCaption() {
 
   if (trade) {
     lines.push(``);
-    lines.push(`<b>📍 Entry:</b> <code>${fmt(trade.entry, 5)}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${fmt(trade.sl, 5)}</code>`);
+    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(trade.entry, activeSym)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(trade.sl, activeSym)}</code>`);
     if (trade.tp != null && !pureTrailingEnabled) {
-      lines.push(`<b>🎯 TP:</b> <code>${fmt(trade.tp, 5)}</code>`);
+      lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(trade.tp, activeSym)}</code>`);
     }
     if (trade.rr != null) {
       lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
@@ -2700,29 +2752,29 @@ function buildTelegramCaption() {
       }
     }
     if (trailingSL != null && trailingStopEnabled) {
-      lines.push(`<b>Trailing SL:</b> <code>${fmt(trailingSL, 5)}</code>`);
+      lines.push(`<b>Trailing SL:</b> <code>${fmtPrice(trailingSL, activeSym)}</code>`);
     }
   }
 
   if (openingRange) {
     lines.push(``);
-    lines.push(`<b>Range High:</b> <code>${fmt(openingRange.high, 5)}</code>`);
-    lines.push(`<b>Range Low:</b> <code>${fmt(openingRange.low, 5)}</code>`);
+    lines.push(`<b>Range High:</b> <code>${fmtPrice(openingRange.high, activeSym)}</code>`);
+    lines.push(`<b>Range Low:</b> <code>${fmtPrice(openingRange.low, activeSym)}</code>`);
   }
 
   /* Session Ranges context */
   if (sessionRangesEnabled && sessionRangeAsian) {
     lines.push(``);
     lines.push(`<b>🌍 Session Ranges:</b>`);
-    lines.push(`  Asian: <code>${fmt(sessionRangeAsian.high, 5)}</code> / <code>${fmt(sessionRangeAsian.low, 5)}</code>${asianRangeTight ? " ⚡TIGHT" : ""}`);
+    lines.push(`  Asian: <code>${fmtPrice(sessionRangeAsian.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeAsian.low, activeSym)}</code>${asianRangeTight ? " ⚡TIGHT" : ""}`);
     if (sessionRangeLondon) {
-      lines.push(`  London: <code>${fmt(sessionRangeLondon.high, 5)}</code> / <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+      lines.push(`  London: <code>${fmtPrice(sessionRangeLondon.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeLondon.low, activeSym)}</code>`);
     }
     if (sessionRangeNY) {
-      lines.push(`  NY: <code>${fmt(sessionRangeNY.high, 5)}</code> / <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+      lines.push(`  NY: <code>${fmtPrice(sessionRangeNY.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeNY.low, activeSym)}</code>`);
     }
     if (londonSweepSignal) {
-      lines.push(`  Sweep: London ${londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${londonSweepSignal.dir} @ <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+      lines.push(`  Sweep: London ${londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${londonSweepSignal.dir} @ <code>${fmtPrice(londonSweepSignal.price, activeSym)}</code>`);
     }
   }
 
@@ -2922,12 +2974,13 @@ async function sendTradeOutcomeTelegram(signal) {
   if (!telegramOutcomeSend) return;
   try {
     const sym = getSymbolLabel(signal.symbol || "");
+    const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
     const icon = result === "WIN" ? "✅" : "❌";
-    const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
-    const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
-    const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
+    const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
     const rrStr = signal.rr != null ? "1:" + signal.rr.toFixed(1) : "--";
     const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
     const pattern = signal.confirmPattern || "--";
@@ -2942,7 +2995,7 @@ async function sendTradeOutcomeTelegram(signal) {
     lines.push(`<b>R:R:</b> ${rrStr}`);
     lines.push(`<b>Confluence:</b> ${confScore}`);
     if (signal.trailingSL != null) {
-      lines.push(`<b>Trailing SL:</b> ${fmt(signal.trailingSL, 4)}`);
+      lines.push(`<b>Trailing SL:</b> ${fmtPrice(signal.trailingSL, activeSym)}`);
     }
     if (signal.partialTpHit) {
       lines.push(`<b>Partial TP:</b> Hit at 1:1`);
@@ -3195,10 +3248,10 @@ function buildPanelTelegramCaption(p) {
 
   if (p.trade) {
     lines.push(``);
-    lines.push(`<b>📍 Entry:</b> <code>${fmt(p.trade.entry, 5)}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${fmt(p.trade.sl, 5)}</code>`);
+    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(p.trade.entry, p.symbol)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(p.trade.sl, p.symbol)}</code>`);
     if (p.trade.tp != null && !p.filters.pureTrailingEnabled) {
-      lines.push(`<b>🎯 TP:</b> <code>${fmt(p.trade.tp, 5)}</code>`);
+      lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(p.trade.tp, p.symbol)}</code>`);
     }
     if (p.trade.rr != null) {
       lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
@@ -3215,29 +3268,29 @@ function buildPanelTelegramCaption(p) {
       }
     }
     if (p.trailingSL != null && p.filters.trailingStopEnabled) {
-      lines.push(`<b>Trailing SL:</b> <code>${fmt(p.trailingSL, 5)}</code>`);
+      lines.push(`<b>Trailing SL:</b> <code>${fmtPrice(p.trailingSL, p.symbol)}</code>`);
     }
   }
 
   if (p.openingRange) {
     lines.push(``);
-    lines.push(`<b>Range High:</b> <code>${fmt(p.openingRange.high, 5)}</code>`);
-    lines.push(`<b>Range Low:</b> <code>${fmt(p.openingRange.low, 5)}</code>`);
+    lines.push(`<b>Range High:</b> <code>${fmtPrice(p.openingRange.high, p.symbol)}</code>`);
+    lines.push(`<b>Range Low:</b> <code>${fmtPrice(p.openingRange.low, p.symbol)}</code>`);
   }
 
   /* Session Ranges context */
   if (sessionRangesEnabled && p.sessionRangeAsian) {
     lines.push(``);
     lines.push(`<b>🌍 Session Ranges:</b>`);
-    lines.push(`  Asian: <code>${fmt(p.sessionRangeAsian.high, 5)}</code> / <code>${fmt(p.sessionRangeAsian.low, 5)}</code>${p.asianRangeTight ? " ⚡TIGHT" : ""}`);
+    lines.push(`  Asian: <code>${fmtPrice(p.sessionRangeAsian.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeAsian.low, p.symbol)}</code>${p.asianRangeTight ? " ⚡TIGHT" : ""}`);
     if (p.sessionRangeLondon) {
-      lines.push(`  London: <code>${fmt(p.sessionRangeLondon.high, 5)}</code> / <code>${fmt(p.sessionRangeLondon.low, 5)}</code>`);
+      lines.push(`  London: <code>${fmtPrice(p.sessionRangeLondon.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeLondon.low, p.symbol)}</code>`);
     }
     if (p.sessionRangeNY) {
-      lines.push(`  NY: <code>${fmt(p.sessionRangeNY.high, 5)}</code> / <code>${fmt(p.sessionRangeNY.low, 5)}</code>`);
+      lines.push(`  NY: <code>${fmtPrice(p.sessionRangeNY.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeNY.low, p.symbol)}</code>`);
     }
     if (p.londonSweepSignal) {
-      lines.push(`  Sweep: London ${p.londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${p.londonSweepSignal.dir} @ <code>${fmt(p.londonSweepSignal.price, 5)}</code>`);
+      lines.push(`  Sweep: London ${p.londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${p.londonSweepSignal.dir} @ <code>${fmtPrice(p.londonSweepSignal.price, p.symbol)}</code>`);
     }
   }
 
@@ -3907,9 +3960,9 @@ function renderSignalBanner() {
     const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const sym = s.symbol || "--";
     const isConfirmed = resultLower === "confirmed";
-    const entryStr = s.entry != null ? fmt(s.entry, 4) : "--";
-    const slStr = s.sl != null ? fmt(s.sl, 4) : "--";
-    const tpStr = s.tp != null ? fmt(s.tp, 4) : "--";
+    const entryStr = s.entry != null ? fmtPrice(s.entry, s.symbol) : "--";
+    const slStr = s.sl != null ? fmtPrice(s.sl, s.symbol) : "--";
+    const tpStr = s.tp != null ? fmtPrice(s.tp, s.symbol) : "--";
     const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
     const confStr = s.confluenceScore != null ? s.confluenceScore + "/16" : "";
     const patternStr = s.confirmPattern || "";
@@ -3973,9 +4026,9 @@ function renderScalpTickerBanner() {
     const t = new Date(s.epoch * 1000);
     const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const sym = s.symbol || getActiveSymbol() || "--";
-    const entryStr = fmt(s.entry, 4);
-    const slStr = fmt(s.sl, 4);
-    const tpStr = fmt(s.tp, 4);
+    const entryStr = fmtPrice(s.entry, s.symbol);
+    const slStr = fmtPrice(s.sl, s.symbol);
+    const tpStr = fmtPrice(s.tp, s.symbol);
     const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
     const reasonsStr = s.reasons.slice(0, 2).join(" · ");
 
@@ -4088,9 +4141,9 @@ function renderStrategyTickerBanner() {
     const t = new Date(s.epoch * 1000);
     const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const sym = s.symbol || getActiveSymbol() || "--";
-    const entryStr = fmt(s.entry, 4);
-    const slStr = fmt(s.sl, 4);
-    const tpStr = fmt(s.tp, 4);
+    const entryStr = fmtPrice(s.entry, s.symbol);
+    const slStr = fmtPrice(s.sl, s.symbol);
+    const tpStr = fmtPrice(s.tp, s.symbol);
     const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
     const typeLabel = s._stratLabel || s.type || "--";
 
@@ -5449,17 +5502,17 @@ function updateStateUI() {
   }
   if (UI.sessionRangeEntryDisplay) {
     UI.sessionRangeEntryDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmt(sessionRangeTrade.entry, 4) : "--";
+      ? fmtPrice(sessionRangeTrade.entry, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
     UI.sessionRangeEntryDisplay.className = sessionRangeTrade ? "status-badge disabled" : "env-label";
   }
   if (UI.sessionRangeSLDisplay) {
     UI.sessionRangeSLDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmt(sessionRangeTrade.sl, 4) : "--";
+      ? fmtPrice(sessionRangeTrade.sl, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
     UI.sessionRangeSLDisplay.className = sessionRangeTrade ? "status-badge bear" : "env-label";
   }
   if (UI.sessionRangeTPDisplay) {
     UI.sessionRangeTPDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmt(sessionRangeTrade.tp, 4) : "--";
+      ? fmtPrice(sessionRangeTrade.tp, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
     UI.sessionRangeTPDisplay.className = sessionRangeTrade ? "status-badge bull" : "env-label";
   }
   if (UI.sessionRangeRRDisplay) {
@@ -5578,9 +5631,10 @@ function updateStateUI() {
   }
 
   if (trade) {
-    if (UI.entryPrice) UI.entryPrice.textContent = fmt(trade.entry, 4);
-    if (UI.slPrice) UI.slPrice.textContent    = fmt(trade.sl, 4);
-    if (UI.tpPrice) UI.tpPrice.textContent    = trade.tp != null ? fmt(trade.tp, 4) : "TRAILING";
+    const activeSym = getActiveSymbol();
+    if (UI.entryPrice) UI.entryPrice.textContent = fmtPrice(trade.entry, activeSym);
+    if (UI.slPrice) UI.slPrice.textContent    = fmtPrice(trade.sl, activeSym);
+    if (UI.tpPrice) UI.tpPrice.textContent    = trade.tp != null ? fmtPrice(trade.tp, activeSym) : "TRAILING";
     if (UI.rrDisplay) UI.rrDisplay.textContent  = `1 : ${fmt(trade.rr, 1)}`;
 
     /* Account-based $ Risk / $ Reward / Position Size */
@@ -6881,17 +6935,17 @@ function processLiquiditySweep() {
 
   /* Log */
   const symbol = getActiveSymbol() || "--";
-  addLog(`🌊 LIQUIDITY SWEEP ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | Range [${fmt(signal.range.low, 4)}–${fmt(signal.range.high, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+  addLog(`🌊 LIQUIDITY SWEEP ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Range [${fmtPrice(signal.range.low, symbol)}–${fmtPrice(signal.range.high, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
 
   showToast(
     `Liquidity Sweep ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
     "trade", 10000
   );
 
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmt(signal.entry, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
     throttledNotification("IT Guru: Liquidity Sweep!", body);
   }
 
@@ -7098,16 +7152,16 @@ function processStopLossHunt() {
 
   const symbol = getActiveSymbol() || "--";
   const reLabel = reEntry ? " (RE-ENTRY — stop hunt of stop hunters)" : "";
-  addLog(`🎯 STOP LOSS HUNT ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)} | Level ${fmt(signal.level.level, 4)} (${signal.level.touches} touches) | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+  addLog(`🎯 STOP LOSS HUNT ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Level ${fmtPrice(signal.level.level, symbol)} (${signal.level.touches} touches) | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
 
   showToast(
     `Stop Loss Hunt ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel}`,
-    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
     "trade", 10000
   );
 
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmt(signal.entry, 4)}\nLevel: ${fmt(signal.level.level, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nLevel: ${fmtPrice(signal.level.level, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
     throttledNotification("IT Guru: Stop Loss Hunt!", body);
   }
 
@@ -7311,16 +7365,16 @@ function processFailedPinBar() {
 
   const symbol = getActiveSymbol() || "--";
   const stateEmoji = signal.state === "fear" ? "😱" : "🤑";
-  addLog(`${stateEmoji} FAILED PIN BAR ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | State: ${signal.state.toUpperCase()} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+  addLog(`${stateEmoji} FAILED PIN BAR ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | State: ${signal.state.toUpperCase()} | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
 
   showToast(
     `Failed Pin Bar ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmt(signal.entry, 4)} | ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | ${signal.state.toUpperCase()} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
     "trade", 10000
   );
 
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmt(signal.entry, 4)}\nState: ${signal.state.toUpperCase()} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nState: ${signal.state.toUpperCase()} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
     throttledNotification("IT Guru: Failed Pin Bar!", body);
   }
 
@@ -7594,17 +7648,17 @@ function processFibScalp() {
 
   /* Log */
   const symbol = getActiveSymbol() || "--";
-  addLog(`📐 FIB GOLDEN ZONE ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | Golden Zone [${fmt(signal.goldenLow, 4)}–${fmt(signal.goldenHigh, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`);
+  addLog(`📐 FIB GOLDEN ZONE ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Golden Zone [${fmtPrice(signal.goldenLow, symbol)}–${fmtPrice(signal.goldenHigh, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`);
 
   showToast(
     `Fib Golden Zone ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
     "trade", 10000
   );
 
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `📐 ${signal.dir} Fib Golden Zone — ${symbol} @ ${fmt(signal.entry, 4)}\nGolden Zone: ${fmt(signal.goldenLow, 4)}–${fmt(signal.goldenHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    const body = `📐 ${signal.dir} Fib Golden Zone — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nGolden Zone: ${fmtPrice(signal.goldenLow, symbol)}–${fmtPrice(signal.goldenHigh, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
     throttledNotification("IT Guru: Fib Golden Zone Scalp!", body);
   }
 
@@ -7966,17 +8020,17 @@ function processPowerOf3() {
 
   /* Log */
   const symbol = getActiveSymbol() || "--";
-  addLog(`⚡ PO3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmt(signal.entry, 4)} | 1H Open ${fmt(signal.oneHourOpen, 4)} | Sweep ${fmt(signal.sweepPrice, 4)} | FVG [${fmt(signal.fvgLow, 4)}–${fmt(signal.fvgHigh, 4)}] | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`);
+  addLog(`⚡ PO3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | 1H Open ${fmtPrice(signal.oneHourOpen, symbol)} | Sweep ${fmtPrice(signal.sweepPrice, symbol)} | FVG [${fmtPrice(signal.fvgLow, symbol)}–${fmtPrice(signal.fvgHigh, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`);
 
   showToast(
     `Power of 3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmt(signal.entry, 4)} | 1H Open: ${fmt(signal.oneHourOpen, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)} | R:R 1:${fmt(signal.rr, 1)}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | 1H Open: ${fmtPrice(signal.oneHourOpen, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
     "trade", 10000
   );
 
   /* Browser notification */
   if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `⚡ ${signal.dir} Power of 3 — ${symbol} @ ${fmt(signal.entry, 4)}\n1H Open: ${fmt(signal.oneHourOpen, 4)} | Sweep: ${fmt(signal.sweepPrice, 4)}\nFVG: ${fmt(signal.fvgLow, 4)}–${fmt(signal.fvgHigh, 4)}\nSL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`;
+    const body = `⚡ ${signal.dir} Power of 3 — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\n1H Open: ${fmtPrice(signal.oneHourOpen, symbol)} | Sweep: ${fmtPrice(signal.sweepPrice, symbol)}\nFVG: ${fmtPrice(signal.fvgLow, symbol)}–${fmtPrice(signal.fvgHigh, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
     throttledNotification("IT Guru: Power of 3 Signal!", body);
   }
 
@@ -8027,10 +8081,10 @@ function monitorPo3Outcomes(candle) {
         s.partialTpHit = true;
         s._reached1R = true;  /* also mark for profit exit alert tracking */
         s.sl = s.entry;  /* slide SL to breakeven */
-        addLog(`⚡ PO3 Partial TP hit (1R) — SL moved to breakeven @ ${fmt(s.entry, 4)}, running to full TP ${fmt(s.tp, 4)}`);
+        addLog(`⚡ PO3 Partial TP hit (1R) — SL moved to breakeven @ ${fmtPrice(s.entry, s.symbol)}, running to full TP ${fmtPrice(s.tp, s.symbol)}`);
         showToast(
           `PO3 Partial TP ✓`,
-          `1R hit — SL → breakeven @ ${fmt(s.entry, 4)} | Full TP @ ${fmt(s.tp, 4)}`,
+          `1R hit — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)} | Full TP @ ${fmtPrice(s.tp, s.symbol)}`,
           "info", 6000
         );
         changed = true;
@@ -8043,11 +8097,11 @@ function monitorPo3Outcomes(candle) {
 
     /* Check SL / TP */
     if (s.dir === "BULL") {
-      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
-      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      if (candle.low <= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
+      else if (candle.high >= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     } else {
-      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmt(s.sl, 4)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
-      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      if (candle.high >= s.sl) { s.result = "LOSS"; addLog(`⚡ PO3 LOSS — hit SL @ ${fmtPrice(s.sl, s.symbol)}${s.partialTpHit ? " (breakeven)" : ""}`); changed = true; }
+      else if (candle.low <= s.tp) { s.result = "WIN"; addLog(`⚡ PO3 WIN — hit TP @ ${fmtPrice(s.tp, s.symbol)}`); changed = true; }
     }
   }
   if (changed) {
@@ -8536,9 +8590,9 @@ function buildScalpTelegramCaption(scalp) {
   }
 
   lines.push(``);
-  lines.push(`<b>📍 Entry:</b> <code>${fmt(scalp.entry, 5)}</code>`);
-  lines.push(`<b>🛑 SL:</b> <code>${fmt(scalp.sl, 5)}</code>`);
-  lines.push(`<b>🎯 TP:</b> <code>${fmt(scalp.tp, 5)}</code>`);
+  lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(scalp.entry, symbol)}</code>`);
+  lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(scalp.sl, symbol)}</code>`);
+  lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(scalp.tp, symbol)}</code>`);
   if (scalp.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(scalp.rr, 1)}`);
   }
@@ -8637,12 +8691,13 @@ async function sendScalpOutcomeTelegram(scalp) {
 
   try {
     const sym = getSymbolLabel(scalp.symbol || getActiveSymbol() || "");
+    const activeSym = scalp.symbol || getActiveSymbol() || "";
     const dir = scalp.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = scalp.result;
     const icon = result === "WIN" ? "✅" : "❌";
-    const entryStr = scalp.entry != null ? fmt(scalp.entry, 5) : "--";
-    const slStr = scalp.sl != null ? fmt(scalp.sl, 5) : "--";
-    const tpStr = scalp.tp != null ? fmt(scalp.tp, 5) : "--";
+    const entryStr = scalp.entry != null ? fmtPrice(scalp.entry, activeSym) : "--";
+    const slStr = scalp.sl != null ? fmtPrice(scalp.sl, activeSym) : "--";
+    const tpStr = scalp.tp != null ? fmtPrice(scalp.tp, activeSym) : "--";
     const rrStr = scalp.rr != null ? "1:" + fmt(scalp.rr, 1) : "--";
     const confScore = scalp.conf != null ? scalp.conf + "/7" : "--";
     const reasons = scalp.reasons ? scalp.reasons.join(", ") : "--";
@@ -8749,9 +8804,9 @@ function buildStrategyTelegramCaption(signal) {
   }
 
   lines.push(``);
-  lines.push(`<b>📍 Entry:</b> <code>${fmt(signal.entry, 4)}</code>`);
-  lines.push(`<b>🛑 SL:</b> <code>${fmt(signal.sl, 4)}</code>`);
-  lines.push(`<b>🎯 TP:</b> <code>${fmt(signal.tp, 4)}</code>`);
+  lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
+  lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(signal.sl, symbol)}</code>`);
+  lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
   }
@@ -8759,11 +8814,11 @@ function buildStrategyTelegramCaption(signal) {
   /* Strategy-specific details */
   if (signal.type === "liquidity_sweep" && signal.range) {
     lines.push(``);
-    lines.push(`<b>Range:</b> [${fmt(signal.range.low, 4)} – ${fmt(signal.range.high, 4)}]`);
+    lines.push(`<b>Range:</b> [${fmtPrice(signal.range.low, symbol)} – ${fmtPrice(signal.range.high, symbol)}]`);
   }
   if (signal.type === "stop_loss_hunt" && signal.level) {
     lines.push(``);
-    lines.push(`<b>Key Level:</b> ${fmt(signal.level.level, 4)} (${signal.level.touches} touches)`);
+    lines.push(`<b>Key Level:</b> ${fmtPrice(signal.level.level, symbol)} (${signal.level.touches} touches)`);
   }
   if (signal.type === "failed_pin_bar" && signal.state) {
     lines.push(``);
@@ -8771,8 +8826,8 @@ function buildStrategyTelegramCaption(signal) {
   }
   if (signal.type === "fib_scalp" && signal.goldenLow != null) {
     lines.push(``);
-    lines.push(`<b>Golden Zone:</b> [${fmt(signal.goldenLow, 4)} – ${fmt(signal.goldenHigh, 4)}]`);
-    lines.push(`<b>Fib Range:</b> [${fmt(signal.fibLow, 4)} – ${fmt(signal.fibHigh, 4)}]`);
+    lines.push(`<b>Golden Zone:</b> [${fmtPrice(signal.goldenLow, symbol)} – ${fmtPrice(signal.goldenHigh, symbol)}]`);
+    lines.push(`<b>Fib Range:</b> [${fmtPrice(signal.fibLow, symbol)} – ${fmtPrice(signal.fibHigh, symbol)}]`);
   }
 
   /* Lot size / position sizing based on account amount */
@@ -8875,12 +8930,13 @@ async function sendStrategyOutcomeTelegram(signal) {
 
   try {
     const sym = getSymbolLabel(signal.symbol || getActiveSymbol() || "");
+    const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
     const icon = result === "WIN" ? "✅" : "❌";
-    const entryStr = signal.entry != null ? fmt(signal.entry, 4) : "--";
-    const slStr = signal.sl != null ? fmt(signal.sl, 4) : "--";
-    const tpStr = signal.tp != null ? fmt(signal.tp, 4) : "--";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
+    const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
     const rrStr = signal.rr != null ? "1:" + fmt(signal.rr, 1) : "--";
 
     /* Strategy-specific emoji and label */
@@ -8903,7 +8959,7 @@ async function sendStrategyOutcomeTelegram(signal) {
       lines.push(`<b>State:</b> ${signal.state === "fear" ? "😱 FEAR" : "🤑 GREED"}`);
     }
     if (signal.type === "fib_scalp" && signal.goldenLow != null) {
-      lines.push(`<b>Golden Zone:</b> [${fmt(signal.goldenLow, 4)} – ${fmt(signal.goldenHigh, 4)}]`);
+      lines.push(`<b>Golden Zone:</b> [${fmtPrice(signal.goldenLow, activeSym)} – ${fmtPrice(signal.goldenHigh, activeSym)}]`);
     }
 
     /* Lot size / position sizing based on account amount */
@@ -8983,10 +9039,11 @@ async function sendProfitExitAlertTelegram(signal, stratLabel) {
 
   try {
     const sym = getSymbolLabel(signal.symbol || getActiveSymbol() || "");
+    const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const entryStr = signal.entry != null ? fmt(signal.entry, 5) : "--";
-    const slStr    = signal.sl    != null ? fmt(signal.sl, 5)    : "--";
-    const tpStr    = signal.tp    != null ? fmt(signal.tp, 5)    : "--";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+    const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
     const rrStr    = signal.rr    != null ? "1:" + fmt(signal.rr, 1) : "--";
 
     const origSl = signal._origSl != null ? signal._origSl : signal.sl;
@@ -9004,7 +9061,9 @@ async function sendProfitExitAlertTelegram(signal, stratLabel) {
     lines.push(`<b>🎯 TP:</b> <code>${tpStr}</code>`);
     lines.push(`<b>R:R:</b> ${rrStr}`);
     if (risk != null && risk > 0) {
-      const oneRStr = signal.dir === "BULL" ? fmt(signal.entry + risk, 5) : fmt(signal.entry - risk, 5);
+      const oneRStr = signal.dir === "BULL"
+        ? fmtPrice(signal.entry + risk, activeSym)
+        : fmtPrice(signal.entry - risk, activeSym);
       lines.push(`<b>1R level hit:</b> <code>${oneRStr}</code>`);
     }
     lines.push(``);
@@ -9022,6 +9081,7 @@ async function sendProfitExitAlertTelegram(signal, stratLabel) {
  * @param {"TIGHT_ASIAN"|"LONDON_SWEEP"} signalType
  */
 function buildSessionRangeTelegramCaption(signalType) {
+  const activeSym = getActiveSymbol() || "";
   const symbol = UI.symbolSelect
     ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
        ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
@@ -9044,34 +9104,34 @@ function buildSessionRangeTelegramCaption(signalType) {
     lines.push(``);
     if (sessionRangeAsian) {
       lines.push(`<b>Asian Range:</b>`);
-      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
-      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      lines.push(`  High: <code>${fmtPrice(sessionRangeAsian.high, activeSym)}</code>`);
+      lines.push(`  Low: <code>${fmtPrice(sessionRangeAsian.low, activeSym)}</code>`);
       const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
-      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>${asianRangeTight ? " ⚡ TIGHT" : ""}`);
+      lines.push(`  Size: <code>${fmtPrice(rangeSize, activeSym)}</code>${asianRangeTight ? " ⚡ TIGHT" : ""}`);
     }
     if (londonSweepSignal) {
       lines.push(``);
-      lines.push(`<b>Sweep Price:</b> <code>${fmt(londonSweepSignal.price, 5)}</code>`);
+      lines.push(`<b>Sweep Price:</b> <code>${fmtPrice(londonSweepSignal.price, activeSym)}</code>`);
       lines.push(`<b>Signal:</b> Potential ${reversal} reversal`);
     }
     if (sessionRangeTrade) {
       const trDir = sessionRangeTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
       lines.push(``);
       lines.push(`<b>🎯 Trade Setup:</b> ${trDir}`);
-      lines.push(`<b>📍 Entry:</b> <code>${fmt(sessionRangeTrade.entry, 5)}</code>`);
-      lines.push(`<b>🛑 SL:</b> <code>${fmt(sessionRangeTrade.sl, 5)}</code>`);
-      lines.push(`<b>🎯 TP:</b> <code>${fmt(sessionRangeTrade.tp, 5)}</code>`);
+      lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(sessionRangeTrade.entry, activeSym)}</code>`);
+      lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(sessionRangeTrade.sl, activeSym)}</code>`);
+      lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(sessionRangeTrade.tp, activeSym)}</code>`);
       lines.push(`<b>R:R:</b> 1:${fmt(sessionRangeTrade.rr, 1)}`);
       const trRisk = Math.abs(sessionRangeTrade.entry - sessionRangeTrade.sl);
       if (trRisk > 0) {
-        lines.push(`<b>Risk (pips):</b> <code>${fmt(trRisk, 5)}</code>`);
+        lines.push(`<b>Risk (pips):</b> <code>${fmtPrice(trRisk, activeSym)}</code>`);
       }
     }
     if (sessionRangeLondon) {
       lines.push(``);
       lines.push(`<b>London Range:</b>`);
-      lines.push(`  High: <code>${fmt(sessionRangeLondon.high, 5)}</code>`);
-      lines.push(`  Low: <code>${fmt(sessionRangeLondon.low, 5)}</code>`);
+      lines.push(`  High: <code>${fmtPrice(sessionRangeLondon.high, activeSym)}</code>`);
+      lines.push(`  Low: <code>${fmtPrice(sessionRangeLondon.low, activeSym)}</code>`);
     }
   } else {
     /* TIGHT_ASIAN */
@@ -9082,12 +9142,12 @@ function buildSessionRangeTelegramCaption(signalType) {
     lines.push(``);
     if (sessionRangeAsian) {
       lines.push(`<b>Asian Range:</b>`);
-      lines.push(`  High: <code>${fmt(sessionRangeAsian.high, 5)}</code>`);
-      lines.push(`  Low: <code>${fmt(sessionRangeAsian.low, 5)}</code>`);
+      lines.push(`  High: <code>${fmtPrice(sessionRangeAsian.high, activeSym)}</code>`);
+      lines.push(`  Low: <code>${fmtPrice(sessionRangeAsian.low, activeSym)}</code>`);
       const rangeSize = sessionRangeAsian.high - sessionRangeAsian.low;
-      lines.push(`  Size: <code>${fmt(rangeSize, 5)}</code>`);
+      lines.push(`  Size: <code>${fmtPrice(rangeSize, activeSym)}</code>`);
       if (atrValue > 0) {
-        lines.push(`  ATR: <code>${fmt(atrValue, 5)}</code>`);
+        lines.push(`  ATR: <code>${fmtPrice(atrValue, activeSym)}</code>`);
         lines.push(`  Ratio: ${fmt(rangeSize / atrValue, 2)}× ATR (< ${ASIAN_TIGHT_ATR_MULT}×)`);
       }
     }
@@ -9098,8 +9158,8 @@ function buildSessionRangeTelegramCaption(signalType) {
   if (sessionRangeNY) {
     lines.push(``);
     lines.push(`<b>NY Range:</b>`);
-    lines.push(`  High: <code>${fmt(sessionRangeNY.high, 5)}</code>`);
-    lines.push(`  Low: <code>${fmt(sessionRangeNY.low, 5)}</code>`);
+    lines.push(`  High: <code>${fmtPrice(sessionRangeNY.high, activeSym)}</code>`);
+    lines.push(`  Low: <code>${fmtPrice(sessionRangeNY.low, activeSym)}</code>`);
   }
 
   lines.push(``);
@@ -9183,11 +9243,11 @@ function renderScalpAlerts() {
     li.innerHTML =
       `<span class="scalp-dir">${s.dir === "BULL" ? "▲ BUY" : "▼ SELL"}</span>` +
       (s.symbol ? `<span class="scalp-symbol">${s.symbol}</span>` : "") +
-      `<span class="scalp-price">@ ${fmt(s.entry, 4)}</span>` +
+      `<span class="scalp-price">@ ${fmtPrice(s.entry, s.symbol)}</span>` +
       `<span class="scalp-conf">${s.conf}/7</span>` +
       `<span class="scalp-time">${ts}</span>` +
       `<div class="scalp-reasons">${s.reasons.join(" · ")}</div>` +
-      `<div class="scalp-levels">SL: ${fmt(s.sl, 4)} &nbsp;|&nbsp; TP: ${fmt(s.tp, 4)}</div>`;
+      `<div class="scalp-levels">SL: ${fmtPrice(s.sl, s.symbol)} &nbsp;|&nbsp; TP: ${fmtPrice(s.tp, s.symbol)}</div>`;
     UI.scalpAlertList.appendChild(li);
   }
   if (UI.scalpAlertCount) UI.scalpAlertCount.textContent = allScalps.length;
@@ -12343,7 +12403,7 @@ function drawChart() {
       ctx.lineTo(W - marginRight, slY);
       ctx.stroke();
       ctx.fillStyle = COLORS.sl || "#f43f5e";
-      ctx.fillText(`SL ${fmt(nt.sl, 4)} (mid)`, W - marginRight - 4, slY - 4);
+      ctx.fillText(`SL ${fmtPrice(nt.sl, getActiveSymbol())} (mid)`, W - marginRight - 4, slY - 4);
 
       /* TP line */
       if (nt.tp != null) {
@@ -12354,7 +12414,7 @@ function drawChart() {
         ctx.lineTo(W - marginRight, tpY);
         ctx.stroke();
         ctx.fillStyle = COLORS.tp || "#10b981";
-        ctx.fillText(`TP ${fmt(nt.tp, 4)} (1:2)`, W - marginRight - 4, tpY - 4);
+        ctx.fillText(`TP ${fmtPrice(nt.tp, getActiveSymbol())} (1:2)`, W - marginRight - 4, tpY - 4);
       }
 
       ctx.setLineDash([]);
@@ -12425,7 +12485,7 @@ function drawChart() {
       ctx.fillStyle = COLORS.entryLine || "#a855f7";
       ctx.font = "bold 10px Arial";
       ctx.textAlign = "right";
-      ctx.fillText(`ENTRY ${fmt(srt.entry, 4)}`, W - marginRight - 4, srtEntryY - 4);
+      ctx.fillText(`ENTRY ${fmtPrice(srt.entry, srt.symbol || getActiveSymbol())}`, W - marginRight - 4, srtEntryY - 4);
 
       /* SL line */
       const srtSlY = yOf(srt.sl);
@@ -12437,7 +12497,7 @@ function drawChart() {
       ctx.lineTo(W - marginRight, srtSlY);
       ctx.stroke();
       ctx.fillStyle = COLORS.sl || "#f43f5e";
-      ctx.fillText(`SL ${fmt(srt.sl, 4)}`, W - marginRight - 4, srtSlY - 4);
+      ctx.fillText(`SL ${fmtPrice(srt.sl, srt.symbol || getActiveSymbol())}`, W - marginRight - 4, srtSlY - 4);
 
       /* TP line */
       if (srt.tp != null) {
@@ -12448,7 +12508,7 @@ function drawChart() {
         ctx.lineTo(W - marginRight, srtTpY);
         ctx.stroke();
         ctx.fillStyle = COLORS.tp || "#10b981";
-        ctx.fillText(`TP ${fmt(srt.tp, 4)} (1:${fmt(srt.rr, 1)})`, W - marginRight - 4, srtTpY - 4);
+        ctx.fillText(`TP ${fmtPrice(srt.tp, srt.symbol || getActiveSymbol())} (1:${fmt(srt.rr, 1)})`, W - marginRight - 4, srtTpY - 4);
       }
 
       ctx.setLineDash([]);
@@ -12600,15 +12660,16 @@ function drawChart() {
 
   /* ---- Trade levels: Entry / SL / TP ---- */
   if (trade) {
-    drawHLine(ctx, yOf(trade.entry), marginLeft, W - marginRight, COLORS.entryLine, "ENTRY " + fmt(trade.entry, 4), W, marginRight);
-    drawHLine(ctx, yOf(trade.sl),    marginLeft, W - marginRight, COLORS.slLine,    "SL " + fmt(trade.sl, 4), W, marginRight);
+    const activeSym = getActiveSymbol();
+    drawHLine(ctx, yOf(trade.entry), marginLeft, W - marginRight, COLORS.entryLine, "ENTRY " + fmtPrice(trade.entry, activeSym), W, marginRight);
+    drawHLine(ctx, yOf(trade.sl),    marginLeft, W - marginRight, COLORS.slLine,    "SL " + fmtPrice(trade.sl, activeSym), W, marginRight);
     if (trade.tp != null) {
-      drawHLine(ctx, yOf(trade.tp), marginLeft, W - marginRight, COLORS.tpLine, "TP " + fmt(trade.tp, 4), W, marginRight);
+      drawHLine(ctx, yOf(trade.tp), marginLeft, W - marginRight, COLORS.tpLine, "TP " + fmtPrice(trade.tp, activeSym), W, marginRight);
     }
 
     /* Trailing SL line (if different from original SL) */
     if (trailingSL != null && trailingSL !== trade.sl) {
-      drawHLine(ctx, yOf(trailingSL), marginLeft, W - marginRight, COLORS.trailingSL || "#f97316", "TRAIL " + fmt(trailingSL, 4), W, marginRight);
+      drawHLine(ctx, yOf(trailingSL), marginLeft, W - marginRight, COLORS.trailingSL || "#f97316", "TRAIL " + fmtPrice(trailingSL, activeSym), W, marginRight);
     }
 
     /* Partial TP line at 1:1 level */
@@ -12616,7 +12677,7 @@ function drawChart() {
       const risk = Math.abs(trade.entry - trade.sl);
       const partialLevel = trade.dir === "BULL" ? trade.entry + risk : trade.entry - risk;
       const partialColor = partialTpHit ? "rgba(34,197,94,0.5)" : "rgba(168,85,247,0.4)";
-      drawHLine(ctx, yOf(partialLevel), marginLeft, W - marginRight, partialColor, "1:1 " + fmt(partialLevel, 4), W, marginRight);
+      drawHLine(ctx, yOf(partialLevel), marginLeft, W - marginRight, partialColor, "1:1 " + fmtPrice(partialLevel, activeSym), W, marginRight);
     }
 
     const entryY = yOf(trade.entry);
@@ -12726,7 +12787,7 @@ function drawChart() {
     const symbolLabel = sel ? (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : sel.value) : "";
     const sigDir = trade.dir === "BULL" ? "▲ BUY" : "▼ SELL";
     const sigColor = trade.dir === "BULL" ? "#22c55e" : "#ef4444";
-    const sigText = `${sigDir}  ${symbolLabel}  @  ${fmt(trade.entry, 4)}`;
+    const sigText = `${sigDir}  ${symbolLabel}  @  ${fmtPrice(trade.entry, getActiveSymbol())}`;
 
     ctx.save();
     ctx.font = "bold 13px Arial";
