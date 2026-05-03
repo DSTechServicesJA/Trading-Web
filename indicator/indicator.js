@@ -2155,7 +2155,7 @@ function processNyOpenRangeCandle(idx) {
 
       /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
       if (minConfluenceEnabled) {
-        const confScore = computeConfluenceScore(dir, c.close);
+        const confScore = computeConfluenceScore(dir, c.close, idx);
         if (confScore < minConfluenceValue) {
           addLog(`⚠ NY Open Range REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
           nyOpenRangeRetest = null;
@@ -2397,7 +2397,7 @@ function detectLondonAsianSweep() {
       if (risk > 0) {
         /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
         if (minConfluenceEnabled) {
-          const confScore = computeConfluenceScore("BEAR", entry);
+          const confScore = computeConfluenceScore("BEAR", entry, i);
           if (confScore < minConfluenceValue) {
             addLog(`⚠ London Sweep SELL REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
             londonSweepSignal = null;
@@ -2463,7 +2463,7 @@ function detectLondonAsianSweep() {
       if (risk > 0) {
         /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
         if (minConfluenceEnabled) {
-          const confScore = computeConfluenceScore("BULL", entry);
+          const confScore = computeConfluenceScore("BULL", entry, i);
           if (confScore < minConfluenceValue) {
             addLog(`⚠ London Sweep BUY REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
             londonSweepSignal = null;
@@ -6578,9 +6578,9 @@ function computeVWAP() {
 }
 
 /* 1. Min Confluence Gate — applied after trade is built (main strategy) or before signal fires (secondary strategies) */
-function isConfluenceSufficient(overrideDir, overrideLevel) {
+function isConfluenceSufficient(overrideDir, overrideLevel, overrideCandleIdx) {
   if (!minConfluenceEnabled) return true;
-  const score = computeConfluenceScore(overrideDir, overrideLevel);
+  const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
   return score >= minConfluenceValue;
 }
 
@@ -7035,7 +7035,7 @@ function processLiquiditySweep() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry);
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Liquidity Sweep REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
       return;
@@ -7261,7 +7261,7 @@ function processStopLossHunt() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry);
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Stop Loss Hunt REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
       return;
@@ -7492,7 +7492,7 @@ function processFailedPinBar() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry);
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Failed Pin Bar REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
       return;
@@ -7787,7 +7787,7 @@ function processFibScalp() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry);
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Fib Golden Zone REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
       return;
@@ -8172,7 +8172,7 @@ function processPowerOf3() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry);
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Power of 3 REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
       return;
@@ -10502,14 +10502,14 @@ function isFalseBreakout(currentIdx) {
  * preferred direction alignment (Boom/Crash), step run / jump impulse.
  * Maximum possible varies by market type (9-12).
  */
-function computeConfluenceScore(overrideDir, overrideLevel) {
+function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
   /* When called without args use main breakout context; with args (secondary strategies)
      use the provided direction and level instead. */
   const dir   = overrideDir   !== undefined ? overrideDir   : (breakout ? breakout.dir   : null);
   const level = overrideLevel !== undefined ? overrideLevel : (breakout ? breakout.level : null);
   if (!dir) return 0;
-  /* hasBoCtx: true only when we have the full main-strategy breakout state */
-  const hasBoCtx = overrideDir === undefined && !!breakout;
+  /* hasBoCtx: true only when called with no args (main strategy — full breakout state available) */
+  const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && !!breakout;
 
   let score = 0;
 
@@ -10569,9 +10569,9 @@ function computeConfluenceScore(overrideDir, overrideLevel) {
     }
   }
 
-  /* Factor 7: Volume spike — use breakout candle for main strategy, last candle for secondary */
+  /* Factor 7: Volume spike — use breakout candle for main strategy, signal candle for secondary */
   {
-    const vIdx = hasBoCtx ? breakout.candleIdx : candles.length - 1;
+    const vIdx = hasBoCtx ? breakout.candleIdx : (overrideCandleIdx !== undefined ? overrideCandleIdx : candles.length - 1);
     if (vIdx >= 0 && vIdx < candles.length && hasVolumeSpikeOnBreakout(vIdx)) score++;
   }
 
