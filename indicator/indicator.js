@@ -3078,8 +3078,9 @@ async function sendTelegramMessage(text) {
 /**
  * Send a Telegram alert when a trade hits the 1:1 partial TP level.
  * Applies to both the main breakout strategy and PO3 strategy.
- * Notifies the trader to close a portion of the position to protect profits while
- * the remainder runs toward the full TP (SL moved to breakeven).
+ * Notifies the trader that the 1:1 level has been reached so they can consider
+ * closing a portion of the position manually. The main strategy continues to
+ * the original TP/SL without any automatic SL adjustment.
  * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
  */
 async function sendPartialTpTelegram(signal, partialLevel) {
@@ -3098,17 +3099,16 @@ async function sendPartialTpTelegram(signal, partialLevel) {
     lines.push(`🔔 <b>Partial TP Hit — 1:1 Reached</b>`);
     lines.push(``);
     lines.push(`<b>Consider closing a portion of your position now to protect profits.</b>`);
-    lines.push(`SL has been moved to breakeven. Remainder will run to full TP or BE.`);
+    lines.push(`Trade continues to full TP with original SL intact.`);
     lines.push(``);
     lines.push(`${dir} ${sym}`);
     lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
     lines.push(`<b>🔔 1:1 Level:</b> <code>${lvlStr}</code>`);
     lines.push(`<b>🎯 Full TP:</b> <code>${tpStr}</code>`);
-    lines.push(`<b>🛑 Original SL:</b> <code>${slStr}</code>`);
-    lines.push(`<b>🛡️ Breakeven SL:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
     lines.push(`<b>R:R:</b> ${rrStr}`);
     lines.push(``);
-    lines.push(`<i>Monitoring trade for full TP or breakeven exit…</i>`);
+    lines.push(`<i>Monitoring trade for full TP or SL exit…</i>`);
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -5196,7 +5196,7 @@ function getMarketRecommendations(symbol) {
         hint: "Standard breakout strategy — EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise. "
             + "ATR tolerance adapts retest detection to volatility. "
             + "Trailing stop locks in profits on extended moves. "
-            + "Partial TP at 1:1 secures gains and moves SL to breakeven. "
+            + "Partial TP at 1:1 alerts to consider securing gains — trade continues to full TP. "
             + "False breakout filter prevents entering on fake-outs. "
             + "Min R:R gate ensures every trade has at least 1:2 risk-reward. "
             + "Confluence score (0-16) gauges overall setup quality."
@@ -8286,7 +8286,7 @@ function detectPowerOf3() {
     dir: dailyBias,
     entry, sl, tp, rr,
     _origSl: sl,            /* preserve original SL for partial TP distance calc */
-    partialTpHit: false,    /* true when price hit 1R profit and SL moved to breakeven */
+    partialTpHit: false,    /* true when price hit 1R profit (1:1 alert fired) */
     oneHourOpen: oneHourOpenPrice,
     sweepPrice,
     fvgHigh: fvgTop,
@@ -9373,11 +9373,10 @@ function resolveScalpBothHit(s) {
 
 /**
  * Generic "both SL and TP hit in same candle" resolver for all strategies.
- * When `partialTpHit` is set the SL is at breakeven (entry) and the full TP
- * was also reached in the same candle — the trade is always a WIN in that
- * case since TP was the meaningful target and partial profit was already
- * locked in.  Otherwise falls back to distance comparison: the level closer
- * to entry is assumed to have been hit first.
+ * When `partialTpHit` is set the 1:1 alert has already fired and partial profit
+ * has been noted — the trade is always a WIN in that case since reaching the TP
+ * is considered the primary outcome.  Otherwise falls back to distance comparison:
+ * the level closer to entry is assumed to have been hit first.
  */
 function resolveBothHit(s) {
   if (s.partialTpHit === true) return "WIN";
@@ -13064,25 +13063,21 @@ function monitorTradeOutcome(candle) {
       const partialLevel = trade.entry + risk; /* 1:1 reward */
       if (candle.high >= partialLevel) {
         partialTpHit = true;
-        trailingSL = trade.entry; /* move SL to breakeven */
-        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven, trade continues to full TP`);
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — alert only, trade continues to full TP`);
         pending.partialTpHit = true;
-        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits secured via Telegram, SL → breakeven`, "trade", 8000);
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits noted, trade continues to full TP`, "trade", 8000);
         sendPartialTpTelegram(pending, partialLevel);
-        /* Defer SL/TP check to next candle so the newly-set breakeven SL is not
-           evaluated against the same candle that triggered the partial TP.
-           This mirrors the PO3 `continue` pattern and prevents an immediate
-           false trade close when the candle wicks back to entry. */
+        /* Defer SL/TP check to next candle to avoid dual-resolution on the
+           same candle that triggered the partial TP alert. */
         return;
       }
     } else {
       const partialLevel = trade.entry - risk; /* 1:1 reward */
       if (candle.low <= partialLevel) {
         partialTpHit = true;
-        trailingSL = trade.entry; /* move SL to breakeven */
-        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven, trade continues to full TP`);
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — alert only, trade continues to full TP`);
         pending.partialTpHit = true;
-        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits secured via Telegram, SL → breakeven`, "trade", 8000);
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits noted, trade continues to full TP`, "trade", 8000);
         sendPartialTpTelegram(pending, partialLevel);
         /* Defer SL/TP check to next candle — same reasoning as BULL case above. */
         return;
@@ -13148,19 +13143,17 @@ function monitorTradeOutcome(candle) {
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
-      /* SL hit: only count as WIN if stop locked in genuine profit (strictly above entry).
-         A breakeven exit (stop at entry, after partial TP) is counted as LOSS so that
-         win rate reflects only trades that reached the full TP target. */
+      /* SL hit: only count as WIN if stop locked in genuine profit (strictly above entry). */
       if (checkSL > trade.entry) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
-        const exitNote = checkSL === trade.entry ? " (breakeven — SL at entry after partial TP)" : trailingSL != null ? " (trailing)" : "";
+        const exitNote = trailingSL != null ? " (trailing)" : "";
         addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
@@ -13182,12 +13175,12 @@ function monitorTradeOutcome(candle) {
         pending.result = "WIN";
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
         signalLosses++;
         resolved = true;
-        const exitNote = checkSL === trade.entry ? " (breakeven — SL at entry after partial TP)" : trailingSL != null ? " (trailing)" : "";
+        const exitNote = trailingSL != null ? " (trailing)" : "";
         addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
