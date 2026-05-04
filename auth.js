@@ -233,13 +233,19 @@ const ITGuruAuth = (() => {
         return;
       }
 
-      const sub = u.subscription_status || "inactive";
-      const exp = u.subscription_expires_at;
+      const sub  = u.subscription_status || "inactive";
+      const plan = u.subscription_plan || null;
+      const exp  = u.subscription_expires_at;
 
       let subLabel;
       if (sub === "active")   subLabel = "✅ Active";
       else if (sub === "trial") subLabel = "🔵 Trial";
       else                      subLabel = "⚪ Inactive";
+
+      if (plan && sub !== "inactive") {
+        const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1);
+        subLabel += " · " + planLabel;
+      }
 
       let expText = "";
       if (exp) {

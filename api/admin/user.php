@@ -32,7 +32,7 @@ if ($targetId <= 0) {
 if ($method === 'PATCH') {
     $body = getJsonBody();
 
-    $allowed = ['status', 'subscription_status', 'subscription_expires_at', 'role'];
+    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role'];
     $set     = [];
     $params  = [];
 
@@ -50,6 +50,15 @@ if ($method === 'PATCH') {
         }
         $set[]    = 'subscription_status = ?';
         $params[] = $body['subscription_status'];
+    }
+
+    if (array_key_exists('subscription_plan', $body)) {
+        $plan = $body['subscription_plan'];
+        if ($plan !== null && $plan !== '' && !in_array($plan, ['trial', 'weekly', 'monthly'], true)) {
+            jsonResponse(['error' => 'Invalid subscription_plan value (use trial, weekly, monthly, or null)'], 400);
+        }
+        $set[]    = 'subscription_plan = ?';
+        $params[] = ($plan === '' || $plan === null) ? null : $plan;
     }
 
     if (array_key_exists('subscription_expires_at', $body)) {
@@ -75,16 +84,62 @@ if ($method === 'PATCH') {
         jsonResponse(['error' => 'No updatable fields provided'], 400);
     }
 
+    /* ── Auto-calculate expiry when activating a plan (and expiry not explicitly provided) ── */
+    $newStatus = $body['subscription_status'] ?? null;
+    $newPlan   = array_key_exists('subscription_plan', $body) ? ($body['subscription_plan'] ?? null) : null;
+    $expiryProvided = array_key_exists('subscription_expires_at', $body);
+
+    if ($newStatus === 'active' && !$expiryProvided) {
+        $planForExpiry = $newPlan ?? null;
+        if ($planForExpiry === null && !array_key_exists('subscription_plan', $body)) {
+            /* plan not being changed — check if we have a plan in DB already */
+            $planForExpiry = '__from_db__';
+        }
+        $daysMap = ['weekly' => 7, 'monthly' => 30];
+        if ($planForExpiry === '__from_db__') {
+            /* defer — will be resolved below after we confirm user exists */
+        } elseif (isset($daysMap[$planForExpiry])) {
+            /* Remove any previously queued expiry set and replace with auto value */
+            $autoExpiry = (new \DateTime())->modify('+' . $daysMap[$planForExpiry] . ' days')->format('Y-m-d H:i:s');
+            /* Replace or append the expiry in $set/$params */
+            $expIdx = array_search('subscription_expires_at = ?', $set);
+            if ($expIdx !== false) {
+                $params[$expIdx] = $autoExpiry;
+            } else {
+                $set[]    = 'subscription_expires_at = ?';
+                $params[] = $autoExpiry;
+            }
+        }
+    }
+
     $params[] = $targetId;
 
     try {
         $pdo = getDB();
 
         /* Verify the user exists before updating */
-        $check = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $check = $pdo->prepare('SELECT id, subscription_plan FROM users WHERE id = ?');
         $check->execute([$targetId]);
-        if (!$check->fetch()) {
+        $existing = $check->fetch();
+        if (!$existing) {
             jsonResponse(['error' => 'User not found'], 404);
+        }
+
+        /* Resolve deferred auto-expiry when plan comes from the DB */
+        if ($newStatus === 'active' && !$expiryProvided) {
+            $resolvedPlan = $newPlan ?? $existing['subscription_plan'];
+            $daysMap = ['weekly' => 7, 'monthly' => 30];
+            if (isset($daysMap[$resolvedPlan])) {
+                $autoExpiry = (new \DateTime())->modify('+' . $daysMap[$resolvedPlan] . ' days')->format('Y-m-d H:i:s');
+                $expIdx = array_search('subscription_expires_at = ?', $set);
+                if ($expIdx !== false) {
+                    $params[$expIdx] = $autoExpiry;
+                } else {
+                    /* Insert before the final $targetId param */
+                    array_splice($set,    -0, 0, ['subscription_expires_at = ?']);
+                    array_splice($params, -1, 0, [$autoExpiry]);
+                }
+            }
         }
 
         $stmt = $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?');

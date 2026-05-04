@@ -30,7 +30,7 @@ try {
     $pdo  = getDB();
     $stmt = $pdo->prepare(
         'SELECT id, username, display_name, password_hash, role, status,
-                subscription_status, subscription_expires_at
+                subscription_status, subscription_plan, subscription_expires_at
          FROM users WHERE username = ?'
     );
     $stmt->execute([$username]);
@@ -70,6 +70,7 @@ try {
             'displayName'             => $user['display_name'] ?? $user['username'],
             'role'                    => $user['role'] ?? 'user',
             'subscription_status'     => $user['subscription_status'] ?? 'inactive',
+            'subscription_plan'       => $user['subscription_plan'],
             'subscription_expires_at' => $user['subscription_expires_at'],
             'strategies'              => $strategies,
         ],
