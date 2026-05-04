@@ -20,6 +20,7 @@ wp-config.php
 !api/config.php
 !database/schema.sql
 !database/seed_user.sql
+!database/seed_admin_temp.sql
 
 # ──────────────────────────────────────────────
 # OS & Editor files
