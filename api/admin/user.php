@@ -78,13 +78,17 @@ if ($method === 'PATCH') {
     $params[] = $targetId;
 
     try {
-        $pdo  = getDB();
-        $stmt = $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?');
-        $stmt->execute($params);
+        $pdo = getDB();
 
-        if ($stmt->rowCount() === 0) {
+        /* Verify the user exists before updating */
+        $check = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $check->execute([$targetId]);
+        if (!$check->fetch()) {
             jsonResponse(['error' => 'User not found'], 404);
         }
+
+        $stmt = $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?');
+        $stmt->execute($params);
 
         jsonResponse(['message' => 'User updated']);
     } catch (\Throwable $e) {

@@ -199,12 +199,63 @@ const ITGuruAuth = (() => {
         if (Array.isArray(data.user?.strategies)) {
           sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
         }
+        updateNavUI();
         return true;
       }
       return false;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Update nav UI elements that reflect the current auth state:
+   *   - #adminNavItem  → shown only for admin users
+   *   - #userAccountInfo → subscription status + expiry badge
+   * Safe to call at any time; silently no-ops when elements are absent.
+   */
+  function updateNavUI() {
+    try {
+      const u = getUser();
+
+      /* Admin nav link */
+      const adminNavItem = document.getElementById("adminNavItem");
+      if (adminNavItem) {
+        adminNavItem.style.display = (u && u.role === "admin") ? "" : "none";
+      }
+
+      /* User account info bar */
+      const infoEl = document.getElementById("userAccountInfo");
+      if (!infoEl) return;
+
+      if (!u) {
+        infoEl.style.display = "none";
+        return;
+      }
+
+      const sub = u.subscription_status || "inactive";
+      const exp = u.subscription_expires_at;
+
+      let subLabel;
+      if (sub === "active")   subLabel = "✅ Active";
+      else if (sub === "trial") subLabel = "🔵 Trial";
+      else                      subLabel = "⚪ Inactive";
+
+      let expText = "";
+      if (exp) {
+        const expDate = new Date(exp);
+        const now     = new Date();
+        if (expDate < now) {
+          expText = " · ⚠️ Expired";
+        } else {
+          expText = " · Expires " + expDate.toLocaleDateString(undefined,
+            { year: "numeric", month: "short", day: "numeric" });
+        }
+      }
+
+      infoEl.textContent = "👤 " + (u.displayName || u.username) + "  ·  " + subLabel + expText;
+      infoEl.style.display = "";
+    } catch (_) {}
   }
 
   /** Logout – clear session */
@@ -251,6 +302,7 @@ const ITGuruAuth = (() => {
     /* Show/hide overlay based on session state */
     if (isLoggedIn()) {
       overlay.style.display = "none";
+      updateNavUI();
     } else {
       overlay.style.display = "flex";
     }
@@ -302,6 +354,7 @@ const ITGuruAuth = (() => {
         try {
           await login(username, password);
           overlay.style.display = "none";
+          updateNavUI();
           if (opts.onLogin) opts.onLogin();
         } catch (ex) {
           if (err) err.textContent = ex.message || "Login failed";
@@ -331,6 +384,7 @@ const ITGuruAuth = (() => {
         try {
           await register(username, password, email);
           overlay.style.display = "none";
+          updateNavUI();
           if (opts.onLogin) opts.onLogin();
         } catch (ex) {
           if (regError) regError.textContent = ex.message || "Registration failed";
@@ -369,6 +423,7 @@ const ITGuruAuth = (() => {
     register,
     verify,
     logout,
+    updateNavUI,
     initLoginGate
   };
 })();
