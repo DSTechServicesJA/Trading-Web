@@ -30,6 +30,7 @@ const ITGuruAuth = (() => {
     : "https://trading.dsitservicesja.com/api/auth";
   const SESSION_KEY   = "itguru_auth_token";
   const USER_KEY      = "itguru_auth_user";
+  const STRATEGIES_KEY = "itguru_auth_strategies";
 
   /* -------- Helpers -------- */
 
@@ -88,6 +89,13 @@ const ITGuruAuth = (() => {
     } catch { return null; }
   }
 
+  /** Get granted strategy keys for the current user */
+  function getStrategies() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STRATEGIES_KEY) || "[]");
+    } catch { return []; }
+  }
+
   /** Login with username + password */
   async function login(username, password) {
     const resp = await authFetch("login", {
@@ -110,6 +118,9 @@ const ITGuruAuth = (() => {
 
     sessionStorage.setItem(SESSION_KEY, data.token);
     sessionStorage.setItem(USER_KEY, JSON.stringify(data.user || { username }));
+    if (Array.isArray(data.user?.strategies)) {
+      sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
+    }
 
     /* Persist "remember me" if requested */
     if (data.token) {
@@ -163,6 +174,9 @@ const ITGuruAuth = (() => {
 
     sessionStorage.setItem(SESSION_KEY, data.token);
     sessionStorage.setItem(USER_KEY, JSON.stringify(data.user || { username }));
+    if (Array.isArray(data.user?.strategies)) {
+      sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
+    }
     return data;
   }
 
@@ -178,7 +192,16 @@ const ITGuruAuth = (() => {
         body: JSON.stringify({ token })
       });
       const data = await safeJson(resp);
-      return data.valid === true;
+      if (data.valid === true) {
+        if (data.user) {
+          sessionStorage.setItem(USER_KEY, JSON.stringify(data.user));
+        }
+        if (Array.isArray(data.user?.strategies)) {
+          sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
+        }
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -188,6 +211,7 @@ const ITGuruAuth = (() => {
   function logout() {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(STRATEGIES_KEY);
     localStorage.removeItem("itguru_saved_user");
     localStorage.removeItem("itguru_remember_login");
   }
@@ -340,6 +364,7 @@ const ITGuruAuth = (() => {
     isLoggedIn,
     getToken,
     getUser,
+    getStrategies,
     login,
     register,
     verify,

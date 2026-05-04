@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IT Guru – Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 connect-src 'self' https://trading.dsitservicesja.com;
+                 script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+                 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+                 font-src https://fonts.gstatic.com;
+                 img-src 'self' data:;" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════ LOGIN OVERLAY ═══════════════════════════ -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card">
+    <div id="loginFormSection">
+      <h2>🔐 Admin Login</h2>
+      <p>Sign in with your admin account.</p>
+      <input type="text"     id="loginUsername" class="login-input" placeholder="Username" autocomplete="username" />
+      <input type="password" id="loginPassword" class="login-input" placeholder="Password" autocomplete="current-password" />
+      <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
+      <button id="loginBtn" type="button" class="login-action-btn">LOGIN</button>
+      <div id="loginError" class="login-error"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ APP WRAPPER ═══════════════════════════ -->
+<div id="appWrapper" style="display:none;">
+
+  <!-- ── NAV ── -->
+  <nav class="bot-nav">
+    <div class="brand">🛡️ IT Guru Admin</div>
+    <ul class="bot-links">
+      <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
+      <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)</a></li>
+      <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
+      <li><a href="https://trading.dsitservicesja.com/admin/" class="nav-active">Admin</a></li>
+    </ul>
+    <div class="nav-right">
+      <span id="adminUserLabel" class="admin-user-label"></span>
+      <button id="adminLogoutBtn" type="button" class="btn-logout">Logout</button>
+    </div>
+  </nav>
+
+  <!-- ── MAIN ── -->
+  <main class="admin-container">
+
+    <h1>👤 User Management</h1>
+
+    <!-- ── STATS BAR ── -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-label">Total Users</div>
+        <div id="statTotal" class="stat-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active Subscriptions</div>
+        <div id="statActiveSubs" class="stat-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Trial</div>
+        <div id="statTrial" class="stat-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Locked Accounts</div>
+        <div id="statLocked" class="stat-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Expiring ≤ 7 days</div>
+        <div id="statExpiring" class="stat-value">—</div>
+      </div>
+    </div>
+
+    <!-- ── TOOLBAR ── -->
+    <div class="toolbar">
+      <input type="text" id="searchInput" class="search-input" placeholder="🔍 Search username or email…" />
+      <select id="filterStatus" class="filter-select">
+        <option value="">All Statuses</option>
+        <option value="active">Active</option>
+        <option value="locked">Locked</option>
+      </select>
+      <select id="filterSub" class="filter-select">
+        <option value="">All Subscriptions</option>
+        <option value="active">Active</option>
+        <option value="trial">Trial</option>
+        <option value="inactive">Inactive</option>
+      </select>
+      <select id="filterRole" class="filter-select">
+        <option value="">All Roles</option>
+        <option value="admin">Admin</option>
+        <option value="user">User</option>
+      </select>
+      <button id="newUserBtn" type="button" class="btn-primary">＋ New User</button>
+    </div>
+
+    <!-- ── USER TABLE ── -->
+    <div class="table-wrapper">
+      <table class="user-table" id="userTable">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Subscription</th>
+            <th>Expires</th>
+            <th>Last Login</th>
+            <th>Strategies</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="userTableBody">
+          <tr><td colspan="9" class="table-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── PAGINATION ── -->
+    <div id="pagination" class="pagination"></div>
+
+  </main>
+</div>
+
+<!-- ═══════════════════════════ EDIT USER MODAL ═══════════════════════════ -->
+<div id="editModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card">
+    <h3>✏️ Edit User — <span id="editModalTitle"></span></h3>
+
+    <div class="form-row">
+      <label>Status</label>
+      <select id="editStatus">
+        <option value="active">Active</option>
+        <option value="locked">Locked</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Role</label>
+      <select id="editRole">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Subscription</label>
+      <select id="editSubStatus">
+        <option value="inactive">Inactive</option>
+        <option value="trial">Trial</option>
+        <option value="active">Active</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Expires (leave blank to clear)</label>
+      <input type="date" id="editSubExpiry" />
+    </div>
+    <div class="form-row strat-form-row">
+      <label>Strategies</label>
+      <div id="editStrategyChecks" class="strategy-checks"></div>
+    </div>
+
+    <div id="editError" class="form-error"></div>
+    <div class="modal-actions">
+      <button id="editSaveBtn"   type="button" class="btn-primary">Save</button>
+      <button id="editCancelBtn" type="button" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ NEW USER MODAL ═══════════════════════════ -->
+<div id="newUserModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card">
+    <h3>＋ Create New User</h3>
+
+    <div class="form-row">
+      <label>Username <span class="req">*</span></label>
+      <input type="text"     id="newUsername" placeholder="3–50 chars, letters/numbers/_.-" />
+    </div>
+    <div class="form-row">
+      <label>Email</label>
+      <input type="email"    id="newEmail"    placeholder="Optional" />
+    </div>
+    <div class="form-row">
+      <label>Password <span class="req">*</span></label>
+      <input type="password" id="newPassword" placeholder="Min 8 characters" />
+    </div>
+    <div class="form-row">
+      <label>Role</label>
+      <select id="newRole">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Subscription</label>
+      <select id="newSubStatus">
+        <option value="inactive">Inactive</option>
+        <option value="trial">Trial</option>
+        <option value="active">Active</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Subscription Expires</label>
+      <input type="date" id="newSubExpiry" />
+    </div>
+    <div class="form-row strat-form-row">
+      <label>Grant Strategies</label>
+      <div id="newStrategyChecks" class="strategy-checks"></div>
+    </div>
+
+    <div id="newUserError" class="form-error"></div>
+    <div class="modal-actions">
+      <button id="newUserSaveBtn"   type="button" class="btn-primary">Create User</button>
+      <button id="newUserCancelBtn" type="button" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ DELETE CONFIRM MODAL ═══════════════════════════ -->
+<div id="deleteModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card modal-card-sm">
+    <h3>🗑️ Delete User</h3>
+    <p>Type <strong id="deleteModalUsername"></strong> to confirm deletion. This cannot be undone.</p>
+    <label for="deleteConfirmInput" class="sr-only">Confirm username to delete</label>
+    <input type="text" id="deleteConfirmInput" placeholder="Type username to confirm" aria-label="Type the username to confirm deletion" />
+    <div id="deleteError" class="form-error"></div>
+    <div class="modal-actions">
+      <button id="deleteConfirmBtn" type="button" class="btn-danger">Delete</button>
+      <button id="deleteCancelBtn"  type="button" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="../auth.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

@@ -84,6 +84,7 @@
       <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
       <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)</a></li>
       <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
+      <li id="adminNavItem" style="display:none;"><a href="https://trading.dsitservicesja.com/admin/">Admin</a></li>
     </ul>
     <div class="shortcut-hints">
       <small>Alt+C Connect · Alt+D Disconnect · Alt+R Reset · Alt+T Theme · Alt+E Export CSV · Alt+P Export PDF · Alt+N Notifications</small>
@@ -1380,6 +1381,17 @@
     if (!src || !dst) return;
     const obs = new MutationObserver(() => { dst.textContent = src.textContent; });
     obs.observe(src, { childList: true, characterData: true, subtree: true });
+  })();
+
+  /* ---- Show Admin nav link for admin users ---- */
+  (function () {
+    try {
+      const u = JSON.parse(sessionStorage.getItem("itguru_auth_user") || "null");
+      if (u && u.role === "admin") {
+        const item = document.getElementById("adminNavItem");
+        if (item) item.style.display = "";
+      }
+    } catch (_) {}
   })();
 </script>
 
