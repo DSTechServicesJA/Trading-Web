@@ -15,6 +15,7 @@ let currentFilters  = {};
 let editingUserId   = null;
 let editingUserStrategies = [];
 let deletingUser    = null; /* { id, username } */
+const userCache     = new Map(); /* id → user object from last load */
 
 /* ═══════════════════════════════════════════════
    Boot
@@ -187,7 +188,7 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
     const data = await resp.json();
     renderTable(data.users || []);
     renderPagination(data.page, data.last_page, data.total, data.per_page);
-    updateStats(data.users || []);
+    updateStats(data.total, data.stats || {});
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="9" class="table-empty" style="color:var(--danger-soft)">
       Network error — ${escHtml(e.message)}
@@ -207,6 +208,7 @@ function renderTable(users) {
   const now = Date.now();
 
   for (const u of users) {
+    userCache.set(u.id, u);
     const expiresMs = u.subscription_expires_at ? new Date(u.subscription_expires_at).getTime() : null;
     const isExpired      = expiresMs && expiresMs < now;
     const isExpiringSoon = expiresMs && !isExpired && (expiresMs - now) < 7 * 86400 * 1000;
@@ -259,31 +261,18 @@ function renderTable(users) {
 }
 
 /* ── Stats bar ── */
-function updateStats(users) {
-  const now = Date.now();
-  let activeSubs = 0, trial = 0, locked = 0, expiring = 0;
-  for (const u of users) {
-    if (u.subscription_status === "active")  activeSubs++;
-    if (u.subscription_status === "trial")   trial++;
-    if (u.status === "locked")               locked++;
-    if (u.subscription_expires_at) {
-      const ms = new Date(u.subscription_expires_at).getTime();
-      if (ms > now && (ms - now) < 7 * 86400 * 1000) expiring++;
-    }
-  }
-  /* We have totals from pagination, but for simplicity update from visible page */
-  el("statActiveSubs").textContent = activeSubs;
-  el("statTrial").textContent      = trial;
-  el("statLocked").textContent     = locked;
-  el("statExpiring").textContent   = expiring;
+function updateStats(total, stats) {
+  el("statTotal").textContent      = total;
+  el("statActiveSubs").textContent = stats.active_subs   ?? "—";
+  el("statTrial").textContent      = stats.trial_subs    ?? "—";
+  el("statLocked").textContent     = stats.locked_count  ?? "—";
+  el("statExpiring").textContent   = stats.expiring_soon ?? "—";
 }
 
 /* ── Pagination ── */
 function renderPagination(page, lastPage, total, perPage) {
   const container = document.getElementById("pagination");
   container.innerHTML = "";
-
-  el("statTotal").textContent = total;
 
   if (lastPage <= 1) return;
 
@@ -381,57 +370,35 @@ async function handleRowAction(e) {
 /* ═══════════════════════════════════════════════
    Edit Modal
    ═══════════════════════════════════════════════ */
-async function openEditModal(userId) {
+function openEditModal(userId) {
   editingUserId = userId;
 
-  /* Fetch fresh user data */
-  let user;
-  try {
-    const resp = await apiRequest("/admin/users?page=1&per_page=1&search=&status=&subscription=&role=");
-    /* Instead do a targeted request – we have userId so load from current page rows */
-    const tbody = document.getElementById("userTableBody");
-    const rows  = tbody.querySelectorAll("tr");
-    /* Collect from DOM for quick access */
-    const editBtn = tbody.querySelector(`[data-action="edit"][data-id="${userId}"]`);
-    const tr = editBtn ? editBtn.closest("tr") : null;
-
-    /* Read current values from visible row */
-    let status  = "active", role = "user", sub = "inactive", exp = "", strategies = [];
-    if (tr) {
-      const badges = tr.querySelectorAll(".badge");
-      badges.forEach(b => {
-        if (b.classList.contains("badge-admin") || b.classList.contains("badge-user"))
-          role = b.textContent.trim();
-        if (b.classList.contains("badge-active") || b.classList.contains("badge-locked"))
-          status = b.textContent.trim();
-        if (["badge-active","badge-inactive","badge-trial"].some(c => b.classList.contains(c) && !["active","locked"].includes(b.textContent.trim())))
-          sub = b.textContent.trim();
-      });
-      /* Strategies from row */
-      const tags = tr.querySelectorAll(".strategy-tag");
-      const labelMap = {};
-      for (const s of allStrategies) labelMap[s.label] = s.key;
-      tags.forEach(t => {
-        const key = labelMap[t.textContent.trim()];
-        if (key) strategies.push(key);
-      });
-    }
-
-    /* Populate modal */
-    document.getElementById("editModalTitle").textContent = `User #${userId}`;
-    setSelectValue("editStatus",    status);
-    setSelectValue("editRole",      role);
-    setSelectValue("editSubStatus", sub);
-    document.getElementById("editSubExpiry").value = "";
-    document.getElementById("editError").textContent = "";
-
-    editingUserStrategies = strategies;
-    buildStrategyChecks("editStrategyChecks", strategies);
-    document.getElementById("editModal").style.display = "flex";
-
-  } catch (e) {
-    alert("Could not open edit modal: " + e.message);
+  /* Use cached user data populated during renderTable */
+  const u = userCache.get(userId);
+  if (!u) {
+    alert("User data not found. Please reload the page.");
+    return;
   }
+
+  const strategies = u.strategies || [];
+
+  /* Populate modal */
+  document.getElementById("editModalTitle").textContent = u.username;
+  setSelectValue("editStatus",    u.status || "active");
+  setSelectValue("editRole",      u.role   || "user");
+  setSelectValue("editSubStatus", u.subscription_status || "inactive");
+
+  /* Pre-fill expiry date (convert datetime to date-only for the date input) */
+  const expiryInput = el("editSubExpiry");
+  expiryInput.value = u.subscription_expires_at
+    ? u.subscription_expires_at.split(" ")[0].split("T")[0]
+    : "";
+
+  document.getElementById("editError").textContent = "";
+
+  editingUserStrategies = strategies;
+  buildStrategyChecks("editStrategyChecks", strategies);
+  document.getElementById("editModal").style.display = "flex";
 }
 
 /* ── Save edit ── */

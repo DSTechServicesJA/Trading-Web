@@ -49,6 +49,11 @@ try {
     $pdo->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')
         ->execute([$user['id']]);
 
+    /* ── Fetch granted strategies ── */
+    $stmtS = $pdo->prepare('SELECT strategy_key FROM strategy_access WHERE user_id = ? ORDER BY strategy_key');
+    $stmtS->execute([$user['id']]);
+    $strategies = $stmtS->fetchAll(PDO::FETCH_COLUMN);
+
     /* ── Issue JWT (1-hour expiry) ── */
     $token = jwtEncode([
         'sub'      => $user['id'],
@@ -61,11 +66,12 @@ try {
     jsonResponse([
         'token' => $token,
         'user'  => [
-            'username'             => $user['username'],
-            'displayName'          => $user['display_name'] ?? $user['username'],
-            'role'                 => $user['role'] ?? 'user',
-            'subscription_status'  => $user['subscription_status'] ?? 'inactive',
+            'username'                => $user['username'],
+            'displayName'             => $user['display_name'] ?? $user['username'],
+            'role'                    => $user['role'] ?? 'user',
+            'subscription_status'     => $user['subscription_status'] ?? 'inactive',
             'subscription_expires_at' => $user['subscription_expires_at'],
+            'strategies'              => $strategies,
         ],
     ]);
 } catch (\Throwable $e) {

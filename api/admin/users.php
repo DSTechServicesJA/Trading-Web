@@ -67,6 +67,7 @@ if ($method === 'GET') {
         $total = (int) $countStmt->fetchColumn();
 
         /* Users */
+        $paginatedParams = array_merge($params, [$perPage, $offset]);
         $stmt = $pdo->prepare(
             "SELECT u.id, u.username, u.email, u.display_name, u.role, u.status,
                     u.subscription_status, u.subscription_expires_at, u.last_login_at,
@@ -74,9 +75,9 @@ if ($method === 'GET') {
              FROM users u
              $whereSql
              ORDER BY u.id DESC
-             LIMIT $perPage OFFSET $offset"
+             LIMIT ? OFFSET ?"
         );
-        $stmt->execute($params);
+        $stmt->execute($paginatedParams);
         $users = $stmt->fetchAll();
 
         /* Attach strategies */
@@ -97,12 +98,32 @@ if ($method === 'GET') {
             unset($u);
         }
 
+        /* Aggregate stats across all matching users (not just current page) */
+        $statsStmt = $pdo->prepare(
+            "SELECT
+                SUM(subscription_status = 'active')  AS active_subs,
+                SUM(subscription_status = 'trial')   AS trial_subs,
+                SUM(status = 'locked')               AS locked_count,
+                SUM(subscription_expires_at IS NOT NULL
+                    AND subscription_expires_at > NOW()
+                    AND subscription_expires_at <= DATE_ADD(NOW(), INTERVAL 7 DAY)) AS expiring_soon
+             FROM users u $whereSql"
+        );
+        $statsStmt->execute($params);
+        $stats = $statsStmt->fetch();
+
         jsonResponse([
-            'users'      => $users,
-            'total'      => $total,
-            'page'       => $page,
-            'per_page'   => $perPage,
-            'last_page'  => (int) ceil($total / $perPage),
+            'users'        => $users,
+            'total'        => $total,
+            'page'         => $page,
+            'per_page'     => $perPage,
+            'last_page'    => (int) ceil($total / $perPage),
+            'stats'        => [
+                'active_subs'   => (int) ($stats['active_subs']   ?? 0),
+                'trial_subs'    => (int) ($stats['trial_subs']    ?? 0),
+                'locked_count'  => (int) ($stats['locked_count']  ?? 0),
+                'expiring_soon' => (int) ($stats['expiring_soon'] ?? 0),
+            ],
         ]);
     } catch (\Throwable $e) {
         error_log('Admin GET /users error: ' . $e->getMessage());

@@ -14428,18 +14428,6 @@ function applyStrategyAccess() {
 
   const granted = new Set(ITGuruAuth.getStrategies());
 
-  /** Lock a strategy toggle element and reset its runtime flag. */
-  function lockStrategy(toggleId, disableFn) {
-    const el = document.getElementById(toggleId);
-    if (!el) return;
-    if (!granted.has(el.dataset.strategyKey || "")) {
-      el.checked  = false;
-      el.disabled = true;
-      el.title    = "Upgrade your subscription to access this strategy";
-      if (disableFn) disableFn();
-    }
-  }
-
   /* Map: element id → strategy key → disable callback */
   const strategyMap = [
     { id: "liquiditySweepToggle",  key: "liquidity_sweep",  fn: () => { liquiditySweepEnabled = false; } },
