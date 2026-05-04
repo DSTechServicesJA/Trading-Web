@@ -317,7 +317,7 @@ const ITGuruAuth = (() => {
         }
 
         loginBtn.disabled = true;
-        loginBtn.textContent = "Logging in…";
+        loginBtn.textContent = "Signing in…";
         if (err) err.textContent = "";
 
         /* Handle "remember me" */
@@ -340,7 +340,7 @@ const ITGuruAuth = (() => {
           if (err) err.textContent = ex.message || "Login failed";
         } finally {
           loginBtn.disabled = false;
-          loginBtn.textContent = "LOGIN";
+          loginBtn.textContent = "Sign In";
         }
       });
     }
