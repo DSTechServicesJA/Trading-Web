@@ -13065,20 +13065,27 @@ function monitorTradeOutcome(candle) {
       if (candle.high >= partialLevel) {
         partialTpHit = true;
         trailingSL = trade.entry; /* move SL to breakeven */
-        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven, trade continues to full TP`);
         pending.partialTpHit = true;
-        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — close portion to protect profits, SL → breakeven`, "trade", 8000);
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits secured via Telegram, SL → breakeven`, "trade", 8000);
         sendPartialTpTelegram(pending, partialLevel);
+        /* Defer SL/TP check to next candle so the newly-set breakeven SL is not
+           evaluated against the same candle that triggered the partial TP.
+           This mirrors the PO3 `continue` pattern and prevents an immediate
+           false trade close when the candle wicks back to entry. */
+        return;
       }
     } else {
       const partialLevel = trade.entry - risk; /* 1:1 reward */
       if (candle.low <= partialLevel) {
         partialTpHit = true;
         trailingSL = trade.entry; /* move SL to breakeven */
-        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven`);
+        addLog(`Partial TP hit at 1:1 (${fmt(partialLevel, 4)}) — SL moved to breakeven, trade continues to full TP`);
         pending.partialTpHit = true;
-        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — close portion to protect profits, SL → breakeven`, "trade", 8000);
+        showToast("🔔 Partial TP Hit", `1:1 reached (${fmt(partialLevel, 4)}) — profits secured via Telegram, SL → breakeven`, "trade", 8000);
         sendPartialTpTelegram(pending, partialLevel);
+        /* Defer SL/TP check to next candle — same reasoning as BULL case above. */
+        return;
       }
     }
   }
