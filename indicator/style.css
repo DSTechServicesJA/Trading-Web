@@ -2548,3 +2548,25 @@ body.light-theme .ms-card-footer {
 .opposite-row .opp-wr { font-weight: 700; color: var(--accent, #4fc3f7); }
 .opposite-row .opp-profit { color: var(--success); font-weight: 600; }
 .opposite-row .opp-loss { color: var(--danger); font-weight: 600; }
+
+/* ---- Stream Mode ---- */
+#streamModeBtn.stream-active {
+  background: var(--warning);
+  color: #000;
+  border-color: var(--warning-soft);
+}
+
+body.stream-mode #appIdInput,
+body.stream-mode #derivTokenInput,
+body.stream-mode #telegramChatId,
+body.stream-mode #telegramBotToken {
+  filter: blur(6px);
+  pointer-events: none;
+  user-select: none;
+}
+
+body.stream-mode #autoTradeBalanceValue,
+body.stream-mode #autoTradePLValue {
+  filter: blur(6px);
+  user-select: none;
+}
