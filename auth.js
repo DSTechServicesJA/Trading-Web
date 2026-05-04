@@ -281,14 +281,6 @@ const ITGuruAuth = (() => {
     const passInput = document.getElementById("loginPassword");
     const rememberMe = document.getElementById("loginRememberMe");
     const formLogin  = document.getElementById("loginFormSection");
-    const formReg    = document.getElementById("registerFormSection");
-    const switchToReg  = document.getElementById("switchToRegister");
-    const switchToLogin = document.getElementById("switchToLogin");
-    const regUserInput  = document.getElementById("regUsername");
-    const regPassInput  = document.getElementById("regPassword");
-    const regEmailInput = document.getElementById("regEmail");
-    const regSubmitBtn  = document.getElementById("regSubmitBtn");
-    const regError      = document.getElementById("regError");
 
     if (!overlay) return;
 
@@ -305,24 +297,6 @@ const ITGuruAuth = (() => {
       updateNavUI();
     } else {
       overlay.style.display = "flex";
-    }
-
-    /* Switch between login / register forms */
-    if (switchToReg) {
-      switchToReg.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (formLogin) formLogin.style.display = "none";
-        if (formReg) formReg.style.display = "block";
-        if (err) err.textContent = "";
-      });
-    }
-    if (switchToLogin) {
-      switchToLogin.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (formReg) formReg.style.display = "none";
-        if (formLogin) formLogin.style.display = "block";
-        if (regError) regError.textContent = "";
-      });
     }
 
     /* Login button handler */
@@ -365,50 +339,11 @@ const ITGuruAuth = (() => {
       });
     }
 
-    /* Register button handler */
-    if (regSubmitBtn) {
-      regSubmitBtn.addEventListener("click", async () => {
-        const username = regUserInput?.value?.trim() || "";
-        const password = regPassInput?.value || "";
-        const email    = regEmailInput?.value?.trim() || "";
-
-        if (!username || !password) {
-          if (regError) regError.textContent = "Username and password are required";
-          return;
-        }
-
-        regSubmitBtn.disabled = true;
-        regSubmitBtn.textContent = "Creating account…";
-        if (regError) regError.textContent = "";
-
-        try {
-          await register(username, password, email);
-          overlay.style.display = "none";
-          updateNavUI();
-          if (opts.onLogin) opts.onLogin();
-        } catch (ex) {
-          if (regError) regError.textContent = ex.message || "Registration failed";
-        } finally {
-          regSubmitBtn.disabled = false;
-          regSubmitBtn.textContent = "CREATE ACCOUNT";
-        }
-      });
-    }
-
     /* Allow Enter key to submit login */
     [userInput, passInput].forEach(el => {
       if (el) {
         el.addEventListener("keydown", (e) => {
           if (e.key === "Enter") loginBtn?.click();
-        });
-      }
-    });
-
-    /* Allow Enter key to submit registration */
-    [regUserInput, regPassInput, regEmailInput].forEach(el => {
-      if (el) {
-        el.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") regSubmitBtn?.click();
         });
       }
     });
@@ -420,7 +355,6 @@ const ITGuruAuth = (() => {
     getUser,
     getStrategies,
     login,
-    register,
     verify,
     logout,
     updateNavUI,
