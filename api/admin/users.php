@@ -70,7 +70,7 @@ if ($method === 'GET') {
         $paginatedParams = array_merge($params, [$perPage, $offset]);
         $stmt = $pdo->prepare(
             "SELECT u.id, u.username, u.email, u.display_name, u.role, u.status,
-                    u.subscription_status, u.subscription_expires_at, u.last_login_at,
+                    u.subscription_status, u.subscription_plan, u.subscription_expires_at, u.last_login_at,
                     u.created_at
              FROM users u
              $whereSql
@@ -142,6 +142,7 @@ if ($method === 'POST') {
     $role     = $body['role'] ?? 'user';
     $status   = $body['status'] ?? 'active';
     $sub      = $body['subscription_status'] ?? 'inactive';
+    $subPlan  = array_key_exists('subscription_plan', $body) ? ($body['subscription_plan'] ?? null) : null;
     $subExp   = $body['subscription_expires_at'] ?? null;
 
     /* Validation */
@@ -169,6 +170,19 @@ if ($method === 'POST') {
     if (!in_array($sub, ['active', 'inactive', 'trial'], true)) {
         jsonResponse(['error' => 'Invalid subscription_status'], 400);
     }
+    if ($subPlan !== null && $subPlan !== '' && !in_array($subPlan, ['trial', 'weekly', 'monthly'], true)) {
+        jsonResponse(['error' => 'Invalid subscription_plan value (use trial, weekly, monthly, or null)'], 400);
+    }
+    $subPlan = ($subPlan === '') ? null : $subPlan;
+
+    /* Auto-calculate expiry when activating with a plan and no explicit expiry provided */
+    if ($sub === 'active' && ($subExp === null || $subExp === '')) {
+        $daysMap = ['weekly' => 7, 'monthly' => 30];
+        if (isset($daysMap[$subPlan])) {
+            $subExp = (new \DateTime())->modify('+' . $daysMap[$subPlan] . ' days')->format('Y-m-d H:i:s');
+        }
+    }
+
     if ($subExp !== null && $subExp !== '') {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}/', $subExp)
             || !\DateTime::createFromFormat('Y-m-d', substr($subExp, 0, 10))) {
@@ -197,8 +211,8 @@ if ($method === 'POST') {
 
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
         $stmt = $pdo->prepare(
-            'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_plan, subscription_expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $username,
@@ -208,6 +222,7 @@ if ($method === 'POST') {
             $role,
             $status,
             $sub,
+            $subPlan,
             ($subExp !== '' && $subExp !== null) ? $subExp : null,
         ]);
         $newId = (int) $pdo->lastInsertId();

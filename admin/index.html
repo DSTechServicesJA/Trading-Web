@@ -113,6 +113,7 @@
             <th>Role</th>
             <th>Status</th>
             <th>Subscription</th>
+            <th>Plan</th>
             <th>Expires</th>
             <th>Last Login</th>
             <th>Strategies</th>
@@ -120,7 +121,7 @@
           </tr>
         </thead>
         <tbody id="userTableBody">
-          <tr><td colspan="9" class="table-empty">Loading…</td></tr>
+          <tr><td colspan="10" class="table-empty">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -159,7 +160,16 @@
       </select>
     </div>
     <div class="form-row">
-      <label>Expires (leave blank to clear)</label>
+      <label>Plan</label>
+      <select id="editSubPlan">
+        <option value="">— None —</option>
+        <option value="trial">Trial</option>
+        <option value="weekly">Weekly ($9.99)</option>
+        <option value="monthly">Monthly ($29.99)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Expires (leave blank to auto-calculate)</label>
       <input type="date" id="editSubExpiry" />
     </div>
     <div class="form-row strat-form-row">
@@ -205,6 +215,15 @@
         <option value="inactive">Inactive</option>
         <option value="trial">Trial</option>
         <option value="active">Active</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Plan</label>
+      <select id="newSubPlan">
+        <option value="">— None —</option>
+        <option value="trial">Trial</option>
+        <option value="weekly">Weekly ($9.99)</option>
+        <option value="monthly">Monthly ($29.99)</option>
       </select>
     </div>
     <div class="form-row">

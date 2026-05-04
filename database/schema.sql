@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     role                    ENUM('user','admin') NOT NULL DEFAULT 'user',
     status                  ENUM('active','locked') NOT NULL DEFAULT 'active',
     subscription_status     ENUM('active','inactive','trial') NOT NULL DEFAULT 'inactive',
+    subscription_plan       ENUM('trial','weekly','monthly') DEFAULT NULL,
     subscription_expires_at DATETIME       DEFAULT NULL,
     last_login_at           TIMESTAMP      NULL DEFAULT NULL,
     created_at              TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -36,6 +37,14 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX      idx_status   (status),
     INDEX      idx_sub_expires (subscription_expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Migration: add subscription_plan to existing databases
+-- Run this only if the users table already exists without the column.
+-- ──────────────────────────────────────────────
+-- ALTER TABLE users
+--     ADD COLUMN subscription_plan ENUM('trial','weekly','monthly') DEFAULT NULL
+--     AFTER subscription_status;
 
 -- ──────────────────────────────────────────────
 -- Strategy access grants per user

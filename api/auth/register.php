@@ -88,6 +88,7 @@ try {
             'displayName'         => $username,
             'role'                => 'user',
             'subscription_status' => 'inactive',
+            'subscription_plan'   => null,
             'strategies'          => [],
         ],
     ], 201);

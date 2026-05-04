@@ -174,13 +174,13 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
   });
 
   const tbody = document.getElementById("userTableBody");
-  tbody.innerHTML = `<tr><td colspan="9" class="table-empty">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="10" class="table-empty">Loading…</td></tr>`;
 
   try {
     const resp = await apiRequest("/admin/users?" + params);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      tbody.innerHTML = `<tr><td colspan="9" class="table-empty" style="color:var(--danger-soft)">
+      tbody.innerHTML = `<tr><td colspan="10" class="table-empty" style="color:var(--danger-soft)">
         Error: ${escHtml(err.error || "Failed to load users")}
       </td></tr>`;
       return;
@@ -191,7 +191,7 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
     renderPagination(data.page, data.last_page, data.total, data.per_page);
     updateStats(data.total, data.stats || {});
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" class="table-empty" style="color:var(--danger-soft)">
+    tbody.innerHTML = `<tr><td colspan="10" class="table-empty" style="color:var(--danger-soft)">
       Network error — ${escHtml(e.message)}
     </td></tr>`;
   }
@@ -201,7 +201,7 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
 function renderTable(users) {
   const tbody = document.getElementById("userTableBody");
   if (!users.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="table-empty">No users found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="table-empty">No users found.</td></tr>`;
     return;
   }
 
@@ -235,12 +235,17 @@ function renderTable(users) {
       ? `<span class="ts">${expiryBadge}${fmtDate(u.subscription_expires_at)}</span>`
       : `<span class="ts">—</span>`;
 
+    const planLabel = u.subscription_plan
+      ? u.subscription_plan.charAt(0).toUpperCase() + u.subscription_plan.slice(1)
+      : "—";
+
     tr.innerHTML = `
       <td><strong>${escHtml(u.username)}</strong></td>
       <td class="ts">${escHtml(u.email || "—")}</td>
       <td><span class="badge badge-${escHtml(u.role)}">${escHtml(u.role)}</span></td>
       <td><span class="badge badge-${escHtml(u.status)}">${escHtml(u.status)}</span></td>
       <td><span class="badge badge-${escHtml(u.subscription_status)}">${escHtml(u.subscription_status)}</span></td>
+      <td class="ts">${escHtml(planLabel)}</td>
       <td>${expiryText}</td>
       <td class="ts">${u.last_login_at ? fmtDateTime(u.last_login_at) : "—"}</td>
       <td class="strategies-cell">${strategies}</td>
@@ -388,6 +393,7 @@ function openEditModal(userId) {
   setSelectValue("editStatus",    u.status || "active");
   setSelectValue("editRole",      u.role   || "user");
   setSelectValue("editSubStatus", u.subscription_status || "inactive");
+  setSelectValue("editSubPlan",   u.subscription_plan || "");
 
   /* Pre-fill expiry date using ISO extraction for reliable cross-browser handling */
   const expiryInput = el("editSubExpiry");
@@ -413,6 +419,7 @@ async function saveEdit() {
   const status  = el("editStatus").value;
   const role    = el("editRole").value;
   const sub     = el("editSubStatus").value;
+  const plan    = el("editSubPlan").value || null;
   const expiry  = el("editSubExpiry").value || null;
   const newStrats = getCheckedStrategies("editStrategyChecks");
 
@@ -420,7 +427,7 @@ async function saveEdit() {
     /* Update user fields */
     const resp = await apiRequest("/admin/user?id=" + editingUserId, {
       method: "PATCH",
-      body: JSON.stringify({ status, role, subscription_status: sub, subscription_expires_at: expiry }),
+      body: JSON.stringify({ status, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -465,6 +472,7 @@ function openNewUserModal() {
   el("newPassword").value  = "";
   el("newRole").value      = "user";
   el("newSubStatus").value = "inactive";
+  el("newSubPlan").value   = "";
   el("newSubExpiry").value = "";
   el("newUserError").textContent = "";
   buildStrategyChecks("newStrategyChecks", []);
@@ -483,6 +491,7 @@ async function saveNewUser() {
   const password  = el("newPassword").value;
   const role      = el("newRole").value;
   const sub       = el("newSubStatus").value;
+  const plan      = el("newSubPlan").value || null;
   const expiry    = el("newSubExpiry").value || null;
   const strategies = getCheckedStrategies("newStrategyChecks");
 
@@ -495,7 +504,7 @@ async function saveNewUser() {
   try {
     const resp = await apiRequest("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ username, email, password, role, subscription_status: sub, subscription_expires_at: expiry, strategies }),
+      body: JSON.stringify({ username, email, password, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, strategies }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Failed to create user");
