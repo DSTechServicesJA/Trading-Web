@@ -15,6 +15,7 @@ let currentFilters  = {};
 let editingUserId   = null;
 let editingUserStrategies = [];
 let deletingUser    = null; /* { id, username } */
+let resetPwUser     = null; /* { id, username } */
 const userCache     = new Map(); /* id → user object from last load */
 
 /* ═══════════════════════════════════════════════
@@ -254,6 +255,7 @@ function renderTable(users) {
           ${u.status === "active" ? "🔒" : "🔓"}
         </button>
         <button type="button" class="btn-icon btn-sm" data-action="edit" data-id="${u.id}" title="Edit user">✏️</button>
+        <button type="button" class="btn-icon btn-sm" data-action="reset-password" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Reset password">🔑</button>
         <button type="button" class="btn-icon btn-sm btn-danger" data-action="delete" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Delete user">🗑️</button>
       </td>`;
 
@@ -364,6 +366,11 @@ async function handleRowAction(e) {
 
   if (action === "edit") {
     openEditModal(id);
+    return;
+  }
+
+  if (action === "reset-password") {
+    openResetPwModal({ id, username: btn.dataset.username });
     return;
   }
 
@@ -520,6 +527,61 @@ async function saveNewUser() {
 }
 
 /* ═══════════════════════════════════════════════
+   Reset Password Modal
+   ═══════════════════════════════════════════════ */
+function openResetPwModal(user) {
+  resetPwUser = user;
+  document.getElementById("resetPwModalTitle").textContent = user.username;
+  document.getElementById("resetPwNew").value     = "";
+  document.getElementById("resetPwConfirm").value = "";
+  document.getElementById("resetPwError").textContent = "";
+  document.getElementById("resetPwModal").style.display = "flex";
+  document.getElementById("resetPwNew").focus();
+}
+
+async function saveResetPassword() {
+  const btn   = document.getElementById("resetPwSaveBtn");
+  const errEl = document.getElementById("resetPwError");
+  errEl.textContent = "";
+
+  const newPw     = document.getElementById("resetPwNew").value;
+  const confirmPw = document.getElementById("resetPwConfirm").value;
+
+  if (!newPw) {
+    errEl.textContent = "New password is required";
+    return;
+  }
+  if (newPw.length < 8) {
+    errEl.textContent = "Password must be at least 8 characters";
+    return;
+  }
+  if (newPw !== confirmPw) {
+    errEl.textContent = "Passwords do not match";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const resp = await apiRequest("/admin/user?id=" + encodeURIComponent(resetPwUser.id), {
+      method: "PATCH",
+      body: JSON.stringify({ password: newPw }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || "Failed to reset password");
+    }
+    closeModal("resetPwModal");
+  } catch (e) {
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Reset Password";
+  }
+}
+
+/* ═══════════════════════════════════════════════
    Delete Modal
    ═══════════════════════════════════════════════ */
 function openDeleteModal(user) {
@@ -568,6 +630,9 @@ function bindModals() {
   document.getElementById("editSaveBtn").addEventListener("click",   saveEdit);
   document.getElementById("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
 
+  document.getElementById("resetPwSaveBtn").addEventListener("click",   saveResetPassword);
+  document.getElementById("resetPwCancelBtn").addEventListener("click", () => closeModal("resetPwModal"));
+
   document.getElementById("newUserSaveBtn").addEventListener("click",   saveNewUser);
   document.getElementById("newUserCancelBtn").addEventListener("click", () => closeModal("newUserModal"));
 
@@ -575,7 +640,7 @@ function bindModals() {
   document.getElementById("deleteCancelBtn").addEventListener("click",  () => closeModal("deleteModal"));
 
   /* Close on backdrop click */
-  ["editModal", "newUserModal", "deleteModal"].forEach(id => {
+  ["editModal", "newUserModal", "resetPwModal", "deleteModal"].forEach(id => {
     document.getElementById(id).addEventListener("click", e => {
       if (e.target === e.currentTarget) closeModal(id);
     });
@@ -584,6 +649,13 @@ function bindModals() {
   /* Enter key in delete confirm */
   document.getElementById("deleteConfirmInput").addEventListener("keydown", e => {
     if (e.key === "Enter") confirmDelete();
+  });
+
+  /* Enter key in reset-password fields */
+  ["resetPwNew", "resetPwConfirm"].forEach(id => {
+    document.getElementById(id).addEventListener("keydown", e => {
+      if (e.key === "Enter") saveResetPassword();
+    });
   });
 }
 

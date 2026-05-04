@@ -2,7 +2,7 @@
 /**
  * /api/admin/user.php
  * ────────────────────
- * PATCH  — update a single user (status, subscription, role)
+ * PATCH  — update a single user (status, subscription, role, password)
  * DELETE — hard-delete a user
  *
  * Query param: ?id=<user_id>
@@ -32,7 +32,7 @@ if ($targetId <= 0) {
 if ($method === 'PATCH') {
     $body = getJsonBody();
 
-    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role'];
+    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role', 'password'];
     $set     = [];
     $params  = [];
 
@@ -78,6 +78,18 @@ if ($method === 'PATCH') {
         }
         $set[]    = 'role = ?';
         $params[] = $body['role'];
+    }
+
+    if (isset($body['password'])) {
+        $newPassword = $body['password'];
+        if (!is_string($newPassword) || strlen($newPassword) < 8) {
+            jsonResponse(['error' => 'Password must be at least 8 characters'], 400);
+        }
+        if (strlen($newPassword) > 128) {
+            jsonResponse(['error' => 'Password must not exceed 128 characters'], 400);
+        }
+        $set[]    = 'password_hash = ?';
+        $params[] = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
     }
 
     if (!$set) {
