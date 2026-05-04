@@ -83,6 +83,7 @@ async function safeJson(resp) {
 }
 
 const DERIV_TOKEN_KEY = "deriv_token";
+const STREAM_MODE_KEY = "itguru_indicator_streamMode";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
 /* Tuning defaults (user-configurable via UI) */
@@ -942,6 +943,10 @@ const AUTO_TRADE_PROPOSAL_TIMEOUT_MS = 30000;  /* 30s max for proposal → buy t
 let accountSize          = 0;     /* 0 = disabled / not entered */
 let riskPercent          = 1.0;   /* default 1% risk per trade */
 
+/* Stream Mode – hides sensitive info (App ID, token, account details) for live streaming */
+let streamMode           = false;
+let _lastAuthorizeAcct   = null;  /* cached so badge tooltip restores when stream mode is toggled off */
+
 /* ---- Symbol spec helpers ---- */
 
 /** Return the active symbol from the UI or multi-panel context. */
@@ -1678,6 +1683,7 @@ function initUI() {
   UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
   UI.soundToggleBtn   = document.getElementById("soundToggleBtn");
   UI.notifToggleBtn   = document.getElementById("notifToggleBtn");
+  UI.streamModeBtn    = document.getElementById("streamModeBtn");
   UI.emaToggle        = document.getElementById("emaToggle");
 
   /* Symbol nav */
@@ -4558,6 +4564,27 @@ function initTheme() {
   if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
 }
 
+/* ================= STREAM MODE ================= */
+/** Apply or remove stream-mode visuals based on the current `streamMode` flag. */
+function applyStreamMode() {
+  document.body.classList.toggle("stream-mode", streamMode);
+  if (UI.streamModeBtn) {
+    UI.streamModeBtn.textContent = streamMode ? "🔴 LIVE" : "🎥";
+    UI.streamModeBtn.title       = streamMode
+      ? "Stream Mode ON – click to disable (Alt+S)"
+      : "Stream Mode – hide sensitive info (Alt+S)";
+    UI.streamModeBtn.classList.toggle("stream-active", streamMode);
+  }
+  /* Refresh account badge tooltip so loginid/balance appear or disappear immediately */
+  if (_lastAuthorizeAcct) updateAccountBadge(_lastAuthorizeAcct);
+}
+
+function toggleStreamMode() {
+  streamMode = !streamMode;
+  localStorage.setItem(STREAM_MODE_KEY, JSON.stringify(streamMode));
+  applyStreamMode();
+}
+
 /* ================= KEYBOARD SHORTCUTS ================= */
 function initKeyboardShortcuts() {
   document.addEventListener("keydown", (e) => {
@@ -4574,6 +4601,7 @@ function initKeyboardShortcuts() {
       if (UI.notifToggleBtn) UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
       saveSettings();
     }
+    if (e.altKey && e.key === "s") { e.preventDefault(); toggleStreamMode(); }
   });
 }
 
@@ -6006,6 +6034,7 @@ function subscribeCandles(socket, symbol, gran) {
 /** Update the account type badge in the status bar */
 function updateAccountBadge(acct) {
   if (!UI.accountTypeBadge) return;
+  if (acct) _lastAuthorizeAcct = acct;
   if (!acct) {
     UI.accountTypeBadge.textContent = "NO AUTH";
     UI.accountTypeBadge.className = "status-badge disabled";
@@ -6015,7 +6044,9 @@ function updateAccountBadge(acct) {
   const isReal = !acct.is_virtual;
   UI.accountTypeBadge.textContent = isReal ? `REAL (${acct.currency})` : `DEMO (${acct.currency})`;
   UI.accountTypeBadge.className = isReal ? "status-badge enabled" : "status-badge caution";
-  UI.accountTypeBadge.title = `${acct.loginid} – Balance: ${acct.currency} ${acct.balance}`;
+  UI.accountTypeBadge.title = streamMode
+    ? "Account authorized"
+    : `${acct.loginid} – Balance: ${acct.currency} ${acct.balance}`;
 }
 
 /* ================= WEBSOCKET ================= */
@@ -6084,7 +6115,9 @@ function connect() {
       const acct = msg.authorize;
       const isReal = !acct.is_virtual;
       updateAccountBadge(acct);
-      addLog(`✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
+      addLog(streamMode
+        ? `✅ Authorized (${isReal ? "REAL" : "DEMO"})`
+        : `✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
       if (!isReal) {
         addLog("⚠ Demo account detected – switch to a real account token for live market data");
       }
@@ -15738,6 +15771,13 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreSignalLog();
   restoreSignalHistory();
   initTheme();
+
+  /* Restore stream mode from localStorage before wiring UI */
+  try {
+    const saved = localStorage.getItem(STREAM_MODE_KEY);
+    if (saved !== null) streamMode = JSON.parse(saved) === true;
+  } catch (_) { /* ignore */ }
+
   initKeyboardShortcuts();
 
   /* Button handlers */
@@ -16429,6 +16469,9 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSettings();
     });
   }
+  if (UI.streamModeBtn) UI.streamModeBtn.addEventListener("click", toggleStreamMode);
+  /* Apply stream mode visuals now that the button is in the DOM */
+  applyStreamMode();
 
   /* EMA toggle */
   if (UI.emaToggle) {
