@@ -29,7 +29,11 @@ try {
 
     /* ── Fetch fresh user data from DB ── */
     $pdo  = getDB();
-    $stmt = $pdo->prepare('SELECT id, username, display_name FROM users WHERE id = ?');
+    $stmt = $pdo->prepare(
+        'SELECT id, username, display_name, role, status,
+                subscription_status, subscription_expires_at
+         FROM users WHERE id = ?'
+    );
     $stmt->execute([$payload['sub']]);
     $user = $stmt->fetch();
 
@@ -37,11 +41,25 @@ try {
         jsonResponse(['valid' => false], 401);
     }
 
+    /* ── Check account is still active ── */
+    if (($user['status'] ?? 'active') === 'locked') {
+        jsonResponse(['valid' => false, 'error' => 'Account is locked'], 403);
+    }
+
+    /* ── Fetch granted strategies ── */
+    $stmtS = $pdo->prepare('SELECT strategy_key FROM strategy_access WHERE user_id = ? ORDER BY strategy_key');
+    $stmtS->execute([$user['id']]);
+    $strategies = $stmtS->fetchAll(PDO::FETCH_COLUMN);
+
     jsonResponse([
         'valid' => true,
         'user'  => [
-            'username'    => $user['username'],
-            'displayName' => $user['display_name'] ?? $user['username'],
+            'username'             => $user['username'],
+            'displayName'          => $user['display_name'] ?? $user['username'],
+            'role'                 => $user['role'] ?? 'user',
+            'subscription_status'  => $user['subscription_status'] ?? 'inactive',
+            'subscription_expires_at' => $user['subscription_expires_at'],
+            'strategies'           => $strategies,
         ],
     ]);
 } catch (\Throwable $e) {

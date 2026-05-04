@@ -76,6 +76,7 @@ try {
     $token = jwtEncode([
         'sub'      => $userId,
         'username' => $username,
+        'role'     => 'user',
         'iat'      => time(),
         'exp'      => time() + 3600,
     ]);
@@ -83,8 +84,11 @@ try {
     jsonResponse([
         'token' => $token,
         'user'  => [
-            'username'    => $username,
-            'displayName' => $username,
+            'username'            => $username,
+            'displayName'         => $username,
+            'role'                => 'user',
+            'subscription_status' => 'inactive',
+            'strategies'          => [],
         ],
     ], 201);
 } catch (\Throwable $e) {

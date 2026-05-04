@@ -14390,6 +14390,8 @@ function initLoginGate() {
           const derivToken = _deobfuscate(remembered);
           if (derivToken) sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
         }
+        /* Refresh user data (role + strategies) from server */
+        ITGuruAuth.verify().then(() => applyStrategyAccess());
       }
     });
 
@@ -14401,11 +14403,76 @@ function initLoginGate() {
         location.reload();
       });
     }
+
+    /* If already logged in, apply strategy access after restoring settings */
+    if (ITGuruAuth.isLoggedIn()) {
+      ITGuruAuth.verify().then(() => applyStrategyAccess());
+    }
     return;
   }
 
   /* Fallback: no auth module, allow browsing freely */
   if (UI.loginOverlay) UI.loginOverlay.style.display = "none";
+}
+
+/**
+ * Lock strategy toggles that the user has not been granted access to.
+ * Admins bypass all gates.
+ */
+function applyStrategyAccess() {
+  if (typeof ITGuruAuth === "undefined") return;
+
+  const user = ITGuruAuth.getUser();
+  /* Admins get everything */
+  if (user && user.role === "admin") return;
+
+  const granted = new Set(ITGuruAuth.getStrategies());
+
+  /** Lock a strategy toggle element and reset its runtime flag. */
+  function lockStrategy(toggleId, disableFn) {
+    const el = document.getElementById(toggleId);
+    if (!el) return;
+    if (!granted.has(el.dataset.strategyKey || "")) {
+      el.checked  = false;
+      el.disabled = true;
+      el.title    = "Upgrade your subscription to access this strategy";
+      if (disableFn) disableFn();
+    }
+  }
+
+  /* Map: element id → strategy key → disable callback */
+  const strategyMap = [
+    { id: "liquiditySweepToggle",  key: "liquidity_sweep",  fn: () => { liquiditySweepEnabled = false; } },
+    { id: "stopLossHuntToggle",    key: "stop_loss_hunt",   fn: () => { stopLossHuntEnabled   = false; } },
+    { id: "failedPinBarToggle",    key: "failed_pin_bar",   fn: () => { failedPinBarEnabled   = false; } },
+    { id: "fibScalpToggle",        key: "fib_scalp",        fn: () => { fibScalpEnabled       = false; } },
+    { id: "po3Toggle",             key: "po3",              fn: () => { po3Enabled            = false; } },
+    { id: "nyOpenRangeToggle",     key: "ny_open_range",    fn: () => { nyOpenRangeEnabled    = false; } },
+    { id: "sessionRangesToggle",   key: "session_ranges",   fn: () => { sessionRangesEnabled  = false; } },
+    { id: "gridScalperMAToggle",   key: "grid_scalper_ma",  fn: () => { gridScalperMAEnabled  = false; } },
+    { id: "fvgStratToggle",        key: "fvg_strat",        fn: () => { fvgStratEnabled       = false; } },
+    { id: "liveScalpToggle",       key: "live_scalp",       fn: () => { liveScalpEnabled      = false; } },
+  ];
+
+  for (const { id, key, fn } of strategyMap) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (!granted.has(key)) {
+      el.checked  = false;
+      el.disabled = true;
+      el.title    = "🔒 Upgrade to access this strategy";
+      if (fn) fn();
+      /* Add lock icon label next to the toggle */
+      const label = el.closest("label") || el.parentElement;
+      if (label && !label.querySelector(".strategy-lock-badge")) {
+        const badge = document.createElement("span");
+        badge.className   = "strategy-lock-badge";
+        badge.textContent = "🔒";
+        badge.title       = "Upgrade to unlock";
+        label.appendChild(badge);
+      }
+    }
+  }
 }
 
 /* ================= MULTI-SYMBOL ANALYSIS ================= */

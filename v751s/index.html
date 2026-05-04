@@ -65,6 +65,7 @@
     <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
     <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)/1HZ75</a></li>
     <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
+    <li id="adminNavItem" style="display:none;"><a href="https://trading.dsitservicesja.com/admin/">Admin</a></li>
   </ul>
 </nav>
 
@@ -182,6 +183,17 @@ document.getElementById("maxLosses").textContent = MAX_LOSSES;
       link.style.color = "#38bdf8";
     }
   });
+
+  /* ---- Show Admin nav link for admin users ---- */
+  (function () {
+    try {
+      const u = JSON.parse(sessionStorage.getItem("itguru_auth_user") || "null");
+      if (u && u.role === "admin") {
+        const item = document.getElementById("adminNavItem");
+        if (item) item.style.display = "";
+      }
+    } catch (_) {}
+  })();
 </script>
 </body>
 </html>

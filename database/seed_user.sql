@@ -25,13 +25,19 @@
 -- ⚠  Change the password after first login!
 -- ──────────────────────────────────────────────
 
-INSERT INTO users (username, email, password_hash, display_name)
+INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status)
 VALUES (
     '<YOUR_USERNAME>',
     '<YOUR_EMAIL>',
     '<BCRYPT_HASH>',
-    '<DISPLAY_NAME>'
+    '<DISPLAY_NAME>',
+    'admin',
+    'active',
+    'active'
 )
 ON DUPLICATE KEY UPDATE
-    password_hash = VALUES(password_hash),
-    updated_at    = CURRENT_TIMESTAMP;
+    password_hash           = VALUES(password_hash),
+    role                    = VALUES(role),
+    status                  = VALUES(status),
+    subscription_status     = VALUES(subscription_status),
+    updated_at              = CURRENT_TIMESTAMP;
