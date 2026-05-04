@@ -229,7 +229,8 @@
   <div class="modal-card modal-card-sm">
     <h3>🗑️ Delete User</h3>
     <p>Type <strong id="deleteModalUsername"></strong> to confirm deletion. This cannot be undone.</p>
-    <input type="text" id="deleteConfirmInput" placeholder="Type username to confirm" />
+    <label for="deleteConfirmInput" class="sr-only">Confirm username to delete</label>
+    <input type="text" id="deleteConfirmInput" placeholder="Type username to confirm" aria-label="Type the username to confirm deletion" />
     <div id="deleteError" class="form-error"></div>
     <div class="modal-actions">
       <button id="deleteConfirmBtn" type="button" class="btn-danger">Delete</button>

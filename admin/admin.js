@@ -109,7 +109,8 @@ async function apiRequest(path, options = {}) {
 
   const url  = ADMIN_API + path;
   const resp = await fetch(url, { ...options, headers });
-  /* php fallback */
+  /* Fallback: if .htaccess URL rewriting is not available (e.g. Nginx without rewrite rules),
+     retry with explicit .php extension so the endpoint is always reachable. */
   if (resp.status === 404 && !path.endsWith(".php")) {
     const fallback = await fetch(url + ".php", { ...options, headers });
     return fallback;
@@ -388,10 +389,10 @@ function openEditModal(userId) {
   setSelectValue("editRole",      u.role   || "user");
   setSelectValue("editSubStatus", u.subscription_status || "inactive");
 
-  /* Pre-fill expiry date (convert datetime to date-only for the date input) */
+  /* Pre-fill expiry date using ISO extraction for reliable cross-browser handling */
   const expiryInput = el("editSubExpiry");
   expiryInput.value = u.subscription_expires_at
-    ? u.subscription_expires_at.split(" ")[0].split("T")[0]
+    ? new Date(u.subscription_expires_at).toISOString().split("T")[0]
     : "";
 
   document.getElementById("editError").textContent = "";

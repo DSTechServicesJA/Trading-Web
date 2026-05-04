@@ -54,8 +54,10 @@ if ($method === 'PATCH') {
 
     if (array_key_exists('subscription_expires_at', $body)) {
         $exp = $body['subscription_expires_at'];
-        if ($exp !== null && $exp !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}/', $exp)) {
-            jsonResponse(['error' => 'Invalid subscription_expires_at format'], 400);
+        if ($exp !== null && $exp !== ''
+            && (!preg_match('/^\d{4}-\d{2}-\d{2}/', $exp)
+                || !\DateTime::createFromFormat('Y-m-d', substr($exp, 0, 10)))) {
+            jsonResponse(['error' => 'Invalid subscription_expires_at format (use YYYY-MM-DD)'], 400);
         }
         $set[]    = 'subscription_expires_at = ?';
         $params[] = ($exp === '' || $exp === null) ? null : $exp;

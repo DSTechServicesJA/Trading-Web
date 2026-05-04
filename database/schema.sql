@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX      idx_username (username),
     INDEX      idx_email    (email),
     INDEX      idx_role     (role),
-    INDEX      idx_status   (status)
+    INDEX      idx_status   (status),
+    INDEX      idx_sub_expires (subscription_expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ──────────────────────────────────────────────

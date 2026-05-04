@@ -170,7 +170,8 @@ if ($method === 'POST') {
         jsonResponse(['error' => 'Invalid subscription_status'], 400);
     }
     if ($subExp !== null && $subExp !== '') {
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}/', $subExp)) {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}/', $subExp)
+            || !\DateTime::createFromFormat('Y-m-d', substr($subExp, 0, 10))) {
             jsonResponse(['error' => 'Invalid subscription_expires_at format (use YYYY-MM-DD)'], 400);
         }
     }
