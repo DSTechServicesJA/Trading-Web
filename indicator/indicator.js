@@ -767,6 +767,7 @@ let phase         = "WAITING";
 
 /* Win/Loss tracking */
 const SIGNAL_HISTORY_MAX = 200;       /* max in-memory signal entries (oldest trimmed first) */
+const BANNER_DISPLAY_MAX = 100;        /* max cards rendered in any signal/scalp/strategy banner */
 let signalHistory   = [];
 let signalWins      = 0;
 let signalLosses    = 0;
@@ -4172,7 +4173,7 @@ function renderSignalBanner() {
   /* Newest first: multi-panel aggregated list is already sorted newest-first;
      single-symbol signalHistory is stored oldest-first so we reverse it */
   const sorted = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
-  const signals = sorted.slice(0, 100);
+  const signals = sorted.slice(0, BANNER_DISPLAY_MAX);
   for (const s of signals) {
     const card = document.createElement("div");
     const resultLower = (s.result || "PENDING").toLowerCase();
@@ -4239,7 +4240,7 @@ function renderScalpTickerBanner() {
   }
 
   /* Render newest first (aggregated list is already newest-first) */
-  const scalpLimit = Math.min(allScalps.length, 100);
+  const scalpLimit = Math.min(allScalps.length, BANNER_DISPLAY_MAX);
   for (let i = 0; i < scalpLimit; i++) {
     const s = allScalps[i];
     const card = document.createElement("div");
@@ -4358,7 +4359,7 @@ function renderStrategyTickerBanner() {
   }
 
   /* Render newest first (aggregated list is already newest-first) */
-  const stratLimit = Math.min(allStrategies.length, 100);
+  const stratLimit = Math.min(allStrategies.length, BANNER_DISPLAY_MAX);
   for (let i = 0; i < stratLimit; i++) {
     const s = allStrategies[i];
     const card = document.createElement("div");
