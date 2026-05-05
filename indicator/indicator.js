@@ -3092,6 +3092,7 @@ async function sendTelegramMessage(text) {
  * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
  */
 async function sendPartialTpTelegram(signal, partialLevel) {
+  if (!partialTpEnabled) return;
   if (!telegramOutcomeSend) return;
   try {
     const activeSym = signal.symbol || getActiveSymbol() || "";
@@ -8428,8 +8429,9 @@ function monitorPo3Outcomes(candle) {
        breakeven (entry).  This locks in the partial profit and removes risk
        for the remainder of the trade that runs to full TP.
        The `continue` is intentional: defer SL/TP check to the next tick so
-       that the newly-moved breakeven SL (not the original SL) governs. */
-    if (!s.partialTpHit) {
+       that the newly-moved breakeven SL (not the original SL) governs.
+       Only active when partialTpEnabled is ON — mirrors the main-strategy gate. */
+    if (partialTpEnabled && !s.partialTpHit) {
       const origSl = s._origSl;
       const risk = Math.abs(s.entry - origSl);
       const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
