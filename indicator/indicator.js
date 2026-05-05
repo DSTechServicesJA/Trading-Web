@@ -3297,10 +3297,19 @@ async function sendTelegramAlert() {
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
+  const caption = buildTelegramCaption();
   try {
-    const blob = await captureChartScreenshot();
-    const caption = buildTelegramCaption();
-    await sendTelegramPhoto(blob, caption);
+    let blob;
+    try {
+      blob = await captureChartScreenshot();
+    } catch (screenshotErr) {
+      addLog(`📤 Screenshot failed, sending text-only signal: ${screenshotErr.message}`);
+    }
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog("📤 Telegram alert sent successfully");
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Sent!";
@@ -3346,13 +3355,16 @@ async function sendPanelTelegramAlert(symbol) {
   try {
     blob = await capturePanelScreenshot(p);
   } catch (err) {
-    addLog(`📤 [${symbol}] Telegram screenshot error: ${err.message}`);
-    return;
+    addLog(`📤 [${symbol}] Screenshot failed, sending text-only signal: ${err.message}`);
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
   try {
-    await sendTelegramPhoto(blob, caption);
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
@@ -9593,16 +9605,24 @@ async function sendTelegramScalpAlert(scalp) {
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending scalp…";
+  const caption = buildScalpTelegramCaption(scalp);
   try {
     /* In multi-panel mode, capture the correct panel's chart (not whatever is currently in globals) */
     let blob;
-    if (scalp.symbol && multiPanels.has(scalp.symbol)) {
-      blob = await capturePanelScreenshot(multiPanels.get(scalp.symbol));
-    } else {
-      blob = await captureChartScreenshot();
+    try {
+      if (scalp.symbol && multiPanels.has(scalp.symbol)) {
+        blob = await capturePanelScreenshot(multiPanels.get(scalp.symbol));
+      } else {
+        blob = await captureChartScreenshot();
+      }
+    } catch (screenshotErr) {
+      addLog(`📤 Scalp screenshot failed, sending text-only signal: ${screenshotErr.message}`);
     }
-    const caption = buildScalpTelegramCaption(scalp);
-    await sendTelegramPhoto(blob, caption);
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog("📤 Scalp Telegram alert sent successfully");
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Scalp sent!";
@@ -9852,16 +9872,24 @@ async function sendTelegramStrategyAlert(signal) {
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending strategy alert…";
+  const caption = buildStrategyTelegramCaption(signal);
   try {
     /* In multi-panel mode, capture the correct panel's chart */
     let blob;
-    if (signal.symbol && multiPanels.has(signal.symbol)) {
-      blob = await capturePanelScreenshot(multiPanels.get(signal.symbol));
-    } else {
-      blob = await captureChartScreenshot();
+    try {
+      if (signal.symbol && multiPanels.has(signal.symbol)) {
+        blob = await capturePanelScreenshot(multiPanels.get(signal.symbol));
+      } else {
+        blob = await captureChartScreenshot();
+      }
+    } catch (screenshotErr) {
+      addLog(`📤 Strategy screenshot failed, sending text-only signal: ${screenshotErr.message}`);
     }
-    const caption = buildStrategyTelegramCaption(signal);
-    await sendTelegramPhoto(blob, caption);
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog(`📤 Strategy Telegram alert sent (${signal.type})`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Strategy alert sent!";
