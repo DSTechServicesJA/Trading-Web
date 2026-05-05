@@ -766,6 +766,7 @@ let trade         = null;
 let phase         = "WAITING";
 
 /* Win/Loss tracking */
+const SIGNAL_HISTORY_MAX = 200;       /* max in-memory signal entries (oldest trimmed first) */
 let signalHistory   = [];
 let signalWins      = 0;
 let signalLosses    = 0;
@@ -4170,7 +4171,8 @@ function renderSignalBanner() {
 
   /* Newest first: multi-panel aggregated list is already sorted newest-first;
      single-symbol signalHistory is stored oldest-first so we reverse it */
-  const signals = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
+  const sorted = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
+  const signals = sorted.slice(0, 100);
   for (const s of signals) {
     const card = document.createElement("div");
     const resultLower = (s.result || "PENDING").toLowerCase();
@@ -4237,7 +4239,8 @@ function renderScalpTickerBanner() {
   }
 
   /* Render newest first (aggregated list is already newest-first) */
-  for (let i = 0; i < allScalps.length; i++) {
+  const scalpLimit = Math.min(allScalps.length, 100);
+  for (let i = 0; i < scalpLimit; i++) {
     const s = allScalps[i];
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
@@ -4355,7 +4358,8 @@ function renderStrategyTickerBanner() {
   }
 
   /* Render newest first (aggregated list is already newest-first) */
-  for (let i = 0; i < allStrategies.length; i++) {
+  const stratLimit = Math.min(allStrategies.length, 100);
+  for (let i = 0; i < stratLimit; i++) {
     const s = allStrategies[i];
     const card = document.createElement("div");
     const isBull = s.dir === "BULL";
@@ -12222,6 +12226,7 @@ function recordConfirmedSignal(confirmPattern) {
     stake: null
   };
   signalHistory.push(signal);
+  if (signalHistory.length > SIGNAL_HISTORY_MAX) signalHistory.shift();
   persistSignalHistory();
   updateStatsUI();
   updateSignalBanners();
@@ -12281,7 +12286,10 @@ function recordSignal(confirmPattern) {
       signal.stake      = null;  /* deprecated — using lot size for MT5 */
     }
   }
-  if (!lastConfirmed) signalHistory.push(signal);
+  if (!lastConfirmed) {
+    signalHistory.push(signal);
+    if (signalHistory.length > SIGNAL_HISTORY_MAX) signalHistory.shift();
+  }
   /* Capture chart screenshot as data URL for PDF export */
   try {
     if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
