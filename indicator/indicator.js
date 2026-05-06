@@ -3815,7 +3815,7 @@ function saveSettings() {
       fvgStratEnabled,
       autoTradeFvgStrat,
       teslaScalingEnabled,
-      teslaScalingPlan
+      teslaScalingPlan,
       mtfTopDownEnabled,
       autoTradeMtfTopDown
     };
