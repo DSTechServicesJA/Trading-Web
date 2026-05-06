@@ -581,6 +581,61 @@ html[data-theme="light"] .filter-select {
 
 .strategies-cell { max-width: 220px; }
 
+/* ---- Telegram column ---- */
+.tg-col { min-width: 160px; }
+
+.tg-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.tg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tg-not-linked {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.btn-tg-user-sync,
+.btn-tg-user-kick,
+.btn-tg-user-unlink {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.btn-tg-user-sync {
+  background: linear-gradient(135deg, #229ED9, #1a7fb5);
+}
+.btn-tg-user-sync:hover { box-shadow: 0 2px 8px rgba(34,158,217,0.4); }
+.btn-tg-user-sync:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-tg-user-kick {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+}
+.btn-tg-user-kick:hover { box-shadow: 0 2px 8px rgba(244,63,94,0.4); }
+.btn-tg-user-kick:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-tg-user-unlink {
+  background: rgba(100,116,139,0.25);
+  color: var(--text-soft);
+  border: 1px solid var(--glass-border);
+}
+.btn-tg-user-unlink:hover { background: rgba(100,116,139,0.4); }
+.btn-tg-user-unlink:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* ---- Actions cell ---- */
 .actions-cell { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
 
