@@ -2792,3 +2792,129 @@ body.stream-mode #autoTradePLValue {
   filter: blur(6px);
   user-select: none;
 }
+
+/* ---- Strategy Enable/Disable Grid ---- */
+.strat-enable-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.strat-enable-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  user-select: none;
+}
+.strat-enable-row:hover {
+  border-color: rgba(99, 102, 241, 0.22);
+  background: var(--bg-card-hover);
+}
+.strat-enable-row:has(input:checked) {
+  border-color: rgba(16, 185, 129, 0.22);
+  background: rgba(16, 185, 129, 0.04);
+}
+.strat-enable-row:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.strat-enable-row input[type="checkbox"] {
+  order: 10;
+  margin-left: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 32px;
+  height: 18px;
+  background: rgba(92, 100, 132, 0.3);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.25s;
+  flex-shrink: 0;
+}
+.strat-enable-row input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.strat-enable-row input[type="checkbox"]:checked {
+  background: var(--success);
+}
+.strat-enable-row input[type="checkbox"]:checked::after {
+  transform: translateX(14px);
+}
+.strat-enable-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+.strat-enable-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+.strat-enable-name {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.strat-enable-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.strat-enable-badge.on {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success-soft);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.strat-enable-badge.off {
+  background: rgba(92, 100, 132, 0.12);
+  color: var(--text-muted);
+  border: 1px solid rgba(92, 100, 132, 0.2);
+}
+.strat-enable-badge.locked {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--warning-soft);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+/* Light theme overrides */
+body.light-theme .strat-enable-row {
+  background: #f5f7fa;
+  border-color: rgba(99, 102, 241, 0.1);
+}
+body.light-theme .strat-enable-row:hover {
+  background: #eef0f8;
+}
+body.light-theme .strat-enable-row:has(input:checked) {
+  background: rgba(16, 185, 129, 0.06);
+}
+body.light-theme .strat-enable-name {
+  color: #1e2340;
+}
+body.light-theme .strat-enable-row input[type="checkbox"] {
+  background: rgba(99, 102, 241, 0.18);
+}
+body.light-theme .strat-enable-row input[type="checkbox"]:checked {
+  background: var(--success);
+}
