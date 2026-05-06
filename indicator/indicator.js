@@ -1900,6 +1900,7 @@ function setPhase(newPhase) {
         setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
       } else {
         /* Single-symbol mode: use main chart as before */
+        addLog("📤 Telegram auto-send triggered — TRADE signal");
         setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
       }
     } else {
@@ -2078,8 +2079,10 @@ function startNyOpenRangeTimer() {
       sendPhaseNotification("NY_OPEN_RANGE");
       addLog("\uD83D\uDD64 NY Open Range: 9:30 AM EST reached \u2014 collecting 9:30\u20139:35 range");
       playPhaseAlert("RANGE");
-      // Send Telegram notification for NY Open
-      sendTelegramAlert();
+      // Send Telegram notification for NY Open (only when auto-send is enabled)
+      if (telegramAutoSend) {
+        setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+      }
     }
     /* Reset notification flag after the window passes (after 9:36) so it can fire again tomorrow */
     if ((et.hours === 9 && et.minutes >= 36) || et.hours >= 10) {
@@ -3092,6 +3095,7 @@ async function sendTelegramMessage(text) {
  * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
  */
 async function sendPartialTpTelegram(signal, partialLevel) {
+  if (!partialTpEnabled) return;
   if (!telegramOutcomeSend) return;
   try {
     const activeSym = signal.symbol || getActiveSymbol() || "";
@@ -3297,8 +3301,8 @@ async function sendTelegramAlert() {
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
-  const caption = buildTelegramCaption();
   try {
+    const caption = buildTelegramCaption();
     let blob;
     try {
       blob = await captureChartScreenshot();
@@ -8428,8 +8432,9 @@ function monitorPo3Outcomes(candle) {
        breakeven (entry).  This locks in the partial profit and removes risk
        for the remainder of the trade that runs to full TP.
        The `continue` is intentional: defer SL/TP check to the next tick so
-       that the newly-moved breakeven SL (not the original SL) governs. */
-    if (!s.partialTpHit) {
+       that the newly-moved breakeven SL (not the original SL) governs.
+       Only active when partialTpEnabled is ON — mirrors the main-strategy gate. */
+    if (partialTpEnabled && !s.partialTpHit) {
       const origSl = s._origSl;
       const risk = Math.abs(s.entry - origSl);
       const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
