@@ -279,7 +279,7 @@ function renderTable(users) {
     let tgCell;
     if (u.telegram_linked) {
       const tgName = u.telegram_username ? `@${escHtml(u.telegram_username)}` : "linked";
-      tgCell = `<span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? fmtDate(u.telegram_linked_at) : 'unknown'}">✅ ${tgName}</span>`;
+      tgCell = `<span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? escHtml(fmtDate(u.telegram_linked_at)) : 'unknown'}">✅ ${tgName}</span>`;
     } else {
       tgCell = `<span style="color:var(--text-muted);font-size:11px;">⚠ not linked</span>`;
     }

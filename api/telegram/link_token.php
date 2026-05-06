@@ -75,7 +75,7 @@ try {
     } else {
         /* Generate a new token */
         $token     = bin2hex(random_bytes(32)); // 64 hex chars
-        $expiresAt = (new \DateTime())->modify('+' . (TG_INVITE_EXPIRY_SECONDS / 60) . ' minutes')->format('Y-m-d H:i:s');
+        $expiresAt = (new \DateTime())->modify('+' . (int)(TG_INVITE_EXPIRY_SECONDS / 60) . ' minutes')->format('Y-m-d H:i:s');
 
         $pdo->prepare(
             'INSERT INTO telegram_link_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
