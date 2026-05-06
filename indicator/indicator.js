@@ -3993,6 +3993,7 @@ function restoreSettings() {
     /* Restore auto-trade history */
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
+    updateStrategyBadges();
   } catch (e) { /* storage not available */ }
 }
 
@@ -14529,9 +14530,44 @@ function applyStrategyAccess() {
       }
     }
   }
+  updateStrategyBadges();
 }
 
-/* ================= MULTI-SYMBOL ANALYSIS ================= */
+/**
+ * Refresh the ON/OFF/LOCKED status badges in the Strategies section.
+ * Call this after any strategy toggle changes or after loadSettings().
+ */
+function updateStrategyBadges() {
+  const entries = [
+    { badgeId: "stratBadge-liquiditySweep", toggleId: "liquiditySweepToggle", enabled: liquiditySweepEnabled },
+    { badgeId: "stratBadge-stopLossHunt",   toggleId: "stopLossHuntToggle",   enabled: stopLossHuntEnabled   },
+    { badgeId: "stratBadge-failedPinBar",   toggleId: "failedPinBarToggle",   enabled: failedPinBarEnabled   },
+    { badgeId: "stratBadge-fibScalp",       toggleId: "fibScalpToggle",       enabled: fibScalpEnabled       },
+    { badgeId: "stratBadge-po3",            toggleId: "po3Toggle",            enabled: po3Enabled            },
+    { badgeId: "stratBadge-nyOpenRange",    toggleId: "nyOpenRangeToggle",    enabled: nyOpenRangeEnabled    },
+    { badgeId: "stratBadge-sessionRanges",  toggleId: "sessionRangesToggle",  enabled: sessionRangesEnabled  },
+    { badgeId: "stratBadge-liveScalp",      toggleId: "liveScalpToggle",      enabled: liveScalpEnabled      },
+    { badgeId: "stratBadge-gridScalperMA",  toggleId: "gridScalperMAToggle",  enabled: gridScalperMAEnabled  },
+    { badgeId: "stratBadge-fvgStrat",       toggleId: "fvgStratToggle",       enabled: fvgStratEnabled       },
+  ];
+  for (const { badgeId, toggleId, enabled } of entries) {
+    const badge  = document.getElementById(badgeId);
+    const toggle = document.getElementById(toggleId);
+    if (!badge) continue;
+    if (toggle && toggle.disabled) {
+      badge.textContent = "🔒";
+      badge.className   = "strat-enable-badge locked";
+    } else if (enabled) {
+      badge.textContent = "ON";
+      badge.className   = "strat-enable-badge on";
+    } else {
+      badge.textContent = "OFF";
+      badge.className   = "strat-enable-badge off";
+    }
+  }
+}
+
+
 /**
  * Multi-symbol system: runs up to 6 independent indicator instances
  * simultaneously, each with its own WebSocket connection and state.
@@ -16102,6 +16138,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       updateStateUI();
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16124,6 +16161,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       updateStateUI();
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16259,6 +16297,7 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSettings();
       if (!liveScalpEnabled && UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.liveScalpMinConf) {
@@ -16313,6 +16352,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🌊 Liquidity Sweep strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16328,6 +16368,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🎯 Stop Loss Hunt strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16343,6 +16384,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("📌 Failed Pin Bar strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16358,6 +16400,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("📐 Fib Golden Zone Scalp strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16373,6 +16416,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("⚡ Power of 3 strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16389,6 +16433,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🔲 Grid Scalper MA strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.gridScalperMAStrategySelect) {
@@ -16425,6 +16470,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🎯 Fair Value Gap strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.autoTradeFvgStratToggle) {
