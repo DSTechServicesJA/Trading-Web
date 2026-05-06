@@ -9311,6 +9311,7 @@ function computeMtfBias() {
   const lows   = slice.map(c => c.low);
   const n   = highs.length;
   const mid = Math.floor(n / 2);
+  if (mid === 0 || mid >= n) return "NEUTRAL"; /* guard against edge cases */
 
   const avgHighFirst  = highs.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
   const avgHighSecond = highs.slice(mid).reduce((a, b) => a + b, 0) / (n - mid);
@@ -9436,17 +9437,18 @@ function detectMtfTopDown() {
 
   const entry    = c.close;
   const slBuffer = atrValue * MTF_SL_ATR_BUFFER;
+
+  /* Pre-compute the 4H synthesised slice once for both TP directions */
+  const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
   let sl, tp;
 
   if (dir === "BULL") {
     sl = c.low - slBuffer;
-    const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
     tp = biasSlice.length > 0
       ? Math.max(...biasSlice.map(b => b.high))
       : entry + Math.abs(entry - sl) * MTF_MIN_RR;
   } else {
     sl = c.high + slBuffer;
-    const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
     tp = biasSlice.length > 0
       ? Math.min(...biasSlice.map(b => b.low))
       : entry - Math.abs(sl - entry) * MTF_MIN_RR;
