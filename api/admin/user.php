@@ -12,6 +12,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../telegram/helpers.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -156,6 +157,20 @@ if ($method === 'PATCH') {
 
         $stmt = $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?');
         $stmt->execute($params);
+
+        /* ── Sync Telegram group membership when subscription status changes ── */
+        if (isset($body['subscription_status'])) {
+            try {
+                if ($body['subscription_status'] === 'active') {
+                    telegramAddIfLinked($pdo, $targetId);
+                } elseif (in_array($body['subscription_status'], ['inactive', 'trial'], true)) {
+                    telegramKickIfLinked($pdo, $targetId);
+                }
+            } catch (\Throwable $tgEx) {
+                error_log('Admin PATCH /user Telegram sync error: ' . $tgEx->getMessage());
+                /* Non-fatal — the user update already succeeded */
+            }
+        }
 
         jsonResponse(['message' => 'User updated']);
     } catch (\Throwable $e) {
