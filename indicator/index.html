@@ -1496,9 +1496,9 @@
 
       <!-- Unlinked state -->
       <div id="tgUnlinkedState">
-        <p class="tg-hint">Link your Telegram account to get access to the private group.</p>
+        <p class="tg-hint">Link your Telegram account to get access to the private group. Your group access will remain active for as long as your subscription is active.</p>
         <button id="tgLinkBtn" type="button" class="tg-btn">
-          <span>🔗 Link Telegram Account</span>
+          <span>🔗 Link Telegram &amp; Join Group</span>
         </button>
         <div id="tgError" class="tg-error"></div>
       </div>
@@ -1508,7 +1508,11 @@
         <p class="tg-linked-msg">
           ✅ Linked as <strong id="tgLinkedUsername"></strong>
         </p>
-        <p class="tg-hint">Your Telegram account is connected. You'll be added to the group automatically when your subscription is active.</p>
+        <p class="tg-hint" id="tgLinkedHint">Your Telegram account is connected. You are in the private trading group for the duration of your active subscription.</p>
+        <button id="tgRequestInviteBtn" type="button" class="tg-btn tg-btn-invite">
+          📨 Resend Group Invite
+        </button>
+        <div id="tgInviteMsg" class="tg-invite-msg" style="display:none;"></div>
         <button id="tgUnlinkBtn" type="button" class="tg-btn tg-btn-ghost">
           🔓 Unlink Telegram
         </button>
@@ -1651,6 +1655,7 @@
       const unlinked = document.getElementById("tgUnlinkedState");
       const linked   = document.getElementById("tgLinkedState");
       const nameEl   = document.getElementById("tgLinkedUsername");
+      const hintEl   = document.getElementById("tgLinkedHint");
 
       if (!section) return;
 
@@ -1670,6 +1675,11 @@
         linked.style.display   = "";
         if (nameEl) {
           nameEl.textContent = u.telegram_username ? "@" + u.telegram_username : "Telegram";
+        }
+        if (hintEl) {
+          hintEl.textContent = u.subscription_status === "active"
+            ? "Your Telegram account is connected. You are in the private trading group for the duration of your active subscription."
+            : "Your Telegram account is connected. Activate a subscription to gain access to the private trading group.";
         }
       } else {
         unlinked.style.display = "";
@@ -1700,12 +1710,44 @@
             await ITGuruAuth.verify();
             refreshTelegramUI();
             linkBtn.disabled = false;
-            linkBtn.innerHTML = "<span>🔗 Link Telegram Account</span>";
+            linkBtn.innerHTML = "<span>🔗 Link Telegram &amp; Join Group</span>";
           }, TG_RECHECK_DELAY_MS);
         } catch (ex) {
           if (errEl) errEl.textContent = ex.message || "An error occurred";
           linkBtn.disabled = false;
-          linkBtn.innerHTML = "<span>🔗 Link Telegram Account</span>";
+          linkBtn.innerHTML = "<span>🔗 Link Telegram &amp; Join Group</span>";
+        }
+      });
+    }
+
+    /* ── Request Invite button (for already-linked active users) ── */
+    const requestInviteBtn = document.getElementById("tgRequestInviteBtn");
+    const inviteMsgEl      = document.getElementById("tgInviteMsg");
+    if (requestInviteBtn) {
+      requestInviteBtn.addEventListener("click", async () => {
+        if (inviteMsgEl) { inviteMsgEl.style.display = "none"; inviteMsgEl.textContent = ""; }
+        requestInviteBtn.disabled = true;
+        requestInviteBtn.textContent = "Sending…";
+        try {
+          const resp = await apiCall("/telegram/request_invite", { method: "POST" });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            throw new Error(data.error || "Failed to send invite");
+          }
+          if (inviteMsgEl) {
+            inviteMsgEl.textContent = "✅ " + (data.message || "Invite sent! Check your Telegram messages.");
+            inviteMsgEl.style.display = "";
+            inviteMsgEl.className = "tg-invite-msg tg-invite-msg-ok";
+          }
+        } catch (ex) {
+          if (inviteMsgEl) {
+            inviteMsgEl.textContent = "❌ " + (ex.message || "An error occurred");
+            inviteMsgEl.style.display = "";
+            inviteMsgEl.className = "tg-invite-msg tg-invite-msg-err";
+          }
+        } finally {
+          requestInviteBtn.disabled = false;
+          requestInviteBtn.textContent = "📨 Resend Group Invite";
         }
       });
     }

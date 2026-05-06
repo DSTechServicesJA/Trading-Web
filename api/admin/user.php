@@ -33,7 +33,7 @@ if ($targetId <= 0) {
 if ($method === 'PATCH') {
     $body = getJsonBody();
 
-    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role', 'password'];
+    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role', 'password', 'telegram_username'];
     $set     = [];
     $params  = [];
 
@@ -91,6 +91,21 @@ if ($method === 'PATCH') {
         }
         $set[]    = 'password_hash = ?';
         $params[] = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+    }
+
+    if (array_key_exists('telegram_username', $body)) {
+        $tgUser = $body['telegram_username'];
+        if ($tgUser !== null && $tgUser !== '') {
+            $tgUser = ltrim(trim((string) $tgUser), '@');
+            if (!preg_match('/^[a-zA-Z0-9_]{5,32}$/', $tgUser)) {
+                jsonResponse(['error' => 'Invalid Telegram username (5–32 chars, letters/numbers/underscores, no @)'], 400);
+            }
+            $set[]    = 'telegram_username = ?';
+            $params[] = $tgUser;
+        } else {
+            $set[]    = 'telegram_username = ?';
+            $params[] = null;
+        }
     }
 
     if (!$set) {

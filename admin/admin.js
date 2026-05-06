@@ -573,6 +573,12 @@ function openEditModal(userId) {
     ? new Date(u.subscription_expires_at).toISOString().split("T")[0]
     : "";
 
+  /* Pre-fill telegram username (strip leading @ if present) */
+  const tgInput = el("editTelegramUsername");
+  if (tgInput) {
+    tgInput.value = u.telegram_username ? u.telegram_username.replace(/^@/, "") : "";
+  }
+
   document.getElementById("editError").textContent = "";
 
   editingUserStrategies = strategies;
@@ -588,18 +594,22 @@ async function saveEdit() {
   btn.disabled  = true;
   btn.textContent = "Saving…";
 
-  const status  = el("editStatus").value;
-  const role    = el("editRole").value;
-  const sub     = el("editSubStatus").value;
-  const plan    = el("editSubPlan").value || null;
-  const expiry  = el("editSubExpiry").value || null;
+  const status   = el("editStatus").value;
+  const role     = el("editRole").value;
+  const sub      = el("editSubStatus").value;
+  const plan     = el("editSubPlan").value || null;
+  const expiry   = el("editSubExpiry").value || null;
+  const telegramUsername = (() => {
+    const raw = (el("editTelegramUsername")?.value || "").trim().replace(/^@/, "");
+    return raw || null;
+  })();
   const newStrats = getCheckedStrategies("editStrategyChecks");
 
   try {
     /* Update user fields */
     const resp = await apiRequest("/admin/user?id=" + editingUserId, {
       method: "PATCH",
-      body: JSON.stringify({ status, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry }),
+      body: JSON.stringify({ status, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, telegram_username: telegramUsername }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -639,14 +649,15 @@ async function saveEdit() {
    New User Modal
    ═══════════════════════════════════════════════ */
 function openNewUserModal() {
-  el("newUsername").value  = "";
-  el("newEmail").value     = "";
-  el("newPassword").value  = "";
-  el("newRole").value      = "user";
-  el("newSubStatus").value = "inactive";
-  el("newSubPlan").value   = "";
-  el("newSubExpiry").value = "";
-  el("newUserError").textContent = "";
+  el("newUsername").value          = "";
+  el("newEmail").value             = "";
+  el("newPassword").value          = "";
+  el("newRole").value              = "user";
+  el("newSubStatus").value         = "inactive";
+  el("newSubPlan").value           = "";
+  el("newSubExpiry").value         = "";
+  el("newTelegramUsername").value  = "";
+  el("newUserError").textContent   = "";
   buildStrategyChecks("newStrategyChecks", []);
   document.getElementById("newUserModal").style.display = "flex";
 }
@@ -658,14 +669,15 @@ async function saveNewUser() {
   btn.disabled = true;
   btn.textContent = "Creating…";
 
-  const username  = el("newUsername").value.trim();
-  const email     = el("newEmail").value.trim();
-  const password  = el("newPassword").value;
-  const role      = el("newRole").value;
-  const sub       = el("newSubStatus").value;
-  const plan      = el("newSubPlan").value || null;
-  const expiry    = el("newSubExpiry").value || null;
-  const strategies = getCheckedStrategies("newStrategyChecks");
+  const username       = el("newUsername").value.trim();
+  const email          = el("newEmail").value.trim();
+  const password       = el("newPassword").value;
+  const role           = el("newRole").value;
+  const sub            = el("newSubStatus").value;
+  const plan           = el("newSubPlan").value || null;
+  const expiry         = el("newSubExpiry").value || null;
+  const telegramUsername = el("newTelegramUsername").value.trim().replace(/^@/, "") || null;
+  const strategies     = getCheckedStrategies("newStrategyChecks");
 
   if (!username || !password) {
     errEl.textContent = "Username and password are required";
@@ -676,7 +688,7 @@ async function saveNewUser() {
   try {
     const resp = await apiRequest("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ username, email, password, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, strategies }),
+      body: JSON.stringify({ username, email, password, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, telegram_username: telegramUsername, strategies }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Failed to create user");
