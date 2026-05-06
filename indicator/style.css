@@ -2918,3 +2918,273 @@ body.light-theme .strat-enable-row input[type="checkbox"] {
 body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   background: var(--success);
 }
+
+/* ──────────────────────────────────────────────────────────
+   Telegram Group Section
+   ────────────────────────────────────────────────────────── */
+.tg-section {
+  max-width: 780px;
+  margin: 24px auto 40px;
+  padding: 0 20px;
+}
+
+.tg-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  background: rgba(34, 158, 217, 0.08);
+  border: 1px solid rgba(34, 158, 217, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  box-shadow: 0 4px 24px rgba(34, 158, 217, 0.08);
+}
+
+.tg-icon {
+  font-size: 40px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.tg-body {
+  flex: 1;
+}
+
+.tg-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--heading);
+  margin: 0 0 6px;
+}
+
+.tg-subtitle {
+  font-size: 13.5px;
+  color: var(--text-soft);
+  margin: 0 0 16px;
+}
+
+.tg-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.tg-linked-msg {
+  font-size: 14px;
+  color: var(--success-soft);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.tg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  background: linear-gradient(135deg, #229ED9, #1a7fb5);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.tg-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(34, 158, 217, 0.4);
+}
+
+.tg-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.tg-btn-ghost {
+  background: transparent;
+  color: var(--text-soft);
+  border: 1px solid rgba(34, 158, 217, 0.3);
+}
+
+.tg-btn-ghost:hover {
+  background: rgba(34, 158, 217, 0.08);
+  box-shadow: none;
+}
+
+.tg-error {
+  color: var(--danger-soft);
+  font-size: 12.5px;
+  margin-top: 8px;
+  min-height: 16px;
+}
+
+@media (max-width: 600px) {
+  .tg-card { flex-direction: column; gap: 12px; padding: 20px 18px; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   Subscription Pricing Section
+   ────────────────────────────────────────────────────────── */
+.pricing-section {
+  max-width: 900px;
+  margin: 0 auto 64px;
+  padding: 0 20px;
+  text-align: center;
+}
+
+.pricing-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--heading);
+  margin-bottom: 8px;
+}
+
+.pricing-subtitle {
+  color: var(--text-soft);
+  font-size: 15px;
+  margin-bottom: 36px;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.pricing-card {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--card-shadow);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px var(--glass-border);
+}
+
+.pricing-card-featured {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: 0 4px 32px rgba(99, 102, 241, 0.18), 0 0 0 1px rgba(99, 102, 241, 0.3);
+}
+
+.pricing-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(100, 116, 139, 0.2);
+  color: var(--text-soft);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.pricing-badge-featured {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--primary-soft);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.pricing-plan-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--heading);
+  margin: 0;
+}
+
+.pricing-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pricing-amount {
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--heading);
+  font-family: var(--font-mono);
+}
+
+.pricing-period {
+  font-size: 14px;
+  color: var(--text-soft);
+}
+
+.pricing-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.pricing-features li {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.pricing-btn {
+  display: block;
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary-soft);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pricing-btn:hover {
+  background: rgba(99, 102, 241, 0.25);
+  color: #fff;
+}
+
+.pricing-btn-featured {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary-strong);
+}
+
+.pricing-btn-featured:hover {
+  background: var(--primary-strong);
+}
+
+.pricing-note {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pricing-note a {
+  color: var(--primary-soft);
+  text-decoration: none;
+}
+
+.pricing-note a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .pricing-amount { font-size: 32px; }
+  .pricing-card { padding: 24px 20px; }
+}
