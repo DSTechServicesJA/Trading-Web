@@ -137,15 +137,16 @@ if ($method === 'GET') {
    POST — create user
    ═══════════════════════════════════════════════ */
 if ($method === 'POST') {
-    $body     = getJsonBody();
-    $username = trim($body['username'] ?? '');
-    $password = $body['password'] ?? '';
-    $email    = trim($body['email'] ?? '');
-    $role     = $body['role'] ?? 'user';
-    $status   = $body['status'] ?? 'active';
-    $sub      = $body['subscription_status'] ?? 'inactive';
-    $subPlan  = array_key_exists('subscription_plan', $body) ? ($body['subscription_plan'] ?? null) : null;
-    $subExp   = $body['subscription_expires_at'] ?? null;
+    $body        = getJsonBody();
+    $username    = trim($body['username'] ?? '');
+    $password    = $body['password'] ?? '';
+    $email       = trim($body['email'] ?? '');
+    $role        = $body['role'] ?? 'user';
+    $status      = $body['status'] ?? 'active';
+    $sub         = $body['subscription_status'] ?? 'inactive';
+    $subPlan     = array_key_exists('subscription_plan', $body) ? ($body['subscription_plan'] ?? null) : null;
+    $subExp      = $body['subscription_expires_at'] ?? null;
+    $tgUsername  = isset($body['telegram_username']) ? ltrim(trim((string) $body['telegram_username']), '@') : null;
 
     /* Validation */
     if ($username === '' || $password === '') {
@@ -192,6 +193,14 @@ if ($method === 'POST') {
         }
     }
 
+    /* Validate optional Telegram username */
+    $tgUsername = ($tgUsername === '') ? null : $tgUsername;
+    if ($tgUsername !== null) {
+        if (strlen($tgUsername) > 32 || !preg_match('/^[a-zA-Z0-9_]{5,32}$/', $tgUsername)) {
+            jsonResponse(['error' => 'Invalid Telegram username (5–32 chars, letters/numbers/underscores, no @)'], 400);
+        }
+    }
+
     try {
         $pdo = getDB();
 
@@ -213,8 +222,8 @@ if ($method === 'POST') {
 
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
         $stmt = $pdo->prepare(
-            'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_plan, subscription_expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_plan, subscription_expires_at, telegram_username)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $username,
@@ -226,6 +235,7 @@ if ($method === 'POST') {
             $sub,
             $subPlan,
             ($subExp !== '' && $subExp !== null) ? $subExp : null,
+            $tgUsername,
         ]);
         $newId = (int) $pdo->lastInsertId();
 

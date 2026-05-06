@@ -807,6 +807,13 @@ html[data-theme="light"] .form-row select {
   margin-top: 4px;
 }
 
+.field-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  margin-top: 4px;
+  display: block;
+}
+
 /* ---- Timestamp formatting ---- */
 .ts { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 

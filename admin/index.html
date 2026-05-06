@@ -190,6 +190,11 @@
       <label>Expires (leave blank to auto-calculate)</label>
       <input type="date" id="editSubExpiry" />
     </div>
+    <div class="form-row">
+      <label>Telegram Username</label>
+      <input type="text" id="editTelegramUsername" placeholder="@username (optional)" autocomplete="off" />
+      <small class="field-hint">Update their Telegram @username. This only stores the handle — the user must still link via the bot to activate group access.</small>
+    </div>
     <div class="form-row strat-form-row">
       <label>Strategies</label>
       <div id="editStrategyChecks" class="strategy-checks"></div>
@@ -247,6 +252,11 @@
     <div class="form-row">
       <label>Subscription Expires</label>
       <input type="date" id="newSubExpiry" />
+    </div>
+    <div class="form-row">
+      <label>Telegram Username</label>
+      <input type="text" id="newTelegramUsername" placeholder="@username (optional)" autocomplete="off" />
+      <small class="field-hint">Enter their Telegram @username so they can join the private group once active.</small>
     </div>
     <div class="form-row strat-form-row">
       <label>Grant Strategies</label>
