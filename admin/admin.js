@@ -8,6 +8,10 @@ const ADMIN_API = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
   ? window.ITGURU_AUTH_API_BASE.replace(/\/auth\/?$/, "")
   : "https://trading.dsitservicesja.com/api";
 
+const THEME_KEY  = "itguru_admin_theme";
+const THEME_DARK  = "dark";
+const THEME_LIGHT = "light";
+
 /* ── State ── */
 let allStrategies   = [];   /* [{ key, label }] */
 let currentPage     = 1;
@@ -17,6 +21,31 @@ let editingUserStrategies = [];
 let deletingUser    = null; /* { id, username } */
 let resetPwUser     = null; /* { id, username } */
 const userCache     = new Map(); /* id → user object from last load */
+
+/* ═══════════════════════════════════════════════
+   Theme
+   ═══════════════════════════════════════════════ */
+
+/** Return current theme ("dark" | "light"), defaulting to dark. */
+function getTheme() {
+  return localStorage.getItem(THEME_KEY) === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+}
+
+/** Apply a theme and persist to localStorage. */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  const btn = document.getElementById("themeToggleBtn");
+  if (btn) {
+    btn.textContent = theme === THEME_LIGHT ? "🌙 Dark" : "☀️ Light";
+    btn.title       = theme === THEME_LIGHT ? "Switch to dark theme" : "Switch to light theme";
+  }
+}
+
+/** Toggle between light and dark. */
+function toggleTheme() {
+  applyTheme(getTheme() === THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
+}
 
 /* ═══════════════════════════════════════════════
    Boot
@@ -81,6 +110,11 @@ async function initApp(user) {
 
   const lbl = document.getElementById("adminUserLabel");
   if (lbl) lbl.textContent = "👤 " + (user.displayName || user.username);
+
+  /* Theme: apply saved preference and wire toggle button */
+  applyTheme(getTheme());
+  const themeBtn = document.getElementById("themeToggleBtn");
+  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
 
   /* Logout */
   document.getElementById("adminLogoutBtn").addEventListener("click", () => {

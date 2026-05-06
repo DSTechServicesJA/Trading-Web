@@ -16,6 +16,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Apply saved theme before first paint to prevent flash of unstyled content -->
+  <script>
+    (function () {
+      var t = localStorage.getItem("itguru_admin_theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    })();
+  </script>
 </head>
 <body>
 
@@ -48,6 +55,7 @@
     </ul>
     <div class="nav-right">
       <span id="adminUserLabel" class="admin-user-label"></span>
+      <button id="themeToggleBtn" type="button" class="btn-theme-toggle" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">🌙 Dark</button>
       <button id="adminLogoutBtn" type="button" class="btn-logout">Logout</button>
     </div>
   </nav>
