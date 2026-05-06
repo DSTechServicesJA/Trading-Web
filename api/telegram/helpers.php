@@ -17,6 +17,9 @@
 
 declare(strict_types=1);
 
+/** Seconds a Telegram invite link remains valid when sent to a user. */
+const TG_INVITE_EXPIRY_SECONDS = 900; // 15 minutes
+
 /**
  * Make a Telegram Bot API call server-side via cURL.
  *
@@ -99,7 +102,7 @@ function telegramAddIfLinked(PDO $pdo, int $userId): void
     ]);
 
     /* Create a single-use, 15-minute invite link */
-    $expireTimestamp = time() + 900; // 15 minutes
+    $expireTimestamp = time() + TG_INVITE_EXPIRY_SECONDS;
     $inviteResp = telegramBotApiCall('createChatInviteLink', [
         'chat_id'              => $chatId,
         'expire_date'          => $expireTimestamp,
@@ -117,11 +120,12 @@ function telegramAddIfLinked(PDO $pdo, int $userId): void
             'parse_mode' => 'Markdown',
         ]);
     } else {
-        /* Fallback: try directly adding via addChatMember if the bot has that permission */
+        /* Fallback: the bot may not have createInviteLink permission — unban only
+           if banned so we do not accidentally lift intentional bans. */
         telegramBotApiCall('unbanChatMember', [
             'chat_id'        => $chatId,
             'user_id'        => $tgUserId,
-            'only_if_banned' => false,
+            'only_if_banned' => true,
         ]);
     }
 }

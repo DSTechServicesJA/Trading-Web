@@ -874,13 +874,15 @@
             /* Open the bot link in a new tab */
             window.open(data.bot_link, "_blank", "noopener,noreferrer");
             linkBtn.innerHTML = "<span>✅ Link opened — follow instructions in Telegram</span>";
-            /* Re-verify after a short delay to pick up any changes */
+            /* Re-verify after a short delay to pick up any changes.
+               8 seconds gives the user time to tap /start in the bot. */
+            const TG_RECHECK_DELAY_MS = 8000;
             setTimeout(async () => {
               await ITGuruAuth.verify();
               refreshTelegramUI();
               linkBtn.disabled = false;
               linkBtn.innerHTML = "<span>🔗 Link Telegram Account</span>";
-            }, 8000);
+            }, TG_RECHECK_DELAY_MS);
           } catch (ex) {
             if (errEl) errEl.textContent = ex.message || "An error occurred";
             linkBtn.disabled = false;

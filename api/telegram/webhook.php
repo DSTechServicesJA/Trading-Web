@@ -161,9 +161,9 @@ try {
         /* Confirm to the user */
         $name = $firstName ?: ($fromUser ? "@{$fromUser}" : 'there');
         $subMsg = match ($subStatus) {
-            'active'   => "✅ Your subscription is *active*. You will be added to the private trading group shortly.",
-            'trial'    => "🔵 You are on a *trial* plan. Upgrade to get access to the private trading group.",
-            default    => "⚠️ Your subscription is currently *inactive*. Contact your admin to activate it.",
+            'active'   => "✅ Your subscription is *active*. You will receive an invite to the private trading group shortly.",
+            'trial'    => "🔵 You are on a *trial* plan. Only *active* paid subscribers get access to the private trading group. Upgrade to unlock group access.",
+            default    => "⚠️ Your subscription is currently *inactive*. Contact your admin to activate it and gain access to the private trading group.",
         };
 
         tgReply($chatId,

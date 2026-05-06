@@ -21,6 +21,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/helpers.php';
 
 requirePost();
 
@@ -74,7 +75,7 @@ try {
     } else {
         /* Generate a new token */
         $token     = bin2hex(random_bytes(32)); // 64 hex chars
-        $expiresAt = (new \DateTime())->modify('+15 minutes')->format('Y-m-d H:i:s');
+        $expiresAt = (new \DateTime())->modify('+' . (TG_INVITE_EXPIRY_SECONDS / 60) . ' minutes')->format('Y-m-d H:i:s');
 
         $pdo->prepare(
             'INSERT INTO telegram_link_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
