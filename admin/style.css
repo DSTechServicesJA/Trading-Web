@@ -3,7 +3,7 @@
    Shares design tokens with the main app glassmorphism theme
    ========================================================= */
 
-/* ---- Design Tokens (same as main style.css) ---- */
+/* ---- Design Tokens (dark, default) ---- */
 :root {
   --bg-base:      #06080f;
   --bg-surface:   #0c1021;
@@ -47,6 +47,54 @@
   --font-size-md:  13.5px;
   --font-size-lg:  16px;
   --font-size-xl:  22px;
+
+  /* Theme-specific overrideable tokens */
+  --input-bg:             rgba(6, 8, 15, 0.6);
+  --input-border:         rgba(99, 128, 255, 0.12);
+  --overlay-bg:           rgba(6, 8, 15, 0.92);
+  --modal-overlay-bg:     rgba(6, 8, 15, 0.88);
+  --login-overlay-bg:     rgba(6, 8, 15, 0.92);
+  --row-hover-bg:         rgba(99, 128, 255, 0.04);
+  --row-expiring-bg:      rgba(245, 158, 11, 0.05);
+  --row-expired-bg:       rgba(244, 63, 94, 0.05);
+  --tbl-row-border:       rgba(99, 128, 255, 0.04);
+  --select-arrow-color:   %238b95b5;
+}
+
+/* ---- Light Theme Overrides ---- */
+html[data-theme="light"] {
+  --bg-base:      #f0f4ff;
+  --bg-surface:   #e8eeff;
+  --bg-card:      rgba(255, 255, 255, 0.82);
+  --bg-card-hover: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(99, 128, 255, 0.18);
+  --glass-glow:   rgba(59, 130, 246, 0.08);
+
+  --text:         #1a1f38;
+  --text-soft:    #404770;
+  --text-muted:   #7880a8;
+  --heading:      #0b0e20;
+
+  --primary:        #5b5cf6;
+  --primary-soft:   #4f46e5;
+  --primary-glow:   rgba(99, 102, 241, 0.14);
+  --primary-strong: #4338ca;
+
+  --muted:        #8693b0;
+  --muted-strong: #6879a0;
+
+  --card-shadow:  0 4px 24px rgba(99,128,255,0.10), 0 0 0 1px var(--glass-border);
+
+  --input-bg:             rgba(255, 255, 255, 0.9);
+  --input-border:         rgba(99, 128, 255, 0.22);
+  --row-hover-bg:         rgba(99, 128, 255, 0.06);
+  --row-expiring-bg:      rgba(245, 158, 11, 0.08);
+  --row-expired-bg:       rgba(244, 63, 94, 0.07);
+  --tbl-row-border:       rgba(99, 128, 255, 0.07);
+  --overlay-bg:           rgba(220, 228, 255, 0.88);
+  --modal-overlay-bg:     rgba(220, 228, 255, 0.88);
+  --login-overlay-bg:     rgba(220, 228, 255, 0.95);
+  --select-arrow-color:   %23404770;
 }
 
 /* ---- Reset & Base ---- */
@@ -75,13 +123,19 @@ body::before {
   z-index: 0;
 }
 
+html[data-theme="light"] body::before {
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 10%, rgba(99,102,241,0.09), transparent),
+    radial-gradient(ellipse 50% 50% at 80% 90%, rgba(16,185,129,0.05), transparent);
+}
+
 :focus-visible { outline: 2px solid var(--primary-soft); outline-offset: 2px; }
 
 /* ---- Login Overlay ---- */
 .login-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6,8,15,0.92);
+  background: var(--login-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,9 +169,9 @@ body::before {
   width: 100%;
   padding: 10px 14px;
   margin-bottom: 10px;
-  border: 1px solid rgba(99,128,255,0.12);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-sm);
-  background: rgba(6,8,15,0.6);
+  background: var(--input-bg);
   color: var(--text);
   font-family: var(--font-base);
   font-size: var(--font-size-md);
@@ -235,6 +289,26 @@ body::before {
 
 .btn-logout:hover { background: var(--muted-strong); }
 
+/* ---- Theme toggle button ---- */
+.btn-theme-toggle {
+  padding: 5px 12px;
+  background: var(--bg-card);
+  color: var(--text-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-theme-toggle:hover {
+  background: var(--primary-glow);
+  color: var(--primary-soft);
+  border-color: rgba(99,102,241,0.2);
+}
+
 /* ---- Main Container ---- */
 .admin-container {
   position: relative;
@@ -301,9 +375,9 @@ body::before {
   flex: 1;
   min-width: 200px;
   padding: 8px 14px;
-  border: 1px solid rgba(99,128,255,0.12);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-sm);
-  background: rgba(6,8,15,0.6);
+  background: var(--input-bg);
   color: var(--text);
   font-family: var(--font-base);
   font-size: var(--font-size-md);
@@ -317,18 +391,27 @@ body::before {
 
 .filter-select {
   padding: 8px 30px 8px 12px;
-  border: 1px solid rgba(99,128,255,0.12);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-sm);
-  background: rgba(6,8,15,0.6);
+  background: var(--input-bg);
   color: var(--text);
   font-family: var(--font-base);
   font-size: var(--font-size-md);
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%238b95b5'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='var(--select-arrow-color)'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 10px;
+}
+
+/* Arrow icon per theme (CSS var in SVG URLs isn't interpolated by browser) */
+html:not([data-theme="light"]) .filter-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%238b95b5'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+}
+
+html[data-theme="light"] .filter-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%23404770'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
 }
 
 .filter-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); outline: none; }
@@ -349,6 +432,22 @@ body::before {
 
 .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(99,102,241,0.35); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+.btn-tg-sync {
+  padding: 8px 18px;
+  background: linear-gradient(135deg, #229ED9, #1a7fb5);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-tg-sync:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(34,158,217,0.35); }
+.btn-tg-sync:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
 .btn-ghost {
   padding: 8px 18px;
@@ -428,17 +527,17 @@ body::before {
 
 .user-table td {
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(99,128,255,0.04);
+  border-bottom: 1px solid var(--tbl-row-border);
   color: var(--text);
   vertical-align: middle;
 }
 
 .user-table tr:last-child td { border-bottom: none; }
 
-.user-table tr:hover td { background: rgba(99,128,255,0.04); }
+.user-table tr:hover td { background: var(--row-hover-bg); }
 
-.user-table tr.row-expiring-soon td { background: rgba(245,158,11,0.05); }
-.user-table tr.row-expired td       { background: rgba(244,63,94,0.05); }
+.user-table tr.row-expiring-soon td { background: var(--row-expiring-bg); }
+.user-table tr.row-expired td       { background: var(--row-expired-bg); }
 
 .table-empty {
   text-align: center;
@@ -520,7 +619,7 @@ body::before {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6,8,15,0.88);
+  background: var(--modal-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -576,9 +675,9 @@ body::before {
 .form-row input,
 .form-row select {
   padding: 9px 12px;
-  border: 1px solid rgba(99,128,255,0.12);
+  border: 1px solid var(--input-border);
   border-radius: var(--radius-sm);
-  background: rgba(6,8,15,0.6);
+  background: var(--input-bg);
   color: var(--text);
   font-family: var(--font-base);
   font-size: var(--font-size-md);
@@ -588,10 +687,17 @@ body::before {
 .form-row select {
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%238b95b5'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   padding-right: 28px;
+}
+
+html:not([data-theme="light"]) .form-row select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%238b95b5'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+}
+
+html[data-theme="light"] .form-row select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%23404770'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
 }
 
 .form-row input:focus,
@@ -670,3 +776,4 @@ body::before {
   .user-table { font-size: 11px; }
   .user-table th, .user-table td { padding: 8px 10px; }
 }
+

@@ -2070,4 +2070,107 @@ kbd {
   .pricing-card { padding: 24px 20px; }
 }
 
+/* ──────────────────────────────────────────────────────────
+   Telegram Group Section
+   ────────────────────────────────────────────────────────── */
+.tg-section {
+  max-width: 780px;
+  margin: 0 auto 40px;
+  padding: 0 20px;
+}
 
+.tg-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  background: rgba(34, 158, 217, 0.08);
+  border: 1px solid rgba(34, 158, 217, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  box-shadow: 0 4px 24px rgba(34, 158, 217, 0.08);
+}
+
+.tg-icon {
+  font-size: 40px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.tg-body {
+  flex: 1;
+}
+
+.tg-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--heading);
+  margin: 0 0 6px;
+}
+
+.tg-subtitle {
+  font-size: 13.5px;
+  color: var(--text-soft);
+  margin: 0 0 16px;
+}
+
+.tg-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.tg-linked-msg {
+  font-size: 14px;
+  color: var(--success-soft);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.tg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  background: linear-gradient(135deg, #229ED9, #1a7fb5);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.tg-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(34, 158, 217, 0.4);
+}
+
+.tg-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.tg-btn-ghost {
+  background: transparent;
+  color: var(--text-soft);
+  border: 1px solid rgba(34, 158, 217, 0.3);
+}
+
+.tg-btn-ghost:hover {
+  background: rgba(34, 158, 217, 0.08);
+  box-shadow: none;
+}
+
+.tg-error {
+  color: var(--danger-soft);
+  font-size: 12.5px;
+  margin-top: 8px;
+  min-height: 16px;
+}
+
+@media (max-width: 600px) {
+  .tg-card { flex-direction: column; gap: 12px; padding: 20px 18px; }
+}

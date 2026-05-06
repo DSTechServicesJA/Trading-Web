@@ -71,6 +71,7 @@ if ($method === 'GET') {
         $stmt = $pdo->prepare(
             "SELECT u.id, u.username, u.email, u.display_name, u.role, u.status,
                     u.subscription_status, u.subscription_plan, u.subscription_expires_at, u.last_login_at,
+                    u.telegram_user_id, u.telegram_username, u.telegram_linked_at,
                     u.created_at
              FROM users u
              $whereSql
@@ -93,7 +94,8 @@ if ($method === 'GET') {
                 $stratMap[$row['user_id']][] = $row['strategy_key'];
             }
             foreach ($users as &$u) {
-                $u['strategies'] = $stratMap[$u['id']] ?? [];
+                $u['strategies']      = $stratMap[$u['id']] ?? [];
+                $u['telegram_linked'] = !empty($u['telegram_user_id']);
             }
             unset($u);
         }

@@ -31,7 +31,8 @@ try {
     $pdo  = getDB();
     $stmt = $pdo->prepare(
         'SELECT id, username, display_name, role, status,
-                subscription_status, subscription_plan, subscription_expires_at
+                subscription_status, subscription_plan, subscription_expires_at,
+                telegram_user_id, telegram_username, telegram_linked_at
          FROM users WHERE id = ?'
     );
     $stmt->execute([$payload['sub']]);
@@ -55,6 +56,10 @@ try {
             $pdo->prepare("UPDATE users SET subscription_status = 'inactive' WHERE id = ?")
                 ->execute([$user['id']]);
             $user['subscription_status'] = 'inactive';
+
+            /* Kick from Telegram group if linked */
+            require_once __DIR__ . '/../telegram/helpers.php';
+            telegramKickIfLinked($pdo, (int) $user['id']);
         } catch (\Throwable $ex) {
             error_log('Auto-expiry update error: ' . $ex->getMessage());
         }
@@ -74,6 +79,8 @@ try {
             'subscription_status'     => $user['subscription_status'] ?? 'inactive',
             'subscription_plan'       => $user['subscription_plan'],
             'subscription_expires_at' => $user['subscription_expires_at'],
+            'telegram_username'       => $user['telegram_username'],
+            'telegram_linked'         => !empty($user['telegram_user_id']),
             'strategies'              => $strategies,
         ],
     ]);

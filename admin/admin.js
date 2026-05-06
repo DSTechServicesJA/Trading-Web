@@ -8,6 +8,10 @@ const ADMIN_API = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
   ? window.ITGURU_AUTH_API_BASE.replace(/\/auth\/?$/, "")
   : "https://trading.dsitservicesja.com/api";
 
+const THEME_KEY  = "itguru_admin_theme";
+const THEME_DARK  = "dark";
+const THEME_LIGHT = "light";
+
 /* ── State ── */
 let allStrategies   = [];   /* [{ key, label }] */
 let currentPage     = 1;
@@ -17,6 +21,31 @@ let editingUserStrategies = [];
 let deletingUser    = null; /* { id, username } */
 let resetPwUser     = null; /* { id, username } */
 const userCache     = new Map(); /* id → user object from last load */
+
+/* ═══════════════════════════════════════════════
+   Theme
+   ═══════════════════════════════════════════════ */
+
+/** Return current theme ("dark" | "light"), defaulting to dark. */
+function getTheme() {
+  return localStorage.getItem(THEME_KEY) === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
+}
+
+/** Apply a theme and persist to localStorage. */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  const btn = document.getElementById("themeToggleBtn");
+  if (btn) {
+    btn.textContent = theme === THEME_LIGHT ? "🌙 Dark" : "☀️ Light";
+    btn.title       = theme === THEME_LIGHT ? "Switch to dark theme" : "Switch to light theme";
+  }
+}
+
+/** Toggle between light and dark. */
+function toggleTheme() {
+  applyTheme(getTheme() === THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
+}
 
 /* ═══════════════════════════════════════════════
    Boot
@@ -81,6 +110,11 @@ async function initApp(user) {
 
   const lbl = document.getElementById("adminUserLabel");
   if (lbl) lbl.textContent = "👤 " + (user.displayName || user.username);
+
+  /* Theme: apply saved preference and wire toggle button */
+  applyTheme(getTheme());
+  const themeBtn = document.getElementById("themeToggleBtn");
+  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
 
   /* Logout */
   document.getElementById("adminLogoutBtn").addEventListener("click", () => {
@@ -175,13 +209,13 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
   });
 
   const tbody = document.getElementById("userTableBody");
-  tbody.innerHTML = `<tr><td colspan="10" class="table-empty">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="11" class="table-empty">Loading…</td></tr>`;
 
   try {
     const resp = await apiRequest("/admin/users?" + params);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      tbody.innerHTML = `<tr><td colspan="10" class="table-empty" style="color:var(--danger-soft)">
+      tbody.innerHTML = `<tr><td colspan="11" class="table-empty" style="color:var(--danger-soft)">
         Error: ${escHtml(err.error || "Failed to load users")}
       </td></tr>`;
       return;
@@ -191,8 +225,9 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
     renderTable(data.users || []);
     renderPagination(data.page, data.last_page, data.total, data.per_page);
     updateStats(data.total, data.stats || {});
+    loadTelegramStats();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="10" class="table-empty" style="color:var(--danger-soft)">
+    tbody.innerHTML = `<tr><td colspan="11" class="table-empty" style="color:var(--danger-soft)">
       Network error — ${escHtml(e.message)}
     </td></tr>`;
   }
@@ -202,7 +237,7 @@ async function loadUsers(page = currentPage, filters = currentFilters) {
 function renderTable(users) {
   const tbody = document.getElementById("userTableBody");
   if (!users.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="table-empty">No users found.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="table-empty">No users found.</td></tr>`;
     return;
   }
 
@@ -240,6 +275,15 @@ function renderTable(users) {
       ? u.subscription_plan.charAt(0).toUpperCase() + u.subscription_plan.slice(1)
       : "—";
 
+    /* Telegram cell */
+    let tgCell;
+    if (u.telegram_linked) {
+      const tgName = u.telegram_username ? `@${escHtml(u.telegram_username)}` : "linked";
+      tgCell = `<span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? escHtml(fmtDate(u.telegram_linked_at)) : 'unknown'}">✅ ${tgName}</span>`;
+    } else {
+      tgCell = `<span style="color:var(--text-muted);font-size:11px;">⚠ not linked</span>`;
+    }
+
     tr.innerHTML = `
       <td><strong>${escHtml(u.username)}</strong></td>
       <td class="ts">${escHtml(u.email || "—")}</td>
@@ -249,6 +293,7 @@ function renderTable(users) {
       <td class="ts">${escHtml(planLabel)}</td>
       <td>${expiryText}</td>
       <td class="ts">${u.last_login_at ? fmtDateTime(u.last_login_at) : "—"}</td>
+      <td class="ts">${tgCell}</td>
       <td class="strategies-cell">${strategies}</td>
       <td class="actions-cell">
         <button type="button" class="btn-icon btn-sm" data-action="toggle-status" data-id="${u.id}" data-status="${escHtml(u.status)}" title="${u.status === 'active' ? 'Lock account' : 'Unlock account'}">
@@ -256,6 +301,10 @@ function renderTable(users) {
         </button>
         <button type="button" class="btn-icon btn-sm" data-action="edit" data-id="${u.id}" title="Edit user">✏️</button>
         <button type="button" class="btn-icon btn-sm" data-action="reset-password" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Reset password">🔑</button>
+        ${u.telegram_linked
+          ? `<button type="button" class="btn-icon btn-sm" data-action="tg-sync" data-id="${u.id}" title="Sync Telegram group membership">📱</button>
+             <button type="button" class="btn-icon btn-sm btn-danger" data-action="tg-unlink" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Unlink Telegram">🔗</button>`
+          : ""}
         <button type="button" class="btn-icon btn-sm btn-danger" data-action="delete" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Delete user">🗑️</button>
       </td>`;
 
@@ -275,6 +324,21 @@ function updateStats(total, stats) {
   el("statTrial").textContent      = stats.trial_subs    ?? "—";
   el("statLocked").textContent     = stats.locked_count  ?? "—";
   el("statExpiring").textContent   = stats.expiring_soon ?? "—";
+  /* Telegram stats loaded separately */
+}
+
+/* ── Load and display Telegram stats ── */
+async function loadTelegramStats() {
+  try {
+    const resp = await apiRequest("/admin/telegram");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const s = data.stats || {};
+    el("statTgLinked").textContent        = s.total_linked      ?? "—";
+    el("statTgActiveUnlinked").textContent = s.active_unlinked  ?? "—";
+  } catch {
+    /* non-critical, silently ignore */
+  }
 }
 
 /* ── Pagination ── */
@@ -332,6 +396,30 @@ function bindToolbar() {
   el("filterRole").addEventListener("change",   doSearch);
 
   el("newUserBtn").addEventListener("click", openNewUserModal);
+
+  const syncAllBtn = el("syncAllTgBtn");
+  if (syncAllBtn) {
+    syncAllBtn.addEventListener("click", async () => {
+      if (!confirm("Sync ALL linked Telegram accounts with group membership?\n\nThis will add active subscribers and remove inactive ones. This may take a moment.")) return;
+      syncAllBtn.disabled = true;
+      syncAllBtn.textContent = "📱 Syncing…";
+      try {
+        const resp = await apiRequest("/admin/telegram?action=sync_all", { method: "POST" });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          alert("Sync error: " + (data.error || "Unknown error"));
+        } else {
+          alert(`Sync complete:\n✅ Added: ${data.added ?? 0}\n❌ Kicked: ${data.kicked ?? 0}\n⚠ Errors: ${data.errors ?? 0}`);
+          await loadUsers();
+        }
+      } catch (e) {
+        alert("Network error: " + e.message);
+      } finally {
+        syncAllBtn.disabled = false;
+        syncAllBtn.textContent = "📱 Sync All Telegram";
+      }
+    });
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -376,6 +464,41 @@ async function handleRowAction(e) {
 
   if (action === "delete") {
     openDeleteModal({ id, username: btn.dataset.username });
+    return;
+  }
+
+  if (action === "tg-sync") {
+    btn.disabled = true;
+    try {
+      const resp = await apiRequest("/admin/telegram?action=sync_user&id=" + id, { method: "POST" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        alert("Telegram sync error: " + (data.error || "Unknown error"));
+      } else {
+        alert(data.message || "Sync complete");
+        await loadUsers();
+      }
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "tg-unlink") {
+    const username = btn.dataset.username || ("user #" + id);
+    if (!confirm(`Unlink Telegram from ${username}? This does not kick them from the group.`)) return;
+    btn.disabled = true;
+    try {
+      const resp = await apiRequest("/admin/telegram?id=" + id, { method: "DELETE" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        alert("Unlink error: " + (data.error || "Unknown error"));
+      } else {
+        await loadUsers();
+      }
+    } finally {
+      btn.disabled = false;
+    }
     return;
   }
 }
