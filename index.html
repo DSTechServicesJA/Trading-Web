@@ -600,6 +600,38 @@
     </div>
   </main>
 
+  <!-- ================= TELEGRAM GROUP SECTION ================= -->
+  <section class="tg-section" id="telegramSection" style="display:none;">
+    <div class="tg-card" id="telegramCard">
+      <div class="tg-icon">📱</div>
+      <div class="tg-body">
+        <h3 class="tg-title">Join the Private Telegram Trading Group</h3>
+        <p class="tg-subtitle">Get real-time trade alerts and signals directly in Telegram.</p>
+
+        <!-- Unlinked state -->
+        <div id="tgUnlinkedState">
+          <p class="tg-hint">Link your Telegram account to get access to the private group.</p>
+          <button id="tgLinkBtn" type="button" class="tg-btn">
+            <span>🔗 Link Telegram Account</span>
+          </button>
+          <div id="tgError" class="tg-error"></div>
+        </div>
+
+        <!-- Linked state -->
+        <div id="tgLinkedState" style="display:none;">
+          <p class="tg-linked-msg">
+            ✅ Linked as <strong id="tgLinkedUsername"></strong>
+          </p>
+          <p class="tg-hint">Your Telegram account is connected. You'll be added to the group automatically when your subscription is active.</p>
+          <button id="tgUnlinkBtn" type="button" class="tg-btn tg-btn-ghost">
+            🔓 Unlink Telegram
+          </button>
+          <div id="tgUnlinkError" class="tg-error"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= PRICING SECTION ================= -->
   <section class="pricing-section" id="pricing">
     <h2 class="pricing-title">💎 Subscription Plans</h2>
@@ -770,6 +802,137 @@
           activateTab(btns[idx]);
         });
       });
+    })();
+  </script>
+
+  <!-- ================= TELEGRAM INTEGRATION ================= -->
+  <script>
+    (function () {
+      const AUTH_API = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
+        ? window.ITGURU_AUTH_API_BASE.replace(/\/auth\/?$/, "")
+        : "https://trading.dsitservicesja.com/api";
+
+      async function apiCall(path, options = {}) {
+        const token = ITGuruAuth.getToken();
+        const headers = {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": "Bearer " + token } : {}),
+          ...(options.headers || {}),
+        };
+        const resp = await fetch(AUTH_API + path, { ...options, headers });
+        if (resp.status === 404 && !path.endsWith(".php")) {
+          return fetch(AUTH_API + path + ".php", { ...options, headers });
+        }
+        return resp;
+      }
+
+      function refreshTelegramUI() {
+        const section  = document.getElementById("telegramSection");
+        const unlinked = document.getElementById("tgUnlinkedState");
+        const linked   = document.getElementById("tgLinkedState");
+        const nameEl   = document.getElementById("tgLinkedUsername");
+
+        if (!section) return;
+
+        const u = ITGuruAuth.getUser();
+        if (!u) {
+          section.style.display = "none";
+          return;
+        }
+
+        /* Show section for active subscribers and admins only */
+        const eligible = u.subscription_status === "active" || u.role === "admin";
+        section.style.display = eligible ? "" : "none";
+        if (!eligible) return;
+
+        if (u.telegram_linked) {
+          unlinked.style.display = "none";
+          linked.style.display   = "";
+          if (nameEl) {
+            nameEl.textContent = u.telegram_username ? "@" + u.telegram_username : "Telegram";
+          }
+        } else {
+          unlinked.style.display = "";
+          linked.style.display   = "none";
+        }
+      }
+
+      /* ── Link button ── */
+      const linkBtn  = document.getElementById("tgLinkBtn");
+      const errEl    = document.getElementById("tgError");
+      if (linkBtn) {
+        linkBtn.addEventListener("click", async () => {
+          if (errEl) errEl.textContent = "";
+          linkBtn.disabled = true;
+          linkBtn.innerHTML = "<span>Generating link…</span>";
+          try {
+            const resp = await apiCall("/telegram/link_token", { method: "POST" });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+              throw new Error(data.error || "Failed to generate link token");
+            }
+            /* Open the bot link in a new tab */
+            window.open(data.bot_link, "_blank", "noopener,noreferrer");
+            linkBtn.innerHTML = "<span>✅ Link opened — follow instructions in Telegram</span>";
+            /* Re-verify after a short delay to pick up any changes */
+            setTimeout(async () => {
+              await ITGuruAuth.verify();
+              refreshTelegramUI();
+              linkBtn.disabled = false;
+              linkBtn.innerHTML = "<span>🔗 Link Telegram Account</span>";
+            }, 8000);
+          } catch (ex) {
+            if (errEl) errEl.textContent = ex.message || "An error occurred";
+            linkBtn.disabled = false;
+            linkBtn.innerHTML = "<span>🔗 Link Telegram Account</span>";
+          }
+        });
+      }
+
+      /* ── Unlink button ── */
+      const unlinkBtn  = document.getElementById("tgUnlinkBtn");
+      const unlinkErrEl = document.getElementById("tgUnlinkError");
+      if (unlinkBtn) {
+        unlinkBtn.addEventListener("click", async () => {
+          if (!confirm("Unlink your Telegram account? You will lose access to the Telegram group.")) return;
+          if (unlinkErrEl) unlinkErrEl.textContent = "";
+          unlinkBtn.disabled = true;
+          unlinkBtn.textContent = "Unlinking…";
+          try {
+            const resp = await apiCall("/telegram/unlink", { method: "POST" });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+              throw new Error(data.error || "Failed to unlink");
+            }
+            /* Update local session user to reflect unlinked state */
+            const u = ITGuruAuth.getUser();
+            if (u) {
+              u.telegram_linked   = false;
+              u.telegram_username = null;
+              sessionStorage.setItem("itguru_auth_user", JSON.stringify(u));
+            }
+            refreshTelegramUI();
+          } catch (ex) {
+            if (unlinkErrEl) unlinkErrEl.textContent = ex.message || "An error occurred";
+            unlinkBtn.disabled = false;
+            unlinkBtn.textContent = "🔓 Unlink Telegram";
+          }
+        });
+      }
+
+      /* ── Initial render and subscribe to login changes ── */
+      document.addEventListener("DOMContentLoaded", () => {
+        refreshTelegramUI();
+      });
+
+      /* Re-render whenever auth state updates (e.g. after login/verify) */
+      const _origUpdateNavUI = ITGuruAuth.updateNavUI;
+      if (_origUpdateNavUI) {
+        ITGuruAuth.updateNavUI = function () {
+          _origUpdateNavUI.call(ITGuruAuth);
+          refreshTelegramUI();
+        };
+      }
     })();
   </script>
 </body>

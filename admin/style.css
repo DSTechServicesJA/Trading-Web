@@ -350,6 +350,22 @@ body::before {
 .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(99,102,241,0.35); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
+.btn-tg-sync {
+  padding: 8px 18px;
+  background: linear-gradient(135deg, #229ED9, #1a7fb5);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-tg-sync:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(34,158,217,0.35); }
+.btn-tg-sync:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
 .btn-ghost {
   padding: 8px 18px;
   background: transparent;

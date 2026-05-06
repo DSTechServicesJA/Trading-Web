@@ -79,6 +79,14 @@
         <div class="stat-label">Expiring ≤ 7 days</div>
         <div id="statExpiring" class="stat-value">—</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-label">📱 Telegram Linked</div>
+        <div id="statTgLinked" class="stat-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active but Unlinked</div>
+        <div id="statTgActiveUnlinked" class="stat-value">—</div>
+      </div>
     </div>
 
     <!-- ── TOOLBAR ── -->
@@ -101,6 +109,7 @@
         <option value="user">User</option>
       </select>
       <button id="newUserBtn" type="button" class="btn-primary">＋ New User</button>
+      <button id="syncAllTgBtn" type="button" class="btn-tg-sync" title="Sync all linked Telegram accounts with group membership">📱 Sync All Telegram</button>
     </div>
 
     <!-- ── USER TABLE ── -->
@@ -116,12 +125,13 @@
             <th>Plan</th>
             <th>Expires</th>
             <th>Last Login</th>
+            <th>Telegram</th>
             <th>Strategies</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="userTableBody">
-          <tr><td colspan="10" class="table-empty">Loading…</td></tr>
+          <tr><td colspan="11" class="table-empty">Loading…</td></tr>
         </tbody>
       </table>
     </div>
