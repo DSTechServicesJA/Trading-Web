@@ -110,6 +110,11 @@ const SWING_NEIGHBOR_BARS = 3;
 /* Trailing stop distance in ATR multiples */
 const TRAILING_STOP_ATR_MULT = 1.3;  /* tightened from 1.5 — lock in profits sooner */
 
+/* Tesla 3–6–9 Scaling Model: profit target R multiples */
+const TESLA_T1_R = 3;  /* first partial exit target */
+const TESLA_T2_R = 6;  /* second partial exit target */
+const TESLA_T3_R = 9;  /* final target / runner exit */
+
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
 /* Pin bar: the rejection wick must be this much larger than the other wick */
@@ -788,6 +793,12 @@ let atrValues = [];
 let trailingSL    = null;
 let partialTpHit  = false;
 
+/* Tesla 3–6–9 Scaling Model state (reset with each new trade) */
+let teslaT1Hit  = false;
+let teslaT2Hit  = false;
+let teslaT3Hit  = false;
+let teslaBEHit  = false;
+
 /* Connection uptime */
 let connectTime = null;
 let uptimeInterval = null;
@@ -824,6 +835,8 @@ let falseBreakoutEnabled = true;
 let minRREnabled         = true;
 let pureTrailingEnabled  = false;
 let minRRValue           = 2.0;    /* raised from 1.5 — require better reward per unit of risk */
+let teslaScalingEnabled  = false;  /* Tesla 3–6–9 scaling level alerts */
+let teslaScalingPlan     = "conservative";  /* "conservative" | "aggressive" */
 
 /* Auto-trade: allow the indicator to place trades on Deriv when a signal fires */
 let autoTradeEnabled         = false;  /* breakout-retest TRADE signals */
@@ -1525,6 +1538,8 @@ function initUI() {
   UI.minRRToggle         = document.getElementById("minRRToggle");
   UI.minRRInput          = document.getElementById("minRRInput");
   UI.pureTrailingToggle  = document.getElementById("pureTrailingToggle");
+  UI.teslaScalingToggle  = document.getElementById("teslaScalingToggle");
+  UI.teslaScalingPlan    = document.getElementById("teslaScalingPlan");
 
   /* New indicator state displays */
   UI.confluenceDisplay  = document.getElementById("confluenceDisplay");
@@ -3131,9 +3146,52 @@ async function sendPartialTpTelegram(signal, partialLevel) {
 }
 
 /**
- * Send trade outcome (WIN / LOSS) via Telegram when enabled.
- * Called from monitorTradeOutcome after a trade resolves.
+ * Send a Telegram alert when price reaches a Tesla 3–6–9 level (T1=3R, T2=6R, T3=9R).
+ * Uses the outcome Telegram toggle so no extra setting is needed.
+ * @param {object} signal - the pending trade signal
+ * @param {string} levelLabel - "T1 (3R)", "T2 (6R)", or "T3 (9R)"
+ * @param {number} levelPrice - price at this level
+ * @param {string} plan - "conservative" | "aggressive"
  */
+async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
+  if (!teslaScalingEnabled) return;
+  if (!telegramOutcomeSend) return;
+  try {
+    const activeSym = signal.symbol || getActiveSymbol() || "";
+    const sym = getSymbolLabel(activeSym);
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+    const lvlStr   = fmtPrice(levelPrice, activeSym);
+    const planLabel = plan === "aggressive" ? "Aggressive" : "Conservative";
+
+    /* Determine position action for each level based on the chosen plan */
+    const actions = {
+      "T1 (3R)": plan === "conservative" ? "Close 50% of position" : "Close 25% of position",
+      "T2 (6R)": plan === "conservative" ? "Close 30% of position" : "Close 35% of position",
+      "T3 (9R)": plan === "conservative" ? "Close remaining 20%" : "Close 20% — trail the rest"
+    };
+    const action = actions[levelLabel] || "Review open position";
+
+    const lines = [];
+    lines.push(`⚡ <b>Tesla 3–6–9: ${levelLabel} Reached</b>`);
+    lines.push(``);
+    lines.push(`<b>Plan:</b> ${planLabel}`);
+    lines.push(`<b>Action:</b> ${action}`);
+    lines.push(``);
+    lines.push(`${dir} ${sym}`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🎯 ${levelLabel} Level:</b> <code>${lvlStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(``);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: Tesla ${levelLabel} alert sent`);
+  } catch (err) {
+    addLog(`📤 Tesla level Telegram error: ${err.message}`);
+  }
+}
 async function sendTradeOutcomeTelegram(signal) {
   if (!telegramOutcomeSend) return;
   try {
@@ -3718,7 +3776,9 @@ function saveSettings() {
       gridScalperMAPeriod,
       autoTradeGridScalperMA,
       fvgStratEnabled,
-      autoTradeFvgStrat
+      autoTradeFvgStrat,
+      teslaScalingEnabled,
+      teslaScalingPlan
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) {
@@ -3784,6 +3844,12 @@ function restoreSettings() {
     if (UI.minRRToggle) UI.minRRToggle.checked = minRREnabled;
     if (UI.minRRInput) UI.minRRInput.value = minRRValue;
     if (UI.pureTrailingToggle) UI.pureTrailingToggle.checked = pureTrailingEnabled;
+
+    /* Tesla 3–6–9 Scaling Model */
+    if (s.teslaScalingEnabled != null) teslaScalingEnabled = s.teslaScalingEnabled;
+    if (s.teslaScalingPlan != null) teslaScalingPlan = s.teslaScalingPlan;
+    if (UI.teslaScalingToggle) UI.teslaScalingToggle.checked = teslaScalingEnabled;
+    if (UI.teslaScalingPlan) UI.teslaScalingPlan.value = teslaScalingPlan;
 
     /* New filter toggles */
     if (s.rsiFilterEnabled != null) rsiFilterEnabled = s.rsiFilterEnabled;
@@ -5501,6 +5567,10 @@ function resetIndicator() {
   retestCount = 0;
   trailingSL   = null;
   partialTpHit = false;
+  teslaT1Hit = false;
+  teslaT2Hit = false;
+  teslaT3Hit = false;
+  teslaBEHit = false;
   resetNyOpenRange();
   setPhase("WAITING");
   updateStateUI();
@@ -6967,6 +7037,8 @@ function revertAllSettings() {
   minRREnabled         = false;
   minRRValue           = 2.0;
   pureTrailingEnabled  = false;
+  teslaScalingEnabled  = false;
+  teslaScalingPlan     = "conservative";
 
   /* Advanced signal defaults */
   rsiFilterEnabled     = false;
@@ -7038,6 +7110,8 @@ function revertAllSettings() {
   if (UI.minRRToggle)            UI.minRRToggle.checked            = minRREnabled;
   if (UI.minRRInput)             UI.minRRInput.value               = minRRValue;
   if (UI.pureTrailingToggle)     UI.pureTrailingToggle.checked     = pureTrailingEnabled;
+  if (UI.teslaScalingToggle)     UI.teslaScalingToggle.checked     = teslaScalingEnabled;
+  if (UI.teslaScalingPlan)       UI.teslaScalingPlan.value         = teslaScalingPlan;
   if (UI.rsiFilterToggle)        UI.rsiFilterToggle.checked        = rsiFilterEnabled;
   if (UI.volumeSpikeToggle)      UI.volumeSpikeToggle.checked      = volumeSpikeEnabled;
   if (UI.sessionFilterToggle)    UI.sessionFilterToggle.checked    = sessionFilterEnabled;
@@ -11320,6 +11394,10 @@ function processAllCandles() {
   trade = null;
   trailingSL   = null;
   partialTpHit = false;
+  teslaT1Hit = false;
+  teslaT2Hit = false;
+  teslaT3Hit = false;
+  teslaBEHit = false;
   retestCount  = 0;
   setPhase("WAITING");
 
@@ -12154,6 +12232,10 @@ function buildTrade(confirmCandle, confirmIdx) {
   /* Reset trailing/partial state for new trade */
   trailingSL   = null;
   partialTpHit = false;
+  teslaT1Hit = false;
+  teslaT2Hit = false;
+  teslaT3Hit = false;
+  teslaBEHit = false;
 }
 
 /* ---- True swing point detection ---- */
@@ -13160,6 +13242,74 @@ function monitorTradeOutcome(candle) {
     }
   }
 
+  /* ---- Tesla 3–6–9 Scaling Model ---- */
+  if (teslaScalingEnabled) {
+    const risk = Math.abs(trade.entry - trade.sl);
+    const isBull = trade.dir === "BULL";
+
+    /* Conservative plan: slide SL to breakeven at +1R.
+       Aggressive plan: slide SL to breakeven at +2R. */
+    if (!teslaBEHit) {
+      const beTrigger = teslaScalingPlan === "aggressive" ? 2 : 1;
+      const beLevel   = isBull ? trade.entry + risk * beTrigger : trade.entry - risk * beTrigger;
+      const beHit     = isBull ? candle.high >= beLevel : candle.low <= beLevel;
+      if (beHit) {
+        teslaBEHit = true;
+        trade.sl = trade.entry;  /* slide SL to breakeven */
+        if (trailingSL != null && isBull && trailingSL < trade.entry) trailingSL = trade.entry;
+        if (trailingSL != null && !isBull && trailingSL > trade.entry) trailingSL = trade.entry;
+        const beLabel = `+${beTrigger}R (${teslaScalingPlan === "aggressive" ? "aggressive" : "conservative"} BE)`;
+        addLog(`⚡ Tesla 3–6–9: SL moved to breakeven @ ${fmtPrice(trade.entry, pending.symbol)} at ${beLabel}`);
+        showToast("⚡ Tesla BE", `SL locked at breakeven (${beLabel}) — running to T1 (3R)`, "info", 6000);
+      }
+    }
+
+    /* T1 = 3R */
+    if (!teslaT1Hit) {
+      const t1Level = isBull ? trade.entry + risk * TESLA_T1_R : trade.entry - risk * TESLA_T1_R;
+      const t1Hit   = isBull ? candle.high >= t1Level : candle.low <= t1Level;
+      if (t1Hit) {
+        teslaT1Hit = true;
+        pending.teslaT1Hit = true;
+        const action = teslaScalingPlan === "conservative" ? "Close 50% of position" : "Close 25% of position";
+        addLog(`⚡ Tesla 3–6–9: T1 (3R) reached @ ${fmtPrice(t1Level, pending.symbol)} — ${action}`);
+        showToast("⚡ Tesla T1 (3R) ✓", `${action} | Next: T2 at ${TESLA_T2_R}R`, "trade", 8000);
+        sendTeslaLevelTelegram(pending, "T1 (3R)", t1Level, teslaScalingPlan);
+        return;  /* defer SL/TP check to next candle */
+      }
+    }
+
+    /* T2 = 6R */
+    if (teslaT1Hit && !teslaT2Hit) {
+      const t2Level = isBull ? trade.entry + risk * TESLA_T2_R : trade.entry - risk * TESLA_T2_R;
+      const t2Hit   = isBull ? candle.high >= t2Level : candle.low <= t2Level;
+      if (t2Hit) {
+        teslaT2Hit = true;
+        pending.teslaT2Hit = true;
+        const action = teslaScalingPlan === "conservative" ? "Close 30% of position" : "Close 35% of position";
+        addLog(`⚡ Tesla 3–6–9: T2 (6R) reached @ ${fmtPrice(t2Level, pending.symbol)} — ${action}`);
+        showToast("⚡ Tesla T2 (6R) ✓", `${action} | Next: T3 at ${TESLA_T3_R}R`, "trade", 8000);
+        sendTeslaLevelTelegram(pending, "T2 (6R)", t2Level, teslaScalingPlan);
+        return;  /* defer SL/TP check to next candle */
+      }
+    }
+
+    /* T3 = 9R */
+    if (teslaT1Hit && teslaT2Hit && !teslaT3Hit) {
+      const t3Level = isBull ? trade.entry + risk * TESLA_T3_R : trade.entry - risk * TESLA_T3_R;
+      const t3Hit   = isBull ? candle.high >= t3Level : candle.low <= t3Level;
+      if (t3Hit) {
+        teslaT3Hit = true;
+        pending.teslaT3Hit = true;
+        const action = teslaScalingPlan === "conservative" ? "Close remaining 20% — full exit" : "Close 20% — trail the rest";
+        addLog(`⚡ Tesla 3–6–9: T3 (9R) reached @ ${fmtPrice(t3Level, pending.symbol)} — ${action}`);
+        showToast("⚡ Tesla T3 (9R) ✓", `${action}`, "trade", 10000);
+        sendTeslaLevelTelegram(pending, "T3 (9R)", t3Level, teslaScalingPlan);
+        return;  /* defer SL/TP check to next candle */
+      }
+    }
+  }
+
   /* ---- Trailing stop (ATR-based) ---- */
   if (trailingStopEnabled && atrValue > 0) {
     /* Scalping mode uses a tighter trailing stop (from MD: take profit quickly / move SL tighter) */
@@ -13770,6 +13920,23 @@ function drawChart() {
       const partialLevel = trade.dir === "BULL" ? trade.entry + risk : trade.entry - risk;
       const partialColor = partialTpHit ? "rgba(34,197,94,0.5)" : "rgba(168,85,247,0.4)";
       drawHLine(ctx, yOf(partialLevel), marginLeft, W - marginRight, partialColor, "1:1 " + fmtPrice(partialLevel, activeSym), W, marginRight);
+    }
+
+    /* Tesla 3–6–9 level lines: T1 (3R), T2 (6R), T3 (9R) */
+    if (teslaScalingEnabled) {
+      const risk = Math.abs(trade.entry - trade.sl);
+      const isBull = trade.dir === "BULL";
+      const teslaLevels = [
+        { r: TESLA_T1_R, label: "T1", hit: teslaT1Hit },
+        { r: TESLA_T2_R, label: "T2", hit: teslaT2Hit },
+        { r: TESLA_T3_R, label: "T3", hit: teslaT3Hit }
+      ];
+      for (const { r, label, hit } of teslaLevels) {
+        const lvlPrice = isBull ? trade.entry + risk * r : trade.entry - risk * r;
+        const lvlColor = hit ? "rgba(251,191,36,0.7)" : "rgba(251,191,36,0.35)";
+        drawHLine(ctx, yOf(lvlPrice), marginLeft, W - marginRight, lvlColor,
+          `${label} ${r}R ${fmtPrice(lvlPrice, activeSym)}${hit ? " ✓" : ""}`, W, marginRight);
+      }
     }
 
     const entryY = yOf(trade.entry);
@@ -14677,6 +14844,10 @@ function createPanelState(symbol) {
     rsiValues: [],
     trailingSL: null,
     partialTpHit: false,
+    teslaT1Hit: false,
+    teslaT2Hit: false,
+    teslaT3Hit: false,
+    teslaBEHit: false,
     confluenceScore: 0,
     signalHistory: [],
     signalWins: 0,
@@ -14698,6 +14869,8 @@ function createPanelState(symbol) {
       minRREnabled:        rec.minRR.rec,
       minRRValue:          rec.rr.minRR,
       pureTrailingEnabled: false,
+      teslaScalingEnabled: false,
+      teslaScalingPlan:    "conservative",
       rsiFilterEnabled:    rec.rsi,
       volumeSpikeEnabled:  rec.volSpike.rec,
       sessionFilterEnabled: rec.session.rec,
@@ -14777,6 +14950,10 @@ function activatePanel(p) {
   retestCount    = p.retestCount || 0;
   trailingSL     = p.trailingSL;
   partialTpHit   = p.partialTpHit;
+  teslaT1Hit     = p.teslaT1Hit  || false;
+  teslaT2Hit     = p.teslaT2Hit  || false;
+  teslaT3Hit     = p.teslaT3Hit  || false;
+  teslaBEHit     = p.teslaBEHit  || false;
   confluenceScore = p.confluenceScore;
   signalHistory  = p.signalHistory;
   signalWins     = p.signalWins;
@@ -14837,6 +15014,8 @@ function activatePanel(p) {
     minRREnabled         = f.minRREnabled;
     minRRValue           = f.minRRValue;
     pureTrailingEnabled  = f.pureTrailingEnabled;
+    if (f.teslaScalingEnabled != null) teslaScalingEnabled = f.teslaScalingEnabled;
+    if (f.teslaScalingPlan != null) teslaScalingPlan = f.teslaScalingPlan;
     rsiFilterEnabled     = f.rsiFilterEnabled;
     volumeSpikeEnabled   = f.volumeSpikeEnabled;
     sessionFilterEnabled = f.sessionFilterEnabled;
@@ -14907,6 +15086,10 @@ function savePanel(p) {
   p.retestCount   = retestCount;
   p.trailingSL     = trailingSL;
   p.partialTpHit   = partialTpHit;
+  p.teslaT1Hit     = teslaT1Hit;
+  p.teslaT2Hit     = teslaT2Hit;
+  p.teslaT3Hit     = teslaT3Hit;
+  p.teslaBEHit     = teslaBEHit;
   p.confluenceScore = confluenceScore;
   p.signalHistory  = signalHistory;
   p.signalWins     = signalWins;
@@ -14963,6 +15146,8 @@ function savePanel(p) {
   p.filters.minRREnabled         = minRREnabled;
   p.filters.minRRValue           = minRRValue;
   p.filters.pureTrailingEnabled  = pureTrailingEnabled;
+  p.filters.teslaScalingEnabled  = teslaScalingEnabled;
+  p.filters.teslaScalingPlan     = teslaScalingPlan;
   p.filters.rsiFilterEnabled     = rsiFilterEnabled;
   p.filters.volumeSpikeEnabled   = volumeSpikeEnabled;
   p.filters.sessionFilterEnabled = sessionFilterEnabled;
@@ -15093,6 +15278,8 @@ function syncFilterUIFromGlobals() {
   if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
   if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
   if (UI.pureTrailingToggle)  UI.pureTrailingToggle.checked  = pureTrailingEnabled;
+  if (UI.teslaScalingToggle)  UI.teslaScalingToggle.checked  = teslaScalingEnabled;
+  if (UI.teslaScalingPlan)    UI.teslaScalingPlan.value      = teslaScalingPlan;
   if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
   if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
   if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
@@ -15215,6 +15402,10 @@ function connectPanel(p) {
   p.retestCount = 0;
   p.trailingSL = null;
   p.partialTpHit = false;
+  p.teslaT1Hit = false;
+  p.teslaT2Hit = false;
+  p.teslaT3Hit = false;
+  p.teslaBEHit = false;
   p.confluenceScore = 0;
   p.liveScalpHistory = [];
   p.lastScalpCandleIdx = -999;
@@ -16054,6 +16245,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.pureTrailingToggle) {
     UI.pureTrailingToggle.addEventListener("change", () => { pureTrailingEnabled = UI.pureTrailingToggle.checked; saveSettings(); updateStateUI(); drawChart(); });
+  }
+  if (UI.teslaScalingToggle) {
+    UI.teslaScalingToggle.addEventListener("change", () => { teslaScalingEnabled = UI.teslaScalingToggle.checked; saveSettings(); drawChart(); });
+  }
+  if (UI.teslaScalingPlan) {
+    UI.teslaScalingPlan.addEventListener("change", () => { teslaScalingPlan = UI.teslaScalingPlan.value; saveSettings(); });
   }
   if (UI.rsiFilterToggle) {
     UI.rsiFilterToggle.addEventListener("change", () => { rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
