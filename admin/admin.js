@@ -51,16 +51,35 @@ function toggleTheme() {
    Boot
    ═══════════════════════════════════════════════ */
 document.addEventListener("DOMContentLoaded", async () => {
-  /* ── Guard: only admins may enter ── */
+  /* Wire the login button immediately so it responds even while the async
+     token-verify request is in flight (overlay is visible via CSS until
+     initApp() hides it). initLoginGate's duplicate guard prevents double
+     registration if showLoginOverlay() is called again later. */
+  ITGuruAuth.initLoginGate({
+    onLogin: async () => {
+      const user = ITGuruAuth.getUser();
+      if (!user || user.role !== "admin") {
+        showAccessDenied();
+        return;
+      }
+      initApp(user);
+    }
+  });
+
   if (!ITGuruAuth.isLoggedIn()) {
-    showLoginOverlay();
+    /* Overlay already visible and button already wired — nothing more to do */
     return;
   }
+
+  /* User appears logged in — re-show overlay while we verify the token,
+     so the button remains visible and usable during the async request. */
+  const overlay = document.getElementById("loginOverlay");
+  if (overlay) overlay.style.display = "flex";
 
   const valid = await ITGuruAuth.verify();
   if (!valid) {
     ITGuruAuth.logout();
-    showLoginOverlay();
+    /* Overlay is already visible; button handler is already registered */
     return;
   }
 
@@ -275,13 +294,21 @@ function renderTable(users) {
       ? u.subscription_plan.charAt(0).toUpperCase() + u.subscription_plan.slice(1)
       : "—";
 
-    /* Telegram cell */
+    /* Telegram cell — show linked status + per-user action buttons */
     let tgCell;
     if (u.telegram_linked) {
       const tgName = u.telegram_username ? `@${escHtml(u.telegram_username)}` : "linked";
-      tgCell = `<span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? escHtml(fmtDate(u.telegram_linked_at)) : 'unknown'}">✅ ${tgName}</span>`;
+      tgCell = `
+        <div class="tg-cell">
+          <span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? escHtml(fmtDate(u.telegram_linked_at)) : 'unknown'}">✅ ${tgName}</span>
+          <div class="tg-actions">
+            <button type="button" class="btn-tg-user-sync" data-action="tg-sync" data-id="${u.id}" title="Add to group if active subscription, remove if inactive">📱 Sync</button>
+            <button type="button" class="btn-tg-user-kick" data-action="tg-kick" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Force-remove this user from the Telegram group now">🚫 Kick</button>
+            <button type="button" class="btn-tg-user-unlink" data-action="tg-unlink" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Unlink Telegram (does not kick from group)">🔓 Unlink</button>
+          </div>
+        </div>`;
     } else {
-      tgCell = `<span style="color:var(--text-muted);font-size:11px;">⚠ not linked</span>`;
+      tgCell = `<span class="tg-not-linked">⚠ not linked</span>`;
     }
 
     tr.innerHTML = `
@@ -293,7 +320,7 @@ function renderTable(users) {
       <td class="ts">${escHtml(planLabel)}</td>
       <td>${expiryText}</td>
       <td class="ts">${u.last_login_at ? fmtDateTime(u.last_login_at) : "—"}</td>
-      <td class="ts">${tgCell}</td>
+      <td class="tg-col">${tgCell}</td>
       <td class="strategies-cell">${strategies}</td>
       <td class="actions-cell">
         <button type="button" class="btn-icon btn-sm" data-action="toggle-status" data-id="${u.id}" data-status="${escHtml(u.status)}" title="${u.status === 'active' ? 'Lock account' : 'Unlock account'}">
@@ -301,10 +328,6 @@ function renderTable(users) {
         </button>
         <button type="button" class="btn-icon btn-sm" data-action="edit" data-id="${u.id}" title="Edit user">✏️</button>
         <button type="button" class="btn-icon btn-sm" data-action="reset-password" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Reset password">🔑</button>
-        ${u.telegram_linked
-          ? `<button type="button" class="btn-icon btn-sm" data-action="tg-sync" data-id="${u.id}" title="Sync Telegram group membership">📱</button>
-             <button type="button" class="btn-icon btn-sm btn-danger" data-action="tg-unlink" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Unlink Telegram">🔗</button>`
-          : ""}
         <button type="button" class="btn-icon btn-sm btn-danger" data-action="delete" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Delete user">🗑️</button>
       </td>`;
 
@@ -476,6 +499,25 @@ async function handleRowAction(e) {
         alert("Telegram sync error: " + (data.error || "Unknown error"));
       } else {
         alert(data.message || "Sync complete");
+        await loadUsers();
+      }
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  if (action === "tg-kick") {
+    const username = btn.dataset.username || ("user #" + id);
+    if (!confirm(`Force-kick ${username} from the Telegram group?\n\nThis removes them from the group immediately regardless of subscription status. Their Telegram account remains linked.`)) return;
+    btn.disabled = true;
+    try {
+      const resp = await apiRequest("/admin/telegram?action=kick&id=" + id, { method: "POST" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        alert("Kick error: " + (data.error || "Unknown error"));
+      } else {
+        alert(data.message || "User kicked from group");
         await loadUsers();
       }
     } finally {

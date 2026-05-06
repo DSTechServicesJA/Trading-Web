@@ -305,9 +305,16 @@ const ITGuruAuth = (() => {
       overlay.style.display = "flex";
     }
 
-    /* Login button handler */
-    if (loginBtn) {
+    /* Login button handler — guard against duplicate registration */
+    if (loginBtn && !loginBtn.dataset.loginBound) {
+      loginBtn.dataset.loginBound = "1";
+      /* Remember original label so it is restored correctly after each attempt */
+      const origBtnText = loginBtn.textContent;
+
       loginBtn.addEventListener("click", async () => {
+        /* Ignore programmatic clicks fired while a login is already in progress */
+        if (loginBtn.disabled) return;
+
         const username = userInput?.value?.trim() || "";
         const password = passInput?.value || "";
 
@@ -340,19 +347,19 @@ const ITGuruAuth = (() => {
           if (err) err.textContent = ex.message || "Login failed";
         } finally {
           loginBtn.disabled = false;
-          loginBtn.textContent = "Sign In";
+          loginBtn.textContent = origBtnText;
+        }
+      });
+
+      /* Allow Enter key to submit login — also guarded by the handler above */
+      [userInput, passInput].forEach(el => {
+        if (el) {
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") loginBtn?.click();
+          });
         }
       });
     }
-
-    /* Allow Enter key to submit login */
-    [userInput, passInput].forEach(el => {
-      if (el) {
-        el.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") loginBtn?.click();
-        });
-      }
-    });
   }
 
   return {
