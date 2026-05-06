@@ -110,10 +110,12 @@ const SWING_NEIGHBOR_BARS = 3;
 /* Trailing stop distance in ATR multiples */
 const TRAILING_STOP_ATR_MULT = 1.3;  /* tightened from 1.5 — lock in profits sooner */
 
-/* Tesla 3–6–9 Scaling Model: profit target R multiples */
+/* Tesla 3–6–9 Scaling Model: profit target R multiples and breakeven triggers */
 const TESLA_T1_R = 3;  /* first partial exit target */
 const TESLA_T2_R = 6;  /* second partial exit target */
 const TESLA_T3_R = 9;  /* final target / runner exit */
+const TESLA_CONSERVATIVE_BE_TRIGGER = 1;  /* slide SL to BE when price reaches +1R */
+const TESLA_AGGRESSIVE_BE_TRIGGER   = 2;  /* slide SL to BE when price reaches +2R */
 
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
@@ -13247,24 +13249,32 @@ function monitorTradeOutcome(candle) {
     const risk = Math.abs(trade.entry - trade.sl);
     const isBull = trade.dir === "BULL";
 
-    /* Conservative plan: slide SL to breakeven at +1R.
-       Aggressive plan: slide SL to breakeven at +2R. */
+    /* Slide SL to breakeven at the plan's configured trigger:
+       Conservative = +1R, Aggressive = +2R. */
     if (!teslaBEHit) {
-      const beTrigger = teslaScalingPlan === "aggressive" ? 2 : 1;
-      const beLevel   = isBull ? trade.entry + risk * beTrigger : trade.entry - risk * beTrigger;
-      const beHit     = isBull ? candle.high >= beLevel : candle.low <= beLevel;
+      const beTrigger = teslaScalingPlan === "aggressive"
+        ? TESLA_AGGRESSIVE_BE_TRIGGER
+        : TESLA_CONSERVATIVE_BE_TRIGGER;
+      const beLevel = isBull ? trade.entry + risk * beTrigger : trade.entry - risk * beTrigger;
+      const beHit   = isBull ? candle.high >= beLevel : candle.low <= beLevel;
       if (beHit) {
         teslaBEHit = true;
         trade.sl = trade.entry;  /* slide SL to breakeven */
-        if (trailingSL != null && isBull && trailingSL < trade.entry) trailingSL = trade.entry;
-        if (trailingSL != null && !isBull && trailingSL > trade.entry) trailingSL = trade.entry;
-        const beLabel = `+${beTrigger}R (${teslaScalingPlan === "aggressive" ? "aggressive" : "conservative"} BE)`;
+        /* Advance trailing SL to breakeven if it would regress below it */
+        if (trailingSL != null) {
+          trailingSL = isBull
+            ? Math.max(trailingSL, trade.entry)
+            : Math.min(trailingSL, trade.entry);
+        }
+        const beLabel = `+${beTrigger}R (${teslaScalingPlan} BE)`;
         addLog(`⚡ Tesla 3–6–9: SL moved to breakeven @ ${fmtPrice(trade.entry, pending.symbol)} at ${beLabel}`);
         showToast("⚡ Tesla BE", `SL locked at breakeven (${beLabel}) — running to T1 (3R)`, "info", 6000);
       }
     }
 
-    /* T1 = 3R */
+    /* T1 = 3R — first partial exit.
+       Returns early to defer SL/TP resolution to the next candle; this prevents
+       a simultaneous TP/SL hit on the same candle from overriding the scaling alert. */
     if (!teslaT1Hit) {
       const t1Level = isBull ? trade.entry + risk * TESLA_T1_R : trade.entry - risk * TESLA_T1_R;
       const t1Hit   = isBull ? candle.high >= t1Level : candle.low <= t1Level;
@@ -13275,11 +13285,11 @@ function monitorTradeOutcome(candle) {
         addLog(`⚡ Tesla 3–6–9: T1 (3R) reached @ ${fmtPrice(t1Level, pending.symbol)} — ${action}`);
         showToast("⚡ Tesla T1 (3R) ✓", `${action} | Next: T2 at ${TESLA_T2_R}R`, "trade", 8000);
         sendTeslaLevelTelegram(pending, "T1 (3R)", t1Level, teslaScalingPlan);
-        return;  /* defer SL/TP check to next candle */
+        return;
       }
     }
 
-    /* T2 = 6R */
+    /* T2 = 6R — second partial exit */
     if (teslaT1Hit && !teslaT2Hit) {
       const t2Level = isBull ? trade.entry + risk * TESLA_T2_R : trade.entry - risk * TESLA_T2_R;
       const t2Hit   = isBull ? candle.high >= t2Level : candle.low <= t2Level;
@@ -13290,11 +13300,11 @@ function monitorTradeOutcome(candle) {
         addLog(`⚡ Tesla 3–6–9: T2 (6R) reached @ ${fmtPrice(t2Level, pending.symbol)} — ${action}`);
         showToast("⚡ Tesla T2 (6R) ✓", `${action} | Next: T3 at ${TESLA_T3_R}R`, "trade", 8000);
         sendTeslaLevelTelegram(pending, "T2 (6R)", t2Level, teslaScalingPlan);
-        return;  /* defer SL/TP check to next candle */
+        return;
       }
     }
 
-    /* T3 = 9R */
+    /* T3 = 9R — final exit */
     if (teslaT1Hit && teslaT2Hit && !teslaT3Hit) {
       const t3Level = isBull ? trade.entry + risk * TESLA_T3_R : trade.entry - risk * TESLA_T3_R;
       const t3Hit   = isBull ? candle.high >= t3Level : candle.low <= t3Level;
@@ -13305,7 +13315,7 @@ function monitorTradeOutcome(candle) {
         addLog(`⚡ Tesla 3–6–9: T3 (9R) reached @ ${fmtPrice(t3Level, pending.symbol)} — ${action}`);
         showToast("⚡ Tesla T3 (9R) ✓", `${action}`, "trade", 10000);
         sendTeslaLevelTelegram(pending, "T3 (9R)", t3Level, teslaScalingPlan);
-        return;  /* defer SL/TP check to next candle */
+        return;
       }
     }
   }
