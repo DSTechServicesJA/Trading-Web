@@ -599,10 +599,7 @@ async function saveEdit() {
   const sub      = el("editSubStatus").value;
   const plan     = el("editSubPlan").value || null;
   const expiry   = el("editSubExpiry").value || null;
-  const telegramUsername = (() => {
-    const raw = (el("editTelegramUsername")?.value || "").trim().replace(/^@/, "");
-    return raw || null;
-  })();
+  const telegramUsername = (el("editTelegramUsername")?.value || "").trim().replace(/^@/, "") || null;
   const newStrats = getCheckedStrategies("editStrategyChecks");
 
   try {
@@ -676,7 +673,7 @@ async function saveNewUser() {
   const sub            = el("newSubStatus").value;
   const plan           = el("newSubPlan").value || null;
   const expiry         = el("newSubExpiry").value || null;
-  const telegramUsername = el("newTelegramUsername").value.trim().replace(/^@/, "") || null;
+  const telegramUsername = (el("newTelegramUsername")?.value || "").trim().replace(/^@/, "") || null;
   const strategies     = getCheckedStrategies("newStrategyChecks");
 
   if (!username || !password) {
