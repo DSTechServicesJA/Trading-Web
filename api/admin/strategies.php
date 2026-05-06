@@ -31,5 +31,6 @@ jsonResponse([
         ['key' => 'grid_scalper_ma',  'label' => 'Grid Scalper MA'],
         ['key' => 'fvg_strat',        'label' => 'Fair Value Gap (FVG)'],
         ['key' => 'live_scalp',       'label' => 'Live Scalp Scanner'],
+        ['key' => 'mtf_top_down',     'label' => 'MTF Top-Down'],
     ],
 ]);

@@ -541,6 +541,7 @@
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeSessionRangeToggle" checked /> 🌍 Session Range (London Sweep)</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeGridScalperMAToggle" checked /> 🔲 Grid Scalper MA</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFvgStratToggle" checked /> 🎯 Fair Value Gap</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeMtfTopDownToggle" checked /> ⏱ MTF Top-Down</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
             <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
@@ -667,6 +668,13 @@
                   <span class="strat-enable-icon">📊</span>
                   <span class="strat-enable-name">Fair Value Gap</span>
                   <span class="strat-enable-badge off" id="stratBadge-fvgStrat">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="mtfTopDownToggle" />
+                  <span class="strat-enable-icon">⏱</span>
+                  <span class="strat-enable-name">MTF Top-Down</span>
+                  <span class="strat-enable-badge off" id="stratBadge-mtfTopDown">OFF</span>
                 </label>
 
               </div>
@@ -944,6 +952,11 @@
               <p class="param-group-title">🎯 Fair Value Gap Alerts</p>
               <ul id="fvgStratAlertList" class="scalp-alert-list"></ul>
               <span id="fvgStratAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⏱ MTF Top-Down Alerts</p>
+              <ul id="mtfTopDownAlertList" class="scalp-alert-list"></ul>
+              <span id="mtfTopDownAlertCount" style="display:none;">0</span>
 
               <p class="hint" style="margin-top:6px;">Recent signals from all custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
             </div>
