@@ -712,6 +712,15 @@
               <label class="toggle-row"><input type="checkbox" id="partialTpToggle" /> Partial TP (1:1)</label>
               <p class="hint">Move SL to breakeven when price reaches 1:1 reward.</p>
 
+              <label class="toggle-row"><input type="checkbox" id="teslaScalingToggle" /> Tesla 3–6–9 Scaling</label>
+              <div style="margin-top:4px;margin-bottom:4px;">
+                <select id="teslaScalingPlan" style="width:100%;">
+                  <option value="conservative">Conservative (50/30/20)</option>
+                  <option value="aggressive">Aggressive (25/35/20+trail)</option>
+                </select>
+              </div>
+              <p class="hint">Alert at 3R (T1), 6R (T2), and 9R (T3) with position-sizing guidance and SL → BE lock.</p>
+
               <label class="toggle-row"><input type="checkbox" id="falseBreakoutToggle" /> False Breakout Filter</label>
               <p class="hint">Invalidate breakout if next 3 candles close back inside range.</p>
 
