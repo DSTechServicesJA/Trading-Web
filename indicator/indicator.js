@@ -1900,6 +1900,7 @@ function setPhase(newPhase) {
         setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
       } else {
         /* Single-symbol mode: use main chart as before */
+        addLog("📤 Telegram auto-send triggered — TRADE signal");
         setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
       }
     } else {
@@ -2078,8 +2079,10 @@ function startNyOpenRangeTimer() {
       sendPhaseNotification("NY_OPEN_RANGE");
       addLog("\uD83D\uDD64 NY Open Range: 9:30 AM EST reached \u2014 collecting 9:30\u20139:35 range");
       playPhaseAlert("RANGE");
-      // Send Telegram notification for NY Open
-      sendTelegramAlert();
+      // Send Telegram notification for NY Open (only when auto-send is enabled)
+      if (telegramAutoSend) {
+        setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
+      }
     }
     /* Reset notification flag after the window passes (after 9:36) so it can fire again tomorrow */
     if ((et.hours === 9 && et.minutes >= 36) || et.hours >= 10) {
@@ -3298,8 +3301,8 @@ async function sendTelegramAlert() {
   }
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
-  const caption = buildTelegramCaption();
   try {
+    const caption = buildTelegramCaption();
     let blob;
     try {
       blob = await captureChartScreenshot();
