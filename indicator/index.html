@@ -1496,10 +1496,15 @@
 
       <!-- Unlinked state -->
       <div id="tgUnlinkedState">
-        <p class="tg-hint">Link your Telegram account to access the private group, which will remain active for as long as your subscription is active.</p>
+        <p class="tg-hint">Click below to connect via our Telegram bot. Tap <strong>START</strong> in the bot when it opens — you will then receive a private group invite link directly in Telegram.</p>
         <button id="tgLinkBtn" type="button" class="tg-btn">
           <span>🔗 Link Telegram &amp; Join Group</span>
         </button>
+        <div id="tgLinkSteps" style="display:none;" class="tg-hint tg-link-steps">
+          <strong>Step 1:</strong> The Telegram bot has opened in a new tab.<br>
+          <strong>Step 2:</strong> Tap the <strong>START</strong> button in the bot.<br>
+          <strong>Step 3:</strong> The bot will send you a group invite link — tap it to join! ✅
+        </div>
         <div id="tgError" class="tg-error"></div>
       </div>
 
@@ -1703,7 +1708,9 @@
           }
           /* Open the bot link in a new tab */
           window.open(data.bot_link, "_blank", "noopener,noreferrer");
-          linkBtn.innerHTML = "<span>✅ Link opened — follow instructions in Telegram</span>";
+          linkBtn.innerHTML = "<span>✅ Bot opened — tap START in Telegram to complete</span>";
+          const stepsEl = document.getElementById("tgLinkSteps");
+          if (stepsEl) stepsEl.style.display = "";
           /* Re-verify after a short delay to pick up any changes. */
           const TG_RECHECK_DELAY_MS = 8000;
           setTimeout(async () => {
@@ -1711,6 +1718,7 @@
             refreshTelegramUI();
             linkBtn.disabled = false;
             linkBtn.innerHTML = "<span>🔗 Link Telegram &amp; Join Group</span>";
+            if (stepsEl) stepsEl.style.display = "none";
           }, TG_RECHECK_DELAY_MS);
         } catch (ex) {
           if (errEl) errEl.textContent = ex.message || "An error occurred";

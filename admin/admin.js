@@ -308,7 +308,11 @@ function renderTable(users) {
           </div>
         </div>`;
     } else {
-      tgCell = `<span class="tg-not-linked">⚠ not linked</span>`;
+      const savedName = u.telegram_username ? ` · @${escHtml(u.telegram_username)}` : "";
+      const notLinkedTitle = u.telegram_username
+        ? `@${escHtml(u.telegram_username)} saved but not yet linked via bot`
+        : "No Telegram account linked";
+      tgCell = `<span class="tg-not-linked" title="${notLinkedTitle}">⚠ not linked${savedName}</span>`;
     }
 
     tr.innerHTML = `

@@ -2968,6 +2968,15 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   margin: 0 0 14px;
 }
 
+.tg-link-steps {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(34, 158, 217, 0.08);
+  border-left: 3px solid #229ED9;
+  border-radius: 4px;
+  line-height: 1.8;
+}
+
 .tg-linked-msg {
   font-size: 14px;
   color: var(--success-soft);
