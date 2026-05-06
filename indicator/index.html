@@ -541,6 +541,7 @@
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeSessionRangeToggle" checked /> 🌍 Session Range (London Sweep)</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeGridScalperMAToggle" checked /> 🔲 Grid Scalper MA</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFvgStratToggle" checked /> 🎯 Fair Value Gap</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeMtfTopDownToggle" checked /> ⏱ MTF Top-Down</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
             <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
@@ -589,6 +590,94 @@
               <div id="oppositeModeSummary"></div>
             </div>
 
+            </div>
+          </section>
+
+          <!-- Strategies Enable/Disable -->
+          <section class="box">
+            <h3 class="collapsible">🧠 Strategies</h3>
+            <div class="collapsible-body open">
+              <p class="hint" style="margin-bottom:10px;">Enable or disable individual strategies. Active strategies scan every candle for signals, which appear in <b>🎯 Strategy Alerts</b> below. 🔒 = requires a subscription upgrade.</p>
+              <div class="strat-enable-grid">
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="liquiditySweepToggle" />
+                  <span class="strat-enable-icon">🌊</span>
+                  <span class="strat-enable-name">Liquidity Sweep</span>
+                  <span class="strat-enable-badge off" id="stratBadge-liquiditySweep">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="stopLossHuntToggle" />
+                  <span class="strat-enable-icon">🎯</span>
+                  <span class="strat-enable-name">Stop Loss Hunt</span>
+                  <span class="strat-enable-badge off" id="stratBadge-stopLossHunt">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="failedPinBarToggle" />
+                  <span class="strat-enable-icon">📌</span>
+                  <span class="strat-enable-name">Failed Pin Bar</span>
+                  <span class="strat-enable-badge off" id="stratBadge-failedPinBar">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="fibScalpToggle" />
+                  <span class="strat-enable-icon">📐</span>
+                  <span class="strat-enable-name">Fib Golden Zone</span>
+                  <span class="strat-enable-badge off" id="stratBadge-fibScalp">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="po3Toggle" />
+                  <span class="strat-enable-icon">🔀</span>
+                  <span class="strat-enable-name">Power of 3</span>
+                  <span class="strat-enable-badge off" id="stratBadge-po3">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="nyOpenRangeToggle" />
+                  <span class="strat-enable-icon">🕤</span>
+                  <span class="strat-enable-name">NY Open Range</span>
+                  <span class="strat-enable-badge off" id="stratBadge-nyOpenRange">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="sessionRangesToggle" />
+                  <span class="strat-enable-icon">🌍</span>
+                  <span class="strat-enable-name">Session Ranges</span>
+                  <span class="strat-enable-badge off" id="stratBadge-sessionRanges">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="liveScalpToggle" />
+                  <span class="strat-enable-icon">⚡</span>
+                  <span class="strat-enable-name">Live Scalp Scanner</span>
+                  <span class="strat-enable-badge off" id="stratBadge-liveScalp">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="gridScalperMAToggle" />
+                  <span class="strat-enable-icon">🔲</span>
+                  <span class="strat-enable-name">Grid Scalper MA</span>
+                  <span class="strat-enable-badge off" id="stratBadge-gridScalperMA">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="fvgStratToggle" />
+                  <span class="strat-enable-icon">📊</span>
+                  <span class="strat-enable-name">Fair Value Gap</span>
+                  <span class="strat-enable-badge off" id="stratBadge-fvgStrat">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="mtfTopDownToggle" />
+                  <span class="strat-enable-icon">⏱</span>
+                  <span class="strat-enable-name">MTF Top-Down</span>
+                  <span class="strat-enable-badge off" id="stratBadge-mtfTopDown">OFF</span>
+                </label>
+
+              </div>
             </div>
           </section>
 
@@ -748,15 +837,11 @@
 
               <hr class="param-divider" />
               <p class="param-group-title">🕤 NY Open Range (9:30 AM EST)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="nyOpenRangeToggle" /> NY Open Range Strategy</label>
               <p class="hint">At 9:30 AM EST, marks the 9:30–9:35 range high/low. Enters on a clean breakout + valid retest (wick into range, close outside). SL at range midpoint, TP at 1:2 R:R.</p>
               <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) and <b>Auto-Send Strategy Alerts</b> (Telegram) to auto-execute and receive Telegram notifications.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🌍 Session Ranges (Asian / London / NY)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="sessionRangesToggle" /> Session Ranges Indicator</label>
               <p class="hint">Draws Asian (00–09 UTC), London (07–16 UTC), and NY (12–21 UTC) session high/low ranges. Detects tight Asian ranges (&lt;1× ATR) and London sweeps of the Asian range (liquidity grab → trade signal with entry, SL, TP).</p>
               <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) to auto-execute. Enable <b>Auto-Send Session Range Signals</b> or <b>Auto-Send Strategy Alerts</b> in Telegram for notifications.</p>
 
@@ -768,8 +853,6 @@
 
               <hr class="param-divider" />
               <p class="param-group-title">⚡ Live Scalp Scanner</p>
-
-              <label class="toggle-row"><input type="checkbox" id="liveScalpToggle" /> Live Scalp Detection</label>
               <p class="hint">Scans every candle for high-probability scalp setups using 7-point confluence: EMA momentum, RSI zone, MACD cross, Stochastic cross, Bollinger bounce, candle pattern, ADX trend. Alerts appear in real-time on the chart.</p>
 
               <label for="liveScalpMinConf" class="spaced-label">Min Confluence (1–7)</label>
@@ -778,38 +861,26 @@
 
               <hr class="param-divider" />
               <p class="param-group-title">🌊 Strategy 1: Liquidity Sweep (15m → 1m)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="liquiditySweepToggle" /> Liquidity Sweep Detection</label>
               <p class="hint">Identifies range from a single candle's high/low. If the next candle breaks the range but closes back inside → liquidity sweep signal. Entry at candle close, SL just outside the range, TP at 2:1 R:R. Works best on 15m/1m charts for scalp entries.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Strategy 2: Stop Loss Hunt</p>
-
-              <label class="toggle-row"><input type="checkbox" id="stopLossHuntToggle" /> Stop Loss Hunt Detection</label>
               <p class="hint">Finds key support/resistance levels tested multiple times. When price breaks beyond the level but closes back inside → stop hunt signal. Entry at candle close, SL beyond the hunt candle, TP at 2:1 R:R. Includes re-entry logic if your stop is hunted again (stop hunt of stop hunters).</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">📌 Strategy 3: Failed Pin Bar (Fear/Greed)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="failedPinBarToggle" /> Failed Pin Bar Detection</label>
               <p class="hint">Detects market fear (consecutive bearish candles) or greed (consecutive bullish candles). Spots a pin bar against the dominant emotion, then enters when the pin bar fails (breaks in direction of momentum). SL beyond the pin bar, TP at 1.5:1 R:R for quick scalp pips.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">📐 Strategy 4: Fib Golden Zone Scalp</p>
-
-              <label class="toggle-row"><input type="checkbox" id="fibScalpToggle" /> Fib Golden Zone Scalp Detection</label>
               <p class="hint">Pure price action + Fibonacci on the 1-minute chart. Identifies a micro-trend (higher lows / lower highs), waits for a break of structure, then enters when price retraces into the 0.5–0.618 Fibonacci retracement zone (the "Golden Zone"). Exits at the previous swing high (uptrend) or swing low (downtrend). SL beyond the 0.786 Fib level. Fast, clean 10-minute scalp strategy.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">⚡ Strategy 5: Power of 3 (ICT)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="po3Toggle" /> Power of 3 Detection</label>
               <p class="hint">ICT Power of 3 delivery: Accumulation → Manipulation → Expansion. Uses EMA 8/21 daily bias to define direction. Marks the 1-hour candle open, waits for a liquidity sweep (manipulation) beyond the open, then waits for a market structure shift (MSS) with displacement that leaves a Fair Value Gap (FVG). Enters when price returns into the FVG. SL below the sweep low (bullish) or above the sweep high (bearish). TP at the 1H high/low + external liquidity. Partial at 1–2R, let the rest run.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🔲 Strategy 8: Grid Scalper MA</p>
-
-              <label class="toggle-row"><input type="checkbox" id="gridScalperMAToggle" /> Grid Scalper MA Detection</label>
               <p class="hint">Dynamic MA-based signal strategy with two modes: <b>Price vs MA</b> fires when price closes above/below a Simple Moving Average crossover, and <b>BOS</b> fires when price breaks above a confirmed swing high (BUY) or below a confirmed swing low (SELL). SL placed at the nearest swing point + ATR buffer. TP at 2:1 R:R.</p>
 
               <div style="margin-top:4px;margin-bottom:4px;">
@@ -829,8 +900,6 @@
 
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
-
-              <label class="toggle-row"><input type="checkbox" id="fvgStratToggle" /> Fair Value Gap Detection</label>
               <p class="hint">ICT-style supply &amp; demand strategy using Fair Value Gaps as confluence. Detects a "big push" (3+ consecutive strong candles) that leaves FVG imbalances, then marks the origin candle (the demand/supply zone <em>before</em> the push). Waits for price to retrace back into that zone at a Fibonacci discount (&lt;50% retracement), confirms with a bullish/bearish engulfing pattern, and enters in the direction of the original push. SL below the demand zone (or above supply). TP at the recent swing high/low. Requires EMA trend alignment. Works on any timeframe.</p>
 
             </div>
@@ -883,6 +952,11 @@
               <p class="param-group-title">🎯 Fair Value Gap Alerts</p>
               <ul id="fvgStratAlertList" class="scalp-alert-list"></ul>
               <span id="fvgStratAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⏱ MTF Top-Down Alerts</p>
+              <ul id="mtfTopDownAlertList" class="scalp-alert-list"></ul>
+              <span id="mtfTopDownAlertCount" style="display:none;">0</span>
 
               <p class="hint" style="margin-top:6px;">Recent signals from all custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
             </div>

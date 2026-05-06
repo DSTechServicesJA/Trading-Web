@@ -1417,6 +1417,34 @@ const FVG_ZONE_ATR_BUFFER    = 0.15;    /* ATR buffer below/above demand/supply 
 const FVG_LOOKBACK           = 60;      /* candles to scan for push + zone */
 const FVG_FIB_DISCOUNT       = 0.5;     /* below this fib retracement level = discount */
 
+/* ================= MTF TOP-DOWN STRATEGY (Strategy 11) ================= */
+/*
+ * Multi-Timeframe Top-Down approach:
+ *   1. Synthesise "4H equivalent" bars from the current candle stream.
+ *   2. computeMtfBias()     – HH/HL vs LH/LL structure → BULL | BEAR | NEUTRAL
+ *   3. detectMtfSetup()     – 1H-equivalent consolidation + bias-aligned breakout
+ *   4. detectMtfConfirmation() – current-TF retest of the broken level
+ *   5. detectMtfTopDown()   – entry on pin-bar / engulfing / micro-BOS at the zone
+ *   Entry  : close of the trigger candle
+ *   SL     : wick extreme + 0.3 × ATR buffer
+ *   TP     : 4H swing high (BULL) or swing low (BEAR), min 2:1 R:R
+ */
+let mtfTopDownEnabled   = false;    /* master toggle */
+let mtfTopDownHistory   = [];       /* alert history */
+let lastMtfTopDownIdx   = -999;     /* cooldown tracker */
+let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
+
+const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
+const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
+const MTF_TOP_DOWN_MAX_CANDLES = 60;  /* monitoring timeout (candles) */
+const MTF_BIAS_TF_MULT         = 16;  /* ×current TF → "4H" synthesis ratio */
+const MTF_SETUP_TF_MULT        = 4;   /* ×current TF → "1H" synthesis ratio */
+const MTF_BIAS_LOOKBACK        = 6;   /* synthesised 4H bars for bias */
+const MTF_SETUP_LOOKBACK       = 12;  /* synthesised 1H bars for setup range */
+const MTF_MIN_RR               = 2.0; /* minimum acceptable R:R */
+const MTF_SL_ATR_BUFFER        = 0.3; /* ATR buffer beyond wick for SL */
+const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest */
+
 /* ================= LIVE SCALP SCANNER ================= */
 let liveScalpEnabled = false;       /* master toggle */
 let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
@@ -1637,6 +1665,12 @@ function initUI() {
   UI.fvgStratAlertList     = document.getElementById("fvgStratAlertList");
   UI.fvgStratAlertCount    = document.getElementById("fvgStratAlertCount");
   UI.autoTradeFvgStratToggle = document.getElementById("autoTradeFvgStratToggle");
+
+  /* Strategy 11: MTF Top-Down */
+  UI.mtfTopDownToggle          = document.getElementById("mtfTopDownToggle");
+  UI.mtfTopDownAlertList       = document.getElementById("mtfTopDownAlertList");
+  UI.mtfTopDownAlertCount      = document.getElementById("mtfTopDownAlertCount");
+  UI.autoTradeMtfTopDownToggle = document.getElementById("autoTradeMtfTopDownToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -2932,6 +2966,7 @@ function buildTelegramCaption() {
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
   if (po3Enabled) filters.push("Power of 3");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
+  if (mtfTopDownEnabled) filters.push("MTF Top-Down");
   if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
@@ -3718,7 +3753,9 @@ function saveSettings() {
       gridScalperMAPeriod,
       autoTradeGridScalperMA,
       fvgStratEnabled,
-      autoTradeFvgStrat
+      autoTradeFvgStrat,
+      mtfTopDownEnabled,
+      autoTradeMtfTopDown
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) {
@@ -3892,6 +3929,12 @@ function restoreSettings() {
     if (s.autoTradeFvgStrat != null) autoTradeFvgStrat = s.autoTradeFvgStrat;
     if (UI.autoTradeFvgStratToggle) UI.autoTradeFvgStratToggle.checked = autoTradeFvgStrat;
 
+    /* Strategy 11: MTF Top-Down */
+    if (s.mtfTopDownEnabled != null) mtfTopDownEnabled = s.mtfTopDownEnabled;
+    if (UI.mtfTopDownToggle) UI.mtfTopDownToggle.checked = mtfTopDownEnabled;
+    if (s.autoTradeMtfTopDown != null) autoTradeMtfTopDown = s.autoTradeMtfTopDown;
+    if (UI.autoTradeMtfTopDownToggle) UI.autoTradeMtfTopDownToggle.checked = autoTradeMtfTopDown;
+
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
     if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
@@ -3993,6 +4036,7 @@ function restoreSettings() {
     /* Restore auto-trade history */
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
+    updateStrategyBadges();
   } catch (e) { /* storage not available */ }
 }
 
@@ -4096,7 +4140,8 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_sessionRange",   history: sessionRangeHistory,    label: "🌍 Session Rng" },
     { id: "stratWR_gridScalper",    history: gridScalperMAHistory,   label: "🔲 Grid Scalper" },
     { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
-    { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" }
+    { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" },
+    { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -4349,7 +4394,8 @@ function getAggregatedStrategyHistory() {
       { history: p.nyOpenRangeHistory    || [], label: "🕤 NY Open Range" },
       { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" },
       { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
-      { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" }
+      { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" },
+      { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -6419,8 +6465,9 @@ function adjustIndicesAfterSlice(removed) {
   lastPo3Idx            = Math.max(-999, lastPo3Idx - removed);
   lastGridScalperMAIdx  = Math.max(-999, lastGridScalperMAIdx - removed);
   lastScalpCandleIdx    = Math.max(-999, lastScalpCandleIdx - removed);
+  lastMtfTopDownIdx     = Math.max(-999, lastMtfTopDownIdx - removed);
 
-  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory]) {
+  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory]) {
     for (const s of h) {
       if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
     }
@@ -7019,8 +7066,7 @@ function revertAllSettings() {
   gridScalperMAStrategy = "price_vs_ma";
   gridScalperMAPeriod   = 21;
   fvgStratEnabled       = false;
-
-  /* Advanced parameter defaults */
+  mtfTopDownEnabled     = false;
   RANGE_MINUTES           = 15;
   LEVEL_TOUCH_TOLERANCE   = 0.15;
   DOJI_BODY_RATIO         = 0.2;
@@ -7064,8 +7110,7 @@ function revertAllSettings() {
   if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
   _updateGridScalperMAPeriodVisibility();
   if (UI.fvgStratToggle)         UI.fvgStratToggle.checked         = fvgStratEnabled;
-
-  /* Profit-Direction UI sync */
+  if (UI.mtfTopDownToggle)       UI.mtfTopDownToggle.checked       = mtfTopDownEnabled;
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
   if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
   if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
@@ -8601,11 +8646,13 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.gridScalperMAAlertList, UI.gridScalperMAAlertCount, gridScalperMAHistory, "🔲", "Grid Scalper MA");
   /* Fair Value Gap (FVG) */
   _renderAlertList(UI.fvgStratAlertList, UI.fvgStratAlertCount, fvgStratHistory, "🎯", "Fair Value Gap");
+  /* MTF Top-Down */
+  _renderAlertList(UI.mtfTopDownAlertList, UI.mtfTopDownAlertCount, mtfTopDownHistory, "⏱", "MTF Top-Down");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
-    + fvgStratHistory.length;
+    + fvgStratHistory.length + mtfTopDownHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -9209,6 +9256,7 @@ function processCustomStrategies() {
   processPowerOf3();
   processGridScalperMA();
   processFVGStrat();
+  processMtfTopDown();
 }
 
 /**
@@ -9222,6 +9270,319 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorPo3Outcomes(candle);
   monitorGridScalperMAOutcomes(candle);
   monitorFVGStratOutcomes(candle);
+  monitorMtfTopDownOutcomes(candle);
+}
+
+/* ================= MTF TOP-DOWN STRATEGY (Strategy 11) ================= */
+
+/**
+ * Synthesise higher-timeframe candles by grouping `ratio` consecutive base
+ * candles into a single OHLC bar.  Uses the global `candles` array.
+ */
+function synthesizeTfCandles(ratio) {
+  if (!candles || candles.length < ratio || ratio < 2) return candles ? candles.slice() : [];
+  const result = [];
+  for (let i = 0; i + ratio <= candles.length; i += ratio) {
+    const group = candles.slice(i, i + ratio);
+    result.push({
+      epoch: group[0].epoch,
+      open:  group[0].open,
+      high:  Math.max(...group.map(c => c.high)),
+      low:   Math.min(...group.map(c => c.low)),
+      close: group[group.length - 1].close
+    });
+  }
+  return result;
+}
+
+/**
+ * Determine the higher-timeframe directional bias from the synthesised "4H"
+ * candle set.  Compares average highs and lows across first vs second half
+ * of the MTF_BIAS_LOOKBACK window.
+ *
+ * @returns {"BULL"|"BEAR"|"NEUTRAL"}
+ */
+function computeMtfBias() {
+  const biasBars = synthesizeTfCandles(MTF_BIAS_TF_MULT);
+  if (biasBars.length < MTF_BIAS_LOOKBACK + 2) return "NEUTRAL";
+
+  const slice = biasBars.slice(-MTF_BIAS_LOOKBACK);
+  const highs  = slice.map(c => c.high);
+  const lows   = slice.map(c => c.low);
+  const n   = highs.length;
+  const mid = Math.floor(n / 2);
+  if (mid === 0 || mid >= n) return "NEUTRAL"; /* guard against edge cases */
+
+  const avgHighFirst  = highs.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
+  const avgHighSecond = highs.slice(mid).reduce((a, b) => a + b, 0) / (n - mid);
+  const avgLowFirst   = lows.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
+  const avgLowSecond  = lows.slice(mid).reduce((a, b) => a + b, 0) / (n - mid);
+
+  const risingHighs  = avgHighSecond > avgHighFirst;
+  const risingLows   = avgLowSecond  > avgLowFirst;
+  const fallingHighs = avgHighSecond < avgHighFirst;
+  const fallingLows  = avgLowSecond  < avgLowFirst;
+
+  if (risingHighs && risingLows)   return "BULL";
+  if (fallingHighs && fallingLows) return "BEAR";
+  return "NEUTRAL";
+}
+
+/**
+ * Detect a 1H-equivalent setup: price consolidates then breaks out in the
+ * direction of the 4H bias.
+ *
+ * @returns {{ dir, level, rangeHigh, rangeLow }|null}
+ */
+function detectMtfSetup() {
+  const bias = computeMtfBias();
+  if (bias === "NEUTRAL") return null;
+
+  const setupBars = synthesizeTfCandles(MTF_SETUP_TF_MULT);
+  if (setupBars.length < MTF_SETUP_LOOKBACK + 2) return null;
+
+  /* Consolidation range: all but last two bars */
+  const rangeBars = setupBars.slice(-MTF_SETUP_LOOKBACK - 2, -2);
+  const rangeHigh = Math.max(...rangeBars.map(c => c.high));
+  const rangeLow  = Math.min(...rangeBars.map(c => c.low));
+  if (rangeHigh <= rangeLow) return null;
+
+  const last = setupBars[setupBars.length - 1];
+
+  if (bias === "BULL" && last.close > rangeHigh) {
+    return { dir: "BULL", level: rangeHigh, rangeHigh, rangeLow };
+  }
+  if (bias === "BEAR" && last.close < rangeLow) {
+    return { dir: "BEAR", level: rangeLow, rangeHigh, rangeLow };
+  }
+  return null;
+}
+
+/**
+ * Detect a current-TF retest of the 1H broken level.
+ * A retest: price returns within ATR tolerance of the level then closes
+ * back on the breakout side.
+ *
+ * @returns {{ dir, level, retestCandleIdx }|null}
+ */
+function detectMtfConfirmation() {
+  const setup = detectMtfSetup();
+  if (!setup) return null;
+
+  const len = candles.length;
+  if (len < 5) return null;
+
+  const { dir, level } = setup;
+  const tolerance = atrValue > 0 ? atrValue * 0.5 : level * 0.002;
+
+  const scanStart = Math.max(0, len - 1 - MTF_RETEST_LOOKBACK);
+  for (let i = scanStart; i < len - 1; i++) {
+    const c = candles[i];
+    if (!c) continue;
+    if (dir === "BULL") {
+      if (c.low <= level + tolerance && c.close >= level) {
+        return { dir, level, retestCandleIdx: i };
+      }
+    } else {
+      if (c.high >= level - tolerance && c.close <= level) {
+        return { dir, level, retestCandleIdx: i };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Main MTF Top-Down signal detector.
+ * Looks for a pin bar, engulfing candle, or micro break-of-structure at the
+ * confirmed retest zone.
+ *
+ * @returns {Object|null}
+ */
+function detectMtfTopDown() {
+  if (!mtfTopDownEnabled) return null;
+  if (!candles || candles.length < 20) return null;
+
+  const idx = candles.length - 1;
+
+  /* Cooldown */
+  if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) return null;
+  /* One pending at a time */
+  if (mtfTopDownHistory.some(s => s.result === "PENDING")) return null;
+
+  const confirmation = detectMtfConfirmation();
+  if (!confirmation) return null;
+
+  const { dir, level, retestCandleIdx } = confirmation;
+
+  /* Only act within 3 candles of the confirmed retest */
+  if (idx - retestCandleIdx > 3) return null;
+
+  const c    = candles[idx];
+  const prev = candles[idx - 1];
+  if (!c || !prev) return null;
+
+  const hasPinBar     = isPinBar(c, dir);
+  const hasBullEngulf = dir === "BULL" && isBullishEngulfing(prev, c);
+  const hasBearEngulf = dir === "BEAR" && isBearishEngulfing(prev, c);
+  /* Micro BOS: current close surpasses the previous candle on the breakout side */
+  const microBosBull  = dir === "BULL" && c.close > prev.high && c.close > c.open;
+  const microBosBear  = dir === "BEAR" && c.close < prev.low  && c.close < c.open;
+
+  if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) return null;
+
+  const patternType = hasPinBar ? "pin_bar"
+    : (hasBullEngulf || hasBearEngulf) ? "engulfing"
+    : "micro_bos";
+
+  const entry    = c.close;
+  const slBuffer = atrValue * MTF_SL_ATR_BUFFER;
+
+  /* Pre-compute the 4H synthesised slice once for both TP directions */
+  const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
+  let sl, tp;
+
+  if (dir === "BULL") {
+    sl = c.low - slBuffer;
+    tp = biasSlice.length > 0
+      ? Math.max(...biasSlice.map(b => b.high))
+      : entry + Math.abs(entry - sl) * MTF_MIN_RR;
+  } else {
+    sl = c.high + slBuffer;
+    tp = biasSlice.length > 0
+      ? Math.min(...biasSlice.map(b => b.low))
+      : entry - Math.abs(sl - entry) * MTF_MIN_RR;
+  }
+
+  const risk = Math.abs(entry - sl);
+  if (risk <= 0) return null;
+
+  /* Guarantee minimum R:R */
+  if (Math.abs(tp - entry) / risk < MTF_MIN_RR) {
+    tp = dir === "BULL" ? entry + risk * MTF_MIN_RR : entry - risk * MTF_MIN_RR;
+  }
+  const rr = Math.abs(tp - entry) / risk;
+
+  return {
+    dir, entry, sl, tp, rr, level, retestCandleIdx,
+    mtfBias: computeMtfBias(),
+    patternType,
+    candleIdx: idx,
+    epoch:  c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type:   "mtf_top_down"
+  };
+}
+
+/**
+ * Run the MTF Top-Down scanner and handle all alerting.
+ */
+function processMtfTopDown() {
+  const signal = detectMtfTopDown();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog("\u26a0 MTF Top-Down REJECTED \u2014 confluence " + confScore + "/" + minConfluenceValue + " below minimum");
+      return;
+    }
+  }
+
+  lastMtfTopDownIdx = signal.candleIdx;
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  mtfTopDownHistory.unshift(signal);
+  if (mtfTopDownHistory.length > MTF_TOP_DOWN_MAX_HISTORY) mtfTopDownHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  const patLabel = signal.patternType === "pin_bar" ? "Pin Bar"
+    : signal.patternType === "engulfing" ? "Engulfing"
+    : "Micro BOS";
+  const dirArrow = signal.dir === "BULL" ? "\u25b2 BUY" : "\u25bc SELL";
+  addLog("\u23f1 MTF Top-Down " + dirArrow + " \u2014 " + sym + " @ " + fmtPrice(signal.entry, sym)
+    + " | Bias: " + signal.mtfBias + " | Pattern: " + patLabel
+    + " | Level: " + fmtPrice(signal.level, sym)
+    + " | SL " + fmtPrice(signal.sl, sym)
+    + " | TP " + fmtPrice(signal.tp, sym)
+    + " | R:R 1:" + fmt(signal.rr, 1));
+
+  showToast(
+    "MTF Top-Down " + dirArrow,
+    sym + " @ " + fmtPrice(signal.entry, sym)
+      + " | " + signal.mtfBias + " bias | " + patLabel
+      + " at " + fmtPrice(signal.level, sym)
+      + " | SL: " + fmtPrice(signal.sl, sym)
+      + " | TP: " + fmtPrice(signal.tp, sym)
+      + " | R:R 1:" + fmt(signal.rr, 1),
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = "\u23f1 " + signal.dir + " MTF Top-Down \u2014 " + sym
+      + " @ " + fmtPrice(signal.entry, sym)
+      + "\nBias: " + signal.mtfBias + " | Pattern: " + patLabel
+      + "\nLevel: " + fmtPrice(signal.level, sym)
+      + "\nSL: " + fmtPrice(signal.sl, sym) + " | TP: " + fmtPrice(signal.tp, sym);
+    throttledNotification("IT Guru: MTF Top-Down Signal!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(function() { sendTelegramStrategyAlert(signal); }, CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeMtfTopDown && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp,
+      symbol: signal.symbol || sym, source: "strategy", strategyName: "mtfTopDown" });
+  }
+}
+
+/**
+ * Monitor pending MTF Top-Down signals for SL/TP outcome.
+ */
+function monitorMtfTopDownOutcomes(candle) {
+  if (!mtfTopDownEnabled) return;
+  let changed = false;
+  for (const s of mtfTopDownHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    if (elapsed < 0 || elapsed >= MTF_TOP_DOWN_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true;
+      addLog("\u23f1 MTF Top-Down EXPIRED (timeout " + MTF_TOP_DOWN_MAX_CANDLES + " candles) \u2014 " + (s.symbol || ""));
+      continue;
+    }
+
+    if (s.dir === "BULL") {
+      if (candle.high >= s.tp) {
+        s.result = "WIN"; changed = true;
+        addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+      } else if (candle.low <= s.sl) {
+        s.result = "LOSS"; changed = true;
+        addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+      }
+    } else {
+      if (candle.low <= s.tp) {
+        s.result = "WIN"; changed = true;
+        addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+      } else if (candle.high >= s.sl) {
+        s.result = "LOSS"; changed = true;
+        addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+      }
+    }
+  }
+  if (changed) renderStrategyAlerts();
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -9771,6 +10132,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "fvg_strat") {
     stratEmoji = "🎯";
     stratLabel = "Fair Value Gap";
+  } else if (signal.type === "mtf_top_down") {
+    stratEmoji = "⏱";
+    stratLabel = "MTF Top-Down";
   }
 
   const lines = [];
@@ -9834,8 +10198,20 @@ function buildStrategyTelegramCaption(signal) {
       lines.push(`<b>📐 Fib Level:</b> ${fmt(signal.fibLevel * 100, 0)}% (discount zone ≤ ${fmt(FVG_FIB_DISCOUNT * 100, 0)}%)`);
     }
   }
-
-  /* Lot size / position sizing based on account amount */
+  if (signal.type === "mtf_top_down") {
+    lines.push(``);
+    if (signal.mtfBias) {
+      const biasEmoji = signal.mtfBias === "BULL" ? "📈" : signal.mtfBias === "BEAR" ? "📉" : "➡️";
+      lines.push(`<b>${biasEmoji} HTF Bias:</b> ${signal.mtfBias}`);
+    }
+    if (signal.level != null) {
+      lines.push(`<b>🎯 Key Level:</b> <code>${fmtPrice(signal.level, symbol)}</code>`);
+    }
+    if (signal.patternType) {
+      const pLabel = signal.patternType === "pin_bar" ? "Pin Bar" : signal.patternType === "engulfing" ? "Engulfing" : "Micro BOS";
+      lines.push(`<b>🕯 Entry Pattern:</b> ${pLabel}`);
+    }
+  }
   if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
     const tradeObj = { entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr || 0, symbol };
     const m = calcPositionMetrics(tradeObj);
@@ -9964,6 +10340,7 @@ async function sendStrategyOutcomeTelegram(signal) {
       stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
     }
     else if (signal.type === "fvg_strat") { stratEmoji = "🎯"; stratLabel = "Fair Value Gap"; }
+    else if (signal.type === "mtf_top_down") { stratEmoji = "⏱"; stratLabel = "MTF Top-Down"; }
 
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
@@ -14024,7 +14401,8 @@ function drawChart() {
     { history: nyOpenRangeHistory,    enabled: nyOpenRangeEnabled,    emoji: "🕤", color: "#f97316" },
     { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" },
     { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" },
-    { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" }
+    { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" },
+    { history: mtfTopDownHistory,     enabled: mtfTopDownEnabled,     emoji: "⏱", color: "#6366f1" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -14508,6 +14886,7 @@ function applyStrategyAccess() {
     { id: "gridScalperMAToggle",   key: "grid_scalper_ma",  fn: () => { gridScalperMAEnabled  = false; } },
     { id: "fvgStratToggle",        key: "fvg_strat",        fn: () => { fvgStratEnabled       = false; } },
     { id: "liveScalpToggle",       key: "live_scalp",       fn: () => { liveScalpEnabled      = false; } },
+    { id: "mtfTopDownToggle",      key: "mtf_top_down",     fn: () => { mtfTopDownEnabled     = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -14529,9 +14908,45 @@ function applyStrategyAccess() {
       }
     }
   }
+  updateStrategyBadges();
 }
 
-/* ================= MULTI-SYMBOL ANALYSIS ================= */
+/**
+ * Refresh the ON/OFF/LOCKED status badges in the Strategies section.
+ * Call this after any strategy toggle changes or after loadSettings().
+ */
+function updateStrategyBadges() {
+  const entries = [
+    { badgeId: "stratBadge-liquiditySweep", toggleId: "liquiditySweepToggle", enabled: liquiditySweepEnabled },
+    { badgeId: "stratBadge-stopLossHunt",   toggleId: "stopLossHuntToggle",   enabled: stopLossHuntEnabled   },
+    { badgeId: "stratBadge-failedPinBar",   toggleId: "failedPinBarToggle",   enabled: failedPinBarEnabled   },
+    { badgeId: "stratBadge-fibScalp",       toggleId: "fibScalpToggle",       enabled: fibScalpEnabled       },
+    { badgeId: "stratBadge-po3",            toggleId: "po3Toggle",            enabled: po3Enabled            },
+    { badgeId: "stratBadge-nyOpenRange",    toggleId: "nyOpenRangeToggle",    enabled: nyOpenRangeEnabled    },
+    { badgeId: "stratBadge-sessionRanges",  toggleId: "sessionRangesToggle",  enabled: sessionRangesEnabled  },
+    { badgeId: "stratBadge-liveScalp",      toggleId: "liveScalpToggle",      enabled: liveScalpEnabled      },
+    { badgeId: "stratBadge-gridScalperMA",  toggleId: "gridScalperMAToggle",  enabled: gridScalperMAEnabled  },
+    { badgeId: "stratBadge-fvgStrat",       toggleId: "fvgStratToggle",       enabled: fvgStratEnabled       },
+    { badgeId: "stratBadge-mtfTopDown",     toggleId: "mtfTopDownToggle",     enabled: mtfTopDownEnabled     },
+  ];
+  for (const { badgeId, toggleId, enabled } of entries) {
+    const badge  = document.getElementById(badgeId);
+    const toggle = document.getElementById(toggleId);
+    if (!badge) continue;
+    if (toggle && toggle.disabled) {
+      badge.textContent = "🔒";
+      badge.className   = "strat-enable-badge locked";
+    } else if (enabled) {
+      badge.textContent = "ON";
+      badge.className   = "strat-enable-badge on";
+    } else {
+      badge.textContent = "OFF";
+      badge.className   = "strat-enable-badge off";
+    }
+  }
+}
+
+
 /**
  * Multi-symbol system: runs up to 6 independent indicator instances
  * simultaneously, each with its own WebSocket connection and state.
@@ -14800,8 +15215,8 @@ function activatePanel(p) {
   lastGridScalperMAIdx  = p.lastGridScalperMAIdx  != null ? p.lastGridScalperMAIdx  : -999;
   fvgStratHistory       = p.fvgStratHistory       || [];
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
-
-  /* Session Ranges */
+  mtfTopDownHistory     = p.mtfTopDownHistory     || [];
+  lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
   sessionRangeAsian   = p.sessionRangeAsian  || null;
   sessionRangeLondon  = p.sessionRangeLondon || null;
   sessionRangeNY      = p.sessionRangeNY     || null;
@@ -14930,8 +15345,8 @@ function savePanel(p) {
   p.lastGridScalperMAIdx  = lastGridScalperMAIdx;
   p.fvgStratHistory       = fvgStratHistory;
   p.lastFvgStratIdx       = lastFvgStratIdx;
-
-  /* Session Ranges */
+  p.mtfTopDownHistory     = mtfTopDownHistory;
+  p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
   p.sessionRangeAsian   = sessionRangeAsian;
   p.sessionRangeLondon  = sessionRangeLondon;
   p.sessionRangeNY      = sessionRangeNY;
@@ -15233,7 +15648,8 @@ function connectPanel(p) {
   p.lastGridScalperMAIdx  = -999;
   p.fvgStratHistory       = [];
   p.lastFvgStratIdx       = -999;
-  p.nyOpenRangeHistory    = [];
+  p.mtfTopDownHistory     = [];
+  p.lastMtfTopDownIdx     = -999;
   p.sessionRangeHistory   = [];
   p.connected = false;
 
@@ -16102,6 +16518,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       updateStateUI();
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16124,6 +16541,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       updateStateUI();
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16259,6 +16677,7 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSettings();
       if (!liveScalpEnabled && UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.liveScalpMinConf) {
@@ -16313,6 +16732,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🌊 Liquidity Sweep strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16328,6 +16748,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🎯 Stop Loss Hunt strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16343,6 +16764,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("📌 Failed Pin Bar strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16358,6 +16780,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("📐 Fib Golden Zone Scalp strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16373,6 +16796,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("⚡ Power of 3 strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
 
@@ -16389,6 +16813,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🔲 Grid Scalper MA strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.gridScalperMAStrategySelect) {
@@ -16425,11 +16850,33 @@ document.addEventListener("DOMContentLoaded", () => {
         addLog("🎯 Fair Value Gap strategy disabled");
       }
       drawChart();
+      updateStrategyBadges();
     });
   }
   if (UI.autoTradeFvgStratToggle) {
     UI.autoTradeFvgStratToggle.addEventListener("change", () => {
       autoTradeFvgStrat = UI.autoTradeFvgStratToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 11: MTF Top-Down listener */
+  if (UI.mtfTopDownToggle) {
+    UI.mtfTopDownToggle.addEventListener("change", () => {
+      mtfTopDownEnabled = UI.mtfTopDownToggle.checked;
+      saveSettings();
+      if (mtfTopDownEnabled) {
+        addLog("\u23f1 MTF Top-Down strategy enabled \u2014 scanning for multi-timeframe bias + retest entries");
+        showToast("MTF Top-Down Enabled", "Scanning for 4H bias + 1H setup + retest entry patterns.", "info", 5000);
+      } else {
+        addLog("\u23f1 MTF Top-Down strategy disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeMtfTopDownToggle) {
+    UI.autoTradeMtfTopDownToggle.addEventListener("change", () => {
+      autoTradeMtfTopDown = UI.autoTradeMtfTopDownToggle.checked;
       saveSettings();
     });
   }
