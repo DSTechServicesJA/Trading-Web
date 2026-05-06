@@ -302,9 +302,9 @@ function renderTable(users) {
         <div class="tg-cell">
           <span class="badge badge-active" title="Linked since ${u.telegram_linked_at ? escHtml(fmtDate(u.telegram_linked_at)) : 'unknown'}">✅ ${tgName}</span>
           <div class="tg-actions">
-            <button type="button" class="btn-tg-user-sync" data-action="tg-sync" data-id="${u.id}" title="Add to group if active subscription, remove if inactive">📱 Sync</button>
-            <button type="button" class="btn-tg-user-kick" data-action="tg-kick" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Force-remove this user from the Telegram group now">🚫 Kick</button>
-            <button type="button" class="btn-tg-user-unlink" data-action="tg-unlink" data-id="${u.id}" data-username="${escHtml(u.username)}" title="Unlink Telegram (does not kick from group)">🔓 Unlink</button>
+            <button type="button" class="btn-tg-user-sync" data-action="tg-sync" data-id="${u.id}" aria-label="Sync Telegram group membership" title="Add to group if active subscription, remove if inactive">📱 Sync</button>
+            <button type="button" class="btn-tg-user-kick" data-action="tg-kick" data-id="${u.id}" data-username="${escHtml(u.username)}" aria-label="Force kick from Telegram group" title="Force-remove this user from the Telegram group now">🚫 Kick</button>
+            <button type="button" class="btn-tg-user-unlink" data-action="tg-unlink" data-id="${u.id}" data-username="${escHtml(u.username)}" aria-label="Unlink Telegram account" title="Unlink Telegram (does not kick from group)">🔓 Unlink</button>
           </div>
         </div>`;
     } else {
