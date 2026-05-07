@@ -247,8 +247,14 @@ try {
         } else {
             /* Kick from the Telegram group before clearing the DB record so that
                any subsequent expiry check (which looks up telegram_user_id) still
-               finds the user and removes them cleanly. */
-            telegramKickIfLinked($pdo, (int) $user['id']);
+               finds the user and removes them cleanly.
+               If the kick fails (e.g. network error, bot not admin) we log it but
+               still proceed to unlink so the user is not left in a broken state. */
+            try {
+                telegramKickIfLinked($pdo, (int) $user['id']);
+            } catch (\Throwable $kickEx) {
+                error_log('Telegram /unlink kick error for user ' . $user['id'] . ': ' . $kickEx->getMessage());
+            }
 
             $pdo->prepare(
                 'UPDATE users SET telegram_user_id = NULL, telegram_username = NULL, telegram_linked_at = NULL WHERE id = ?'
