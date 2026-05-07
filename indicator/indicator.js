@@ -18503,10 +18503,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (selectAllScanner) {
       selectAllScanner.addEventListener("click", () => {
         UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-          if (!cb.checked) {
-            cb.checked = true;
-            if (!scannerSymbols.includes(cb.dataset.symbol)) scannerSymbols.push(cb.dataset.symbol);
-          }
+          cb.checked = true;
+          if (!scannerSymbols.includes(cb.dataset.symbol)) scannerSymbols.push(cb.dataset.symbol);
         });
         updateScannerSymbolCount();
         saveSettings();
