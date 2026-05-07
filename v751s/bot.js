@@ -498,7 +498,11 @@ setBotState(true);
 
 // Init auth gate + logout button
 if (typeof ITGuruAuth !== "undefined") {
-  ITGuruAuth.initLoginGate();
+  ITGuruAuth.initLoginGate({
+    onLogin: () => {
+      ITGuruAuth.verify().then(() => checkBotAccess());
+    }
+  });
   const authLogoutBtn = document.getElementById("authLogoutBtn");
   if (authLogoutBtn) {
     authLogoutBtn.addEventListener("click", () => {
@@ -506,4 +510,36 @@ if (typeof ITGuruAuth !== "undefined") {
       location.reload();
     });
   }
+  if (ITGuruAuth.isLoggedIn()) {
+    ITGuruAuth.verify().then(() => checkBotAccess());
+  }
+}
+
+function checkBotAccess() {
+  if (typeof ITGuruAuth === "undefined") return true;
+  const user = ITGuruAuth.getUser();
+  if (user && user.role === "admin") return true; /* admins bypass gate */
+  const granted = ITGuruAuth.getStrategies();
+  if (!granted.includes("bot_hc_1hz75v")) {
+    const overlay = document.getElementById("loginOverlay");
+    if (overlay) {
+      overlay.innerHTML = `
+        <div class="login-card" style="text-align:center;padding:40px 32px;">
+          <div style="font-size:48px;margin-bottom:16px;">🔒</div>
+          <h2 style="margin:0 0 12px;">Access Restricted</h2>
+          <p style="margin:0 0 24px;color:var(--text-muted,#aaa);">
+            You don't have access to IT Guru – High Confidence 1HZ75V Bot.<br>
+            Contact your administrator to request access.
+          </p>
+          <button type="button"
+            style="padding:10px 28px;border-radius:8px;border:none;background:var(--primary,#6c63ff);color:#fff;font-size:15px;cursor:pointer;"
+            onclick="ITGuruAuth.logout(); location.reload();">
+            Logout
+          </button>
+        </div>`;
+      overlay.style.display = "flex";
+    }
+    return false;
+  }
+  return true;
 }

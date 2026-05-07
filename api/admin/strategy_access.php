@@ -37,9 +37,10 @@ if ($stratKey === '') {
 
 /* Valid strategy keys (must match strategies.php) */
 $validKeys = [
+    'bot_hc_1hz75v', 'bot_normal',
     'liquidity_sweep', 'stop_loss_hunt', 'failed_pin_bar', 'fib_scalp',
     'po3', 'ny_open_range', 'session_ranges', 'grid_scalper_ma',
-    'fvg_strat', 'live_scalp',
+    'fvg_strat', 'live_scalp', 'mtf_top_down',
 ];
 if (!in_array($stratKey, $validKeys, true)) {
     jsonResponse(['error' => 'Unknown strategy_key'], 400);

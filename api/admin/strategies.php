@@ -21,6 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 
 jsonResponse([
     'strategies' => [
+        ['key' => 'bot_hc_1hz75v',    'label' => 'IT Guru – High Confidence 1HZ75V Bot'],
+        ['key' => 'bot_normal',        'label' => 'IT Guru – Bot'],
         ['key' => 'liquidity_sweep',  'label' => 'Liquidity Sweep'],
         ['key' => 'stop_loss_hunt',   'label' => 'Stop Loss Hunt'],
         ['key' => 'failed_pin_bar',   'label' => 'Failed Pin Bar'],
