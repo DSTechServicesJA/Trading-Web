@@ -516,9 +516,9 @@ if (typeof ITGuruAuth !== "undefined") {
 }
 
 function checkBotAccess() {
-  if (typeof ITGuruAuth === "undefined") return;
+  if (typeof ITGuruAuth === "undefined") return true;
   const user = ITGuruAuth.getUser();
-  if (user && user.role === "admin") return; /* admins bypass gate */
+  if (user && user.role === "admin") return true; /* admins bypass gate */
   const granted = ITGuruAuth.getStrategies();
   if (!granted.includes("bot_hc_1hz75v")) {
     const overlay = document.getElementById("loginOverlay");
@@ -539,5 +539,7 @@ function checkBotAccess() {
         </div>`;
       overlay.style.display = "flex";
     }
+    return false;
   }
+  return true;
 }
