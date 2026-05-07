@@ -795,6 +795,17 @@ button:disabled {
   padding: var(--space-sm) var(--space-md);
   font-size: var(--fs-sm);
 }
+.legend-group-label {
+  width: 100%;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
 .legend-row {
   display: flex;
   align-items: center;
@@ -806,7 +817,12 @@ button:disabled {
   width: 12px;
   height: 12px;
   border-radius: 4px;
+  flex-shrink: 0;
 }
+/* Candle colours */
+.bull-candle-swatch { background: #22c55e; border: 1px solid #16a34a; }
+.bear-candle-swatch { background: #ef4444; border: 1px solid #dc2626; }
+
 .range-swatch          { background: rgba(99, 102, 241, 0.35); border: 1px solid var(--primary); }
 .breakout-bull-swatch  { background: rgba(16, 185, 129, 0.35); border: 1px solid var(--success); }
 .breakout-bear-swatch  { background: rgba(244, 63, 94, 0.35); border: 1px solid var(--danger); }
@@ -814,12 +830,29 @@ button:disabled {
 .confirm-swatch        { background: rgba(168, 85, 247, 0.35); border: 1px solid #a855f7; }
 .entry-swatch          { background: rgba(34, 211, 238, 0.35); border: 1px solid var(--cyan); }
 
+/* Trade level swatches */
+.sl-swatch          { background: rgba(239, 68, 68, 0.35); border: 1px solid #ef4444; }
+.tp-swatch          { background: rgba(34, 197, 94, 0.35); border: 1px solid #22c55e; }
+.partial-tp-swatch  { background: rgba(168, 85, 247, 0.25); border: 1px dashed #a855f7; }
+.tesla-swatch       { background: rgba(251, 191, 36, 0.35); border: 1px solid #fbbf24; }
+
 /* ---- EMA Legend Swatches ---- */
 .ema-fast-swatch { background: rgba(245, 158, 11, 0.35); border: 1px solid #f59e0b; }
 .ema-slow-swatch { background: rgba(139, 92, 246, 0.35); border: 1px solid #8b5cf6; }
 .htf-ema-swatch  { background: rgba(34, 211, 238, 0.35); border: 1px solid var(--cyan); }
 .trailing-sl-swatch { background: rgba(249, 115, 22, 0.35); border: 1px solid #f97316; }
 .live-price-swatch  { background: linear-gradient(90deg, rgba(16,185,129,0.35), rgba(244,63,94,0.35)); border: 1px dashed var(--text-muted); }
+.bollinger-swatch   { background: rgba(167, 139, 250, 0.2); border: 1px solid #a78bfa; }
+
+/* Candle annotation inline symbol */
+.legend-annotation {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  flex-shrink: 0;
+}
 
 .ema-toggle-row label {
   display: flex;
