@@ -16901,6 +16901,7 @@ function syncProfitDirToAllPanels() {
 /* ---- Connect a multi-symbol panel ---- */
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
+  if (p.unavailable) return; /* symbol rejected by the API – do not reconnect */
   /* Use per-symbol recommended timeframe from market type recommendations */
   const rec = getMarketRecommendations(p.symbol);
   let gran = rec.timeframe.gran;
@@ -17014,6 +17015,17 @@ function connectPanel(p) {
       /* Delegate auto-trade errors to the shared handler first */
       if (handleAutoTradeMessage(msg, panelWs)) return;
       addLog(`[Multi] ${p.symbol} API error: ${msg.error.message}`);
+      /* If the symbol itself is invalid, mark it unavailable and stop */
+      const errCode = msg.error.code || "";
+      const errMsg  = msg.error.message || "";
+      if (errCode === "InputValidationFailed" || /is invalid/i.test(errMsg) ||
+          errCode === "SymbolDoesNotExist"   || /symbol.*not.*found/i.test(errMsg)) {
+        p.unavailable = true;
+        p.unavailableReason = errMsg || "Symbol not available";
+        updatePanelCardUI(p);
+        disconnectPanel(p);
+        return;
+      }
       /* If panel auth fails, still subscribe to data */
       if (msg.msg_type === "authorize") {
         subscribeCandles(panelWs, p.symbol, gran);
@@ -17205,6 +17217,29 @@ function disconnectPanel(p) {
 
 /* ---- Update card badges/status ---- */
 function updatePanelCardUI(p) {
+  /* When the Deriv API has rejected the symbol as invalid, show a distinct N/A state */
+  if (p.unavailable) {
+    if (p.phaseEl) {
+      p.phaseEl.textContent = "N/A";
+      p.phaseEl.className = "ms-card-phase ms-phase-waiting";
+    }
+    if (p.dirEl) {
+      p.dirEl.textContent = "--";
+      p.dirEl.className = "ms-card-dir ms-dir-none";
+    }
+    if (p.dotEl) {
+      p.dotEl.className = "ms-card-dot disconnected";
+    }
+    if (p.statusTextEl) {
+      p.statusTextEl.innerHTML = `<span class="ms-card-dot disconnected"></span> N/A`;
+      p.statusTextEl.title = p.unavailableReason || "Symbol not available on this account";
+    }
+    if (p.actionEl) {
+      p.actionEl.textContent = "";
+      p.actionEl.className = "ms-card-action";
+    }
+    return;
+  }
   if (p.phaseEl) {
     p.phaseEl.textContent = p.phase;
     p.phaseEl.className = "ms-card-phase ms-phase-" + p.phase.toLowerCase();
