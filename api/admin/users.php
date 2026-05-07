@@ -114,6 +114,13 @@ if ($method === 'GET') {
         $statsStmt->execute($params);
         $stats = $statsStmt->fetch();
 
+        /* Global count of users with any bot strategy access */
+        $botStmt = $pdo->query(
+            "SELECT COUNT(DISTINCT user_id) FROM strategy_access
+             WHERE strategy_key IN ('bot_hc_1hz75v', 'bot_normal')"
+        );
+        $botAccessCount = (int) $botStmt->fetchColumn();
+
         jsonResponse([
             'users'        => $users,
             'total'        => $total,
@@ -121,10 +128,11 @@ if ($method === 'GET') {
             'per_page'     => $perPage,
             'last_page'    => (int) ceil($total / $perPage),
             'stats'        => [
-                'active_subs'   => (int) ($stats['active_subs']   ?? 0),
-                'trial_subs'    => (int) ($stats['trial_subs']    ?? 0),
-                'locked_count'  => (int) ($stats['locked_count']  ?? 0),
-                'expiring_soon' => (int) ($stats['expiring_soon'] ?? 0),
+                'active_subs'      => (int) ($stats['active_subs']   ?? 0),
+                'trial_subs'       => (int) ($stats['trial_subs']    ?? 0),
+                'locked_count'     => (int) ($stats['locked_count']  ?? 0),
+                'expiring_soon'    => (int) ($stats['expiring_soon'] ?? 0),
+                'bot_access_count' => $botAccessCount,
             ],
         ]);
     } catch (\Throwable $e) {
