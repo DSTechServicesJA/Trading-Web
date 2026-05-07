@@ -16093,10 +16093,10 @@ function drawHLine(ctx, y, x1, x2, color, label, W, mr) {
 function syncConfigFromUI() {
   if (UI.rangeDuration) {
     const v = parseInt(UI.rangeDuration.value, 10);
-    if (!isNaN(v) && v > 0 && v <= 120) {
+    if (!isNaN(v) && v > 0) {
       RANGE_MINUTES = v;
     } else {
-      addLog("⚠️ Invalid range duration. Must be between 1-120 minutes.");
+      addLog("⚠️ Invalid range duration. Must be at least 1 minute.");
       UI.rangeDuration.value = RANGE_MINUTES; /* Reset to valid value */
     }
   }
