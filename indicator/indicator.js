@@ -328,12 +328,21 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "frxAUDCAD":[50, 100, 200, 300, 500],
   "frxAUDCHF":[50, 100, 200, 300, 500],
   "frxNZDJPY":[50, 100, 200, 300, 500],
+  "frxNZDCAD":[50, 100, 200, 300, 500],
+  "frxNZDCHF":[50, 100, 200, 300, 500],
+  "frxCADJPY":[50, 100, 200, 300, 500],
+  "frxCADCHF":[50, 100, 200, 300, 500],
+  "frxCHFJPY":[50, 100, 200, 300, 500],
 
   /* --- Forex Exotics --- */
   "frxUSDMXN":[50, 100, 200, 300, 500],
   "frxUSDNOK":[50, 100, 200, 300, 500],
   "frxUSDSEK":[50, 100, 200, 300, 500],
+  "frxUSDSGD":[50, 100, 200, 300, 500],
+  "frxUSDZAR":[50, 100, 200, 300, 500],
   "frxUSDPLN":[50, 100, 200, 300, 500],
+  "frxUSDTRY":[50, 100, 200, 300, 500],
+  "frxUSDHKD":[50, 100, 200, 300, 500],
 
   /* --- Commodities --- */
   "frxXAUUSD":[50, 100, 200, 300, 500],
@@ -434,12 +443,21 @@ const SYMBOL_SPECS = (() => {
   fx("frxAUDCAD", "CAD", 0.0001, 100000);
   fx("frxAUDCHF", "CHF", 0.0001, 100000);
   fx("frxNZDJPY", "JPY", 0.01,   100000);
+  fx("frxNZDCAD", "CAD", 0.0001, 100000);
+  fx("frxNZDCHF", "CHF", 0.0001, 100000);
+  fx("frxCADJPY", "JPY", 0.01,   100000);
+  fx("frxCADCHF", "CHF", 0.0001, 100000);
+  fx("frxCHFJPY", "JPY", 0.01,   100000);
 
   /* ---------- Forex Exotics ---------- */
   fx("frxUSDMXN", "MXN", 0.0001, 100000);
   fx("frxUSDNOK", "NOK", 0.0001, 100000);
   fx("frxUSDSEK", "SEK", 0.0001, 100000);
+  fx("frxUSDSGD", "SGD", 0.0001, 100000);
+  fx("frxUSDZAR", "ZAR", 0.0001, 100000);
   fx("frxUSDPLN", "PLN", 0.0001, 100000);
+  fx("frxUSDTRY", "TRY", 0.0001, 100000);
+  fx("frxUSDHKD", "HKD", 0.0001, 100000);
 
   /* ---------- Commodities ---------- */
   fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:      100 oz / lot, pip = $0.01 */
@@ -16883,6 +16901,7 @@ function syncProfitDirToAllPanels() {
 /* ---- Connect a multi-symbol panel ---- */
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
+  if (p.unavailable) return; /* symbol rejected by the API – do not reconnect */
   /* Use per-symbol recommended timeframe from market type recommendations */
   const rec = getMarketRecommendations(p.symbol);
   let gran = rec.timeframe.gran;
@@ -16996,6 +17015,17 @@ function connectPanel(p) {
       /* Delegate auto-trade errors to the shared handler first */
       if (handleAutoTradeMessage(msg, panelWs)) return;
       addLog(`[Multi] ${p.symbol} API error: ${msg.error.message}`);
+      /* If the symbol itself is invalid, mark it unavailable and stop */
+      const errCode = msg.error.code || "";
+      const errMsg  = msg.error.message || "";
+      if (errCode === "InputValidationFailed" || /is invalid/i.test(errMsg) ||
+          errCode === "SymbolDoesNotExist"   || /symbol.*not.*found/i.test(errMsg)) {
+        p.unavailable = true;
+        p.unavailableReason = errMsg || "Symbol not available";
+        updatePanelCardUI(p);
+        disconnectPanel(p);
+        return;
+      }
       /* If panel auth fails, still subscribe to data */
       if (msg.msg_type === "authorize") {
         subscribeCandles(panelWs, p.symbol, gran);
@@ -17187,6 +17217,29 @@ function disconnectPanel(p) {
 
 /* ---- Update card badges/status ---- */
 function updatePanelCardUI(p) {
+  /* When the Deriv API has rejected the symbol as invalid, show a distinct N/A state */
+  if (p.unavailable) {
+    if (p.phaseEl) {
+      p.phaseEl.textContent = "N/A";
+      p.phaseEl.className = "ms-card-phase ms-phase-waiting";
+    }
+    if (p.dirEl) {
+      p.dirEl.textContent = "--";
+      p.dirEl.className = "ms-card-dir ms-dir-none";
+    }
+    if (p.dotEl) {
+      p.dotEl.className = "ms-card-dot disconnected";
+    }
+    if (p.statusTextEl) {
+      p.statusTextEl.innerHTML = `<span class="ms-card-dot disconnected"></span> N/A`;
+      p.statusTextEl.title = p.unavailableReason || "Symbol not available on this account";
+    }
+    if (p.actionEl) {
+      p.actionEl.textContent = "";
+      p.actionEl.className = "ms-card-action";
+    }
+    return;
+  }
   if (p.phaseEl) {
     p.phaseEl.textContent = p.phase;
     p.phaseEl.className = "ms-card-phase ms-phase-" + p.phase.toLowerCase();
