@@ -2374,7 +2374,8 @@ function monitorNyOpenRangeTradeOutcome(candle) {
   const histEntry = nyOpenRangeHistory.find(h => h === t);
   if (histEntry) {
     histEntry.result = result;
-    if (!histEntry._stratOutcomeSent) {
+    /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
+    if (!histEntry._stratOutcomeSent && histEntry._sentViaTelegram === true) {
       sendStrategyOutcomeTelegram(histEntry);
     }
   }
@@ -2691,10 +2692,11 @@ function monitorSessionRangeTradeOutcome(candle) {
   const histEntry = sessionRangeHistory.find(h => h === srt);
   if (histEntry) {
     histEntry.result = result;
-    if (!histEntry._stratOutcomeSent) {
-      /* sendStrategyOutcomeTelegram uses the general strategy alert channel (telegramStrategyAutoSend).
-         sendSessionRangeOutcomeTelegram below uses the dedicated session-range channel (telegramSessionRangeOutcomeSend).
-         These are two independent toggles, so both can fire. */
+    /* Only send via the general strategy channel when the dedicated session-range
+       outcome channel is off — if both are on, the dedicated send below is sufficient
+       and prevents subscribers receiving two identical messages. (Bug #6 fix)
+       Also gated on _sentViaTelegram so historical signals do not send. (Bug #12) */
+    if (!histEntry._stratOutcomeSent && !telegramSessionRangeOutcomeSend && histEntry._sentViaTelegram === true) {
       sendStrategyOutcomeTelegram(histEntry);
     }
   }
@@ -3231,6 +3233,11 @@ async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
 }
 async function sendTradeOutcomeTelegram(signal) {
   if (!telegramOutcomeSend) return;
+  if (signal._outcomeSent) return;
+  /* Set the flag synchronously before the first await so that any re-entrant call
+     (possible because JS is single-threaded but event-loop interleaving can occur
+     between awaits) sees the flag and returns early without sending a duplicate. */
+  signal._outcomeSent = true;
   try {
     const sym = getSymbolLabel(signal.symbol || "");
     const activeSym = signal.symbol || getActiveSymbol() || "";
@@ -3238,6 +3245,7 @@ async function sendTradeOutcomeTelegram(signal) {
     const result = signal.result;
     const icon = result === "WIN" ? "✅" : "❌";
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const exitStr  = signal.exitPrice != null ? fmtPrice(signal.exitPrice, activeSym) : "--";
     const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
     const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
     const rrStr = signal.rr != null ? "1:" + signal.rr.toFixed(1) : "--";
@@ -3249,6 +3257,7 @@ async function sendTradeOutcomeTelegram(signal) {
     lines.push("");
     lines.push(`<b>Pattern:</b> ${pattern}`);
     lines.push(`<b>Entry:</b> ${entryStr}`);
+    lines.push(`<b>Exit:</b> ${exitStr}`);
     lines.push(`<b>SL:</b> ${slStr}`);
     lines.push(`<b>TP:</b> ${tpStr}`);
     lines.push(`<b>R:R:</b> ${rrStr}`);
@@ -7425,9 +7434,10 @@ function monitorLiquiditySweepOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of liquiditySweepHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7653,9 +7663,10 @@ function monitorStopLossHuntOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of stopLossHuntHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -7881,9 +7892,10 @@ function monitorFailedPinBarOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of failedPinBarHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -8190,9 +8202,10 @@ function monitorFibScalpOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal */
+    /* Send Telegram outcome for each newly resolved signal.
+       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of fibScalpHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -8624,7 +8637,10 @@ function monitorPo3Outcomes(candle) {
     for (const s of po3History) {
       if (s.result === "WIN" || s.result === "LOSS") {
         if (!s._po3Resolved) { s._po3Resolved = true; resolved = true; }
-        if (!s._stratOutcomeSent) { sendStrategyOutcomeTelegram(s); }
+        /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
+        if (!s._stratOutcomeSent && s._sentViaTelegram === true) { sendStrategyOutcomeTelegram(s); }
+      } else if (s.result === "EXPIRED") {
+        if (!s._stratOutcomeSent && s._sentViaTelegram === true) { sendStrategyOutcomeTelegram(s); }
       }
     }
     /* Only reset cooldown when trade fully resolves (not on partial TP) */
@@ -8665,7 +8681,7 @@ function _checkProfitExitAlert(s, candle, stratLabel) {
       if (reached) s._reached1R = true;
     }
   }
-  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && s._sentViaTelegram && !_historicalProcessing) {
+  if (s._reached1R && !s._profitExitAlertSent && telegramProfitExitAlertEnabled && s._sentViaTelegram === true && !_historicalProcessing) {
     const atEntry = s.dir === "BULL" ? candle.close <= s.entry : candle.close >= s.entry;
     if (atEntry) {
       s._profitExitAlertSent = true;
@@ -8947,8 +8963,9 @@ function monitorGridScalperMAOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
+    /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of gridScalperMAHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -9311,8 +9328,9 @@ function monitorFVGStratOutcomes(candle) {
   }
   if (changed) {
     renderStrategyAlerts();
+    /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
     for (const s of fvgStratHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -9640,25 +9658,33 @@ function monitorMtfTopDownOutcomes(candle) {
       if (candle.high >= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.low <= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     } else {
       if (candle.low <= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.high >= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     }
   }
-  if (changed) renderStrategyAlerts();
+  if (changed) {
+    /* Send EXPIRED notifications (WIN/LOSS are sent inline above). */
+    for (const s of mtfTopDownHistory) {
+      if (s.result === "EXPIRED" && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    renderStrategyAlerts();
+  }
 }
 
 /* ================= LIVE SCALP SCANNER ================= */
@@ -10375,13 +10401,9 @@ async function sendTelegramStrategyAlert(signal) {
 async function sendStrategyOutcomeTelegram(signal) {
   if (!telegramStrategyOutcomeSend) return;
 
-  /* Mark as sent now (while toggle is on) to prevent duplicate sends.
-     This is intentionally inside the toggle check so that if the toggle was off
-     when the outcome fired, the flag stays false and the notification can still
-     be sent later once the toggle is enabled. */
-  signal._stratOutcomeSent = true;
-
-  /* Sync credentials from DOM */
+  /* Sync credentials from DOM and validate BEFORE marking the signal as sent,
+     so that a bad-credential failure leaves _stratOutcomeSent = false and allows
+     a retry once credentials are corrected. (Bug #5 fix) */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
   if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
 
@@ -10393,35 +10415,74 @@ async function sendStrategyOutcomeTelegram(signal) {
     return;
   }
 
+  /* Credentials are valid — mark sent now (before await) to prevent concurrent
+     duplicate sends in the same JS event loop turn. */
+  signal._stratOutcomeSent = true;
+
+  const result = signal.result;
+  const activeSym = signal.symbol || getActiveSymbol() || "";
+  const sym = getSymbolLabel(activeSym);
+  const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+
+  /* Strategy-specific emoji and label */
+  let stratEmoji = "📊";
+  let stratLabel = "Strategy";
+  if (signal.type === "liquidity_sweep") { stratEmoji = "🌊"; stratLabel = "Liquidity Sweep"; }
+  else if (signal.type === "stop_loss_hunt") { stratEmoji = "🎯"; stratLabel = "Stop Loss Hunt"; }
+  else if (signal.type === "failed_pin_bar") { stratEmoji = "📌"; stratLabel = "Failed Pin Bar"; }
+  else if (signal.type === "fib_scalp") { stratEmoji = "📐"; stratLabel = "Fib Golden Zone"; }
+  else if (signal.type === "grid_scalper_ma") {
+    stratEmoji = "🔲";
+    stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
+  }
+  else if (signal.type === "fvg_strat") { stratEmoji = "🎯"; stratLabel = "Fair Value Gap"; }
+  else if (signal.type === "mtf_top_down") { stratEmoji = "⏱"; stratLabel = "MTF Top-Down"; }
+  else if (signal.type === "ny_open_range") { stratEmoji = "🕤"; stratLabel = "NY Open Range"; }
+  else if (signal.type === "session_range") { stratEmoji = "🌍"; stratLabel = "Session Range"; }
+  else if (signal.type === "power_of_3") { stratEmoji = "⚡"; stratLabel = "Power of 3"; }
+
+  /* ── EXPIRED: distinct short message, no statistics block ── */
+  if (result === "EXPIRED") {
+    try {
+      const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+      const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+      const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
+      const rrStr    = signal.rr    != null ? "1:" + fmt(signal.rr, 1)          : "--";
+      const lines = [];
+      lines.push(`⏱ <b>${stratLabel} — Trade Expired</b> — ${dir} ${sym}`);
+      lines.push("");
+      lines.push(`Setup timed out — no TP or SL was hit.`);
+      lines.push(`<b>📍 Entry:</b> ${entryStr}`);
+      lines.push(`<b>🛑 SL:</b> ${slStr}`);
+      lines.push(`<b>🎯 TP:</b> ${tpStr}`);
+      lines.push(`<b>R:R:</b> ${rrStr}`);
+      lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+      await sendTelegramMessage(lines.join("\n"));
+      addLog(`📤 Telegram: ${stratLabel} EXPIRED notification sent`);
+    } catch (err) {
+      addLog(`📤 Strategy expired Telegram error: ${err.message}`);
+    }
+    return;
+  }
+
+  /* ── WIN / LOSS ── */
   try {
-    const sym = getSymbolLabel(signal.symbol || getActiveSymbol() || "");
-    const activeSym = signal.symbol || getActiveSymbol() || "";
-    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const result = signal.result;
     const icon = result === "WIN" ? "✅" : "❌";
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
-    const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
-    const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
-    const rrStr = signal.rr != null ? "1:" + fmt(signal.rr, 1) : "--";
-
-    /* Strategy-specific emoji and label */
-    let stratEmoji = "📊";
-    let stratLabel = "Strategy";
-    if (signal.type === "liquidity_sweep") { stratEmoji = "🌊"; stratLabel = "Liquidity Sweep"; }
-    else if (signal.type === "stop_loss_hunt") { stratEmoji = "🎯"; stratLabel = "Stop Loss Hunt"; }
-    else if (signal.type === "failed_pin_bar") { stratEmoji = "📌"; stratLabel = "Failed Pin Bar"; }
-    else if (signal.type === "fib_scalp") { stratEmoji = "📐"; stratLabel = "Fib Golden Zone"; }
-    else if (signal.type === "grid_scalper_ma") {
-      stratEmoji = "🔲";
-      stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
-    }
-    else if (signal.type === "fvg_strat") { stratEmoji = "🎯"; stratLabel = "Fair Value Gap"; }
-    else if (signal.type === "mtf_top_down") { stratEmoji = "⏱"; stratLabel = "MTF Top-Down"; }
+    /* Derive exit price: explicit value takes priority; fall back to TP (WIN) or SL (LOSS). */
+    const rawExit = signal.exitPrice != null ? signal.exitPrice
+      : result === "WIN" ? signal.tp
+      : signal.sl;
+    const exitStr  = rawExit  != null ? fmtPrice(rawExit, activeSym)  : "--";
+    const slStr    = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
+    const tpStr    = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
+    const rrStr    = signal.rr != null ? "1:" + fmt(signal.rr, 1) : "--";
 
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
     lines.push("");
     lines.push(`<b>📍 Entry:</b> ${entryStr}`);
+    lines.push(`<b>🏁 Exit:</b> ${exitStr}`);
     lines.push(`<b>🛑 SL:</b> ${slStr}`);
     lines.push(`<b>🎯 TP:</b> ${tpStr}`);
     lines.push(`<b>R:R:</b> ${rrStr}`);
@@ -10431,6 +10492,10 @@ async function sendStrategyOutcomeTelegram(signal) {
     }
     if (signal.type === "fib_scalp" && signal.goldenLow != null) {
       lines.push(`<b>Golden Zone:</b> [${fmtPrice(signal.goldenLow, activeSym)} – ${fmtPrice(signal.goldenHigh, activeSym)}]`);
+    }
+    /* Partial TP info for PO3 and any strategy that sets partialTpHit (Bug #8) */
+    if (signal.partialTpHit) {
+      lines.push(`<b>🔔 Partial TP:</b> Hit at 1:1 (SL moved to breakeven)`);
     }
 
     /* Lot size / position sizing based on account amount */
@@ -10467,7 +10532,7 @@ async function sendStrategyOutcomeTelegram(signal) {
       : signal.type === "grid_scalper_ma" ? gridScalperMAHistory
       : signal.type === "ny_open_range" ? nyOpenRangeHistory
       : signal.type === "session_range" ? sessionRangeHistory
-      : signal.type === "po3" ? po3History
+      : signal.type === "power_of_3" ? po3History
       : signal.type === "fvg_strat" ? fvgStratHistory : null;
     for (const h of allStratHistories) {
       const isThis = h === thisHistory;
@@ -13730,6 +13795,7 @@ function monitorTradeOutcome(candle) {
       const inProfit = (trade.dir === "BULL" && exitPrice >= trade.entry) ||
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
+      pending.exitPrice = exitPrice;
       if (inProfit) signalWins++; else signalLosses++;
       addLog(`⏱ Scalp TIMEOUT (${SCALP_MAX_CANDLES} candles) — exit at ${fmt(exitPrice, 4)} → ${pending.result}`);
       monitoringTrade = false;
@@ -13751,6 +13817,7 @@ function monitorTradeOutcome(candle) {
     if (slHit && tpHit) {
       /* Both levels hit in same candle — closer level was hit first */
       pending.result = checkSL > trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.exitPrice = pending.result === "WIN" ? trade.tp : checkSL;
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
@@ -13758,11 +13825,13 @@ function monitorTradeOutcome(candle) {
       /* SL hit: only count as WIN if stop locked in genuine profit (strictly above entry). */
       if (checkSL > trade.entry) {
         pending.result = "WIN";
+        pending.exitPrice = checkSL;
         signalWins++;
         resolved = true;
         addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
+        pending.exitPrice = checkSL;
         signalLosses++;
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
@@ -13770,6 +13839,7 @@ function monitorTradeOutcome(candle) {
       }
     } else if (tpHit) {
       pending.result = "WIN";
+      pending.exitPrice = trade.tp;
       signalWins++;
       resolved = true;
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
@@ -13779,17 +13849,20 @@ function monitorTradeOutcome(candle) {
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
     if (slHit && tpHit) {
       pending.result = checkSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.exitPrice = pending.result === "WIN" ? trade.tp : checkSL;
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
       if (checkSL < trade.entry) {
         pending.result = "WIN";
+        pending.exitPrice = checkSL;
         signalWins++;
         resolved = true;
         addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
+        pending.exitPrice = checkSL;
         signalLosses++;
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
@@ -13797,6 +13870,7 @@ function monitorTradeOutcome(candle) {
       }
     } else if (tpHit) {
       pending.result = "WIN";
+      pending.exitPrice = trade.tp;
       signalWins++;
       resolved = true;
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);

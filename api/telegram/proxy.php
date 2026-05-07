@@ -87,6 +87,12 @@ if ($token === '' || !preg_match('/^\d+:[A-Za-z0-9_-]+$/', $token)) {
     jsonResponse(['ok' => false, 'description' => 'Invalid or missing bot token'], 400);
 }
 
+/* ── Enforce platform bot token when configured (prevents SSRF-style proxy abuse) ── */
+$platformToken = env('TELEGRAM_BOT_TOKEN');
+if ($platformToken !== '' && $token !== $platformToken) {
+    jsonResponse(['ok' => false, 'description' => 'Unauthorized bot token'], 403);
+}
+
 /* ── Build the Telegram API URL ── */
 $telegramUrl = "https://api.telegram.org/bot{$token}/{$action}";
 
