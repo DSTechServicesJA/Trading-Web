@@ -29,14 +29,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-/* ── Validate webhook secret ── */
+/* ── Validate webhook secret (mandatory — reject if not configured) ── */
 $webhookSecret = env('TELEGRAM_WEBHOOK_SECRET');
-if ($webhookSecret !== '') {
-    $incoming = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
-    if (!hash_equals($webhookSecret, $incoming)) {
-        http_response_code(403);
-        exit;
-    }
+if ($webhookSecret === '') {
+    error_log('Telegram webhook: TELEGRAM_WEBHOOK_SECRET is not configured — refusing request');
+    http_response_code(403);
+    exit;
+}
+$incoming = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
+if (!hash_equals($webhookSecret, $incoming)) {
+    http_response_code(403);
+    exit;
 }
 
 /* ── Parse update ── */
@@ -242,6 +245,11 @@ try {
                 "ℹ️ Your Telegram account is not linked to any IT Guru account."
             );
         } else {
+            /* Kick from the Telegram group before clearing the DB record so that
+               any subsequent expiry check (which looks up telegram_user_id) still
+               finds the user and removes them cleanly. */
+            telegramKickIfLinked($pdo, (int) $user['id']);
+
             $pdo->prepare(
                 'UPDATE users SET telegram_user_id = NULL, telegram_username = NULL, telegram_linked_at = NULL WHERE id = ?'
             )->execute([$user['id']]);
