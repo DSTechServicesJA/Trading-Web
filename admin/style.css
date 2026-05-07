@@ -347,6 +347,11 @@ html[data-theme="light"] body::before {
   text-align: center;
 }
 
+.stat-card-bot {
+  border-color: rgba(245,158,11,0.22);
+  background: linear-gradient(135deg, var(--bg-card), rgba(245,158,11,0.04));
+}
+
 .stat-label {
   font-size: 10px;
   font-weight: 700;
@@ -579,7 +584,13 @@ html[data-theme="light"] .filter-select {
   white-space: nowrap;
 }
 
-.strategies-cell { max-width: 220px; }
+.strategy-tag-bot {
+  background: rgba(245,158,11,0.12);
+  color: var(--warning-soft);
+  border-color: rgba(245,158,11,0.28);
+}
+
+.strategies-cell { max-width: 260px; }
 
 /* ---- Telegram column ---- */
 .tg-col { min-width: 160px; }
@@ -684,7 +695,7 @@ html[data-theme="light"] .filter-select {
 }
 
 .modal-card {
-  width: min(520px, 96vw);
+  width: min(580px, 96vw);
   max-height: 90vh;
   overflow-y: auto;
   background: var(--bg-surface);
@@ -766,6 +777,21 @@ html[data-theme="light"] .form-row select {
 
 .strategy-checks {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.strategy-check-group {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -786,11 +812,27 @@ html[data-theme="light"] .form-row select {
 
 .strategy-check-item:hover { background: var(--primary-glow); color: var(--primary-soft); border-color: rgba(99,102,241,0.2); }
 
+.strategy-check-bot {
+  background: rgba(245,158,11,0.07);
+  border-color: rgba(245,158,11,0.2);
+  color: var(--warning-soft);
+}
+
+.strategy-check-bot:hover {
+  background: rgba(245,158,11,0.16);
+  border-color: rgba(245,158,11,0.35);
+  color: var(--warning-soft);
+}
+
 .strategy-check-item input[type="checkbox"] {
   cursor: pointer;
   width: 14px;
   height: 14px;
   accent-color: var(--primary);
+}
+
+.strategy-check-bot input[type="checkbox"] {
+  accent-color: var(--warning);
 }
 
 .modal-actions {

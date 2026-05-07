@@ -22,6 +22,9 @@ let deletingUser    = null; /* { id, username } */
 let resetPwUser     = null; /* { id, username } */
 const userCache     = new Map(); /* id → user object from last load */
 
+/* Bot strategy keys — rendered/styled separately from indicator strategies */
+const BOT_STRATEGY_KEYS = new Set(['bot_hc_1hz75v', 'bot_normal']);
+
 /* ═══════════════════════════════════════════════
    Theme
    ═══════════════════════════════════════════════ */
@@ -190,18 +193,35 @@ function buildStrategyChecks(containerId, grantedKeys) {
   if (!container) return;
   container.innerHTML = "";
   const granted = new Set(grantedKeys);
-  for (const s of allStrategies) {
-    const label = document.createElement("label");
-    label.className = "strategy-check-item";
-    const cb = document.createElement("input");
-    cb.type     = "checkbox";
-    cb.value    = s.key;
-    cb.checked  = granted.has(s.key);
-    cb.dataset.stratKey = s.key;
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(s.label));
-    container.appendChild(label);
+
+  const botStrategies = allStrategies.filter(s => BOT_STRATEGY_KEYS.has(s.key));
+  const indStrategies = allStrategies.filter(s => !BOT_STRATEGY_KEYS.has(s.key));
+
+  function renderSection(sectionLabel, items, isBotSection) {
+    if (!items.length) return;
+    const heading = document.createElement("div");
+    heading.className = "strategy-section-label";
+    heading.textContent = sectionLabel;
+    container.appendChild(heading);
+    const group = document.createElement("div");
+    group.className = "strategy-check-group";
+    for (const s of items) {
+      const label = document.createElement("label");
+      label.className = "strategy-check-item" + (isBotSection ? " strategy-check-bot" : "");
+      const cb = document.createElement("input");
+      cb.type  = "checkbox";
+      cb.value = s.key;
+      cb.checked = granted.has(s.key);
+      cb.dataset.stratKey = s.key;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(s.label));
+      group.appendChild(label);
+    }
+    container.appendChild(group);
   }
+
+  renderSection("🤖 Bot Access", botStrategies, true);
+  renderSection("📊 Indicator Strategies", indStrategies, false);
 }
 
 function getCheckedStrategies(containerId) {
@@ -274,8 +294,9 @@ function renderTable(users) {
     else if (isExpiringSoon) tr.classList.add("row-expiring-soon");
 
     const strategies = (u.strategies || []).map(k => {
-      const label = allStrategies.find(s => s.key === k)?.label || k;
-      return `<span class="strategy-tag">${escHtml(label)}</span>`;
+      const label    = allStrategies.find(s => s.key === k)?.label || k;
+      const isBotKey = BOT_STRATEGY_KEYS.has(k);
+      return `<span class="strategy-tag${isBotKey ? ' strategy-tag-bot' : ''}">${escHtml(label)}</span>`;
     }).join("") || '<span style="color:var(--text-muted);font-size:11px;">none</span>';
 
     const expiryBadge = expiresMs
@@ -347,10 +368,12 @@ function renderTable(users) {
 /* ── Stats bar ── */
 function updateStats(total, stats) {
   el("statTotal").textContent      = total;
-  el("statActiveSubs").textContent = stats.active_subs   ?? "—";
-  el("statTrial").textContent      = stats.trial_subs    ?? "—";
-  el("statLocked").textContent     = stats.locked_count  ?? "—";
-  el("statExpiring").textContent   = stats.expiring_soon ?? "—";
+  el("statActiveSubs").textContent = stats.active_subs    ?? "—";
+  el("statTrial").textContent      = stats.trial_subs     ?? "—";
+  el("statLocked").textContent     = stats.locked_count   ?? "—";
+  el("statExpiring").textContent   = stats.expiring_soon  ?? "—";
+  const botEl = el("statBotAccess");
+  if (botEl) botEl.textContent     = stats.bot_access_count ?? "—";
   /* Telegram stats loaded separately */
 }
 
