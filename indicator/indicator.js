@@ -1944,7 +1944,7 @@ function initUI() {
 
   /* Feature 8: Scanner */
   UI.scannerToggle           = document.getElementById("scannerToggle");
-  UI.scannerSymbolsInput     = document.getElementById("scannerSymbolsInput");
+  UI.scannerSymbolPicker     = document.getElementById("scannerSymbolPicker");
 }
 
 /* ================= HELPERS ================= */
@@ -4293,7 +4293,13 @@ function restoreSettings() {
     if (UI.multiRLadderToggle)        UI.multiRLadderToggle.checked        = multiRLadderEnabled;
     if (UI.adaptiveConfluenceToggle)  UI.adaptiveConfluenceToggle.checked  = adaptiveConfluenceEnabled;
     if (UI.scannerToggle)             UI.scannerToggle.checked             = scannerEnabled;
-    if (UI.scannerSymbolsInput)       UI.scannerSymbolsInput.value         = scannerSymbols.join(", ");
+    if (UI.scannerSymbolPicker) {
+      const symSet = new Set(scannerSymbols);
+      UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = symSet.has(cb.dataset.symbol);
+      });
+      updateScannerSymbolCount();
+    }
     if (UI.backtestSpeedInput)        UI.backtestSpeedInput.value          = backtestSpeedMs;
 
     /* Restore auto-trade history */
@@ -14656,6 +14662,11 @@ function getNewsPauseEvent() {
 }
 
 /* ---- Feature 8: Multi-Symbol Scanner ---- */
+function updateScannerSymbolCount() {
+  const el = document.getElementById("scannerSymbolCount");
+  if (el) el.textContent = `${scannerSymbols.length} symbol${scannerSymbols.length !== 1 ? "s" : ""} selected`;
+}
+
 function updateScannerUI() {
   if (!scannerEnabled) return;
   const grid = document.getElementById("scannerGrid");
@@ -18472,13 +18483,47 @@ document.addEventListener("DOMContentLoaded", () => {
       updateScannerUI();
     });
   }
-  if (UI.scannerSymbolsInput) {
-    UI.scannerSymbolsInput.value = scannerSymbols.join(", ");
-    UI.scannerSymbolsInput.addEventListener("change", () => {
-      scannerSymbols = UI.scannerSymbolsInput.value.split(",").map(s => s.trim()).filter(Boolean);
-      saveSettings();
-      updateScannerUI();
+  if (UI.scannerSymbolPicker) {
+    UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener("change", () => {
+        const sym = cb.dataset.symbol;
+        if (cb.checked) {
+          if (!scannerSymbols.includes(sym)) scannerSymbols.push(sym);
+        } else {
+          scannerSymbols = scannerSymbols.filter(s => s !== sym);
+        }
+        updateScannerSymbolCount();
+        saveSettings();
+        updateScannerUI();
+      });
     });
+
+    const selectAllScanner = document.getElementById("selectAllScannerSymbols");
+    const deselectAllScanner = document.getElementById("deselectAllScannerSymbols");
+    if (selectAllScanner) {
+      selectAllScanner.addEventListener("click", () => {
+        UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          if (!cb.checked) {
+            cb.checked = true;
+            if (!scannerSymbols.includes(cb.dataset.symbol)) scannerSymbols.push(cb.dataset.symbol);
+          }
+        });
+        updateScannerSymbolCount();
+        saveSettings();
+        updateScannerUI();
+      });
+    }
+    if (deselectAllScanner) {
+      deselectAllScanner.addEventListener("click", () => {
+        UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.checked = false;
+        });
+        scannerSymbols = [];
+        updateScannerSymbolCount();
+        saveSettings();
+        updateScannerUI();
+      });
+    }
   }
 
   /* Fetch news calendar on load if enabled */

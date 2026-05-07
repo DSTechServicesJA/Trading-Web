@@ -1096,8 +1096,115 @@
             <div class="collapsible-body">
               <label class="toggle-row"><input type="checkbox" id="scannerToggle" /> Enable Scanner Dashboard</label>
               <p class="hint">Shows a live grid of symbols and their current indicator phases (WAITING / BREAKOUT / RETEST / TRADE).</p>
-              <label for="scannerSymbolsInput" class="spaced-label">Watchlist (comma-separated symbols)</label>
-              <input type="text" id="scannerSymbolsInput" placeholder="R_100, R_50, frxEURUSD" />
+              <p class="hint">Select symbols to include in the scanner watchlist.</p>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <button id="selectAllScannerSymbols" class="btn btn-xs">Select All</button>
+                <button id="deselectAllScannerSymbols" class="btn btn-xs">Deselect All</button>
+              </div>
+              <div id="scannerSymbolPicker" class="multi-symbol-picker">
+                <div class="ms-group-label">Volatility (1s)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ10V" /> Vol 10 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ15V" /> Vol 15 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ25V" /> Vol 25 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ30V" /> Vol 30 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ50V" /> Vol 50 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ90V" /> Vol 90 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ150V" /> Vol 150 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ200V" /> Vol 200 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ250V" /> Vol 250 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ300V" /> Vol 300 (1s)</label>
+                <div class="ms-group-label">Volatility (Std)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_10" /> Vol 10 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_25" /> Vol 25 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_50" /> Vol 50 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <div class="ms-group-label">Boom Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM300N" /> Boom 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM600" /> Boom 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM900" /> Boom 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM1000" /> Boom 1000</label>
+                <div class="ms-group-label">Crash Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH300N" /> Crash 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH500" /> Crash 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH600" /> Crash 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH900" /> Crash 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH1000" /> Crash 1000</label>
+                <div class="ms-group-label">Jump Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD10" /> Jump 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD25" /> Jump 25</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD50" /> Jump 50</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD100" /> Jump 100</label>
+                <div class="ms-group-label">Step Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG2" /> Step 200</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG3" /> Step 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG4" /> Step 400</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG5" /> Step 500</label>
+                <div class="ms-group-label">Daily Reset</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBULL" /> Bull Market</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBEAR" /> Bear Market</label>
+                <div class="ms-group-label">DEX Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600DN" /> DEX 600 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600UP" /> DEX 600 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900DN" /> DEX 900 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900UP" /> DEX 900 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500DN" /> DEX 1500 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500UP" /> DEX 1500 Up</label>
+                <div class="ms-group-label">Drift Switch</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI10" /> Drift Switch 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI20" /> Drift Switch 20</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI30" /> Drift Switch 30</label>
+                <div class="ms-group-label">Forex Majors</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDJPY" /> USD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCHF" /> USD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDUSD" /> AUD/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCAD" /> USD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDUSD" /> NZD/USD</label>
+                <div class="ms-group-label">Forex Crosses</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURGBP" /> EUR/GBP</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURAUD" /> EUR/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCAD" /> EUR/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCHF" /> EUR/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURNZD" /> EUR/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPAUD" /> GBP/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCAD" /> GBP/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCHF" /> GBP/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPNZD" /> GBP/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDJPY" /> AUD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDNZD" /> AUD/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCAD" /> AUD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCHF" /> AUD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDJPY" /> NZD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCAD" /> NZD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCHF" /> NZD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADJPY" /> CAD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADCHF" /> CAD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCHFJPY" /> CHF/JPY</label>
+                <div class="ms-group-label">Forex Exotics</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDMXN" /> USD/MXN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDNOK" /> USD/NOK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSEK" /> USD/SEK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSGD" /> USD/SGD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDZAR" /> USD/ZAR</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDPLN" /> USD/PLN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDTRY" /> USD/TRY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDHKD" /> USD/HKD</label>
+                <div class="ms-group-label">Commodities</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold (XAU)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAGUSD" /> Silver (XAG)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPTUSD" /> Platinum (XPT)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPDUSD" /> Palladium (XPD)</label>
+              </div>
+              <p id="scannerSymbolCount" class="hint" style="margin-top:6px;">0 symbols selected</p>
             </div>
           </section>
 
