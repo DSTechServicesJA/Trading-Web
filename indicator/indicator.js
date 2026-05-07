@@ -187,10 +187,16 @@ const STOCH_OVERBOUGHT = 80;
 const FIB_EXTENSIONS = [1.272, 1.414, 1.618, 2.0, 2.618];
 
 /* Feature 2: Orderblock detection (Strategy 12) */
-const ORDERBLOCK_MAX_HISTORY = 30;
-const ORDERBLOCK_COOLDOWN    = 8;
-const ORDERBLOCK_MAX_SL_ATR  = 1.5;
-const ORDERBLOCK_LOOKBACK    = 40;
+const ORDERBLOCK_MAX_HISTORY        = 30;
+const ORDERBLOCK_COOLDOWN           = 8;
+const ORDERBLOCK_MAX_SL_ATR         = 1.5;
+const ORDERBLOCK_LOOKBACK           = 40;
+const ORDERBLOCK_IMPULSE_LOOKBACK   = 15;   /* max candles to scan back for impulse start */
+const ORDERBLOCK_IMPULSE_DOMINANCE  = 0.7;  /* fraction of impulse candles that must agree on direction */
+const ORDERBLOCK_STRONG_CANDLE_RATIO = 0.5; /* fraction of impulse candles that must be "strong" */
+const ORDERBLOCK_MIN_IMPULSE_ATR    = 1.5;  /* impulse total range must be ≥ this × ATR */
+const ORDERBLOCK_ZONE_TOLERANCE_ATR = 0.3;  /* ATR multiple for OB zone retest tolerance */
+const ORDERBLOCK_SL_BUFFER_ATR      = 0.3;  /* ATR buffer beyond OB zone for SL placement */
 
 /* Feature 1: Backtesting engine */
 const BACKTEST_DEFAULT_SPEED_MS = 200;
@@ -4536,15 +4542,20 @@ function renderSignalBanner() {
       `<span class="signal-card-time">${ts}</span>` +
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
 
-    /* Feature 12: Signal note field — show existing note or inline input */
+    /* Feature 12: Signal note field — build programmatically (no innerHTML with user data) */
     const noteId = `sig_${s.time}_${sym}`;
     const existingNote = getSignalNote(noteId);
     const noteEl = document.createElement("div");
     noteEl.className = "signal-note-row";
-    noteEl.innerHTML = `<input type="text" class="signal-note-input" placeholder="Add note…" value="${existingNote.replace(/"/g, '&quot;')}" data-note-id="${noteId}" title="Trade journal note for this signal" />`;
-    noteEl.querySelector("input").addEventListener("change", (e) => {
-      saveSignalNote(noteId, e.target.value);
-    });
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.className = "signal-note-input";
+    noteInput.placeholder = "Add note…";
+    noteInput.value = existingNote;
+    noteInput.dataset.noteId = noteId;
+    noteInput.title = "Trade journal note for this signal";
+    noteInput.addEventListener("change", (e) => { saveSignalNote(noteId, e.target.value); });
+    noteEl.appendChild(noteInput);
 
     card.title = isConfirmed
       ? `${isBull ? "BUY" : "SELL"} ${sym} — ${patternStr} confirmed\nAwaiting trade build…`
@@ -14165,7 +14176,7 @@ function detectOrderblockStrategy(idx) {
   const c = candles[idx];
   if (!c) return;
 
-  for (let impStart = idx - 1; impStart >= Math.max(1, idx - 15); impStart--) {
+  for (let impStart = idx - 1; impStart >= Math.max(1, idx - ORDERBLOCK_IMPULSE_LOOKBACK); impStart--) {
     const impulseLen = idx - impStart + 1;
     if (impulseLen < 3) continue;
     let bullCount = 0, bearCount = 0, strongCount = 0, totalMove = 0;
@@ -14177,11 +14188,11 @@ function detectOrderblockStrategy(idx) {
       if (rng > 0 && body / rng >= 0.50) strongCount++;
       totalMove += rng;
     }
-    const dir = bullCount >= Math.ceil(impulseLen * 0.7) ? "BULL"
-              : bearCount >= Math.ceil(impulseLen * 0.7) ? "BEAR" : null;
+    const dir = bullCount >= Math.ceil(impulseLen * ORDERBLOCK_IMPULSE_DOMINANCE)  ? "BULL"
+              : bearCount >= Math.ceil(impulseLen * ORDERBLOCK_IMPULSE_DOMINANCE)  ? "BEAR" : null;
     if (!dir) continue;
-    if (strongCount < Math.ceil(impulseLen * 0.5)) continue;
-    if (totalMove < 1.5 * atrValue) continue;
+    if (strongCount < Math.ceil(impulseLen * ORDERBLOCK_STRONG_CANDLE_RATIO)) continue;
+    if (totalMove < ORDERBLOCK_MIN_IMPULSE_ATR * atrValue) continue;
 
     /* Last opposing candle before impulse start = orderblock */
     let obIdx = impStart - 1;
@@ -14196,7 +14207,7 @@ function detectOrderblockStrategy(idx) {
     if (!obCandle) continue;
 
     /* Current price must be retesting the OB zone */
-    const zoneTol = atrValue * 0.3;
+    const zoneTol = atrValue * ORDERBLOCK_ZONE_TOLERANCE_ATR;
     const inZone = c.close >= obCandle.low - zoneTol && c.close <= obCandle.high + zoneTol;
     if (!inZone) continue;
 
@@ -14204,8 +14215,8 @@ function detectOrderblockStrategy(idx) {
       if (computeConfluenceScore(dir, c.close, idx) < minConfluenceValue) continue;
     }
 
-    const sl = dir === "BULL" ? obCandle.low  - atrValue * 0.3
-                              : obCandle.high + atrValue * 0.3;
+    const sl = dir === "BULL" ? obCandle.low  - atrValue * ORDERBLOCK_SL_BUFFER_ATR
+                              : obCandle.high + atrValue * ORDERBLOCK_SL_BUFFER_ATR;
     const risk = Math.abs(c.close - sl);
     if (risk <= 0 || risk > ORDERBLOCK_MAX_SL_ATR * atrValue) continue;
     const rr = 2.0;
@@ -14264,12 +14275,12 @@ function detectBosChoch() {
   bosChochMarkers = [];
   const lookback = Math.min(candles.length, 100);
   const start = candles.length - lookback;
-  const N = 3;
+  const swingDetectionPeriod = 3; /* candles on each side required to confirm a swing point */
   const swingHighs = [], swingLows = [];
-  for (let i = start + N; i < candles.length - N; i++) {
+  for (let i = start + swingDetectionPeriod; i < candles.length - swingDetectionPeriod; i++) {
     const c = candles[i];
     let isH = true, isL = true;
-    for (let k = 1; k <= N; k++) {
+    for (let k = 1; k <= swingDetectionPeriod; k++) {
       if (candles[i-k].high >= c.high || candles[i+k].high >= c.high) isH = false;
       if (candles[i-k].low  <= c.low  || candles[i+k].low  <= c.low)  isL = false;
     }
@@ -14634,6 +14645,7 @@ async function fetchNewsCalendar() {
     drawChart();
   } catch(e) {
     console.info("News calendar fetch skipped:", e.message);
+    addLog("📅 News calendar: fetch failed (optional feature — check network access)");
   }
 }
 function getNewsPauseEvent() {
@@ -14648,16 +14660,30 @@ function updateScannerUI() {
   if (!scannerEnabled) return;
   const grid = document.getElementById("scannerGrid");
   if (!grid) return;
-  const rows = scannerSymbols.map(sym => {
+  grid.innerHTML = "";
+  if (scannerSymbols.length === 0) {
+    const hint = document.createElement("span");
+    hint.className = "hint";
+    hint.textContent = "No symbols configured";
+    grid.appendChild(hint);
+    return;
+  }
+  for (const sym of scannerSymbols) {
     const panel = multiPanels.get(sym);
     const ph    = panel ? (panel.state && panel.state.phase ? panel.state.phase : "WAITING") : "WAITING";
     const badgeClass = { TRADE: "enabled", BREAKOUT: "warning", RETEST: "warning", CONFIRM: "enabled" }[ph] || "disabled";
-    return `<div class="scanner-cell ${badgeClass.toLowerCase()}-cell">
-      <span class="scanner-symbol">${sym}</span>
-      <span class="scanner-phase status-badge ${badgeClass}">${ph}</span>
-    </div>`;
-  });
-  grid.innerHTML = rows.join("") || '<span class="hint">No symbols configured</span>';
+    const cell = document.createElement("div");
+    cell.className = `scanner-cell ${badgeClass.toLowerCase()}-cell`;
+    const symSpan = document.createElement("span");
+    symSpan.className = "scanner-symbol";
+    symSpan.textContent = sym;
+    const phSpan = document.createElement("span");
+    phSpan.className = `scanner-phase status-badge ${badgeClass}`;
+    phSpan.textContent = ph;
+    cell.appendChild(symSpan);
+    cell.appendChild(phSpan);
+    grid.appendChild(cell);
+  }
 }
 
 function drawChart() {
