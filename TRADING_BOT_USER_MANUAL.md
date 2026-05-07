@@ -1,19 +1,20 @@
-# 📘 TRADING BOT — COMPLETE CLIENT USER MANUAL
+# IT GURU — BREAKOUT RETEST INDICATOR
+## Complete Client User Manual
 
-> **IMPORTANT DISCLAIMER:** This manual and the trading bot described herein do **not** constitute financial advice. All trade setups communicated are potential opportunities based on technical analysis only. Trading financial markets involves significant risk. You are solely responsible for your own trading decisions. Past signal performance does not guarantee future results.
+> **IMPORTANT DISCLAIMER:** This manual and the IT Guru indicator described herein do **not** constitute financial advice. All trade setups are potential opportunities based on technical analysis only. Trading financial markets involves significant risk of loss. You are solely responsible for your own trading decisions, position sizing, and account management. Past performance does not guarantee future results.
 
 ---
 
 ## TABLE OF CONTENTS
 
 1. [Introduction — The PIN (Beginner Level)](#1-introduction--the-pin-beginner-level)
-2. [How the Bot Works (Beginner → Intermediate)](#2-how-the-bot-works-beginner--intermediate)
-3. [How Clients Use the Bot (Core Usage)](#3-how-clients-use-the-bot-core-usage)
+2. [How the Indicator Works (Beginner to Intermediate)](#2-how-the-indicator-works-beginner-to-intermediate)
+3. [How to Use IT Guru (Core Usage)](#3-how-to-use-it-guru-core-usage)
 4. [Signal Format Explained](#4-signal-format-explained)
-5. [Practical Use Cases — Real Trader Scenarios](#5-practical-use-cases--real-trader-scenarios)
+5. [Strategies Explained — All 12 Modules](#5-strategies-explained--all-12-modules)
 6. [Advanced Usage — The ANCHOR (Power Users)](#6-advanced-usage--the-anchor-power-users)
-7. [Risk Management & Responsibility](#7-risk-management--responsibility)
-8. [Limitations of the Bot](#8-limitations-of-the-bot)
+7. [Risk Management and Responsibility](#7-risk-management-and-responsibility)
+8. [Limitations of the Indicator](#8-limitations-of-the-indicator)
 9. [Quick Start Summary](#9-quick-start-summary)
 10. [Frequently Asked Questions (FAQ)](#10-frequently-asked-questions-faq)
 
@@ -21,632 +22,947 @@
 
 ## 1. INTRODUCTION — THE PIN (BEGINNER LEVEL)
 
-### 🤔 What Is a Trading Bot?
+### What Is IT Guru?
 
-Think of a trading bot as a highly focused assistant that watches the markets for you — 24 hours a day, without getting tired, distracted, or emotional.
+**IT Guru** is a professional-grade, browser-based trading indicator built specifically for the **Deriv platform**. It connects live to Deriv's price feeds and continuously watches charts for high-quality trading opportunities across dozens of markets — 24 hours a day, 7 days a week.
 
-A simple real-life comparison: imagine you hired a security guard whose only job is to watch a camera feed and call you the moment something important happens. The guard does not make decisions for you — they simply alert you. That is exactly what this trading bot does. It monitors price charts continuously and notifies you when it detects a potential trading opportunity.
+Think of IT Guru as your personal market analyst who never sleeps. While you go about your day, it is scanning every candlestick, measuring every price move, and alerting you the moment a quality setup forms. You remain in full control of your trades — IT Guru gives you the information; you make the decisions.
 
----
-
-### 🤖 What Does THIS Bot Do?
-
-This bot:
-
-- **Monitors multiple financial markets** around the clock
-- **Analyzes price movement, trends, and key technical levels** using proven methods
-- **Identifies potential trade setups** based on market structure and indicator signals
-- **Sends those setups to you** with all the information you need to make an informed decision
-- **Does NOT place trades for you** (unless you have specifically activated an automated execution feature)
+It is accessed through your web browser at: **trading.dsitservicesja.com/indicator/**
 
 ---
 
-### 📊 Markets the Bot Analyzes
+### What Does IT Guru Do?
 
-This bot is built to analyse a wide range of markets:
+IT Guru:
 
-| Market Category | Examples |
+- **Connects live to Deriv** via a secure WebSocket and receives real-time price data
+- **Monitors candles in real time** across every timeframe from 1 minute to 1 day
+- **Identifies 6-phase breakout-retest setups** — the core signal engine
+- **Runs up to 12 additional strategies simultaneously** on the same chart
+- **Fires a Live Scalp Scanner** for rapid, high-confluence short-term entries
+- **Alerts you via Telegram** with a full chart screenshot, entry, stop loss, and take profit
+- **Optionally places trades automatically** on your Deriv account when a signal fires
+- **Tracks your win/loss record** and displays live performance statistics
+- **Can be backtested** using historical candle data
+
+---
+
+### Markets IT Guru Analyses
+
+IT Guru supports over 90 symbols across the following categories:
+
+| Category | Available Markets |
 |---|---|
-| **Forex Pairs** | EUR/USD, GBP/USD, USD/JPY, AUD/USD, and more |
-| **Volatility Indices** | Volatility 10, Volatility 25, Volatility 50, Volatility 75, Volatility 100 |
-| **Boom Indices** | Boom 300, Boom 500, Boom 1000 |
-| **Crash Indices** | Crash 300, Crash 500, Crash 1000 |
-| **Jump Indices** | Jump 10, Jump 25, Jump 50, Jump 75, Jump 100 |
-| **Step Indices** | Step Index |
+| **Volatility (1s)** | Vol 10, 15, 25, 30, 50, 75, 90, 100, 150, 200, 250, 300 (1s) |
+| **Volatility (Standard)** | Vol 10, 25, 50, 75, 100 Index |
+| **Boom Indices** | Boom 300, 500, 600, 900, 1000 |
+| **Crash Indices** | Crash 300, 500, 600, 900, 1000 |
+| **Jump Indices** | Jump 10, 25, 50, 75, 100 |
+| **Step Indices** | Step Index, Step 200, 300, 400, 500 |
+| **Daily Reset** | Bull Market Index, Bear Market Index |
+| **DEX Indices** | DEX 600/900/1500 Up and Down |
+| **Drift Switch** | Drift Switch 10, 20, 30 |
+| **Forex Majors** | EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD |
+| **Forex Crosses** | EUR/GBP, EUR/JPY, GBP/JPY, and 14 more pairs |
+| **Forex Exotics** | USD/MXN, USD/ZAR, USD/TRY, and 5 more |
+| **Commodities** | Gold (XAU/USD), Silver (XAG/USD), Platinum, Palladium |
 
-> Volatility, Boom, Crash, Jump, and Step indices are synthetic instruments available on the **Deriv** platform.
-
----
-
-### 💡 What Are "Potential Trades"?
-
-When the bot says it has identified a *potential trade setup*, it means:
-
-- The market conditions **look favourable** for a trade in a specific direction
-- The setup is based on **technical analysis** — not prediction or certainty
-- There is **always a possibility the trade does not work out**
-
-Think of it like a weather forecast: "70% chance of rain." It is not guaranteed — it is a probability based on the best available information at that time.
+> All Deriv synthetic indices are available 24/7, including weekends. Forex markets follow standard market hours.
 
 ---
 
-### 👤 Who Is This Bot For?
+### Timeframes Available
 
-This bot is designed to add value for a wide variety of traders:
+IT Guru can run on any of these timeframes: **1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h, 4h, 8h, 1D**
 
-- **Beginners** who want guidance on what to look for before entering a trade
-- **Scalpers** who need fast, structured setups on short timeframes
-- **Swing traders** who want higher-timeframe setups without spending hours charting
-- **Busy professionals** who cannot monitor the markets all day
-- **Experienced traders** who want a second opinion or additional confluence before entering
+The best timeframe depends on your trading style and the market you are trading (explained further in Sections 3 and 5).
 
 ---
 
-### ❌ What the Bot Does NOT Do
+### What Are "Potential Trade Setups"?
 
-It is equally important to understand what the bot will never do:
+When IT Guru identifies a setup, it means:
 
-- ❌ **Does not place trades automatically** (unless you have specifically enabled auto-execution and accepted that risk)
-- ❌ **Does not guarantee profits** — no system, human, or machine can do that
-- ❌ **Does not replace risk management** — your stop loss, lot size, and discipline are still your responsibility
-- ❌ **Does not give financial advice** — it provides technical signals only
-- ❌ **Does not take responsibility for losses** — you are the trader and final decision-maker
+- A defined sequence of price conditions has been satisfied
+- The technical evidence suggests the market **may** move in a specific direction
+- The risk-to-reward on the setup meets a minimum standard
+- There is **always a possibility the trade does not work** — no setup is certain
 
----
-
-## 2. HOW THE BOT WORKS (BEGINNER → INTERMEDIATE)
-
-### 📡 How the Bot Monitors the Markets
-
-The bot connects directly to live price feeds and processes candle data (price bars) in real time. For every market it monitors, it is constantly asking:
-
-> *"Is there a high-quality setup forming right now?"*
-
-It analyses each chart across multiple timeframes simultaneously to build a complete picture of what the market is doing.
+Think of it like a weather forecast: "70% chance of rain." The meteorologist uses the best available data to give you a probability — not a guarantee.
 
 ---
 
-### 🔍 Types of Analysis Used
+### Who Is IT Guru For?
 
-The bot uses a combination of well-established technical analysis techniques:
-
-#### 1. Market Structure
-Market structure refers to the overall "shape" of price movement. The bot identifies:
-- **Higher highs and higher lows** → Uptrend (bullish bias)
-- **Lower highs and lower lows** → Downtrend (bearish bias)
-- **Equal highs and lows** → Ranging/sideways market
-
-#### 2. Trend Direction
-The bot determines whether a market is trending up, trending down, or moving sideways. It uses multiple timeframes so that short-term signals align with the bigger picture — this is called **top-down analysis**.
-
-#### 3. Support & Resistance
-These are key price levels where the market has historically reacted:
-- **Support** — a price floor where buyers tend to step in
-- **Resistance** — a price ceiling where sellers tend to push back
-
-The bot identifies these levels and looks for trade setups at or near them.
-
-#### 4. Volatility Behaviour (Deriv Indices)
-Synthetic indices like Volatility 75 and Boom/Crash behave differently from Forex:
-- **Volatility Indices** move within statistical bounds — the bot reads the rhythm of these swings
-- **Boom Indices** occasionally spike upward sharply (spikes) — the bot accounts for these patterns
-- **Crash Indices** occasionally spike downward — the bot adapts its logic accordingly
-- **Jump Indices** have sudden price jumps — the bot identifies post-jump opportunities
-- **Step Index** moves in fixed-size steps — the bot reads the directional pattern
-
-#### 5. Indicator Confirmation
-The bot uses widely respected technical indicators to confirm what it sees in market structure:
-
-| Indicator | What It Does (Simple Explanation) |
+| Trader Type | How IT Guru Helps |
 |---|---|
-| **RSI (Relative Strength Index)** | Measures whether a market is overbought (too high, may fall) or oversold (too low, may rise). A reading above 70 signals caution on buys; below 30 signals caution on sells. |
-| **EMA (Exponential Moving Average)** | A smoothed average of price over time. Price above EMA = bullish; below EMA = bearish. The bot uses EMAs to filter trade direction. |
-| **Price Action** | Reading the candlestick patterns themselves — what the shape of the candle tells us about buyer/seller strength. |
+| **Complete Beginner** | Provides structured, explained setups as a learning guide |
+| **Scalper** | Live Scalp Scanner fires rapid entries on 1m-5m charts |
+| **Intraday Trader** | Core breakout-retest signals on 15m-1h charts |
+| **Swing Trader** | Higher-timeframe signals (4h, Daily) on Forex pairs |
+| **Busy Professional** | Telegram alerts mean you never have to watch the screen |
+| **Advanced Trader** | 12 strategies and deep filter controls for precision execution |
+| **Auto-Trader** | Optional auto-execution on your Deriv account |
 
 ---
 
-### 📤 How Trade Signals Are Generated
+### What IT Guru Does NOT Do
 
-A signal is only generated when **multiple conditions align at the same time**. The bot requires:
-
-1. ✅ Clear market structure (trend or reversal setup)
-2. ✅ Price at or near a key level (support, resistance, or zone)
-3. ✅ Indicator confirmation (RSI, EMA, pattern)
-4. ✅ Acceptable risk-to-reward ratio (typically 1:2 or better)
-
-When all conditions are met, the bot sends an alert — this is your signal.
+- Does not guarantee profits — no indicator, system, or analyst can do that
+- Does not replace your risk management — stop loss and lot size remain your responsibility
+- Does not constitute financial advice — setups are technical signals only
+- Does not place trades automatically unless you enable Auto-Trade and accept the associated risk
+- Is not responsible for losses — you are the trader and final decision-maker
 
 ---
 
-### 🔄 Buy vs Sell Signals
+### Subscription Plans
 
-| Signal Type | Meaning |
+IT Guru is a subscription service. Plans are available as follows:
+
+| Plan | Price | Duration | Access |
+|---|---|---|---|
+| **Trial** | Free | Limited | Basic signals, demo trading only |
+| **Weekly** | $9.99 | 7 days | All 12 strategies, live and demo trading, Telegram alerts |
+| **Monthly** | $29.99 | 30 days | All 12 strategies, live and demo trading, Telegram alerts, priority support |
+
+> Contact your administrator to activate a plan. Subscription access is enforced at login.
+
+---
+
+## 2. HOW THE INDICATOR WORKS (BEGINNER TO INTERMEDIATE)
+
+### The Core Engine: 6-Phase Breakout-Retest Cycle
+
+The heart of IT Guru is a 6-phase process that plays out on every chart, on every candle. Understanding these six phases is the most important thing you can learn about this indicator.
+
+---
+
+#### Phase 1 — RANGE
+
+The indicator watches the first group of candles and measures the **opening range** — the high and low price established during the initial period (configurable, default 15 minutes).
+
+Think of this as the "base camp" — a zone where price has been consolidating before making its next move. The range high and range low are drawn on the chart as reference lines.
+
+> *Example: On V75 (1m), IT Guru collects the first 15 one-minute candles and marks the high and low of that period.*
+
+---
+
+#### Phase 2 — BREAKOUT
+
+The indicator waits for a candle to **close** above the range high (bullish breakout) or below the range low (bearish breakout). A wick through the level that closes back inside is **not** counted — the candle body must close outside.
+
+This is important: IT Guru requires a **confirmed close** outside the range, not just a temporary spike. This filters out false moves.
+
+> *Example: A strong bullish candle closes above the range high. Breakout confirmed, direction set to BUY.*
+
+---
+
+#### Phase 3 — RETEST
+
+After a breakout, price almost always pulls back to **retest** the level it just broke through. The breakout level becomes new support (after a bullish break) or new resistance (after a bearish break).
+
+IT Guru monitors for this retest using ATR-based tolerance so that minor wicks above or below the level do not count as a failed retest.
+
+> *Example: After the bullish breakout, price pulls back down toward the range high. IT Guru detects that price has touched the retest zone.*
+
+---
+
+#### Phase 4 — INDECISION
+
+At the retest zone, the indicator looks for a **candlestick pattern that shows the market pausing** — buyers and sellers fighting for control. IT Guru detects the following indecision patterns:
+
+| Pattern | Description |
 |---|---|
-| **BUY (Long)** | The bot sees conditions favouring price moving UP. You would open a buy/long trade. |
-| **SELL (Short)** | The bot sees conditions favouring price moving DOWN. You would open a sell/short trade. |
+| **Doji** | Open and close nearly identical — neither side winning |
+| **Spinning Top** | Small body with wicks on both sides |
+| **Pin Bar / Hammer / Shooting Star** | Long tail in one direction — rejection of a price level |
+| **Inside Bar** | Current candle fully inside the previous candle's range |
+| **Dragonfly Doji** | Long lower wick, open/close near high — bullish rejection |
+| **Gravestone Doji** | Long upper wick, open/close near low — bearish rejection |
+
+> *Example: A pin bar with a long lower tail forms at the retest zone — sellers tried to push lower but buyers rejected it.*
 
 ---
 
-### 📈 Trend Trades vs Reversal Trades
+#### Phase 5 — CONFIRMATION
 
-| Trade Type | Description | Risk Level |
+The indecision candle alone is not enough. IT Guru requires a **confirmation candle** that shows momentum is genuinely entering in the direction of the trade. Confirmation patterns include:
+
+| Pattern | What It Means |
+|---|---|
+| **Bullish Engulfing** | A green candle that completely engulfs the previous red candle — strong buying momentum |
+| **Bearish Engulfing** | A red candle that completely engulfs the previous green candle — strong selling momentum |
+| **Morning Star** | A 3-candle reversal pattern signalling the end of a downtrend |
+| **Evening Star** | A 3-candle reversal pattern signalling the end of an uptrend |
+| **Inside Bar Breakout** | The inside bar's range is broken in the trade direction |
+| **Piercing Line / Dark Cloud Cover** | Mid-body penetration patterns showing momentum shift |
+| **Tweezers Tops / Bottoms** | Two candles with matching highs or lows — double rejection |
+
+---
+
+#### Phase 6 — TRADE
+
+When confirmation fires, IT Guru calculates and displays the full trade setup:
+
+- **Entry price** — the close of the confirmation candle
+- **Stop Loss** — anchored to the lowest low (bullish) or highest high (bearish) of the retest zone candles, with an ATR buffer for breathing room
+- **Take Profit** — calculated from your chosen Risk:Reward ratio
+- **Confluence Score** — an overall quality rating for the setup (0-16 points)
+- **Position Size** — calculated automatically if you enter your account balance and risk percentage
+
+The signal is then sent to Telegram and displayed on the live chart.
+
+---
+
+### Confluence Score (0-16)
+
+Every breakout-retest signal is scored from **0 to 16** based on how many quality conditions are met. The higher the score, the stronger the setup. Factors that contribute to the score include:
+
+- EMA 8/21 alignment with trade direction
+- Higher-timeframe EMA 100 alignment
+- Strong breakout candle (body conviction)
+- Pin bar present at retest
+- Support/Resistance confluence
+- RSI at ideal retest level
+- Volume spike on breakout
+- Session timing
+- Fibonacci level at retest
+- MACD momentum alignment
+- Bollinger Bands squeeze
+- ADX trend strength
+- Stochastic momentum
+
+> A confluence score of **8 or higher** is generally considered a strong, high-quality setup.
+
+---
+
+### Live Ticker Banners
+
+The top of the IT Guru screen shows three live scrolling banners:
+
+- **LIVE SIGNALS** — breakout-retest signals
+- **LIVE SCALPS** — scalp scanner alerts
+- **STRATEGIES** — alerts from the 12 strategy modules
+
+---
+
+### Technical Indicators Running in the Background
+
+IT Guru continuously computes the following indicators on every candle:
+
+| Indicator | Purpose |
+|---|---|
+| **EMA 8 and 21** | Short-term trend direction and crossover filter |
+| **EMA 100** | Higher-timeframe trend proxy |
+| **EMA 200** | Long-term structural trend reference |
+| **ATR (14)** | Measures volatility — used for SL placement, tolerance, and trailing stops |
+| **RSI (14)** | Confirms pullback depth at retest; oversold/overbought conditions |
+| **MACD (12/26/9)** | Momentum filter — is momentum aligning with the trade? |
+| **Bollinger Bands (20/2 std dev)** | Detects squeeze — low volatility before a big move |
+| **ADX (14)** | Measures trend strength (25+ = trending; below 20 = ranging) |
+| **Stochastic (14/3/3)** | Secondary momentum filter — K/D crossovers |
+| **VWAP** | Volume-weighted average price — institutional bias level |
+| **Fibonacci Levels** | 23.6%, 38.2%, 50%, 61.8%, 78.6% retracement levels at retest |
+
+---
+
+### The 6-Phase in Action — Full Example
+
+> **Market:** Volatility 75 (1s) | **Timeframe:** 1 Minute
+>
+> **Phase 1 (RANGE):** IT Guru collects 15 candles and marks the range: high at 12,450, low at 12,430.
+>
+> **Phase 2 (BREAKOUT):** A strong green candle closes at 12,458 — above the 12,450 range high. Breakout direction: BUY.
+>
+> **Phase 3 (RETEST):** Price pulls back. IT Guru detects that the current candle touched 12,451 — inside the ATR tolerance zone of the 12,450 level.
+>
+> **Phase 4 (INDECISION):** A pin bar forms with a long lower wick at 12,449. Tail is 2.5x the body — confirmed pin bar.
+>
+> **Phase 5 (CONFIRM):** The next candle is a strong bullish engulfing candle closing at 12,455.
+>
+> **Phase 6 (TRADE):** Entry: 12,455. SL: 12,441 (swing low + ATR buffer). TP: 12,483 (2:1 RR). Confluence Score: 11/16. Telegram alert sent with chart screenshot.
+
+---
+
+## 3. HOW TO USE IT GURU (CORE USAGE)
+
+### The Interface at a Glance
+
+When you open IT Guru in your browser, you will see:
+
+**Top bar (always visible):**
+- Brand name + connection status badge
+- Account type (Demo or Real)
+- Current phase (RANGE, BREAKOUT, RETEST, INDECISION, CONFIRM, TRADE)
+- Breakout direction
+- Live price
+- Candle countdown timer (turns red when under 10 seconds)
+- Candles processed count
+- Session uptime
+- Win rate %
+- Connect / Disconnect / Reset buttons
+- Tool buttons: Export CSV, Export PDF, Theme, Sound, Notifications, Stream Mode
+
+**Left Panel (tabbed):**
+- **Settings** — API credentials, symbol, timeframe, strategies, filters, auto-trade
+- **State** — live indicator values (EMA status, HTF trend, ATR, RSI, MACD, etc.)
+- **Stats** — win/loss count, win rate, signal history
+
+**Centre — Live Chart:** Candlestick chart with EMAs, range lines, signal markers, and overlays drawn in real time.
+
+---
+
+### Step 1 — Connect to Deriv
+
+1. In the **API** section of the Settings tab, enter your **Deriv App ID** (default is provided)
+2. Paste your **Deriv API Token** (create one at app.deriv.com under API Token)
+3. Click the **Connect** button in the top bar (or press **Alt+C**)
+4. The status badge changes from DISCONNECTED to CONNECTED and the account type badge shows Demo or Real
+
+> **Tip:** Keep your API token secure. IT Guru stores it encrypted in your browser's local storage.
+
+---
+
+### Step 2 — Choose Your Market and Timeframe
+
+In the **Market** section:
+1. Select your **Symbol** from the dropdown (e.g. Volatility 75 (1s), EUR/USD, Boom 1000)
+2. Select your **Timeframe** (e.g. 1m for scalping, 15m for intraday, 1h for swing)
+3. IT Guru automatically applies **recommended settings** for the selected symbol
+
+> **Lock features:** Tick the Lock checkbox next to Timeframe or R:R to prevent them from being overridden when you switch symbols.
+
+---
+
+### Step 3 — Configure Your Risk:Reward
+
+In the **Risk : Reward** section:
+- Set your desired ratio (e.g. Risk = 1, Reward = 2 for a 1:2 RR)
+- The TP level on the chart and in Telegram alerts is calculated from this ratio
+
+> A **minimum 1:2 RR** is recommended. Enable the **Min R:R Gate** filter to automatically reject setups that do not meet your threshold.
+
+---
+
+### Step 4 — Enter Your Account Size (Optional but Recommended)
+
+In the **Account Size** section:
+- Enter your **account balance** in USD
+- Enter your **risk per trade %** (recommended: 1%)
+- IT Guru will automatically calculate and display:
+  - Dollar risk per trade
+  - Dollar reward potential
+  - Recommended position size (lots)
+
+---
+
+### Step 5 — Enable Strategies
+
+In the **Strategies** section, toggle on the strategies you want to run. Each strategy scans independently for its own specific setup. All active strategy signals appear in the Strategy Alerts panel and are sent to Telegram.
+
+*(See Section 5 for a full explanation of all 12 strategies.)*
+
+---
+
+### Step 6 — Press Connect and Let IT Guru Run
+
+Once connected, IT Guru:
+- Starts collecting candles
+- Processes each new candle through the 6-phase engine
+- Scans all enabled strategies on every candle close
+- Displays the live phase, direction, and state in real time
+
+You do not need to do anything else. Watch the chart, wait for signals, and act when you are ready.
+
+---
+
+### Receiving Signals on Telegram
+
+IT Guru sends Telegram alerts automatically when a signal fires. Each alert includes:
+
+- A **1920x1080 screenshot** of the live chart with all indicators and levels drawn
+- Signal details: symbol, direction, entry, SL, TP, RR, confluence score
+- The strategy or phase that triggered the alert
+
+To receive Telegram alerts, link your Telegram account via the Telegram section in Settings or contact your administrator.
+
+---
+
+### Best Times to Trade Different Markets
+
+| Market | Best Timeframe | Best Hours (UTC) |
 |---|---|---|
-| **Trend Trade** | Trading in the direction of the existing trend (e.g. buying in an uptrend). Lower risk — you are going with the flow. | Moderate |
-| **Reversal Trade** | Trading against the current trend when reversal signals appear (e.g. selling after a long uptrend). Higher reward potential but more risk. | Higher |
+| **Forex Majors (EUR/USD, GBP/USD)** | 15m, 1h, 4h | 07:00-16:00 (London + NY) |
+| **USD/JPY, AUD/USD** | 15m, 1h | 00:00-09:00 (Asian + London) |
+| **Gold (XAU/USD)** | 15m, 1h | 07:00-17:00 (London + NY) |
+| **Volatility Indices (standard)** | 5m-1h | 24/7 |
+| **Volatility (1s) indices** | 1m-5m | 24/7 |
+| **Boom and Crash** | 1m-15m | 24/7 |
+| **Jump and Step Indices** | 1m-5m | 24/7 |
 
 ---
 
-### 📝 Simple Example
+### Keyboard Shortcuts
 
-> **Volatility 75 Index (V75)** is in a clear uptrend.
-> Price pulls back to a key support zone.
-> RSI drops to the 40–45 area (not oversold but cooling off).
-> A bullish pin bar candle forms at that support zone.
-> EMA confirms bullish direction.
-> **Result → The bot detects this confluence and sends a potential BUY setup.**
-
----
-
-## 3. HOW CLIENTS USE THE BOT (CORE USAGE)
-
-### 📬 Where You Receive Signals
-
-Signals are delivered directly to you through one or more of the following channels (depending on your subscription):
-
-- **Telegram** (most common — instant notifications on your phone)
-- **WhatsApp**
-- **Discord**
-- **Web Dashboard** (accessible from any browser)
-
----
-
-### 🪜 Step-by-Step: From Signal to Trade
-
-**Step 1 — Receive the Signal**
-A notification arrives on your device through your chosen channel. It contains all the information you need to evaluate and place the trade.
-
-**Step 2 — Review the Signal**
-Read through the signal details carefully:
-- What market is it?
-- What direction (buy or sell)?
-- Where is the entry area?
-- Where is the stop loss?
-- Where are the take profit targets?
-- What is the risk-to-reward ratio?
-
-**Step 3 — Make Your Decision**
-This is the most important step — **you decide** whether to take the trade. The bot presents the setup; your responsibility is to evaluate whether it fits your account size, risk tolerance, and personal strategy.
-
-**Step 4 — Place the Trade Manually**
-Open your trading platform (e.g. Deriv, MetaTrader 4/5, cTrader), enter the trade based on the signal parameters, and set your stop loss and take profit levels before confirming.
-
-**Step 5 — Monitor and Manage**
-Once in the trade, follow your risk management rules. Do not move your stop loss to a worse position. Let the trade develop. If a new signal or update is sent, evaluate it calmly.
-
----
-
-### ⏱️ How Often Are Signals Sent?
-
-Signal frequency depends on market conditions — quality always comes before quantity:
-
-- **High-volatility sessions** (London Open, New York Open): expect more signals
-- **Low-activity periods** (Asian session for Forex, weekends): fewer signals
-- **Deriv Synthetic Indices**: signals are available 24/7, including weekends
-
-> You can expect anywhere from **2 to 8 quality signals per day** across all markets, though this varies.
-
----
-
-### 🕐 Best Times to Trade Different Markets
-
-| Market | Best Trading Hours (UTC) |
+| Shortcut | Action |
 |---|---|
-| **EUR/USD, GBP/USD** | 07:00 – 16:00 (London + NY overlap) |
-| **USD/JPY, AUD/USD** | 00:00 – 08:00 (Asian/London) |
-| **US Dollar pairs generally** | 13:00 – 17:00 (New York session) |
-| **Volatility Indices** | 24/7 — anytime |
-| **Boom & Crash Indices** | 24/7 — anytime |
-| **Jump & Step Indices** | 24/7 — anytime |
+| **Alt+C** | Connect |
+| **Alt+D** | Disconnect |
+| **Alt+R** | Reset Session |
+| **Alt+T** | Toggle Theme (Light/Dark) |
+| **Alt+E** | Export signals to CSV |
+| **Alt+P** | Export signals to PDF with charts |
+| **Alt+N** | Toggle notifications |
+| **Alt+S** | Toggle Stream Mode (hides sensitive info during screen recording) |
 
 ---
 
 ## 4. SIGNAL FORMAT EXPLAINED
 
-### 📋 Sample Signal
+### Sample Telegram Signal
 
 ```
-═══════════════════════════════
-   📊 POTENTIAL TRADE SETUP
-═══════════════════════════════
-Symbol    : GBP/USD
-Direction : BUY 🟢
-Timeframe : 15M
-Entry Area: 1.2680 – 1.2695
-Stop Loss : 1.2650
-Take Profit 1 (TP1): 1.2730
-Take Profit 2 (TP2): 1.2775
-Risk:Reward: 1:2.5 (TP2)
-─────────────────────────────
-📌 NOTES: Bullish structure on H1.
-Price retesting key support.
-RSI showing recovery from 38.
-EMA aligned bullishly.
-─────────────────────────────
-⚠️ This is NOT financial advice.
-Manage your risk responsibly.
-═══════════════════════════════
+=======================================
+   IT GURU - POTENTIAL TRADE SETUP
+=======================================
+Symbol     : Volatility 75 (1s)
+Direction  : BUY
+Timeframe  : 1m
+---------------------------------------
+Entry      : 12,455.20
+Stop Loss  : 12,441.00
+Take Profit: 12,483.40
+Risk:Reward: 1:2.0
+---------------------------------------
+Confluence : 11 / 16
+Phase      : TRADE
+Confirm    : Bullish Engulfing
+---------------------------------------
+NOTE: Bullish breakout above 15-min
+range. Pin bar retest at 12,450 level.
+EMA 8/21 aligned bullish. RSI at 42.
+Fib 0.618 confluence at retest zone.
+---------------------------------------
+NOT financial advice. Manage your risk.
+=======================================
 ```
 
----
-
-### 🔎 Breaking Down Each Field
-
-#### 📌 Symbol
-The financial instrument being analysed.
-*Example: GBP/USD = British Pound vs US Dollar*
-
-#### 📌 Direction
-- **BUY 🟢** = the bot's analysis suggests price may move upward
-- **SELL 🔴** = the bot's analysis suggests price may move downward
-
-#### 📌 Timeframe
-The chart timeframe the signal was identified on.
-- M1, M5, M15 = short-term (scalping)
-- H1, H4 = medium-term (intraday/swing)
-- D1 = daily (longer-term swing)
-
-#### 📌 Entry Area
-The price zone where the trade is considered valid. This is a **range**, not a single exact price — because markets don't wait for perfect precision.
-
-*Example: Entry Area 1.2680 – 1.2695 means if price is trading anywhere in that band, the entry is still valid.*
-
-#### 📌 Stop Loss (SL)
-The price level where you close the trade if it goes against you — to protect your account. **Always set your stop loss before entering a trade.** This is non-negotiable.
-
-#### 📌 Take Profit (TP)
-Your target price where you close the trade for a profit. Many signals include two levels:
-- **TP1** — a closer, more conservative target
-- **TP2** — a further, more ambitious target
-
-A common approach: close half your position at TP1 and let the rest run to TP2.
-
-#### 📌 Risk:Reward (RR)
-This tells you how much potential reward you stand to gain relative to the risk you are taking.
-
-*Example: RR of 1:2.5 means for every $1 you risk, you stand to make $2.50 if the trade hits TP2.*
-
-A ratio of **1:2 or higher** is generally considered a solid trade.
-
-#### 📌 Notes
-Brief context from the bot's analysis — explains *why* the setup was identified. This helps you understand the reasoning behind the signal.
+*(A full 1920x1080 chart screenshot is attached to every signal)*
 
 ---
 
-## 5. PRACTICAL USE CASES — REAL TRADER SCENARIOS
+### Breaking Down Each Field
 
-### 🟢 Scenario 1: The Complete Beginner
+#### Symbol
+The exact market being traded.
+*Example: "Volatility 75 (1s)" means the 1-second Volatility 75 Index on Deriv.*
 
-**Who:** Someone new to trading, still learning the basics.
+#### Direction
+- **BUY** — setup favours price moving up. Open a BUY/LONG contract on Deriv.
+- **SELL** — setup favours price moving down. Open a SELL/SHORT contract on Deriv.
 
-**How they use the bot:**
-- Uses signals as a learning tool — reads the notes section to understand what to look for
-- Places small demo or micro-lot trades to practice execution
-- Over time, begins recognising the same patterns the bot identifies
+#### Timeframe
+The chart timeframe the setup was detected on.
+- 1m-5m = scalp / very short-term
+- 15m-1h = intraday
+- 4h-1D = swing trade
 
-**Benefit:** Accelerated learning — the bot shows you what a quality setup looks like in real market conditions.
+#### Entry
+The price at the close of the confirmation candle — this is where IT Guru suggests entering the trade.
 
----
+#### Stop Loss (SL)
+The price level that defines your risk. If price reaches this level, the trade is considered invalid. IT Guru places the SL at the structural swing low/high of the retest zone, plus an ATR buffer.
 
-### 🔵 Scenario 2: The Intermediate Trader
+> **Always set your stop loss before opening the trade. This is non-negotiable.**
 
-**Who:** Has basic knowledge, can read charts, but lacks time to monitor all markets.
+#### Take Profit (TP)
+Your target exit price. Calculated automatically from your R:R setting.
+- At 1:2 RR: risk $1 to make $2
+- At 1:3 RR: risk $1 to make $3
 
-**How they use the bot:**
-- Receives signals, quickly cross-references on their own chart to confirm
-- Places trades based on signals that align with their personal assessment
-- Frees up hours of daily screen time
+#### Risk:Reward (RR)
+How much potential reward relative to the risk taken. IT Guru rejects setups that do not meet your minimum RR threshold (configurable via the Min R:R Gate filter).
 
-**Benefit:** Saves time without sacrificing analytical quality.
+#### Confluence Score
+A quality rating from **0 to 16**. Higher means more technical factors confirm the trade. Use this as a priority guide — prefer higher-scored setups when multiple signals are firing.
 
----
+#### Confirm Pattern
+The specific candlestick pattern that triggered Phase 5 (Confirmation). Examples: Bullish Engulfing, Pin Bar, Morning Star, Inside Bar Breakout.
 
-### 🟣 Scenario 3: The Advanced Trader
-
-**Who:** Experienced trader with a defined strategy and strong market knowledge.
-
-**How they use the bot:**
-- Uses the bot as a **confluence tool** — if the bot signals align with their independent analysis, it strengthens conviction
-- Filters signals by market or timeframe to match their strategy
-- May use the bot to monitor markets they don't normally trade
-
-**Benefit:** Adds a layer of confirmation and access to additional markets.
-
----
-
-### ⚡ Scenario 4: The Scalper
-
-**Who:** Prefers very short-term trades (seconds to a few minutes) on fast-moving markets.
-
-**How they use the bot:**
-- Focuses on M1 and M5 signals on Volatility Indices (particularly V75 and V25)
-- Acts quickly on signals — scalping requires fast execution
-- Uses tight stop losses and small, frequent TP targets
-
-**Best markets:** Volatility 75, Volatility 25, Step Index
+#### Note
+A plain-language summary of why the setup was identified — which indicators agree, what structure is in place, and any notable conditions.
 
 ---
 
-### 🌊 Scenario 5: The Swing Trader
+## 5. STRATEGIES EXPLAINED — ALL 12 MODULES
 
-**Who:** Prefers holding trades for hours to days, targeting larger price moves.
-
-**How they use the bot:**
-- Focuses on H1, H4, and D1 signals on Forex pairs
-- Is not in a rush — waits for premium entries
-- Uses wider stop losses and larger TP targets
-
-**Best markets:** EUR/USD, GBP/USD, USD/JPY, major Forex pairs
+IT Guru runs up to 12 independent strategies simultaneously alongside the core breakout-retest engine. Each one looks for a different type of market condition and fires its own alerts. Here is what each strategy does, explained simply.
 
 ---
 
-### 💥 Scenario 6: Volatility & Boom/Crash Specialist
+### Strategy 1: Liquidity Sweep
 
-**Volatility Indices:**
-- These markets move within predictable statistical ranges. The bot reads the rhythm of expansions and contractions.
-- Best approached as short-to-medium term trades, respecting ATR (Average True Range) for sizing stop losses.
+**What it looks for:** A quick price sweep below a key support level (or above resistance) that immediately reverses — indicating that smart money grabbed stop losses and is now pushing in the opposite direction.
 
-**Boom & Crash Indices:**
-- These indices have periodic spike candles. Trading against a spike (e.g. selling on Crash after a spike down) is a common strategy.
-- The bot identifies the high-probability recovery zones after spikes occur.
-- Always use wide enough stop losses on these instruments to survive small counter-moves.
+**Trade setup:** Entry on the reversal candle after the sweep, with a fixed **2:1 Risk:Reward**.
 
-**Jump Indices:**
-- Sudden price jumps happen at random. The bot looks for setups in the aftermath of jumps when price re-establishes a new trend.
+**Best for:** Experienced traders who understand stop-loss hunting concepts. Works well on Volatility indices.
+
+---
+
+### Strategy 2: Stop Loss Hunt
+
+**What it looks for:** Price approaching a well-defined S/R level that has been touched 3 or more times, making a sharp spike through it, then quickly reversing. Institutions sweep retail stops before moving the other way.
+
+**Trade setup:** Entry after the reversal confirmation candle. SL above/below the spike extreme.
+
+**Best for:** Traders who understand key support/resistance levels.
+
+---
+
+### Strategy 3: Failed Pin Bar
+
+**What it looks for:** A sequence of 3 or more consecutive strong directional candles (a fear or greed push), followed by a pin bar that appears to signal reversal — but actually fails and resumes the original direction.
+
+**Trade setup:** Entry in the direction of the original move when the pin bar's reversal breaks down.
+
+**Best for:** Momentum traders who trade with the trend.
+
+---
+
+### Strategy 4: Fib Golden Zone Scalp
+
+**What it looks for:** A clear micro-trend on 1-minute charts, a break of structure, then price pulling back into the **0.5-0.618 Fibonacci Golden Zone** — the most statistically powerful retracement area.
+
+**Trade setup:** Entry at the Fibonacci zone with the target at the previous swing high (uptrend) or swing low (downtrend). Pure price action — no additional indicators.
+
+**Best for:** Scalpers on 1m charts. Particularly effective on Volatility indices.
+
+---
+
+### Strategy 5: Power of 3 (ICT PO3)
+
+**What it looks for:** The ICT "Power of 3" concept — three phases that repeat every hour:
+1. **Accumulation** — price consolidates near the 1-hour candle open
+2. **Manipulation** — a sweep below (bullish day) or above (bearish day) the 1H open to trap retail traders
+3. **Expansion** — a strong displacement candle leaving a Fair Value Gap (FVG), followed by a retrace into the FVG for entry
+
+**Trade setup:** Entry into the Fair Value Gap after the displacement candle. SL below the manipulation low or above the manipulation high. Partial TP at 1R, SL moves to breakeven, let the rest run.
+
+**Best for:** Intermediate-to-advanced traders familiar with ICT concepts. Best on 15m-1h charts.
+
+---
+
+### Strategy 6: NY Open Range
+
+**What it looks for:** The 9:30-9:35 AM EST New York open range — the first 5 minutes of the New York session. The strategy monitors for a breakout of this range and a retest, then enters in the breakout direction.
+
+**Trade setup:** Retest entry with SL inside the range. Tracks wins/losses to show NY session performance.
+
+**Best for:** Forex traders who trade during the New York session. Best on EUR/USD, GBP/USD, Gold.
+
+---
+
+### Strategy 7: Session Ranges (London Sweep)
+
+**What it looks for:** IT Guru marks the Asian session range (00:00-09:00 UTC). When the London session opens and price **sweeps** the Asian range high or low with a wick but closes **back inside** — this is the London Sweep, a reliable reversal signal.
+
+**Trade setup:** Entry on the closing candle that sweeps but closes back inside the Asian range. SL beyond the sweep extreme.
+
+**Best for:** Forex traders during the London session. Works especially well on tight Asian ranges.
+
+---
+
+### Live Scalp Scanner
+
+**What it looks for:** A rapid confluence check on every candle, scoring 7 technical conditions simultaneously. When 3 or more conditions align, a scalp alert fires immediately — no waiting for multiple phases.
+
+**Signals appear** in the LIVE SCALPS ticker banner at the top of the screen.
+
+**Best for:** Scalpers who want the fastest possible entries. Best on 1m charts and Volatility (1s) indices.
+
+---
+
+### Strategy 8: Grid Scalper MA
+
+**What it looks for:** Two modes:
+- **Price vs MA mode:** BUY when price crosses above a moving average; SELL when it crosses below
+- **BOS mode:** BUY when price breaks above a confirmed swing high; SELL below a swing low
+
+**Best for:** Traders who prefer moving average-based systems or simple break-of-structure trades.
+
+---
+
+### Strategy 9: Fair Value Gap (FVG)
+
+**What it looks for:**
+1. A big push — 3 or more consecutive strong directional candles
+2. A Fair Value Gap within that push (a gap between the high of candle 1 and the low of candle 3)
+3. Price retesting the origin/demand zone before the push started
+4. A Fibonacci discount (price below 50% retracement for buys, above for sells)
+5. A confirmation engulfing candle at the zone
+
+**Trade setup:** Entry at the confirmation candle. SL below/above the demand/supply zone. TP at recent swing.
+
+**Best for:** Intermediate traders who understand supply/demand zones. Strong on trending markets.
+
+---
+
+### Strategy 11: MTF Top-Down Analysis
+
+**What it looks for:** IT Guru synthesises higher timeframe candles from your current chart (16x multiplier for "4H" bias, 4x for "1H" setup). It then:
+1. Determines the 4H bias (bullish/bearish structure)
+2. Finds a 1H consolidation and breakout aligned with that bias
+3. Looks for a retest and confirmation on the current timeframe
+
+**Trade setup:** Entry on the confirmation candle. Minimum 2:1 RR. SL at wick extreme plus ATR buffer.
+
+**Best for:** Advanced traders who want true multi-timeframe top-down alignment without switching charts.
+
+---
+
+### Strategy 12: Orderblock Detection
+
+**What it looks for:** An orderblock — the last bearish candle before a strong bullish move, or the last bullish candle before a strong bearish move. These are zones where institutional orders were placed. When price returns to retest these zones, high-probability entries form.
+
+**Trade setup:** Entry when price retests the orderblock zone with a confirmation pattern.
+
+**Best for:** Advanced traders who understand institutional order flow and supply/demand.
+
+---
+
+### Tesla 3-6-9 Scaling Model
+
+This optional profit management overlay alerts you at three profit milestones:
+
+| Level | R Multiple | Action |
+|---|---|---|
+| **T1** | 3R | Take first partial profit. SL moves to breakeven. |
+| **T2** | 6R | Take second partial profit. Continue running. |
+| **T3** | 9R | Final target or let runner trail. |
+
+Two plans available:
+- **Conservative (50/30/20):** Take 50% at T1, 30% at T2, 20% at T3
+- **Aggressive (25/35/20+trail):** Smaller T1 exit, larger T2 exit, trail the final portion
+
+The chart shows amber T1/T2/T3 horizontal lines so you can visually see your targets.
 
 ---
 
 ## 6. ADVANCED USAGE — THE ANCHOR (POWER USERS)
 
-### 🧭 Understanding Market Bias
+### Reading Market Bias from the State Panel
 
-Market bias is the overall directional lean of a market. Before entering any trade, the power user asks:
+Open the **State** tab in the left panel. This shows you the live values of every indicator in real time:
 
-> *"What is the higher timeframe saying?"*
-
-**How to use the bot for bias:**
-- Check the signal notes for references to H4 or D1 structure
-- If the bot is sending BUY signals consistently on a market, the higher-timeframe bias is likely bullish
-- Only trade in the direction of the bias until structure clearly shifts
-
----
-
-### 🔎 Filtering Signals
-
-Not every signal is worth taking. Advanced users filter by:
-
-| Filter | Approach |
+| State Field | What to Look For |
 |---|---|
-| **Timeframe** | Only take H1 and above signals for swing trades; M15 and below for scalps |
-| **Market** | Stick to 2–3 markets you understand well |
-| **Session** | Only take Forex signals during the London/NY sessions for best liquidity |
-| **RR Ratio** | Ignore signals with RR below your personal minimum (e.g. never below 1:2) |
-| **Confluence** | Only trade when the signal aligns with your own chart reading |
+| **EMA Filter Status** | BULL or BEAR — EMA 8 vs 21 crossover direction |
+| **HTF Trend** | BULL or BEAR — EMA 100 direction (higher-timeframe bias) |
+| **ATR** | Current volatility level — larger ATR means wider SL needed |
+| **Breakout Strength** | Candle body vs ATR — how convincing was the breakout |
+| **RSI** | Current RSI value — ideal retest zone is 35-45 (BULL) or 55-65 (BEAR) |
+| **MACD** | Above zero = bullish momentum; below = bearish |
+| **ADX** | 25 or above = trending market; below 20 = ranging |
+| **Stochastic** | K/D lines — crossover from oversold or overbought |
+| **Volatility Regime** | TRENDING or RANGING — ADX-based market condition |
+| **Signal Strength** | Visual gauge showing current confluence score |
+
+**Power User Rule:** Only take trades where EMA Filter, HTF Trend, and your own chart reading all agree on direction.
 
 ---
 
-### 🔗 Combining Bot Signals With Your Own Strategy
+### Mastering the Strategy Filter Toggles
 
-The bot works exceptionally well as a **trigger** within a broader strategy:
+The **Strategy Filters** section gives you 15+ individual toggles to tune the indicator's precision:
 
-1. **Establish your own bias** using weekly and daily charts
-2. **Wait for the bot** to signal a setup in the direction of your bias
-3. **Enter only when** both your analysis and the bot agree
-4. **Manage the trade** according to your strategy rules
+| Filter | Recommended Setting | Why |
+|---|---|---|
+| **Auto-Reset After Trade** | ON | Automatically scans for the next setup |
+| **EMA 8/21 Trend Filter** | ON | Rejects counter-trend breakouts |
+| **HTF Trend Filter (EMA 100)** | ON | Keeps you aligned with the bigger picture |
+| **ATR-Based Tolerance** | ON | More accurate retest detection on volatile markets |
+| **Trailing Stop** | ON for swings | Locks in profit as the trade runs |
+| **Partial TP (1:1)** | ON for safety | Moves SL to breakeven at 1:1, de-risks the trade |
+| **Tesla 3-6-9 Scaling** | Optional | For runners — maximises profit on big moves |
+| **False Breakout Filter** | ON | Invalidates breakouts that close back inside range within 3 candles |
+| **Min R:R Gate** | ON (set to 2.0) | Automatically rejects low-quality setups |
+| **RSI Filter** | ON | Ensures price has pulled back enough to have room to move |
+| **Volume Spike Filter** | ON | Only accepts breakouts with a strong body candle |
+| **Session Filter** | Optional (Forex only) | Trade Forex only during active sessions |
+| **Fibonacci Retest** | ON | Adds confluence when retest aligns with fib level |
+| **MACD Filter** | ON for strong trends | Ensures momentum agrees with the trade |
+| **ADX Filter** | ON for scalps | Filters out ranging markets |
 
-This combination — your analysis + bot confirmation — is where the highest-quality setups are found.
+> **Lock Filters:** Once you have your filters set exactly how you want them, tick **Lock Filters** to prevent the auto-apply feature from overriding them when you switch symbols.
 
 ---
 
-### 📐 Adjusting Position Sizing
+### Using Multi-Symbol Analysis
 
-Advanced users do not use the same lot size on every trade. Key principles:
+IT Guru supports **simultaneous analysis of up to 90 symbols**. To scan multiple markets at once:
 
-- **Risk a fixed percentage of your account per trade** (typically 0.5%–2%)
-- **Calculate lot size based on the stop loss distance** — a wider SL means a smaller lot size to keep risk constant
-- **Never increase lot size to recover losses** — this is called revenge trading and almost always leads to larger losses
+1. Open the **Multi-Symbol Analysis** section
+2. Tick the symbols you want to monitor
+3. IT Guru opens background connections to each selected symbol
+4. Signals from any symbol appear in the LIVE SIGNALS ticker banner and trigger Telegram alerts
+5. Click any signal in the banner to switch the main chart to that symbol
 
-**Position Size Formula (simplified):**
+> **Power User Tip:** Select 5-10 of your most-traded markets instead of all 90. Too many simultaneous connections can slow down your browser.
+
+---
+
+### Position Sizing — Calculated Automatically
+
+Advanced users never guess lot sizes. With IT Guru:
+
+1. Enter your **account balance** in the Account Size section
+2. Set your **risk per trade %** (start with 1%)
+3. IT Guru calculates exact **position size** (lots) based on your stop loss distance
+
+The formula used:
 ```
-Lot Size = (Account Balance × Risk %) ÷ (Stop Loss in pips × Pip Value)
+Dollar Risk = Account Balance x Risk %
+Position Size (lots) = Dollar Risk / (SL distance in price x contract size)
 ```
 
-Use a position size calculator (many free ones online) to do this quickly.
+This means every trade risks exactly the same percentage of your account, regardless of how wide the stop loss is.
 
 ---
 
-### 🎯 Using the Bot for Confirmation Only
+### Using the Confluence Score to Prioritise Signals
 
-Some advanced traders prefer to:
-- Find their own setups independently
-- Only enter if the bot also identifies the same setup
-- Use this as a **double-confirmation filter** to reduce low-quality trades
+When multiple signals fire across different markets or strategies, use the confluence score to prioritise:
 
-This is one of the most disciplined and effective approaches available to experienced traders.
-
----
-
-### 💡 Advanced Interpretation Examples
-
-**Example 1 — Bias Confirmation:**
-> The bot sends three consecutive BUY signals on EUR/USD over 12 hours. Your own daily chart shows price is above the 200 EMA and has just broken a key resistance level. You treat all subsequent BUY signals with higher confidence and SELL signals with more caution.
-
-**Example 2 — Signal Filtering:**
-> A SELL signal arrives on GBP/USD but the higher timeframe trend is clearly bullish. An advanced user may skip this signal because it goes against the dominant trend.
-
-**Example 3 — Position Scaling:**
-> You enter at TP1 with a half position. When TP1 is hit, you move your stop loss to breakeven on the remaining position and let it ride toward TP2 — capturing extra profit with zero risk on the remaining portion.
+| Score | Quality | Action |
+|---|---|---|
+| 12-16 | Excellent | High priority — consider taking |
+| 8-11 | Good | Solid setup — use with normal risk |
+| 4-7 | Fair | Lower quality — trade smaller or skip |
+| 0-3 | Weak | Consider skipping unless strategy-specific |
 
 ---
 
-## 7. RISK MANAGEMENT & RESPONSIBILITY
+### Auto-Trade — How It Works
 
-> ⚠️ **This section is mandatory reading for all users.**
+Auto-Trade places **multiplier contracts** on your Deriv account automatically when a signal fires. To use it:
 
-### 📉 Trading Risk — What You Need to Know
+1. Enter your **Deriv API Token** with trading permissions enabled
+2. In the **Auto-Trade** section, toggle on the signal source(s) you want automated:
+   - **Breakout-Retest Trades** — core phase-6 signals
+   - **Live Scalp Trades** — scalp scanner signals
+   - **Strategy Trades** — individual strategy signals (12 sub-toggles)
+3. Set your **Base Stake** (starting trade size, minimum $0.37)
+4. Set a **Max Stake** cap (leave blank = 4x base)
+5. Set **Multiplier** (contract leverage — default 100)
+6. Optionally set a **Session TP** (stop auto-trading after a set dollar profit) and **Session SL** (stop after a set dollar loss)
 
-Trading financial markets is one of the most rewarding — and one of the most risky — activities a person can undertake. The potential to grow capital is real, but so is the potential to lose it. There is no version of trading that eliminates risk entirely.
+**Compounding:** Stake automatically increases after 2 or more consecutive wins and resets to base on a loss.
 
-This bot is a tool. Even the best tools in the world require skilled, disciplined hands to produce great results.
+**Safety cut:** Auto-trading halts after 3 consecutive losses to protect your account.
 
----
-
-### ❓ Why Do Losses Happen?
-
-Losses happen even with excellent analysis because:
-
-- Markets are driven by millions of participants globally — no one controls the outcome
-- News events, central bank decisions, and geopolitical events can override technical signals
-- Synthetic indices have engineered randomness built in
-- Even a 70% win rate means 3 out of every 10 trades are losses
-
-**Losses are part of the process.** The goal is not to win every trade. The goal is to ensure that your wins are larger than your losses over time.
+> CAUTION: Auto-Trade uses real money when connected with a live Deriv account. Fully understand the risks before enabling. Start on a demo account first.
 
 ---
 
-### 🛡️ The Pillars of Risk Management
+### Backtesting Your Settings
+
+IT Guru includes a **backtesting engine** that replays historical candle data through your current settings:
+
+1. Ensure you have candles loaded (connect and wait for history to load)
+2. Open the Backtest section in Settings
+3. Set the replay speed
+4. Press Start — the indicator replays each candle as if it were live
+5. Review how many signals fired, how many were wins/losses, and what the confluence scores were
+
+> Use backtesting to validate new settings before running them on a live account.
+
+---
+
+### Advanced Signal Interpretation Examples
+
+**Example 1 — High-Score Priority:**
+> Two signals fire simultaneously — V75 (1s) BUY with confluence score 14, EUR/USD SELL with score 6. Focus on the V75 signal — it has far stronger technical alignment.
+
+**Example 2 — Conflicting Filters:**
+> A BUY signal fires on GBP/USD but the HTF trend (EMA 100) is bearish and ADX shows 17 (ranging market). Two key filters disagree. Skip this trade and wait for better alignment.
+
+**Example 3 — Tesla Scaling in Practice:**
+> You enter a BUY on Boom 1000 at $12,000 with SL at $11,985 (15-point risk). T1 = 3R = $12,045. When price reaches $12,045, take 50% of your position off and move SL to breakeven ($12,000). T2 = 6R = $12,090, take another 30%. Let the final 20% run to T3 = 9R = $12,135 or trail it.
+
+---
+
+## 7. RISK MANAGEMENT AND RESPONSIBILITY
+
+> This section is mandatory reading for all users, regardless of experience level.
+
+### Trading Risk — The Reality
+
+Trading financial markets is one of the most rewarding and most risky activities a person can undertake. The potential to grow capital is real — but so is the potential to lose it all. There is no version of trading that eliminates risk. IT Guru reduces guesswork through analysis, but it cannot remove risk from the equation.
+
+Even the best trading systems in the world have losing periods. What determines long-term success is not winning every trade — it is managing risk so that losses are small and wins are larger.
+
+---
+
+### Why Trades Lose Even With Good Signals
+
+- Markets are influenced by millions of participants — no analysis can account for all of them
+- Major economic news events can override any technical setup instantly
+- Synthetic indices have engineered statistical randomness built into their price generation
+- Even a 70% win rate means 3 out of every 10 trades are losses — that is normal
+
+A losing trade does not mean the indicator failed. It means you experienced the natural probability distribution of the market. What matters is your RR ratio — if you risk $1 to make $2 at a 60% win rate, you are mathematically profitable.
+
+---
+
+### The Three Pillars of Risk Management
 
 #### 1. Always Use a Stop Loss
-A stop loss is not optional. It is your financial seatbelt. Trading without a stop loss is like driving at speed without a seatbelt — you may be fine most of the time, until you are not.
 
-- Place your stop loss **before** entering a trade
-- Never remove or widen your stop loss because the trade is going against you
-- The bot always provides a suggested stop loss level — use it
+IT Guru always provides a stop loss level. Use it. Always.
 
-#### 2. Proper Lot Sizing
-The amount you risk per trade must be proportional to your account size. Recommended risk per trade:
+- Set your stop loss before confirming the trade
+- Never widen your stop loss because the trade is going against you — that turns a small loss into a large one
+- Never trade without a stop loss — one unprotected trade can wipe weeks of profit
+
+#### 2. Size Your Position Correctly
+
+Risk a fixed, small percentage of your account on every single trade:
 
 | Account Stage | Risk Per Trade |
 |---|---|
-| New/Learning | 0.5% of account balance |
-| Developing | 1.0% of account balance |
-| Consistent/Profitable | Up to 2.0% of account balance |
+| New / Learning | 0.5% of account |
+| Developing | 1.0% of account |
+| Consistent and Profitable | Up to 2.0% of account |
 
-**Example:** $500 account × 1% = $5 maximum risk per trade. That is all. No more.
+**Example:** $200 account x 1% = $2.00 maximum risk per trade.
+
+Use IT Guru's built-in position size calculator — enter account balance and risk % and it does the maths for you.
 
 #### 3. Emotional Discipline
-This is the most overlooked aspect of trading — and arguably the most important.
 
-- **Do not revenge trade** after a loss. Take a break, review, and return with a clear head.
-- **Do not over-trade.** Taking every signal that arrives, regardless of quality, leads to overexposure.
-- **Do not let greed override your plan.** If TP1 is hit, move your stop loss up as planned.
-- **Trust the process.** Consistent, disciplined trading with small risk per trade builds accounts over time.
-
----
-
-### ⚖️ Why No Signal Is 100% Accurate
-
-Technical analysis works on probabilities — not certainties. The bot identifies high-probability setups based on historical patterns and current conditions. However:
-
-- Markets can and do behave unexpectedly
-- A perfect-looking setup can fail due to an invisible catalyst
-- Signal accuracy of 60–75% is considered excellent in professional trading
-
-What separates profitable traders from unprofitable ones is not win rate alone — it is **risk management**. A 55% win rate with a 1:3 RR is more profitable than an 80% win rate with a 1:0.5 RR.
+- No revenge trading — after a loss, take a break, return with a clear head
+- No over-trading — quality beats quantity; fewer, better trades beat many mediocre ones
+- No greed — if your TP is hit, close the trade; do not hold for more without a plan
+- No panic — if price moves against you but has not hit your SL, the trade is still valid; do not close early
+- Trust the process — consistent, small risk per trade compounds into significant results over time
 
 ---
 
-### 📜 Client Accountability
+### Why No Signal Is Ever 100% Accurate
 
-We want to be completely transparent with you:
+Technical analysis works on probabilities. IT Guru identifies setups where the statistical odds favour a particular outcome — but there is always uncertainty. Even a confluence score of 16/16 does not guarantee the trade will win.
 
-> *By using this service, you acknowledge that the signals provided are based on technical analysis only and do not constitute financial advice. You accept full responsibility for your own trading decisions, results, and account management. The bot and its operators cannot be held liable for losses incurred as a result of acting on any signal or analysis provided.*
-
-This is not meant to discourage you — it is meant to ensure you enter this journey with the right mindset. Trading can be genuinely life-changing when approached with knowledge, discipline, and respect for risk.
+Professional traders accept this. They focus on risk:reward and consistency, not on winning every trade.
 
 ---
 
-## 8. LIMITATIONS OF THE BOT
+### Client Accountability Statement
 
-### 🌪️ Market Manipulation & Sudden Volatility
-
-Large institutional players (banks, hedge funds) occasionally move markets in unexpected ways. A price level that looks like a textbook support zone may be deliberately targeted to trigger retail stop losses before the real move begins. No bot or analyst can fully predict or prevent this.
+> By using IT Guru, you acknowledge that all signals and analysis provided are for educational and informational purposes only and do not constitute financial advice. You accept full responsibility for your own trading decisions, including the choice of whether to enter, manage, or exit any trade. IT Guru and its operators cannot be held liable for any losses incurred as a result of acting on signals, alerts, or analysis generated by this indicator. Always trade with money you can afford to lose.
 
 ---
 
-### 📰 News Impact (Especially Forex)
+## 8. LIMITATIONS OF THE INDICATOR
 
-Major economic news releases — such as:
-- US Non-Farm Payrolls (NFP)
-- Interest rate decisions (Federal Reserve, Bank of England, ECB)
-- Inflation data (CPI)
-- Geopolitical events
+### Market Manipulation and Sudden Volatility
 
-...can cause extreme, sudden price movements that invalidate any technical setup within seconds. The bot uses technical analysis, not fundamental/news analysis.
+Large institutional players (banks, hedge funds, market makers) can move markets in ways that invalidate technical setups. A perfect-looking setup at a support level can be deliberately targeted by institutions to stop-hunt retail traders before the actual move.
 
-> **Recommendation:** Avoid placing trades in the 30 minutes before and after high-impact news events. Always check an economic calendar (e.g. Forex Factory, Investing.com).
+IT Guru's Liquidity Sweep and Stop Loss Hunt strategies are specifically designed to identify and trade with these manipulation patterns — but they cannot predict every instance.
 
 ---
 
-### 🌐 Internet & Platform Dependency
+### News Impact (Forex)
 
-The bot relies on:
+For Forex pairs, major economic news releases cause extreme, sudden price moves that no technical indicator can anticipate:
+
+- US Non-Farm Payrolls (NFP) — first Friday of each month
+- Interest rate decisions (Federal Reserve, ECB, Bank of England)
+- Inflation data (CPI, PPI)
+- GDP releases, geopolitical events
+
+> **Recommendation:** Enable the **Economic Calendar / News Pause** feature in Settings. This automatically pauses signal generation around high-impact news events. Also check **Forex Factory** or **Investing.com** for the daily economic calendar.
+
+Deriv synthetic indices are **not affected by economic news** — they are computer-generated and run 24/7.
+
+---
+
+### Internet and Platform Dependency
+
+IT Guru requires:
 - A stable internet connection
-- The trading platform (Deriv, MetaTrader, etc.) being operational
-- Data feed accuracy
+- Deriv's WebSocket service to be operational
+- Your browser to remain open and active
 
-Technical issues on your end or the platform's end can cause missed signals or delayed notifications. This is a technology limitation that applies to all online trading tools.
+If your connection drops, IT Guru will attempt to **auto-reconnect** with exponential backoff. During any disconnection, candles and signals may be missed. The current phase will reset on reconnect.
+
+> **Tip:** Use a reliable internet connection. On mobile, prefer WiFi over cellular for sustained sessions.
 
 ---
 
-### 🧠 Why Human Judgment Still Matters
+### Single-Symbol Focus
 
-The bot is a powerful analytical engine — but it is not sentient. It does not know:
-- Your personal financial situation
-- How much you can afford to lose
-- Your emotional state when you trade
-- Whether you are a beginner or a professional
+The core breakout-retest engine monitors one symbol at a time. While Multi-Symbol mode allows scanning multiple markets simultaneously, the main chart and detailed state panel always reflect the primary selected symbol.
 
-These are human factors that require human judgment. The bot provides information. You provide wisdom. Together, they form a powerful partnership.
+---
+
+### Why Human Judgment Still Matters
+
+IT Guru is a sophisticated analytical engine — but it is not sentient. It processes numbers and patterns. It does not know:
+
+- Your personal financial situation or risk tolerance
+- Whether a news event is about to override the technical picture
+- Whether you are having an emotional day
+- Whether the market is in an unusual, low-liquidity condition
+
+These are human factors that require human judgment. The indicator provides high-quality technical analysis — you provide the wisdom, context, and final decision.
 
 ---
 
 ## 9. QUICK START SUMMARY
 
-> 📄 *Your one-page guide to getting started today.*
+*Your one-page guide to getting value from IT Guru today.*
 
 ---
 
-### ✅ How to Start Using the Bot Today
+### Getting Started — 5 Steps
 
-1. **Access your signals channel** — confirm you are connected to the Telegram group, Discord server, or web dashboard as per your subscription instructions
-2. **Review this manual** — especially sections 3, 4, and 7
-3. **Open a demo account** on Deriv or your Forex broker — practice placing trades based on signals without real money first
-4. **Set up your position size calculator** — bookmark a free online tool (e.g. myfxbook.com/tools/position-size)
-5. **Trade small** — when going live, start with micro lots (0.01) until you are comfortable with the workflow
-
----
-
-### 🚀 How to Get Value Fast
-
-- **Focus on 1–2 markets at first** — choose what interests you most (e.g. V75 or EUR/USD)
-- **Take signals on a demo account for 2 weeks** — track your results, learn the rhythm
-- **Apply proper risk management from Day 1** — even on demo. Good habits form early.
-- **Read signal notes carefully** — understanding the reasoning builds your own analytical skill
-- **Engage with the community** — ask questions, share learnings (where applicable)
+1. **Log in** at `trading.dsitservicesja.com/indicator/` with your credentials
+2. **Paste your Deriv API Token** in the API section (create one at app.deriv.com under API Token)
+3. **Select a market** — recommended start: **Volatility 75 (1s)** on the **1-minute** timeframe
+4. **Press Connect** (or Alt+C) — IT Guru begins collecting candles immediately
+5. **Wait for a signal** — when Phase 6 (TRADE) fires, you will see the entry, SL, TP, and confluence score on the chart and receive a Telegram alert
 
 ---
 
-### 🚫 Common Beginner Mistakes to Avoid
+### How to Get Maximum Value Fast
+
+- **Start on a demo account** — practice the workflow without risking real money
+- **Enable only 2-3 strategies at first** — Liquidity Sweep, Fib Golden Zone, and Live Scalp Scanner are excellent starting points
+- **Set your account balance and risk %** — let IT Guru calculate position sizes for you automatically
+- **Pay attention to confluence scores** — prioritise signals with scores of 8 or above and skip weak setups below 4
+- **Review the State tab before each trade** — confirm EMA Filter and HTF Trend agree with the signal direction
+- **Export your signals weekly** (CSV or PDF) and review what worked — learning from your own trade history is priceless
+
+---
+
+### Common Beginner Mistakes to Avoid
 
 | Mistake | Why It Hurts | What to Do Instead |
 |---|---|---|
-| Skipping the stop loss | One bad trade can wipe multiple good ones | Always set SL before entering |
-| Risking too much per trade | Emotional, panicked decisions | Stick to 1% rule per trade |
-| Taking every signal | Overexposure and fatigue | Filter signals — quality over quantity |
-| Moving SL further away when losing | Turns small losses into large ones | Respect your original stop loss |
-| Trading during high-impact news | Extreme volatility defeats all analysis | Check the economic calendar daily |
-| Expecting instant profits | Leads to impatience and poor decisions | Focus on process, not individual trades |
-| Comparing your results to others | Everyone's account and strategy differs | Measure yourself against your own progress |
+| Ignoring the confluence score | Low-quality setups have higher failure rates | Prefer scores of 8 or above |
+| Trading without a stop loss | One bad trade can wipe many wins | IT Guru always provides an SL — use it |
+| Over-sizing positions | Losses feel catastrophic and cause panic | Use the 1% rule — let IT Guru calculate for you |
+| Enabling too many strategies at once | Conflicting signals cause confusion | Start with 2-3 strategies |
+| Ignoring HTF trend | Counter-trend trades fail more often | Check the State tab before every entry |
+| Chasing missed signals | Late entries have poor RR | If price has moved past the entry, wait for the next setup |
+| Trading Forex during news | News overrides all technical analysis | Check the economic calendar daily |
+| Enabling Auto-Trade on a live account immediately | Real money at risk before understanding the system | Test on demo for 2 or more weeks first |
+| Turning off filters after losses | Weakens signal quality further | Keep filters on — trust the confluence engine |
+| Judging the system on one week | Too small a sample size | Evaluate over 3-6 months minimum |
 
 ---
 
@@ -654,73 +970,88 @@ These are human factors that require human judgment. The bot provides informatio
 
 ---
 
-**❓ Can this bot guarantee profits?**
+**Can IT Guru guarantee profits?**
 
-No. No trading system, bot, analyst, or strategy can guarantee profits. Markets are inherently uncertain. What the bot provides is high-probability technical setups based on proven analysis methods. Profitability depends on how you apply those setups, your risk management, and market conditions at the time.
-
----
-
-**❓ Is this financial advice?**
-
-No. Absolutely not. This service provides technical analysis signals and educational market information only. It is not regulated financial advice. You should not make financial decisions based solely on these signals. If you require personalised financial guidance, please consult a licensed financial advisor.
+No. IT Guru identifies high-probability technical setups based on proven analysis methods. No indicator, system, or analyst can guarantee profits in financial markets. Your profitability depends on how you apply the signals, your risk management discipline, and market conditions.
 
 ---
 
-**❓ Can beginners use this bot?**
+**Is this financial advice?**
 
-Yes — and in fact, beginners often benefit greatly from it as a learning and guidance tool. However, beginners are strongly encouraged to:
-- Start on a demo account
-- Spend time reading this manual fully
-- Risk only small amounts when going live
-- Focus on learning the process rather than chasing profits
+No. IT Guru provides technical analysis and trade setup identification only. It is not regulated financial advice. All trading decisions are yours alone. If you need personalised financial guidance, consult a licensed financial advisor.
 
 ---
 
-**❓ Can I use it on a small account?**
+**Can complete beginners use IT Guru?**
 
-Yes. The bot works for accounts of all sizes. The key is to adjust your lot size proportionally. A $100 account trading 0.01 lots with proper risk management can be just as disciplined as a $10,000 account. Grow your account gradually — do not rush the process.
-
----
-
-**❓ Does it work on Deriv only, or also Forex?**
-
-Both. The bot analyses **Deriv synthetic instruments** (Volatility, Boom, Crash, Jump, Step indices) as well as **Forex currency pairs**. Forex signals can be traded on Deriv's Forex section or on any standard Forex broker (MetaTrader 4/5, cTrader, etc.).
+Yes — many beginners find it an excellent learning tool. The 6-phase display teaches you exactly what to look for in a trade. However, beginners should:
+- Start on a **demo account**
+- Read this manual in full
+- Enable the **Auto-Apply Recommended** settings feature
+- Start with just the core breakout-retest signals before exploring strategies
 
 ---
 
-**❓ Can results vary from month to month?**
+**Can I use it on a small account?**
 
-Yes — significantly. Market conditions change. A strategy that performs exceptionally well in a trending market may have more losses during a choppy, sideways market. Signal performance is best evaluated over a minimum of 3–6 months to account for varying market conditions. Never judge the system on a single week's results.
-
----
-
-**❓ How many signals should I trade per day?**
-
-Quality over quantity. There is no requirement to take every signal. Professional traders are often highly selective. Start with 1–2 high-conviction signals per day. As your confidence and account grow, you can gradually increase — always keeping risk management as your top priority.
+Yes. IT Guru calculates position sizes based on any account size. A $50 account trading $0.50 risk per trade (1%) is just as disciplined as a $5,000 account. IT Guru supports Deriv multiplier contracts with a minimum stake of $0.37, making it accessible at any account size.
 
 ---
 
-**❓ What if I miss a signal?**
+**Does IT Guru work on Forex or only Deriv synthetics?**
 
-If you miss a signal and price has already moved significantly past the entry area, do not chase the trade. Wait for the next setup. There will always be more opportunities. Chasing missed signals is a common beginner mistake that leads to poor entries and unnecessary losses.
-
----
-
-**❓ What platform do I need to trade?**
-
-- **Deriv indices (Volatility, Boom, Crash, etc.):** Use the **Deriv platform** (app.deriv.com or the Deriv Trader/DTrader app)
-- **Forex pairs:** Can be traded on Deriv, **MetaTrader 4 (MT4)**, **MetaTrader 5 (MT5)**, or any standard Forex broker
+Both. IT Guru analyses all Deriv synthetic indices (Volatility, Boom, Crash, Jump, Step) and Forex pairs (majors, crosses, exotics) and commodities (Gold, Silver, Platinum, Palladium) — all within the same interface.
 
 ---
 
-*Thank you for being part of this community. We are committed to providing you with the highest quality analysis and support on your trading journey.*
+**Can results vary from month to month?**
+
+Yes. Market conditions change constantly. A trending market produces more clean breakout setups; a choppy, sideways market produces more false breakouts. Evaluate performance over 3-6 months minimum. Short-term results can be misleading in either direction.
+
+---
+
+**What does the confluence score mean?**
+
+The confluence score (0-16) measures how many of IT Guru's technical filters agree with the trade direction. A score of 12 means 12 out of 16 conditions align with the setup. Higher scores statistically correlate with stronger setups. Use it to prioritise when multiple signals fire simultaneously.
+
+---
+
+**What is Auto-Trade and is it safe?**
+
+Auto-Trade places multiplier contracts on your Deriv account automatically when signals fire. It includes multiple safety mechanisms: compounding resets after losses, auto-halt after 3 consecutive losses, and session P/L limits. That said, real money is at risk — always test on demo first and only enable live auto-trade when you fully understand the system and accept the risk.
+
+---
+
+**How do I know which strategy to use?**
+
+Start with the core breakout-retest engine (always active) and Live Scalp Scanner for fast markets. Add Liquidity Sweep and FVG as you grow comfortable. Advanced traders can run all 12 simultaneously and use the confluence score and session filter to prioritise.
+
+---
+
+**What platform do I need?**
+
+IT Guru runs entirely in your **web browser** — no downloads or installations required. You need:
+- A Deriv account (app.deriv.com)
+- A Deriv API Token (generated in your Deriv account settings)
+- A modern browser (Chrome, Firefox, Edge — latest version recommended)
+- A stable internet connection
+
+---
+
+**What if IT Guru disconnects mid-session?**
+
+IT Guru will automatically attempt to reconnect using exponential backoff. The current phase resets on reconnect and candle history is reloaded. To manually reconnect at any time, press the **Connect** button in the top bar.
+
+---
+
+*Thank you for choosing IT Guru. We are committed to providing you with the most powerful, precise, and transparent trading indicator available.*
 
 *Trade smart. Manage your risk. Stay consistent.*
 
 ---
 
-> **FINAL DISCLAIMER:** All content in this manual is for educational and informational purposes only. Trading CFDs and synthetic indices involves significant risk of loss. Past performance is not indicative of future results. Never trade with funds you cannot afford to lose. This is not financial advice.
+> **FINAL DISCLAIMER:** All content in this manual is for educational and informational purposes only. IT Guru is a technical analysis tool, not financial advice. Trading CFDs, Forex, and synthetic indices involves significant risk of loss and is not suitable for all investors. Never trade with funds you cannot afford to lose. Past signal performance is not indicative of future results.
 
 ---
 
-*© Trading Bot User Manual — All Rights Reserved*
+*IT Guru — Breakout Retest Indicator | User Manual — All Rights Reserved*
