@@ -115,10 +115,11 @@ if ($method === 'GET') {
         $stats = $statsStmt->fetch();
 
         /* Global count of users with any bot strategy access */
-        $botStmt = $pdo->query(
+        $botStmt = $pdo->prepare(
             "SELECT COUNT(DISTINCT user_id) FROM strategy_access
-             WHERE strategy_key IN ('bot_hc_1hz75v', 'bot_normal')"
+             WHERE strategy_key IN (?, ?)"
         );
+        $botStmt->execute(['bot_hc_1hz75v', 'bot_normal']);
         $botAccessCount = (int) $botStmt->fetchColumn();
 
         jsonResponse([
