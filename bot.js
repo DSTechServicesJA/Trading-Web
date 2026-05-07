@@ -4849,12 +4849,17 @@ function initLoginGate() {
   if (typeof ITGuruAuth !== "undefined") {
     ITGuruAuth.initLoginGate({
       onLogin: () => {
-        /* After successful auth login, auto-connect if token exists */
-        const token = tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
-        if (token && !wsStarted) {
-          wsStarted = true;
-          connectWS();
-        }
+        /* Refresh user data then check bot access */
+        ITGuruAuth.verify().then(() => {
+          if (checkBotAccess()) {
+            /* After successful auth login, auto-connect if token exists */
+            const token = tokenInput?.value?.trim() || sessionStorage.getItem("deriv_token") || "";
+            if (token && !wsStarted) {
+              wsStarted = true;
+              connectWS();
+            }
+          }
+        });
       }
     });
 
@@ -4866,12 +4871,50 @@ function initLoginGate() {
         location.reload();
       });
     }
+
+    /* If already logged in, verify and check access */
+    if (ITGuruAuth.isLoggedIn()) {
+      ITGuruAuth.verify().then(() => checkBotAccess());
+    }
     return;
   }
 
   /* Fallback: no auth module, allow browsing freely */
   const overlay = document.getElementById("loginOverlay");
   if (overlay) overlay.style.display = "none";
+}
+
+/**
+ * Check whether the logged-in user has been granted access to IT Guru – Bot.
+ * Admins bypass the gate. Returns true if access is allowed, false otherwise.
+ */
+function checkBotAccess() {
+  if (typeof ITGuruAuth === "undefined") return true;
+  const user = ITGuruAuth.getUser();
+  if (user && user.role === "admin") return true; /* admins bypass gate */
+  const granted = ITGuruAuth.getStrategies();
+  if (!granted.includes("bot_normal")) {
+    const overlay = document.getElementById("loginOverlay");
+    if (overlay) {
+      overlay.innerHTML = `
+        <div class="login-card" style="text-align:center;padding:40px 32px;">
+          <div style="font-size:48px;margin-bottom:16px;">🔒</div>
+          <h2 style="margin:0 0 12px;">Access Restricted</h2>
+          <p style="margin:0 0 24px;color:var(--text-muted,#aaa);">
+            You don't have access to IT Guru – Bot.<br>
+            Contact your administrator to request access.
+          </p>
+          <button type="button"
+            style="padding:10px 28px;border-radius:8px;border:none;background:var(--primary,#6c63ff);color:#fff;font-size:15px;cursor:pointer;"
+            onclick="ITGuruAuth.logout(); location.reload();">
+            Logout
+          </button>
+        </div>`;
+      overlay.style.display = "flex";
+    }
+    return false;
+  }
+  return true;
 }
 
 function logLoss(profit) {
