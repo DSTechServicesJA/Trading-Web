@@ -328,21 +328,12 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "frxAUDCAD":[50, 100, 200, 300, 500],
   "frxAUDCHF":[50, 100, 200, 300, 500],
   "frxNZDJPY":[50, 100, 200, 300, 500],
-  "frxNZDCAD":[50, 100, 200, 300, 500],
-  "frxNZDCHF":[50, 100, 200, 300, 500],
-  "frxCADJPY":[50, 100, 200, 300, 500],
-  "frxCADCHF":[50, 100, 200, 300, 500],
-  "frxCHFJPY":[50, 100, 200, 300, 500],
 
   /* --- Forex Exotics --- */
   "frxUSDMXN":[50, 100, 200, 300, 500],
   "frxUSDNOK":[50, 100, 200, 300, 500],
   "frxUSDSEK":[50, 100, 200, 300, 500],
-  "frxUSDSGD":[50, 100, 200, 300, 500],
-  "frxUSDZAR":[50, 100, 200, 300, 500],
   "frxUSDPLN":[50, 100, 200, 300, 500],
-  "frxUSDTRY":[50, 100, 200, 300, 500],
-  "frxUSDHKD":[50, 100, 200, 300, 500],
 
   /* --- Commodities --- */
   "frxXAUUSD":[50, 100, 200, 300, 500],
@@ -443,21 +434,12 @@ const SYMBOL_SPECS = (() => {
   fx("frxAUDCAD", "CAD", 0.0001, 100000);
   fx("frxAUDCHF", "CHF", 0.0001, 100000);
   fx("frxNZDJPY", "JPY", 0.01,   100000);
-  fx("frxNZDCAD", "CAD", 0.0001, 100000);
-  fx("frxNZDCHF", "CHF", 0.0001, 100000);
-  fx("frxCADJPY", "JPY", 0.01,   100000);
-  fx("frxCADCHF", "CHF", 0.0001, 100000);
-  fx("frxCHFJPY", "JPY", 0.01,   100000);
 
   /* ---------- Forex Exotics ---------- */
   fx("frxUSDMXN", "MXN", 0.0001, 100000);
   fx("frxUSDNOK", "NOK", 0.0001, 100000);
   fx("frxUSDSEK", "SEK", 0.0001, 100000);
-  fx("frxUSDSGD", "SGD", 0.0001, 100000);
-  fx("frxUSDZAR", "ZAR", 0.0001, 100000);
   fx("frxUSDPLN", "PLN", 0.0001, 100000);
-  fx("frxUSDTRY", "TRY", 0.0001, 100000);
-  fx("frxUSDHKD", "HKD", 0.0001, 100000);
 
   /* ---------- Commodities ---------- */
   fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:      100 oz / lot, pip = $0.01 */
