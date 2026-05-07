@@ -169,7 +169,8 @@ async function apiRequest(path, options = {}) {
   /* Fallback: if .htaccess URL rewriting is not available (e.g. Nginx without rewrite rules),
      retry with explicit .php extension so the endpoint is always reachable. */
   if (resp.status === 404 && !path.endsWith(".php")) {
-    const fallback = await fetch(url + ".php", { ...options, headers });
+    const phpPath = path.includes("?") ? path.replace("?", ".php?") : path + ".php";
+    const fallback = await fetch(ADMIN_API + phpPath, { ...options, headers });
     return fallback;
   }
   return resp;
