@@ -5,9 +5,16 @@
   <title>IT Guru – Breakout Retest Indicator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
+  <!-- Feature 14: PWA meta tags -->
+  <meta name="theme-color" content="#0a0f1e" />
+  <meta name="description" content="IT Guru – Professional breakout-retest trading indicator for Deriv synthetic and forex indices." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self';
-                 connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com https://api.telegram.org;
+                 connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com https://api.telegram.org https://nfs.faireconomy.media;
                  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
                  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
                  font-src https://fonts.gstatic.com;
@@ -542,6 +549,7 @@
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeGridScalperMAToggle" checked /> 🔲 Grid Scalper MA</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFvgStratToggle" checked /> 🎯 Fair Value Gap</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeMtfTopDownToggle" checked /> ⏱ MTF Top-Down</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeOrderblockToggle" checked /> 🏦 Orderblock</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
             <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
@@ -675,6 +683,13 @@
                   <span class="strat-enable-icon">⏱</span>
                   <span class="strat-enable-name">MTF Top-Down</span>
                   <span class="strat-enable-badge off" id="stratBadge-mtfTopDown">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="orderblockToggle" />
+                  <span class="strat-enable-icon">🏦</span>
+                  <span class="strat-enable-name">Orderblock (S12)</span>
+                  <span class="strat-enable-badge off" id="stratBadge-orderblock">OFF</span>
                 </label>
 
               </div>
@@ -998,6 +1013,104 @@
             </div>
           </section>
 
+          <!-- Chart Visual Enhancements -->
+          <section class="box">
+            <h3 class="collapsible">🎨 Chart Visual Enhancements</h3>
+            <div class="collapsible-body">
+
+              <label class="toggle-row"><input type="checkbox" id="sessionHeatmapToggle" /> Session Heatmap (Feature 17)</label>
+              <p class="hint">Colour chart candles by trading session: Asian (blue), London (green), NY (orange), Overlap (yellow).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="candleAnnotationsToggle" checked /> Candle Pattern Annotations (Feature 6)</label>
+              <p class="hint">Draw doji, pin-bar, engulfing, and inside-bar labels directly on chart candles.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="volumeProfileToggle" /> Volume Profile (Feature 9)</label>
+              <p class="hint">Range-based horizontal histogram on chart right edge showing price activity distribution.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="fibExtensionsToggle" /> Fibonacci Extensions (Feature 10)</label>
+              <p class="hint">Draw 1.272, 1.414, 1.618, 2.0, 2.618 extension levels as potential take-profit targets.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="bosChochToggle" /> BOS / ChoCH Markers (Feature 5)</label>
+              <p class="hint">Draw Break-of-Structure and Change-of-Character labels on the chart at structural breaks.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="divergenceVisualToggle" /> RSI Divergence Lines (Feature 7)</label>
+              <p class="hint">Draw divergence lines connecting swing high/low on price chart when divergence is detected at retest.</p>
+
+            </div>
+          </section>
+
+          <!-- Named Settings Profiles -->
+          <section class="box">
+            <h3 class="collapsible">💾 Settings Profiles (Feature 4)</h3>
+            <div class="collapsible-body">
+              <p class="hint">Save the entire current settings snapshot under a named profile, then restore it with one click. Useful when switching between instruments or strategies.</p>
+              <div class="profile-save-row">
+                <input type="text" id="profileNameInput" placeholder="Profile name (e.g. R100 Scalp)" class="profile-name-input" maxlength="40" />
+                <button type="button" id="profileSaveBtn" class="btn-secondary">💾 Save</button>
+              </div>
+              <div id="profilesList" class="profiles-list"></div>
+            </div>
+          </section>
+
+          <!-- Backtesting Engine -->
+          <section class="box">
+            <h3 class="collapsible">🔁 Backtest Replay (Feature 1)</h3>
+            <div class="collapsible-body">
+              <p class="hint">Replay the currently loaded historical candles through all strategy detectors candle-by-candle. Connect first to load data, then start the backtest.</p>
+              <div class="backtest-controls">
+                <button type="button" id="backtestStartBtn" class="btn-primary">▶ Start Backtest</button>
+                <button type="button" id="backtestStopBtn" class="btn-secondary" disabled>⏹ Stop</button>
+                <span id="backtestStatus" class="backtest-status">Idle</span>
+              </div>
+              <label for="backtestSpeedInput" class="spaced-label">Step Speed (ms/candle)</label>
+              <input type="number" id="backtestSpeedInput" min="50" max="2000" step="50" value="200" />
+              <progress id="backtestProgress" value="0" max="100" class="backtest-progress"></progress>
+              <div id="backtestProgressLabel" class="backtest-progress-label">0% (0 / 0)</div>
+            </div>
+          </section>
+
+          <!-- Economic Calendar -->
+          <section class="box">
+            <h3 class="collapsible">📅 Economic Calendar / News Pause (Feature 11)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="newsPauseToggle" /> Pause Auto-Trades Around News</label>
+              <p class="hint">Block new trades within ±N minutes of high-impact economic events. Fetches the Forex Factory calendar weekly.</p>
+              <label for="newsPauseMinutesInput" class="spaced-label">Pause Window (minutes before/after event)</label>
+              <input type="number" id="newsPauseMinutesInput" min="1" max="60" step="1" value="5" />
+              <p class="hint" style="margin-top:4px;">News events are drawn as red dashed lines on the chart when loaded. Requires internet access.</p>
+            </div>
+          </section>
+
+          <!-- Multi-R Partial Exit Ladder -->
+          <section class="box">
+            <h3 class="collapsible">📊 Multi-R Exit Ladder (Feature 15)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="multiRLadderToggle" /> Enable Multi-R Partial Exit Ladder</label>
+              <p class="hint">Automatically exit portions of the trade at 1R, 2R, and 3R. Overrides the simple 1:1 partial TP when enabled. Default ladder: exit 25% at 1R, 25% at 2R, 50% at 3R (SL slides to BE after first partial exit).</p>
+            </div>
+          </section>
+
+          <!-- Multi-Symbol Scanner -->
+          <section class="box">
+            <h3 class="collapsible">📡 Multi-Symbol Scanner (Feature 8)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="scannerToggle" /> Enable Scanner Dashboard</label>
+              <p class="hint">Shows a live grid of symbols and their current indicator phases (WAITING / BREAKOUT / RETEST / TRADE).</p>
+              <label for="scannerSymbolsInput" class="spaced-label">Watchlist (comma-separated symbols)</label>
+              <input type="text" id="scannerSymbolsInput" placeholder="R_100, R_50, frxEURUSD" />
+            </div>
+          </section>
+
+          <!-- Adaptive Confluence Weighting -->
+          <section class="box">
+            <h3 class="collapsible">🧠 Adaptive Confluence Weights (Feature 13)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="adaptiveConfluenceToggle" /> Enable Adaptive Weighting</label>
+              <p class="hint">Tracks empirical win rate per confluence factor. After 10+ trades per factor, shows colour-coded weight bar. High win-rate factors get more trust over time.</p>
+              <div id="adaptiveConfluenceTable" class="conf-weight-table"></div>
+            </div>
+          </section>
+
           <!-- Telegram Integration -->
           <section class="box">
             <h3 class="collapsible">📤 Telegram Alerts</h3>
@@ -1299,7 +1412,28 @@
               <div id="stratWR_gridScalper" class="strat-wr-row" data-label="🔲 Grid Scalper"></div>
               <div id="stratWR_fvgStrat" class="strat-wr-row" data-label="🎯 FVG"></div>
               <div id="stratWR_liveScalp" class="strat-wr-row" data-label="⚡ Live Scalp"></div>
+              <div id="stratWR_mtfTopDown" class="strat-wr-row" data-label="⏱ MTF Top-Down"></div>
+              <div id="stratWR_orderblock" class="strat-wr-row" data-label="🏦 Orderblock"></div>
             </div>
+          </section>
+
+          <!-- Equity Curve (Feature 3) -->
+          <section class="box">
+            <div class="section-header"><span class="icon">📈</span><h3>Equity Curve (Feature 3)</h3></div>
+            <canvas id="equityCurveCanvas" class="equity-curve-canvas"></canvas>
+            <p class="hint" style="margin-top:4px;">Cumulative P/L from auto-trade history. DD = max drawdown, PF = profit factor, E = expectancy per trade.</p>
+          </section>
+
+          <!-- P&L Breakdown (Feature 16) -->
+          <section class="box">
+            <div class="section-header"><span class="icon">📊</span><h3>P&amp;L Breakdown (Feature 16)</h3></div>
+            <div id="plBreakdownTable" class="pl-breakdown-container"></div>
+          </section>
+
+          <!-- Multi-Symbol Scanner (Feature 8) -->
+          <section class="box" id="scannerPanel" style="display:none;">
+            <div class="section-header"><span class="icon">📡</span><h3>Symbol Scanner (Feature 8)</h3></div>
+            <div id="scannerGrid" class="scanner-grid"></div>
           </section>
 
           <!-- Live Scalp Stats -->
@@ -1809,6 +1943,19 @@
 
 <!-- On-Screen Toast Notifications -->
 <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+<!-- Feature 14: PWA Service Worker Registration -->
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").then((reg) => {
+      console.log("IT Guru SW registered, scope:", reg.scope);
+    }).catch((err) => {
+      console.info("SW registration skipped:", err.message);
+    });
+  });
+}
+</script>
 
 </body>
 </html>

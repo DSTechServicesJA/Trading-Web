@@ -181,6 +181,36 @@ const STOCH_SMOOTH = 3;
 const STOCH_OVERSOLD = 20;
 const STOCH_OVERBOUGHT = 80;
 
+/* ================= FEATURE ENHANCEMENT CONSTANTS ================= */
+
+/* Feature 10: Fibonacci extension levels beyond 1.0 */
+const FIB_EXTENSIONS = [1.272, 1.414, 1.618, 2.0, 2.618];
+
+/* Feature 2: Orderblock detection (Strategy 12) */
+const ORDERBLOCK_MAX_HISTORY = 30;
+const ORDERBLOCK_COOLDOWN    = 8;
+const ORDERBLOCK_MAX_SL_ATR  = 1.5;
+const ORDERBLOCK_LOOKBACK    = 40;
+
+/* Feature 1: Backtesting engine */
+const BACKTEST_DEFAULT_SPEED_MS = 200;
+const BACKTEST_MIN_SPEED_MS     = 50;
+const BACKTEST_MAX_SPEED_MS     = 2000;
+
+/* Feature 15: Multi-R partial exit ladder defaults */
+const MULTI_R_LADDER_DEFAULT = [
+  { r: 1.0, pct: 25 },
+  { r: 2.0, pct: 25 },
+  { r: 3.0, pct: 50 }
+];
+
+/* Feature 11: Economic calendar */
+const NEWS_CACHE_EXPIRY_MS   = 3600000;
+const NEWS_PAUSE_DEFAULT_MIN = 5;
+
+/* Feature 13: Adaptive confluence weighting */
+const CONF_WEIGHT_MIN_SAMPLES = 10;
+
 /* Auto-trade: minimum stake for Deriv contracts */
 const MIN_AUTO_TRADE_STAKE = 0.37;
 const MIN_LIMIT_ORDER_AMOUNT = 0.37;  /* Deriv minimum for SL/TP limit order values */
@@ -1468,6 +1498,66 @@ const LIVE_SCALP_MAX_HISTORY = 30;
 const LIVE_SCALP_COOLDOWN_CANDLES = 3;  /* min candles between consecutive scalp alerts */
 let lastScalpCandleIdx = -999;
 
+/* ================= STRATEGY 12: ORDERBLOCK DETECTION ================= */
+let orderblockEnabled  = false;       /* master toggle */
+let orderblockHistory  = [];          /* alert history */
+let lastOrderblockIdx  = -999;
+let autoTradeOrderblock = true;
+
+/* ================= FEATURE: SESSION HEATMAP (17) ================= */
+let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
+
+/* ================= FEATURE: CANDLE PATTERN ANNOTATIONS (6) ================= */
+let candleAnnotationsEnabled = true;  /* draw labels above/below pattern candles */
+
+/* ================= FEATURE: VOLUME PROFILE (9) ================= */
+let volumeProfileEnabled = false;     /* range-based histogram on chart right edge */
+
+/* ================= FEATURE: FIBONACCI EXTENSIONS (10) ================= */
+let fibExtensionsEnabled = false;     /* draw 1.272/1.414/1.618/2.0/2.618 extension levels */
+
+/* ================= FEATURE: BOS / ChoCH MARKERS (5) ================= */
+let bosChochEnabled  = false;         /* draw BOS/ChoCH labels on chart */
+let bosChochMarkers  = [];            /* [{ idx, type:"BOS"|"ChoCH", dir:"BULL"|"BEAR", price }] */
+
+/* ================= FEATURE: DIVERGENCE VISUAL MARKERS (7) ================= */
+let divergenceVisualEnabled = false;  /* draw divergence lines on price + RSI panel */
+let divergenceMarkers = [];           /* [{ boIdx, rtIdx, dir, rsiBO, rsiRT, priceBO, priceRT }] */
+
+/* ================= FEATURE: NAMED SETTINGS PROFILES (4) ================= */
+const PROFILES_LS_KEY = "itguru_indicator_profiles";
+let savedProfiles = {};               /* { name: settingsSnapshot } */
+
+/* ================= FEATURE: SIGNAL NOTES (12) ================= */
+const SIGNAL_NOTES_LS_KEY = "itguru_signal_notes";
+let signalNotes = {};                 /* { signalId: noteText } */
+
+/* ================= FEATURE: BACKTESTING ENGINE (1) ================= */
+let backtestMode      = false;
+let backtestIdx       = 0;
+let backtestInterval  = null;
+let backtestSpeedMs   = BACKTEST_DEFAULT_SPEED_MS;
+let _backtestCandles  = [];
+
+/* ================= FEATURE: MULTI-R PARTIAL EXIT LADDER (15) ================= */
+let multiRLadderEnabled = false;
+let multiRLadder   = JSON.parse(JSON.stringify(MULTI_R_LADDER_DEFAULT));
+let multiRHitLevels = [];             /* indices of already-triggered ladder levels */
+
+/* ================= FEATURE: ECONOMIC CALENDAR / NEWS PAUSE (11) ================= */
+let newsPauseEnabled  = false;
+let newsPauseMinutes  = NEWS_PAUSE_DEFAULT_MIN;
+let newsEvents        = [];           /* [{ time, title, impact, currency }] */
+let _newsCacheFetched = 0;
+
+/* ================= FEATURE: ADAPTIVE CONFLUENCE WEIGHTING (13) ================= */
+let adaptiveConfluenceEnabled = false;
+let confluenceFactorStats = {};       /* { factorName: { wins, losses } } */
+
+/* ================= FEATURE: SCANNER WATCHLIST (8) ================= */
+let scannerEnabled  = false;
+let scannerSymbols  = ["R_100", "R_50", "R_10", "frxEURUSD", "frxGBPUSD"];
+
 /* ================= UI REFS ================= */
 const UI = {};
 function initUI() {
@@ -1810,6 +1900,45 @@ function initUI() {
   UI.telegramProfitExitAlertToggle     = document.getElementById("telegramProfitExitAlertToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
+
+  /* Feature 2: Orderblock toggle */
+  UI.orderblockToggle        = document.getElementById("orderblockToggle");
+  UI.autoTradeOrderblockToggle = document.getElementById("autoTradeOrderblockToggle");
+
+  /* Feature 17: Session heatmap */
+  UI.sessionHeatmapToggle    = document.getElementById("sessionHeatmapToggle");
+
+  /* Feature 6: Candle annotations */
+  UI.candleAnnotationsToggle = document.getElementById("candleAnnotationsToggle");
+
+  /* Feature 9: Volume profile */
+  UI.volumeProfileToggle     = document.getElementById("volumeProfileToggle");
+
+  /* Feature 10: Fib extensions */
+  UI.fibExtensionsToggle     = document.getElementById("fibExtensionsToggle");
+
+  /* Feature 5: BOS/ChoCH */
+  UI.bosChochToggle          = document.getElementById("bosChochToggle");
+
+  /* Feature 7: Divergence visual */
+  UI.divergenceVisualToggle  = document.getElementById("divergenceVisualToggle");
+
+  /* Feature 11: News pause */
+  UI.newsPauseToggle         = document.getElementById("newsPauseToggle");
+  UI.newsPauseMinutesInput   = document.getElementById("newsPauseMinutesInput");
+
+  /* Feature 15: Multi-R ladder */
+  UI.multiRLadderToggle      = document.getElementById("multiRLadderToggle");
+
+  /* Feature 13: Adaptive confluence */
+  UI.adaptiveConfluenceToggle = document.getElementById("adaptiveConfluenceToggle");
+
+  /* Feature 1: Backtest */
+  UI.backtestSpeedInput      = document.getElementById("backtestSpeedInput");
+
+  /* Feature 8: Scanner */
+  UI.scannerToggle           = document.getElementById("scannerToggle");
+  UI.scannerSymbolsInput     = document.getElementById("scannerSymbolsInput");
 }
 
 /* ================= HELPERS ================= */
@@ -3826,7 +3955,23 @@ function saveSettings() {
       teslaScalingEnabled,
       teslaScalingPlan,
       mtfTopDownEnabled,
-      autoTradeMtfTopDown
+      autoTradeMtfTopDown,
+      /* Feature settings */
+      orderblockEnabled,
+      autoTradeOrderblock,
+      sessionHeatmapEnabled,
+      candleAnnotationsEnabled,
+      volumeProfileEnabled,
+      fibExtensionsEnabled,
+      bosChochEnabled,
+      divergenceVisualEnabled,
+      newsPauseEnabled,
+      newsPauseMinutes,
+      multiRLadderEnabled,
+      adaptiveConfluenceEnabled,
+      scannerEnabled,
+      scannerSymbols: JSON.stringify(scannerSymbols),
+      backtestSpeedMs
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
   } catch (e) {
@@ -4110,6 +4255,41 @@ function restoreSettings() {
     if (UI.gridScalperMAStrategySelect)  UI.gridScalperMAStrategySelect.value    = gridScalperMAStrategy;
     if (UI.gridScalperMAPeriodInput)     UI.gridScalperMAPeriodInput.value       = gridScalperMAPeriod;
     _updateGridScalperMAPeriodVisibility();
+
+    /* Feature settings restore */
+    if (s.orderblockEnabled != null)        orderblockEnabled        = s.orderblockEnabled;
+    if (s.autoTradeOrderblock != null)      autoTradeOrderblock      = s.autoTradeOrderblock;
+    if (s.sessionHeatmapEnabled != null)    sessionHeatmapEnabled    = s.sessionHeatmapEnabled;
+    if (s.candleAnnotationsEnabled != null) candleAnnotationsEnabled = s.candleAnnotationsEnabled;
+    if (s.volumeProfileEnabled != null)     volumeProfileEnabled     = s.volumeProfileEnabled;
+    if (s.fibExtensionsEnabled != null)     fibExtensionsEnabled     = s.fibExtensionsEnabled;
+    if (s.bosChochEnabled != null)          bosChochEnabled          = s.bosChochEnabled;
+    if (s.divergenceVisualEnabled != null)  divergenceVisualEnabled  = s.divergenceVisualEnabled;
+    if (s.newsPauseEnabled != null)         newsPauseEnabled         = s.newsPauseEnabled;
+    if (s.newsPauseMinutes != null)         newsPauseMinutes         = s.newsPauseMinutes;
+    if (s.multiRLadderEnabled != null)      multiRLadderEnabled      = s.multiRLadderEnabled;
+    if (s.adaptiveConfluenceEnabled != null) adaptiveConfluenceEnabled = s.adaptiveConfluenceEnabled;
+    if (s.scannerEnabled != null)           scannerEnabled           = s.scannerEnabled;
+    if (s.scannerSymbols != null) {
+      try { const arr = JSON.parse(s.scannerSymbols); if (Array.isArray(arr)) scannerSymbols = arr; } catch(e) {}
+    }
+    if (s.backtestSpeedMs != null) backtestSpeedMs = Math.max(BACKTEST_MIN_SPEED_MS, Math.min(BACKTEST_MAX_SPEED_MS, parseInt(s.backtestSpeedMs,10) || BACKTEST_DEFAULT_SPEED_MS));
+    if (UI.orderblockToggle)          UI.orderblockToggle.checked          = orderblockEnabled;
+    if (UI.autoTradeOrderblockToggle) UI.autoTradeOrderblockToggle.checked = autoTradeOrderblock;
+    if (UI.sessionHeatmapToggle)      UI.sessionHeatmapToggle.checked      = sessionHeatmapEnabled;
+    if (UI.candleAnnotationsToggle)   UI.candleAnnotationsToggle.checked   = candleAnnotationsEnabled;
+    if (UI.volumeProfileToggle)       UI.volumeProfileToggle.checked       = volumeProfileEnabled;
+    if (UI.fibExtensionsToggle)       UI.fibExtensionsToggle.checked       = fibExtensionsEnabled;
+    if (UI.bosChochToggle)            UI.bosChochToggle.checked            = bosChochEnabled;
+    if (UI.divergenceVisualToggle)    UI.divergenceVisualToggle.checked    = divergenceVisualEnabled;
+    if (UI.newsPauseToggle)           UI.newsPauseToggle.checked           = newsPauseEnabled;
+    if (UI.newsPauseMinutesInput)     UI.newsPauseMinutesInput.value       = newsPauseMinutes;
+    if (UI.multiRLadderToggle)        UI.multiRLadderToggle.checked        = multiRLadderEnabled;
+    if (UI.adaptiveConfluenceToggle)  UI.adaptiveConfluenceToggle.checked  = adaptiveConfluenceEnabled;
+    if (UI.scannerToggle)             UI.scannerToggle.checked             = scannerEnabled;
+    if (UI.scannerSymbolsInput)       UI.scannerSymbolsInput.value         = scannerSymbols.join(", ");
+    if (UI.backtestSpeedInput)        UI.backtestSpeedInput.value          = backtestSpeedMs;
+
     /* Restore auto-trade history */
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
@@ -4199,6 +4379,18 @@ function updateStatsUI() {
   renderSignalBanner();
   renderScalpTickerBanner();
   renderStrategyTickerBanner();
+
+  /* Feature 3: Equity curve */
+  drawEquityCurve();
+
+  /* Feature 16: P&L breakdown */
+  renderPLBreakdown();
+
+  /* Feature 13: Adaptive confluence */
+  if (adaptiveConfluenceEnabled) renderAdaptiveConfluenceTable();
+
+  /* Feature 8: Scanner */
+  if (scannerEnabled) updateScannerUI();
 }
 
 /**
@@ -4218,7 +4410,8 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_gridScalper",    history: gridScalperMAHistory,   label: "🔲 Grid Scalper" },
     { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
     { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" },
-    { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" }
+    { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" },
+    { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -4343,6 +4536,16 @@ function renderSignalBanner() {
       `<span class="signal-card-time">${ts}</span>` +
       `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
 
+    /* Feature 12: Signal note field — show existing note or inline input */
+    const noteId = `sig_${s.time}_${sym}`;
+    const existingNote = getSignalNote(noteId);
+    const noteEl = document.createElement("div");
+    noteEl.className = "signal-note-row";
+    noteEl.innerHTML = `<input type="text" class="signal-note-input" placeholder="Add note…" value="${existingNote.replace(/"/g, '&quot;')}" data-note-id="${noteId}" title="Trade journal note for this signal" />`;
+    noteEl.querySelector("input").addEventListener("change", (e) => {
+      saveSignalNote(noteId, e.target.value);
+    });
+
     card.title = isConfirmed
       ? `${isBull ? "BUY" : "SELL"} ${sym} — ${patternStr} confirmed\nAwaiting trade build…`
       : `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
@@ -4354,6 +4557,7 @@ function renderSignalBanner() {
     card.addEventListener("click", () => handleSignalCardClick(s));
     card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSignalCardClick(s); } });
 
+    card.appendChild(noteEl);
     UI.signalBannerTrack.appendChild(card);
   }
 
@@ -4575,8 +4779,12 @@ function updateScalpStatsUI() {
 function exportSignalsCSV() {
   const allSignals = getAggregatedSignalHistory();
   if (allSignals.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode"];
-  const rows = allSignals.map(s => headers.map(h => `"${s[h] ?? ""}"`).join(","));
+  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode", "note"];
+  const rows = allSignals.map(s => {
+    const noteId = `sig_${s.time}_${s.symbol || ""}`;
+    const note = getSignalNote(noteId) || "";
+    return headers.map(h => h === "note" ? `"${note.replace(/"/g, '""')}"` : `"${s[h] ?? ""}"`).join(",");
+  });
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -6349,6 +6557,8 @@ function connect() {
       monitorCustomStrategyOutcomes(c);
       monitorSessionRangeTradeOutcome(c);
       monitorNyOpenRangeTradeOutcome(c);
+      /* Feature 5: update BOS/ChoCH markers on each new candle */
+      if (bosChochEnabled) detectBosChoch();
       drawChart();
     }
 
@@ -9351,6 +9561,8 @@ function processCustomStrategies() {
   processGridScalperMA();
   processFVGStrat();
   processMtfTopDown();
+  /* Feature 2: Orderblock (Strategy 12) */
+  if (orderblockEnabled && candles.length > 0) detectOrderblockStrategy(candles.length - 1);
 }
 
 /**
@@ -9365,6 +9577,10 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorGridScalperMAOutcomes(candle);
   monitorFVGStratOutcomes(candle);
   monitorMtfTopDownOutcomes(candle);
+  /* Feature 2: Orderblock */
+  monitorOrderblockOutcomes(candles.length - 1);
+  /* Feature 15: Multi-R ladder */
+  monitorMultiRLadder(candles.length - 1);
 }
 
 /* ================= MTF TOP-DOWN STRATEGY (Strategy 11) ================= */
@@ -12283,6 +12499,8 @@ function processCandle(idx) {
       }
       retestInfo = { candleIdx: idx };
       setPhase("INDECISION");
+      /* Feature 7: build divergence visual markers on retest */
+      if (divergenceVisualEnabled) buildDivergenceMarkers();
       addLog(`Retest detected at candle #${idx}${retestCount > 1 ? ` (retest #${retestCount})` : ""}`);
       /* Log RSI at retest */
       const rsi = getCurrentRSI();
@@ -12537,6 +12755,8 @@ function processCandle(idx) {
           return;
         }
         setPhase("TRADE");
+        /* Feature 15: reset multi-R hit levels for new trade */
+        multiRHitLevels = [];
         addLog(`${confirmPattern} at #${idx} — TRADE ENTRY`);
         /* Confluence score was already computed for the min gate check above */
         addLog(`Confluence score: ${confluenceScore}`);
@@ -12611,6 +12831,14 @@ function isBearishEngulfing(prev, curr) {
 
 /* ---- Trade setup builder ---- */
 function buildTrade(confirmCandle, confirmIdx) {
+  /* Feature 11: News pause gate — block new trades during high-impact events */
+  const pauseEvent = getNewsPauseEvent();
+  if (pauseEvent) {
+    addLog(`⛔ Trade BLOCKED by News Pause: ${pauseEvent.currency} ${pauseEvent.title} within ±${newsPauseMinutes}min window`);
+    showToast("News Pause Active", `Trading paused for: ${pauseEvent.currency} ${pauseEvent.title}`, "warning", 8000);
+    return;
+  }
+
   const riskVal   = parseFloat(UI.riskInput.value);
   const rewardVal = parseFloat(UI.rewardInput.value);
   const riskUnits  = (!isNaN(riskVal) && riskVal > 0) ? riskVal : 1;
@@ -13883,6 +14111,10 @@ function monitorTradeOutcome(candle) {
     updateStatsUI();
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
     sendTradeOutcomeTelegram(pending);
+    /* Feature 13: record confluence factor outcome for adaptive weighting */
+    if (adaptiveConfluenceEnabled && pending._confFactors) {
+      recordConfluenceOutcome(pending._confFactors, pending.result);
+    }
   }
 }
 
@@ -13918,6 +14150,514 @@ function getColors() {
     breakoutHighLine: "#22c55e", /* green for breakout high level */
     breakoutLowLine:  "#ef4444"  /* red for breakout low level */
   };
+}
+
+/* ===============================================================
+   FEATURE IMPLEMENTATIONS (17 enhancements)
+   =============================================================== */
+
+/* ---- Feature 2: Strategy 12 — Orderblock Detection ---- */
+function detectOrderblockStrategy(idx) {
+  if (!orderblockEnabled) return;
+  if (idx < ORDERBLOCK_LOOKBACK + 3) return;
+  if (idx - lastOrderblockIdx < ORDERBLOCK_COOLDOWN) return;
+  if (atrValue <= 0) return;
+  const c = candles[idx];
+  if (!c) return;
+
+  for (let impStart = idx - 1; impStart >= Math.max(1, idx - 15); impStart--) {
+    const impulseLen = idx - impStart + 1;
+    if (impulseLen < 3) continue;
+    let bullCount = 0, bearCount = 0, strongCount = 0, totalMove = 0;
+    for (let j = impStart; j <= idx; j++) {
+      const ic = candles[j]; if (!ic) break;
+      const body = Math.abs(ic.close - ic.open);
+      const rng  = ic.high - ic.low;
+      if (ic.close > ic.open) bullCount++; else bearCount++;
+      if (rng > 0 && body / rng >= 0.50) strongCount++;
+      totalMove += rng;
+    }
+    const dir = bullCount >= Math.ceil(impulseLen * 0.7) ? "BULL"
+              : bearCount >= Math.ceil(impulseLen * 0.7) ? "BEAR" : null;
+    if (!dir) continue;
+    if (strongCount < Math.ceil(impulseLen * 0.5)) continue;
+    if (totalMove < 1.5 * atrValue) continue;
+
+    /* Last opposing candle before impulse start = orderblock */
+    let obIdx = impStart - 1;
+    while (obIdx >= Math.max(0, impStart - 5)) {
+      const oc = candles[obIdx]; if (!oc) break;
+      if (dir === "BULL" && oc.close < oc.open) break;
+      if (dir === "BEAR" && oc.close > oc.open) break;
+      obIdx--;
+    }
+    if (obIdx < 0) continue;
+    const obCandle = candles[obIdx];
+    if (!obCandle) continue;
+
+    /* Current price must be retesting the OB zone */
+    const zoneTol = atrValue * 0.3;
+    const inZone = c.close >= obCandle.low - zoneTol && c.close <= obCandle.high + zoneTol;
+    if (!inZone) continue;
+
+    if (minConfluenceEnabled) {
+      if (computeConfluenceScore(dir, c.close, idx) < minConfluenceValue) continue;
+    }
+
+    const sl = dir === "BULL" ? obCandle.low  - atrValue * 0.3
+                              : obCandle.high + atrValue * 0.3;
+    const risk = Math.abs(c.close - sl);
+    if (risk <= 0 || risk > ORDERBLOCK_MAX_SL_ATR * atrValue) continue;
+    const rr = 2.0;
+    const tp = dir === "BULL" ? c.close + risk * rr : c.close - risk * rr;
+
+    const signal = {
+      dir, entry: c.close, sl, tp, rr,
+      obHigh: obCandle.high, obLow: obCandle.low, obIdx, candleIdx: idx,
+      symbol: getActiveSymbol(), epoch: c.epoch,
+      type: "orderblock", result: "PENDING", strategyName: "orderblock",
+      _stratOutcomeSent: false,
+      _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing)
+    };
+    orderblockHistory.unshift(signal);
+    if (orderblockHistory.length > ORDERBLOCK_MAX_HISTORY) orderblockHistory.pop();
+    lastOrderblockIdx = idx;
+
+    addLog(`🏦 Orderblock ${dir} @ #${idx}: OB [${fmt(obCandle.low,4)}–${fmt(obCandle.high,4)}] entry ${fmt(c.close,4)} SL ${fmt(sl,4)} TP ${fmt(tp,4)}`);
+    showToast(`🏦 Orderblock ${dir === "BULL" ? "▲" : "▼"}`, `Entry ${fmt(c.close,4)} | SL ${fmt(sl,4)} | TP ${fmt(tp,4)}`, "info", 8000);
+    if (!_historicalProcessing) {
+      addStrategyTickerItem({ dir, type: "orderblock", label: `🏦 OB ${dir}`, entry: c.close, epoch: c.epoch });
+      if (telegramStrategyAutoSend) setTimeout(() => sendStrategyTelegramAlert(signal), CHART_RENDER_DELAY_MS);
+    }
+    if (autoTradeStrategyEnabled && autoTradeOrderblock) triggerAutoTrade(signal, "orderblock");
+    updateStrategyBadges();
+    drawChart();
+    break;
+  }
+}
+
+function monitorOrderblockOutcomes(idx) {
+  if (!orderblockEnabled || orderblockHistory.length === 0) return;
+  for (const s of orderblockHistory) {
+    if (s.result !== "PENDING") continue;
+    if (s.candleIdx >= idx) continue;
+    const c = candles[idx]; if (!c) continue;
+    let result = null;
+    if (s.dir === "BULL") { if (c.high >= s.tp) result = "WIN"; if (c.low  <= s.sl) result = "LOSS"; }
+    else                  { if (c.low  <= s.tp) result = "WIN"; if (c.high >= s.sl) result = "LOSS"; }
+    if (result) {
+      s.result = result;
+      addLog(`🏦 Orderblock ${s.dir} → ${result} (#${idx})`);
+      if (!_historicalProcessing && telegramStrategyOutcomeSend && !s._stratOutcomeSent) {
+        s._stratOutcomeSent = true;
+        sendStrategyOutcomeTelegram(s);
+      }
+      if (adaptiveConfluenceEnabled) recordConfluenceOutcome(s._confFactors || [], result);
+      updateStatsUI();
+    }
+  }
+}
+
+/* ---- Feature 5: BOS / ChoCH Detection ---- */
+function detectBosChoch() {
+  if (!bosChochEnabled || candles.length < 20) { bosChochMarkers = []; return; }
+  bosChochMarkers = [];
+  const lookback = Math.min(candles.length, 100);
+  const start = candles.length - lookback;
+  const N = 3;
+  const swingHighs = [], swingLows = [];
+  for (let i = start + N; i < candles.length - N; i++) {
+    const c = candles[i];
+    let isH = true, isL = true;
+    for (let k = 1; k <= N; k++) {
+      if (candles[i-k].high >= c.high || candles[i+k].high >= c.high) isH = false;
+      if (candles[i-k].low  <= c.low  || candles[i+k].low  <= c.low)  isL = false;
+    }
+    if (isH) swingHighs.push({ idx: i, price: c.high });
+    if (isL) swingLows.push({ idx: i, price: c.low });
+  }
+  if (swingHighs.length < 2 || swingLows.length < 2) return;
+  const inUptrend   = swingHighs[swingHighs.length-1].price > swingHighs[swingHighs.length-2].price
+                   && swingLows[swingLows.length-1].price   > swingLows[swingLows.length-2].price;
+  const inDowntrend = swingHighs[swingHighs.length-1].price < swingHighs[swingHighs.length-2].price
+                   && swingLows[swingLows.length-1].price   < swingLows[swingLows.length-2].price;
+  for (let i = Math.max(start, candles.length - 40); i < candles.length; i++) {
+    const c = candles[i];
+    const lastSH = swingHighs[swingHighs.length - 1];
+    const lastSL = swingLows[swingLows.length - 1];
+    if (lastSH.idx < i && c.close > lastSH.price && !bosChochMarkers.find(m => m.idx === i && m.dir === "BULL")) {
+      bosChochMarkers.push({ idx: i, type: inUptrend ? "BOS" : "ChoCH", dir: "BULL", price: lastSH.price });
+    }
+    if (lastSL.idx < i && c.close < lastSL.price && !bosChochMarkers.find(m => m.idx === i && m.dir === "BEAR")) {
+      bosChochMarkers.push({ idx: i, type: inDowntrend ? "BOS" : "ChoCH", dir: "BEAR", price: lastSL.price });
+    }
+  }
+  if (bosChochMarkers.length > 6) bosChochMarkers = bosChochMarkers.slice(-6);
+}
+
+/* ---- Feature 7: Divergence visual marker builder ---- */
+function buildDivergenceMarkers() {
+  divergenceMarkers = [];
+  if (!divergenceVisualEnabled || !breakout || !retestInfo) return;
+  if (rsiValues.length < 10) return;
+  const boIdx = breakout.candleIdx, rtIdx = retestInfo.candleIdx;
+  if (boIdx >= rsiValues.length || rtIdx >= rsiValues.length) return;
+  const rsiBO = rsiValues[boIdx], rsiRT = rsiValues[rtIdx];
+  if (rsiBO == null || rsiRT == null) return;
+  divergenceMarkers.push({
+    boIdx, rtIdx, dir: breakout.dir,
+    rsiBO, rsiRT,
+    priceBO: candles[boIdx].close,
+    priceRT: candles[rtIdx].close
+  });
+}
+
+/* ---- Feature 4: Named Settings Profiles ---- */
+function loadProfiles() {
+  try {
+    const raw = localStorage.getItem(PROFILES_LS_KEY);
+    if (raw) savedProfiles = JSON.parse(raw);
+  } catch(e) { savedProfiles = {}; }
+}
+function _persistProfiles() {
+  try { localStorage.setItem(PROFILES_LS_KEY, JSON.stringify(savedProfiles)); }
+  catch(e) { addLog("⚠️ Could not save profiles to storage"); }
+}
+function saveProfile(name) {
+  if (!name || !name.trim()) return;
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + "settings");
+    savedProfiles[name.trim()] = raw ? JSON.parse(raw) : {};
+    _persistProfiles();
+    renderProfilesList();
+    addLog(`💾 Profile saved: "${name.trim()}"`);
+    showToast("Profile Saved", `"${name.trim()}" saved successfully.`, "success", 3000);
+  } catch(e) { addLog("⚠️ Profile save failed"); }
+}
+function loadProfile(name) {
+  if (!name || !savedProfiles[name]) return;
+  try {
+    localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(savedProfiles[name]));
+    restoreSettings();
+    addLog(`📂 Profile loaded: "${name}"`);
+    showToast("Profile Loaded", `"${name}" applied. Reconnect to use new settings.`, "info", 5000);
+  } catch(e) { addLog("⚠️ Profile load failed"); }
+}
+function deleteProfile(name) {
+  if (!name || !savedProfiles[name]) return;
+  delete savedProfiles[name];
+  _persistProfiles();
+  renderProfilesList();
+  addLog(`🗑 Profile deleted: "${name}"`);
+}
+function renderProfilesList() {
+  const list = document.getElementById("profilesList");
+  if (!list) return;
+  list.innerHTML = "";
+  const names = Object.keys(savedProfiles);
+  if (names.length === 0) {
+    list.innerHTML = '<span class="hint" style="font-size:0.75rem;opacity:0.6;">No saved profiles</span>';
+    return;
+  }
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "profile-row";
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "profile-name";
+    nameSpan.textContent = name;
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "profile-btn profile-btn-load";
+    loadBtn.textContent = "Load";
+    loadBtn.addEventListener("click", () => loadProfile(name));
+    const delBtn = document.createElement("button");
+    delBtn.className = "profile-btn profile-btn-del";
+    delBtn.textContent = "✕";
+    delBtn.addEventListener("click", () => { if (confirm(`Delete profile "${name}"?`)) deleteProfile(name); });
+    row.appendChild(nameSpan);
+    row.appendChild(loadBtn);
+    row.appendChild(delBtn);
+    list.appendChild(row);
+  }
+}
+
+/* ---- Feature 12: Signal Notes ---- */
+function loadSignalNotes() {
+  try {
+    const raw = localStorage.getItem(SIGNAL_NOTES_LS_KEY);
+    if (raw) signalNotes = JSON.parse(raw);
+  } catch(e) { signalNotes = {}; }
+}
+function saveSignalNote(id, note) {
+  if (!id) return;
+  if (note && note.trim()) signalNotes[id] = note.trim();
+  else delete signalNotes[id];
+  try { localStorage.setItem(SIGNAL_NOTES_LS_KEY, JSON.stringify(signalNotes)); }
+  catch(e) {}
+}
+function getSignalNote(id) { return signalNotes[id] || ""; }
+
+/* ---- Feature 3: Equity Curve Chart ---- */
+function drawEquityCurve() {
+  const canvas = document.getElementById("equityCurveCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = rect.width  || 280;
+  const H = rect.height || 100;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = currentTheme === "light" ? "#f8fafc" : "#0f172a";
+  ctx.fillRect(0, 0, W, H);
+
+  const resolved = autoTradeHistory.filter(e => (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number");
+  if (resolved.length < 2) {
+    ctx.fillStyle = currentTheme === "light" ? "#94a3b8" : "#64748b";
+    ctx.font = "11px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Not enough trade data yet", W / 2, H / 2);
+    return;
+  }
+  const pl = [];
+  let cumPL = 0;
+  for (const e of resolved) { cumPL += e.profit; pl.push(cumPL); }
+  const maxPL = Math.max(...pl, 0);
+  const minPL = Math.min(...pl, 0);
+  const range = (maxPL - minPL) || 1;
+  const mL = 6, mR = 6, mT = 10, mB = 24;
+  const cW = W - mL - mR, cH = H - mT - mB;
+  const xOf = i => mL + (i / (pl.length - 1)) * cW;
+  const yOf = v => mT + (1 - (v - minPL) / range) * cH;
+  const zy = yOf(0);
+  ctx.strokeStyle = "rgba(148,163,184,0.2)";
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(mL, zy); ctx.lineTo(W - mR, zy); ctx.stroke();
+  ctx.setLineDash([]);
+  const lastPL = pl[pl.length - 1];
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < pl.length; i++) { const x = xOf(i), y = yOf(pl[i]); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.strokeStyle = lastPL >= 0 ? "#22c55e" : "#ef4444";
+  ctx.stroke();
+  ctx.lineTo(xOf(pl.length-1), zy); ctx.lineTo(xOf(0), zy); ctx.closePath();
+  const grad = ctx.createLinearGradient(0, mT, 0, mT + cH);
+  if (lastPL >= 0) { grad.addColorStop(0, "rgba(34,197,94,0.22)"); grad.addColorStop(1, "rgba(34,197,94,0.01)"); }
+  else             { grad.addColorStop(0, "rgba(239,68,68,0.01)");  grad.addColorStop(1, "rgba(239,68,68,0.18)"); }
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.font = "bold 10px Arial"; ctx.textAlign = "right";
+  ctx.fillStyle = lastPL >= 0 ? "#22c55e" : "#ef4444";
+  ctx.fillText(`$${lastPL >= 0 ? "+" : ""}${fmt(lastPL, 2)}`, W - mR - 2, mT + 12);
+  /* Metrics */
+  let peak = 0, maxDD = 0, totalWin = 0, totalLoss = 0, wins = 0, losses = 0;
+  for (const v of pl) { if (v > peak) peak = v; const dd = peak - v; if (dd > maxDD) maxDD = dd; }
+  for (const e of resolved) { if (e.profit > 0) { totalWin += e.profit; wins++; } else { totalLoss += Math.abs(e.profit); losses++; } }
+  const pf       = totalLoss > 0 ? totalWin / totalLoss : Infinity;
+  const winRate  = resolved.length > 0 ? wins / resolved.length : 0;
+  const avgWin   = wins   > 0 ? totalWin  / wins   : 0;
+  const avgLoss  = losses > 0 ? totalLoss / losses : 0;
+  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
+  ctx.font = "8.5px Arial"; ctx.textAlign = "left";
+  ctx.fillStyle = currentTheme === "light" ? "#64748b" : "#94a3b8";
+  ctx.fillText(`DD:$${fmt(maxDD,2)}`, mL,       H - 6);
+  ctx.fillText(`PF:${pf === Infinity ? "∞" : fmt(pf,2)}`, mL + 75,  H - 6);
+  ctx.fillText(`E:${expectancy >= 0 ? "+" : ""}$${fmt(expectancy,2)}`, mL + 145, H - 6);
+}
+
+/* ---- Feature 16: P&L Breakdown ---- */
+function renderPLBreakdown() {
+  const container = document.getElementById("plBreakdownTable");
+  if (!container) return;
+  const byStrategy = {}, bySymbol = {};
+  for (const e of autoTradeHistory) {
+    if (e.result !== "WIN" && e.result !== "LOSS") continue;
+    const profit = typeof e.profit === "number" ? e.profit : 0;
+    const stratKey = e.strategyName || e.source || "breakout";
+    if (!byStrategy[stratKey]) byStrategy[stratKey] = { wins: 0, losses: 0, pl: 0 };
+    if (e.result === "WIN") byStrategy[stratKey].wins++; else byStrategy[stratKey].losses++;
+    byStrategy[stratKey].pl += profit;
+    const sym = e.symbol || "N/A";
+    if (!bySymbol[sym]) bySymbol[sym] = { wins: 0, losses: 0, pl: 0 };
+    if (e.result === "WIN") bySymbol[sym].wins++; else bySymbol[sym].losses++;
+    bySymbol[sym].pl += profit;
+  }
+  const makeTable = (title, data) => {
+    const keys = Object.keys(data);
+    if (keys.length === 0) return "";
+    const rows = keys.map(k => {
+      const s = data[k];
+      const total = s.wins + s.losses;
+      const wr = total > 0 ? Math.round(s.wins / total * 100) : 0;
+      const plColor = s.pl >= 0 ? "#22c55e" : "#ef4444";
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      return `<div class="pl-breakdown-row"><span class="pl-breakdown-name">${label}</span><span>${s.wins}</span><span>${s.losses}</span><span>${wr}%</span><span style="color:${plColor};font-weight:600">${s.pl >= 0 ? "+" : ""}$${fmt(s.pl,2)}</span></div>`;
+    }).join("");
+    return `<div class="pl-breakdown-group"><div class="pl-breakdown-heading">${title}</div><div class="pl-breakdown-header"><span></span><span>W</span><span>L</span><span>Win%</span><span>P/L</span></div>${rows}</div>`;
+  };
+  const html = makeTable("By Strategy", byStrategy) + makeTable("By Symbol", bySymbol);
+  container.innerHTML = html || '<span class="hint" style="font-size:0.75rem;opacity:0.6;">No completed auto-trades yet</span>';
+}
+
+/* ---- Feature 13: Adaptive Confluence Weighting ---- */
+function recordConfluenceOutcome(factors, result) {
+  if (!adaptiveConfluenceEnabled || !factors || !factors.length) return;
+  for (const factor of factors) {
+    if (!confluenceFactorStats[factor]) confluenceFactorStats[factor] = { wins: 0, losses: 0 };
+    if (result === "WIN")  confluenceFactorStats[factor].wins++;
+    if (result === "LOSS") confluenceFactorStats[factor].losses++;
+  }
+  try { localStorage.setItem(LS_PREFIX + "confStats", JSON.stringify(confluenceFactorStats)); } catch(e) {}
+}
+function loadConfluenceStats() {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + "confStats");
+    if (raw) confluenceFactorStats = JSON.parse(raw);
+  } catch(e) { confluenceFactorStats = {}; }
+}
+function getConfluenceFactorWeight(factor) {
+  const stats = confluenceFactorStats[factor];
+  if (!stats) return 0.5;
+  const total = stats.wins + stats.losses;
+  if (total < CONF_WEIGHT_MIN_SAMPLES) return 0.5;
+  return stats.wins / total;
+}
+function renderAdaptiveConfluenceTable() {
+  const container = document.getElementById("adaptiveConfluenceTable");
+  if (!container) return;
+  const factors = Object.keys(confluenceFactorStats);
+  if (factors.length === 0) {
+    container.innerHTML = '<span class="hint" style="font-size:0.75rem;opacity:0.6;">No data yet — updates after 10+ trades per factor</span>';
+    return;
+  }
+  container.innerHTML = factors.map(f => {
+    const s = confluenceFactorStats[f];
+    const total = s.wins + s.losses;
+    const rate = total > 0 ? (s.wins / total * 100).toFixed(0) : "--";
+    const barPct = Math.round(getConfluenceFactorWeight(f) * 100);
+    const barColor = barPct >= 60 ? "#22c55e" : barPct >= 40 ? "#f59e0b" : "#ef4444";
+    return `<div class="conf-weight-row"><span class="conf-weight-name">${f}</span><span class="conf-weight-wr">${rate}% (${total})</span><div class="conf-weight-bar-bg"><div class="conf-weight-bar" style="width:${barPct}%;background:${barColor}"></div></div></div>`;
+  }).join("");
+}
+
+/* ---- Feature 1: Backtesting Engine ---- */
+function startBacktest() {
+  if (backtestMode) stopBacktest();
+  if (candles.length < 10) {
+    showToast("Backtest Error", "Need at least 10 candles. Connect and load data first.", "warning", 5000);
+    return;
+  }
+  _backtestCandles = candles.slice();
+  backtestIdx = 0;
+  backtestMode = true;
+  multiRHitLevels = [];
+  resetIndicator();
+  addLog(`🔁 Backtest started: ${_backtestCandles.length} candles @ ${backtestSpeedMs}ms/step`);
+  showToast("Backtest Started", `Replaying ${_backtestCandles.length} candles at ${backtestSpeedMs}ms/step.`, "info", 5000);
+  updateBacktestUI();
+  backtestInterval = setInterval(() => {
+    if (backtestIdx >= _backtestCandles.length) { stopBacktest(); return; }
+    candles = _backtestCandles.slice(0, backtestIdx + 1);
+    _historicalProcessing = true;
+    try { processAllCandles(); } finally { _historicalProcessing = false; }
+    backtestIdx++;
+    const pct = Math.round(backtestIdx / _backtestCandles.length * 100);
+    const el = document.getElementById("backtestProgress");
+    if (el) el.value = pct;
+    const lbl = document.getElementById("backtestProgressLabel");
+    if (lbl) lbl.textContent = `${pct}%  (${backtestIdx} / ${_backtestCandles.length})`;
+    drawChart();
+    updateStatsUI();
+  }, backtestSpeedMs);
+}
+function stopBacktest() {
+  if (backtestInterval) { clearInterval(backtestInterval); backtestInterval = null; }
+  backtestMode = false;
+  if (_backtestCandles.length > 0) { candles = _backtestCandles.slice(); _backtestCandles = []; }
+  addLog("🔁 Backtest stopped");
+  updateBacktestUI();
+  drawChart();
+  updateStatsUI();
+}
+function updateBacktestUI() {
+  const startBtn = document.getElementById("backtestStartBtn");
+  const stopBtn  = document.getElementById("backtestStopBtn");
+  if (startBtn) startBtn.disabled = backtestMode;
+  if (stopBtn)  stopBtn.disabled  = !backtestMode;
+  const statusEl = document.getElementById("backtestStatus");
+  if (statusEl) statusEl.textContent = backtestMode ? `Running… (${backtestIdx} / ${_backtestCandles.length})` : "Idle";
+}
+
+/* ---- Feature 15: Multi-R Partial Exit Ladder ---- */
+function monitorMultiRLadder(idx) {
+  if (!multiRLadderEnabled || !trade || multiRLadder.length === 0) return;
+  const c = candles[idx]; if (!c) return;
+  const risk = Math.abs(trade.entry - trade.sl); if (risk <= 0) return;
+  for (let li = 0; li < multiRLadder.length; li++) {
+    if (multiRHitLevels.includes(li)) continue;
+    const level = multiRLadder[li];
+    const target = trade.dir === "BULL" ? trade.entry + risk * level.r : trade.entry - risk * level.r;
+    const hit = trade.dir === "BULL" ? c.high >= target : c.low <= target;
+    if (!hit) continue;
+    multiRHitLevels.push(li);
+    const isLast = (li === multiRLadder.length - 1);
+    addLog(`📊 Multi-R ${level.r}R hit → exit ${level.pct}% @ ${fmt(target,4)}${isLast ? " (FULL EXIT)" : " (partial, SL → BE)"}`);
+    showToast(`📊 ${level.r}R Target Hit`, `Exit ${level.pct}% at ${fmt(target,4)}`, isLast ? "trade" : "success", 6000);
+    if (isLast) {
+      trade = null; multiRHitLevels = [];
+      setPhase("WAITING"); drawChart();
+    } else if (li === 0 && trade) {
+      trade.sl = trade.entry;
+      addLog("📊 Multi-R: SL moved to breakeven");
+      drawChart();
+    }
+  }
+}
+
+/* ---- Feature 11: Economic Calendar / News Pause ---- */
+async function fetchNewsCalendar() {
+  const now = Date.now();
+  if (now - _newsCacheFetched < NEWS_CACHE_EXPIRY_MS && newsEvents.length > 0) return;
+  try {
+    const res = await fetch("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+      { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data)) return;
+    newsEvents = data
+      .filter(e => e.impact === "High")
+      .map(e => ({ time: new Date(e.date).getTime(), title: e.title || "", currency: e.country || "", impact: e.impact || "" }))
+      .filter(e => !isNaN(e.time));
+    _newsCacheFetched = now;
+    addLog(`📅 News calendar: ${newsEvents.length} high-impact events loaded`);
+    drawChart();
+  } catch(e) {
+    console.info("News calendar fetch skipped:", e.message);
+  }
+}
+function getNewsPauseEvent() {
+  if (!newsPauseEnabled || newsEvents.length === 0) return null;
+  const now = Date.now();
+  const window = newsPauseMinutes * 60 * 1000;
+  return newsEvents.find(ev => Math.abs(now - ev.time) <= window) || null;
+}
+
+/* ---- Feature 8: Multi-Symbol Scanner ---- */
+function updateScannerUI() {
+  if (!scannerEnabled) return;
+  const grid = document.getElementById("scannerGrid");
+  if (!grid) return;
+  const rows = scannerSymbols.map(sym => {
+    const panel = multiPanels.get(sym);
+    const ph    = panel ? (panel.state && panel.state.phase ? panel.state.phase : "WAITING") : "WAITING";
+    const badgeClass = { TRADE: "enabled", BREAKOUT: "warning", RETEST: "warning", CONFIRM: "enabled" }[ph] || "disabled";
+    return `<div class="scanner-cell ${badgeClass.toLowerCase()}-cell">
+      <span class="scanner-symbol">${sym}</span>
+      <span class="scanner-phase status-badge ${badgeClass}">${ph}</span>
+    </div>`;
+  });
+  grid.innerHTML = rows.join("") || '<span class="hint">No symbols configured</span>';
 }
 
 function drawChart() {
@@ -14300,6 +15040,86 @@ function drawChart() {
     ctx.fillText("CONFIRM", cx1, cy1 - 3);
   }
 
+  /* ---- Feature 17: Session Heatmap — coloured bands on chart timeline ---- */
+  if (sessionHeatmapEnabled && candles.length > 0) {
+    const sessions = [
+      { label: "Asian",   start: 0,  end: 9,  color: "rgba(59,130,246,0.06)"  },
+      { label: "London",  start: 7,  end: 16, color: "rgba(16,185,129,0.07)" },
+      { label: "NY",      start: 12, end: 21, color: "rgba(249,115,22,0.06)"  },
+      { label: "Overlap", start: 12, end: 16, color: "rgba(234,179,8,0.08)"   }
+    ];
+    ctx.save();
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      const hr = new Date(c.epoch * 1000).getUTCHours();
+      let bandColor = null;
+      if (hr >= 12 && hr < 16) bandColor = "rgba(234,179,8,0.08)";       /* overlap – highest priority */
+      else if (hr >= 12 && hr < 21) bandColor = "rgba(249,115,22,0.06)"; /* NY */
+      else if (hr >= 7  && hr < 16) bandColor = "rgba(16,185,129,0.07)"; /* London */
+      else if (hr >= 0  && hr < 9)  bandColor = "rgba(59,130,246,0.06)"; /* Asian */
+      if (!bandColor) continue;
+      const bx = xOf(i) - candleW / 2;
+      ctx.fillStyle = bandColor;
+      ctx.fillRect(bx, marginTop, candleW, chartH);
+    }
+    /* Session legend in bottom-right of chart */
+    const legendItems = [
+      { label: "Asian",   color: "rgba(59,130,246,0.5)"  },
+      { label: "London",  color: "rgba(16,185,129,0.5)" },
+      { label: "NY",      color: "rgba(249,115,22,0.5)"  },
+      { label: "Overlap", color: "rgba(234,179,8,0.7)"   }
+    ];
+    ctx.font = "8px Arial";
+    let lx = marginLeft + 6;
+    const ly = marginTop + chartH - 8;
+    for (const li of legendItems) {
+      ctx.fillStyle = li.color;
+      ctx.fillRect(lx, ly - 6, 10, 8);
+      ctx.fillStyle = currentTheme === "light" ? "#334155" : "#94a3b8";
+      ctx.fillText(li.label, lx + 12, ly);
+      lx += ctx.measureText(li.label).width + 22;
+    }
+    ctx.restore();
+  }
+
+  /* ---- Feature 11: News event vertical lines on chart ---- */
+  if (newsEvents.length > 0 && candles.length > 0) {
+    const firstEpoch = candles[0].epoch * 1000;
+    const lastEpoch  = candles[candles.length - 1].epoch * 1000;
+    ctx.save();
+    for (const ev of newsEvents) {
+      if (ev.time < firstEpoch - 3600000 || ev.time > lastEpoch + 3600000) continue;
+      /* Find nearest candle */
+      const evSec = ev.time / 1000;
+      let nearest = 0;
+      for (let i = 1; i < candles.length; i++) {
+        if (Math.abs(candles[i].epoch - evSec) < Math.abs(candles[nearest].epoch - evSec)) nearest = i;
+      }
+      const nx = xOf(nearest);
+      ctx.strokeStyle = "rgba(239,68,68,0.55)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(nx, marginTop);
+      ctx.lineTo(nx, marginTop + chartH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = "bold 8px Arial";
+      ctx.fillStyle = "rgba(239,68,68,0.9)";
+      ctx.textAlign = "center";
+      ctx.fillText("📅", nx, marginTop + 10);
+      const isCurrent = Math.abs(Date.now() - ev.time) <= newsPauseMinutes * 60000;
+      if (isCurrent) {
+        ctx.fillStyle = "rgba(239,68,68,0.85)";
+        ctx.font = "bold 8px Arial";
+        const evLabel = (ev.currency || "") + " " + (ev.title || "").substring(0, 15);
+        ctx.fillText(evLabel, nx, marginTop + 20);
+      }
+    }
+    ctx.textAlign = "left";
+    ctx.restore();
+  }
+
   /* ---- Draw candles ---- */
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
@@ -14320,6 +15140,44 @@ function drawChart() {
 
     ctx.fillStyle = color;
     ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+  }
+
+  /* ---- Feature 6: Candle pattern annotations ---- */
+  if (candleAnnotationsEnabled && candles.length > 2) {
+    ctx.save();
+    for (let i = 2; i < candles.length; i++) {
+      const c  = candles[i];
+      const cp = candles[i - 1];
+      const cp2 = candles[i - 2];
+      const x  = xOf(i);
+      let label = null, labelColor = "#fbbf24", above = true;
+      const body   = Math.abs(c.close - c.open);
+      const rng    = c.high - c.low;
+      const upTail = c.close >= c.open ? rng - (c.close - c.open) - (c.high - c.close) : rng - (c.open - c.close) - (c.high - c.open);
+      const dnTail = c.close >= c.open ? c.open - c.low : c.close - c.low;
+      /* Doji */
+      if (rng > 0 && body / rng < DOJI_BODY_RATIO) { label = "⊙"; labelColor = "#94a3b8"; above = true; }
+      /* Pin bar / Hammer */
+      else if (body > 0 && dnTail >= PIN_BAR_TAIL_RATIO * body && (rng - dnTail - body) < body) { label = "🔨"; labelColor = c.close >= c.open ? "#22c55e" : "#ef4444"; above = false; }
+      /* Shooting star */
+      else if (body > 0 && (c.high - Math.max(c.open, c.close)) >= PIN_BAR_TAIL_RATIO * body) { label = "⭐"; labelColor = "#ef4444"; above = true; }
+      /* Bullish engulfing */
+      else if (c.close > c.open && cp.close < cp.open && c.close > cp.open && c.open < cp.close) { label = "▲"; labelColor = "#22c55e"; above = false; }
+      /* Bearish engulfing */
+      else if (c.close < c.open && cp.close > cp.open && c.close < cp.open && c.open > cp.close) { label = "▼"; labelColor = "#ef4444"; above = true; }
+      /* Inside bar */
+      else if (c.high < cp.high && c.low > cp.low) { label = "IB"; labelColor = "#a78bfa"; above = false; }
+      if (!label) continue;
+      ctx.font = label.length > 2 ? "bold 9px Arial" : "bold 11px Arial";
+      ctx.fillStyle = labelColor;
+      ctx.textAlign = "center";
+      ctx.globalAlpha = 0.85;
+      const labelY = above ? yOf(c.high) - 10 : yOf(c.low) + 14;
+      ctx.fillText(label, x, labelY);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.restore();
   }
 
   /* ---- EMA overlays ---- */
@@ -14836,6 +15694,163 @@ function drawChart() {
     }
   }
 
+  /* ---- Feature 2: Orderblock zones on chart ---- */
+  if (orderblockEnabled && orderblockHistory.length > 0) {
+    for (const s of orderblockHistory) {
+      if (s.candleIdx < 0 || s.candleIdx >= candles.length) continue;
+      const sx = xOf(s.candleIdx);
+      const zStartX = Math.max(marginLeft, sx - candleW * 10);
+      const zEndX   = Math.min(W - marginRight, sx + candleW * 10);
+      ctx.save();
+      const zTopY    = yOf(s.obHigh);
+      const zBotY    = yOf(s.obLow);
+      ctx.fillStyle = s.dir === "BULL" ? "rgba(59,130,246,0.10)" : "rgba(168,85,247,0.10)";
+      ctx.fillRect(zStartX, zTopY, zEndX - zStartX, zBotY - zTopY);
+      ctx.strokeStyle = s.dir === "BULL" ? "#3b82f6" : "#a855f7";
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([3,2]);
+      ctx.strokeRect(zStartX, zTopY, zEndX - zStartX, zBotY - zTopY);
+      ctx.setLineDash([]);
+      ctx.font = "bold 8px Arial";
+      ctx.fillStyle = s.dir === "BULL" ? "#3b82f6" : "#a855f7";
+      ctx.textAlign = "left";
+      ctx.fillText("OB", zStartX + 2, zTopY - 2);
+      ctx.restore();
+    }
+  }
+
+  /* ---- Feature 5: BOS / ChoCH markers ---- */
+  if (bosChochEnabled && bosChochMarkers.length > 0) {
+    ctx.save();
+    for (const m of bosChochMarkers) {
+      if (m.idx < 0 || m.idx >= candles.length) continue;
+      const mx = xOf(m.idx);
+      const myPrice = m.price;
+      const my = yOf(myPrice);
+      const isBull = m.dir === "BULL";
+      const labelColor = m.type === "BOS" ? (isBull ? "#22c55e" : "#ef4444") : "#f59e0b";
+      /* Horizontal dashed line at the broken level */
+      ctx.strokeStyle = labelColor;
+      ctx.lineWidth = 0.8;
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(Math.max(marginLeft, mx - candleW * 10), my);
+      ctx.lineTo(Math.min(W - marginRight, mx + candleW * 2), my);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      /* Label badge */
+      ctx.font = "bold 9px Arial";
+      const ltext = m.type;
+      const ltw = ctx.measureText(ltext).width + 6;
+      ctx.globalAlpha = 0.88;
+      ctx.fillStyle = labelColor;
+      ctx.fillRect(mx - ltw / 2, my - (isBull ? 18 : 4), ltw, 13);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(ltext, mx, my - (isBull ? 8 : 14));
+      ctx.globalAlpha = 1;
+      ctx.textAlign = "left";
+    }
+    ctx.restore();
+  }
+
+  /* ---- Feature 10: Fibonacci Extension levels ---- */
+  if (fibExtensionsEnabled && breakout && retestInfo && trade) {
+    const swingLow  = breakout.dir === "BULL" ? breakout.level : retestInfo.candleIdx >= 0 ? candles[retestInfo.candleIdx].low  : null;
+    const swingHigh = breakout.dir === "BEAR" ? breakout.level : retestInfo.candleIdx >= 0 ? candles[retestInfo.candleIdx].high : null;
+    const move = breakout.dir === "BULL"
+      ? (swingLow != null && swingHigh != null ? Math.abs(trade.entry - breakout.level) : null)
+      : (swingLow != null && swingHigh != null ? Math.abs(trade.entry - breakout.level) : null);
+    if (move != null && move > 0) {
+      ctx.save();
+      for (const ext of FIB_EXTENSIONS) {
+        const extPrice = breakout.dir === "BULL"
+          ? breakout.level + move * ext
+          : breakout.level - move * ext;
+        const ey = yOf(extPrice);
+        if (ey < marginTop || ey > marginTop + chartH) continue;
+        const opacity = ext <= 1.618 ? 0.7 : 0.4;
+        ctx.strokeStyle = `rgba(251,191,36,${opacity})`;
+        ctx.lineWidth = 0.8;
+        ctx.setLineDash([3,3]);
+        ctx.beginPath();
+        ctx.moveTo(marginLeft, ey);
+        ctx.lineTo(W - marginRight, ey);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "bold 8px Arial";
+        ctx.fillStyle = `rgba(251,191,36,${opacity + 0.2})`;
+        ctx.textAlign = "right";
+        const activeSym = getActiveSymbol();
+        ctx.fillText(`${ext}  ${fmtPrice(extPrice, activeSym)}`, W - marginRight - 4, ey - 2);
+      }
+      ctx.textAlign = "left";
+      ctx.restore();
+    }
+  }
+
+  /* ---- Feature 9: Volume Profile (range-based histogram) ---- */
+  if (volumeProfileEnabled && candles.length > 0) {
+    const buckets = 30;
+    const counts = new Array(buckets).fill(0);
+    const pMin = Math.min(...candles.map(c => c.low));
+    const pMax = Math.max(...candles.map(c => c.high));
+    const pRange = (pMax - pMin) || 1;
+    for (const c of candles) {
+      const mid = (c.high + c.low) / 2;
+      const bucket = Math.min(buckets - 1, Math.floor((mid - pMin) / pRange * buckets));
+      counts[bucket]++;
+    }
+    const maxCount = Math.max(...counts, 1);
+    const vpWidth = Math.min(60, chartW * 0.08);
+    const vpX = W - marginRight - vpWidth - 2;
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    for (let b = 0; b < buckets; b++) {
+      const bPrice = pMin + (b / buckets) * pRange;
+      const bY = yOf(bPrice + pRange / buckets / 2);
+      const barW = (counts[b] / maxCount) * vpWidth;
+      const barH = Math.max(1, (chartH / buckets) * 0.85);
+      const intensity = counts[b] / maxCount;
+      ctx.fillStyle = `rgb(${Math.round(59 + 186 * intensity)},${Math.round(130 - 60 * intensity)},246)`;
+      ctx.fillRect(vpX + vpWidth - barW, bY - barH / 2, barW, barH);
+    }
+    ctx.globalAlpha = 0.6;
+    ctx.font = "7px Arial";
+    ctx.fillStyle = currentTheme === "light" ? "#334155" : "#94a3b8";
+    ctx.textAlign = "left";
+    ctx.fillText("Vol", vpX + 1, marginTop + 12);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.restore();
+  }
+
+  /* ---- Feature 7: RSI Divergence Visual Markers ---- */
+  if (divergenceVisualEnabled && divergenceMarkers.length > 0) {
+    for (const dm of divergenceMarkers) {
+      if (dm.boIdx >= candles.length || dm.rtIdx >= candles.length) continue;
+      const bx = xOf(dm.boIdx), rx = xOf(dm.rtIdx);
+      const by = yOf(dm.priceBO), ry = yOf(dm.priceRT);
+      ctx.save();
+      ctx.strokeStyle = dm.dir === "BULL" ? "#22c55e" : "#ef4444";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(rx, ry);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = "bold 8px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = dm.dir === "BULL" ? "#22c55e" : "#ef4444";
+      const midX = (bx + rx) / 2;
+      const midY = (by + ry) / 2 - 8;
+      ctx.fillText(`RSI div`, midX, midY);
+      ctx.textAlign = "left";
+      ctx.restore();
+    }
+  }
+
   /* ---- Crosshair + OHLC tooltip ---- */
   if (chartMouseActive && chartMouseX >= marginLeft && chartMouseX <= W - marginRight
       && chartMouseY >= marginTop && chartMouseY <= marginTop + chartH) {
@@ -15179,6 +16194,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-gridScalperMA",  toggleId: "gridScalperMAToggle",  enabled: gridScalperMAEnabled  },
     { badgeId: "stratBadge-fvgStrat",       toggleId: "fvgStratToggle",       enabled: fvgStratEnabled       },
     { badgeId: "stratBadge-mtfTopDown",     toggleId: "mtfTopDownToggle",     enabled: mtfTopDownEnabled     },
+    { badgeId: "stratBadge-orderblock",     toggleId: "orderblockToggle",     enabled: orderblockEnabled     },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -17300,6 +18316,147 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Multi-symbol picker */
   initMultiSymbolPicker();
+
+  /* ---- Feature initialisation ---- */
+  loadProfiles();
+  renderProfilesList();
+  loadSignalNotes();
+  loadConfluenceStats();
+
+  /* Feature 2: Orderblock toggle */
+  if (UI.orderblockToggle) {
+    UI.orderblockToggle.checked = orderblockEnabled;
+    UI.orderblockToggle.addEventListener("change", () => {
+      orderblockEnabled = UI.orderblockToggle.checked;
+      saveSettings(); drawChart(); updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeOrderblockToggle) {
+    UI.autoTradeOrderblockToggle.checked = autoTradeOrderblock;
+    UI.autoTradeOrderblockToggle.addEventListener("change", () => { autoTradeOrderblock = UI.autoTradeOrderblockToggle.checked; saveSettings(); });
+  }
+
+  /* Feature 17: Session heatmap */
+  if (UI.sessionHeatmapToggle) {
+    UI.sessionHeatmapToggle.checked = sessionHeatmapEnabled;
+    UI.sessionHeatmapToggle.addEventListener("change", () => { sessionHeatmapEnabled = UI.sessionHeatmapToggle.checked; saveSettings(); drawChart(); });
+  }
+
+  /* Feature 6: Candle annotations */
+  if (UI.candleAnnotationsToggle) {
+    UI.candleAnnotationsToggle.checked = candleAnnotationsEnabled;
+    UI.candleAnnotationsToggle.addEventListener("change", () => { candleAnnotationsEnabled = UI.candleAnnotationsToggle.checked; saveSettings(); drawChart(); });
+  }
+
+  /* Feature 9: Volume profile */
+  if (UI.volumeProfileToggle) {
+    UI.volumeProfileToggle.checked = volumeProfileEnabled;
+    UI.volumeProfileToggle.addEventListener("change", () => { volumeProfileEnabled = UI.volumeProfileToggle.checked; saveSettings(); drawChart(); });
+  }
+
+  /* Feature 10: Fib extensions */
+  if (UI.fibExtensionsToggle) {
+    UI.fibExtensionsToggle.checked = fibExtensionsEnabled;
+    UI.fibExtensionsToggle.addEventListener("change", () => { fibExtensionsEnabled = UI.fibExtensionsToggle.checked; saveSettings(); drawChart(); });
+  }
+
+  /* Feature 5: BOS/ChoCH */
+  if (UI.bosChochToggle) {
+    UI.bosChochToggle.checked = bosChochEnabled;
+    UI.bosChochToggle.addEventListener("change", () => {
+      bosChochEnabled = UI.bosChochToggle.checked;
+      if (bosChochEnabled) detectBosChoch();
+      else bosChochMarkers = [];
+      saveSettings(); drawChart();
+    });
+  }
+
+  /* Feature 7: Divergence visual */
+  if (UI.divergenceVisualToggle) {
+    UI.divergenceVisualToggle.checked = divergenceVisualEnabled;
+    UI.divergenceVisualToggle.addEventListener("change", () => { divergenceVisualEnabled = UI.divergenceVisualToggle.checked; buildDivergenceMarkers(); saveSettings(); drawChart(); });
+  }
+
+  /* Feature 11: News pause */
+  if (UI.newsPauseToggle) {
+    UI.newsPauseToggle.checked = newsPauseEnabled;
+    UI.newsPauseToggle.addEventListener("change", () => {
+      newsPauseEnabled = UI.newsPauseToggle.checked;
+      if (newsPauseEnabled) fetchNewsCalendar();
+      saveSettings();
+    });
+  }
+  if (UI.newsPauseMinutesInput) {
+    UI.newsPauseMinutesInput.value = newsPauseMinutes;
+    UI.newsPauseMinutesInput.addEventListener("change", () => {
+      const v = parseInt(UI.newsPauseMinutesInput.value, 10);
+      if (!isNaN(v) && v >= 1 && v <= 60) newsPauseMinutes = v;
+      UI.newsPauseMinutesInput.value = newsPauseMinutes;
+      saveSettings();
+    });
+  }
+
+  /* Feature 15: Multi-R ladder */
+  if (UI.multiRLadderToggle) {
+    UI.multiRLadderToggle.checked = multiRLadderEnabled;
+    UI.multiRLadderToggle.addEventListener("change", () => { multiRLadderEnabled = UI.multiRLadderToggle.checked; saveSettings(); });
+  }
+
+  /* Feature 13: Adaptive confluence */
+  if (UI.adaptiveConfluenceToggle) {
+    UI.adaptiveConfluenceToggle.checked = adaptiveConfluenceEnabled;
+    UI.adaptiveConfluenceToggle.addEventListener("change", () => {
+      adaptiveConfluenceEnabled = UI.adaptiveConfluenceToggle.checked;
+      saveSettings();
+      renderAdaptiveConfluenceTable();
+    });
+  }
+
+  /* Feature 4: Profile save button */
+  const profileSaveBtn = document.getElementById("profileSaveBtn");
+  if (profileSaveBtn) {
+    profileSaveBtn.addEventListener("click", () => {
+      const nameInput = document.getElementById("profileNameInput");
+      if (nameInput) { saveProfile(nameInput.value); nameInput.value = ""; }
+    });
+  }
+
+  /* Feature 1: Backtest controls */
+  const backtestStartBtn = document.getElementById("backtestStartBtn");
+  const backtestStopBtn  = document.getElementById("backtestStopBtn");
+  if (backtestStartBtn) backtestStartBtn.addEventListener("click", startBacktest);
+  if (backtestStopBtn)  backtestStopBtn.addEventListener("click", stopBacktest);
+  if (UI.backtestSpeedInput) {
+    UI.backtestSpeedInput.value = backtestSpeedMs;
+    UI.backtestSpeedInput.addEventListener("change", () => {
+      const v = parseInt(UI.backtestSpeedInput.value, 10);
+      if (!isNaN(v) && v >= BACKTEST_MIN_SPEED_MS && v <= BACKTEST_MAX_SPEED_MS) backtestSpeedMs = v;
+      UI.backtestSpeedInput.value = backtestSpeedMs;
+    });
+  }
+
+  /* Feature 8: Scanner toggle */
+  if (UI.scannerToggle) {
+    UI.scannerToggle.checked = scannerEnabled;
+    UI.scannerToggle.addEventListener("change", () => {
+      scannerEnabled = UI.scannerToggle.checked;
+      const panel = document.getElementById("scannerPanel");
+      if (panel) panel.style.display = scannerEnabled ? "block" : "none";
+      saveSettings();
+      updateScannerUI();
+    });
+  }
+  if (UI.scannerSymbolsInput) {
+    UI.scannerSymbolsInput.value = scannerSymbols.join(", ");
+    UI.scannerSymbolsInput.addEventListener("change", () => {
+      scannerSymbols = UI.scannerSymbolsInput.value.split(",").map(s => s.trim()).filter(Boolean);
+      saveSettings();
+      updateScannerUI();
+    });
+  }
+
+  /* Fetch news calendar on load if enabled */
+  if (newsPauseEnabled) fetchNewsCalendar();
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();
