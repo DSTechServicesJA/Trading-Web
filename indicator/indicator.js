@@ -2083,6 +2083,9 @@ function setPhase(newPhase) {
       if (_multiPanelProcessing) {
         /* Multi-panel: use panel-specific Telegram send (mini-chart + panel state) */
         const panelSymbol = _multiPanelProcessing;
+        const targetPanel = multiPanels.get(panelSymbol);
+        if (targetPanel) targetPanel._tradeTelegramSent = true;
+        addLog("📤 Telegram auto-send triggered — TRADE signal");
         setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
       } else {
         /* Single-symbol mode: use main chart as before */
@@ -16732,6 +16735,9 @@ function savePanel(p) {
   p.filters.hhhlEnabled             = hhhlEnabled;
   p.filters.followThroughEnabled    = followThroughEnabled;
   p.filters.mtfStructureEnabled     = mtfStructureEnabled;
+  /* Reset the "sent via telegram" flag whenever the trade is no longer active,
+     so the next TRADE signal (after auto-reset or a new setup) triggers a fresh send. */
+  if (phase !== "TRADE") p._tradeTelegramSent = false;
 }
 
 /* ---- Get display name for a symbol ---- */
@@ -16941,6 +16947,7 @@ function connectPanel(p) {
   p.trade = null;
   p.phase = "WAITING";
   p.monitoringTrade = false;
+  p._tradeTelegramSent = false;
   p.emaFast = [];
   p.emaSlow = [];
   p.emaHTF = [];
@@ -17117,6 +17124,16 @@ function connectPanel(p) {
 
     /* Save state back to panel */
     savePanel(p);
+
+    /* Auto-send Telegram for a TRADE signal found during the historical batch.
+       processAllCandles() suppressed auto-send via _historicalProcessing=true, so
+       we trigger it here — once per trade — for any active, unsent TRADE setup. */
+    if (msg.candles && telegramAutoSend && p.phase === "TRADE" && p.trade && !p._tradeTelegramSent) {
+      p._tradeTelegramSent = true;
+      addLog("📤 Telegram auto-send triggered — active TRADE signal");
+      setTimeout(() => sendPanelTelegramAlert(p.symbol), CHART_RENDER_DELAY_MS);
+    }
+
     _multiPanelProcessing = null;
 
     /* Throttled card DOM update (badges, price, status) */
