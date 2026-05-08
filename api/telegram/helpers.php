@@ -119,15 +119,9 @@ function telegramAddIfLinked(PDO $pdo, int $userId): void
             'text'       => "✅ Your subscription is now *active*!\n\nHi {$name}, click the link below to join the private trading group:\n\n{$inviteLink}\n\n⚠️ This link expires in 15 minutes and can only be used once.",
             'parse_mode' => 'Markdown',
         ]);
-    } else {
-        /* Fallback: the bot may not have createInviteLink permission — unban only
-           if banned so we do not accidentally lift intentional bans. */
-        telegramBotApiCall('unbanChatMember', [
-            'chat_id'        => $chatId,
-            'user_id'        => $tgUserId,
-            'only_if_banned' => true,
-        ]);
     }
+    /* No else-unban needed: unbanChatMember was already called unconditionally above
+       before the invite link was created. */
 }
 
 /**

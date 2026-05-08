@@ -253,13 +253,19 @@ function jwtDecode(string $token): ?array
  */
 function rateLimit(int $maxAttempts = 5, int $windowSecs = 60): bool
 {
-    /* Resolve client IP — prefer X-Forwarded-For behind trusted proxies */
+    /* Resolve client IP.
+     * Only trust X-Forwarded-For when TRUSTED_PROXY_IPS is configured in .env
+     * (comma-separated list of trusted reverse-proxy IPs).  Without that setting
+     * the header is user-controlled and must be ignored to prevent rate-limit bypass. */
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        $forwarded = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-        $candidate = trim($forwarded[0]);
-        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
-            $ip = $candidate;
+    $trustedProxies = array_filter(array_map('trim', explode(',', env('TRUSTED_PROXY_IPS', ''))));
+    if (!empty($trustedProxies) && in_array($ip, $trustedProxies, true)) {
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $forwarded = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $candidate = trim($forwarded[0]);
+            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                $ip = $candidate;
+            }
         }
     }
 
@@ -375,8 +381,8 @@ header('X-Content-Type-Options: nosniff');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (env('APP_ENV') !== 'production') {
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
+    header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
 } elseif ($origin !== '') {
     /* In production only allow your own domain */
     $allowed = env('AUTH_API_BASE');
@@ -384,7 +390,7 @@ if (env('APP_ENV') !== 'production') {
     $scheme  = ($parsed['scheme'] ?? 'https') . '://' . ($parsed['host'] ?? '');
     if (str_starts_with($origin, $scheme)) {
         header("Access-Control-Allow-Origin: $origin");
-        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type');
+        header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization');
     }
 }
