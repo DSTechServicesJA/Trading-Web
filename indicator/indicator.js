@@ -620,6 +620,12 @@ let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's 
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
 let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
 
+/* #19: Shared helper — returns the current chart granularity in seconds.
+ * Centralises the UI.granSelect read so all callers stay in sync. */
+function getCurrentGranularitySec() {
+  return UI.granSelect ? (parseInt(UI.granSelect.value, 10) || 60) : 60;
+}
+
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
  * Market types supported:
@@ -1501,7 +1507,7 @@ const PO3_SWEEP_LOOKBACK = 6;       /* base candles to look back for manipulatio
 /* #19: PO3 sweep lookback is scaled proportionally to the timeframe at usage time
  * via getPo3SweepLookback(). This constant is the baseline at 1-minute granularity. */
 function getPo3SweepLookback() {
-  const gran = UI.granSelect ? (parseInt(UI.granSelect.value, 10) || 60) : 60;
+  const gran = getCurrentGranularitySec();
   /* Scale: 6 candles at 60s = 6 min of lookback. Keep the same real-time window
    * proportionally: e.g. 15-min candles → 6 × (900/60) = 90 candles would be too many,
    * so cap at 20 to stay practical, while ensuring at least 6. */
@@ -7301,20 +7307,18 @@ function computeStochastic() {
     for (let j = i - STOCH_SMOOTH + 1; j <= i; j++) sum += (rawK[j] ?? 0);
     stochK.push(sum / STOCH_SMOOTH);
   }
-  /* #6: %D = SMA of smoothed %K — O(n) sliding window instead of O(n²) rescan */
-  let dSum = 0, dCount = 0;
+  /* #6: %D = SMA of smoothed %K — O(n) explicit sliding window (correct & fast).
+   * An array-backed deque is used instead of a back-search so null gaps never
+   * cause an incorrect subtraction.  The window is reset whenever a null is seen
+   * (matching the semantics of "not enough data"). */
+  const dWindow = [];
+  let dSum = 0;
   for (let i = 0; i < stochK.length; i++) {
-    if (stochK[i] == null) { stochD.push(null); dSum = 0; dCount = 0; continue; }
-    dSum   += stochK[i];
-    dCount++;
-    if (dCount > STOCH_D_PERIOD) {
-      /* Subtract the value leaving the window.  Walk back to find it. */
-      let back = i - STOCH_D_PERIOD;
-      while (back >= 0 && stochK[back] == null) back--;
-      if (back >= 0 && stochK[back] != null) dSum -= stochK[back];
-      else dCount = STOCH_D_PERIOD; /* safety: reset count to period */
-    }
-    stochD.push(dCount >= STOCH_D_PERIOD ? dSum / STOCH_D_PERIOD : null);
+    if (stochK[i] == null) { stochD.push(null); dWindow.length = 0; dSum = 0; continue; }
+    dWindow.push(stochK[i]);
+    dSum += stochK[i];
+    if (dWindow.length > STOCH_D_PERIOD) dSum -= dWindow.shift();
+    stochD.push(dWindow.length >= STOCH_D_PERIOD ? dSum / STOCH_D_PERIOD : null);
   }
 }
 
@@ -9231,10 +9235,11 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
   if (countEl) countEl.textContent = history.length;
 
   /* #22: Incremental DOM update — only rebuild when content actually changes.
-   * We stamp each list with a digest (JSON of signal IDs + results) and skip
+   * We stamp each list with a digest (epoch|dir|result per signal) and skip
    * the full rebuild when nothing has changed, avoiding layout thrashing on
-   * every tick. */
-  const digest = history.map(s => `${s.epoch}${s.dir}${s.result}`).join(",");
+   * every tick.  Null-coalesce each field to prevent 'undefined' literals from
+   * causing false cache misses. */
+  const digest = history.map(s => `${s.epoch ?? ""}|${s.dir ?? ""}|${s.result ?? ""}`).join(",");
   if (listEl._alertDigest === digest) return;  /* no changes — skip rebuild */
   listEl._alertDigest = digest;
 
@@ -9874,7 +9879,7 @@ function monitorCustomStrategyOutcomes(candle) {
 function synthesizeTfCandles(ratio) {
   if (!candles || candles.length < ratio || ratio < 2) return candles ? candles.slice() : [];
   /* Determine the base granularity from the UI selector (seconds) */
-  const gran = UI.granSelect ? (parseInt(UI.granSelect.value, 10) || 60) : 60;
+  const gran = getCurrentGranularitySec();
   const bucketSize = ratio * gran;  /* bucket width in seconds */
   const buckets = new Map();  /* key = bucket epoch → OHLC accumulator */
   for (const c of candles) {
@@ -13177,11 +13182,13 @@ function buildTrade(confirmCandle, confirmIdx) {
       return;
     }
     trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
-    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode */
+    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
+     * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
       const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
       trade.entry += slip;  /* fill is worse for BULL */
-      trade.tp     = pureTrailingEnabled ? null : trade.entry + (risk * rr);
+      const slippedRisk = trade.entry - sl;
+      trade.tp = pureTrailingEnabled ? null : trade.entry + slippedRisk * rr;
       trade.backtestSlippage = slip;
     }
   } else {
@@ -13203,11 +13210,13 @@ function buildTrade(confirmCandle, confirmIdx) {
       return;
     }
     trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
-    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode */
+    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
+     * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
       const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
       trade.entry -= slip;  /* fill is worse for BEAR */
-      trade.tp     = pureTrailingEnabled ? null : trade.entry - (risk * rr);
+      const slippedRisk = sl - trade.entry;
+      trade.tp = pureTrailingEnabled ? null : trade.entry - slippedRisk * rr;
       trade.backtestSlippage = slip;
     }
   }
@@ -14037,6 +14046,7 @@ function checkAutoTradeSessionLimits() {
    * This is separate from the session SL (which is based on P/L) and acts as a
    * safety net against deep equity drawdowns from a bad run.             */
   if (!autoTradeHalted && sessionStartBalance != null && autoTradeBalance != null) {
+    if (sessionStartBalance <= 0) return;  /* guard against division by zero */
     const drawdownPct = (sessionStartBalance - autoTradeBalance) / sessionStartBalance * 100;
     if (drawdownPct >= AUTO_TRADE_MAX_DRAWDOWN_PCT) {
       autoTradeHalted = true;
