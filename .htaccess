@@ -25,10 +25,10 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/admin/(users|user|strategies|strategy_access|auth_guard|telegram)$ api/admin/$1.php [L,QSA]
 
-# ── Telegram proxy (extensionless) ──
+# ── Telegram API URL rewriting (extensionless PHP) ──
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/telegram/proxy$ api/telegram/proxy.php [L,QSA]
+RewriteRule ^api/telegram/(link_token|webhook|unlink|setup_webhook|request_invite|proxy)$ api/telegram/$1.php [L,QSA]
 
 # ── Security headers ──
 <IfModule mod_headers.c>
