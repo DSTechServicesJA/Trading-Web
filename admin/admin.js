@@ -1075,10 +1075,7 @@ async function searchUsersForAssign(query) {
     const data  = await resp.json();
     const users = data.users || [];
 
-    /* Also fetch current assignments so we can show assign/unassign buttons */
-    const assignResp = await apiRequest("/admin/profiles?action=assignments&user_id=0"); // placeholder
-    /* We need per-user state — fetch assignments for each result via the profile's assignment list */
-    /* Simpler: just fetch all assignments for this profile */
+    /* Fetch which user IDs already have this profile assigned */
     const assResp = await apiRequest("/admin/profiles?action=assignments_for_profile&profile_id=" + assigningProfileId);
     let assignedUserIds = new Set();
     if (assResp.ok) {
@@ -1160,7 +1157,7 @@ function bindProfileModals() {
     let timer;
     searchInput.addEventListener("input", () => {
       clearTimeout(timer);
-      timer = setTimeout(() => searchUsersForAssign(searchInput.value.trim()), 350);
+      timer = setTimeout(() => searchUsersForAssign(searchInput.value.trim()), 500);
     });
   }
 

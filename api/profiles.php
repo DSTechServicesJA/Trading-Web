@@ -31,7 +31,11 @@ if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
     jsonResponse(['error' => 'Authentication required'], 401);
 }
 
-$payload = jwtDecode($m[1]);
+$rawToken = $m[1];
+if (strlen($rawToken) > 2048) {
+    jsonResponse(['error' => 'Invalid token'], 401);
+}
+$payload = jwtDecode($rawToken);
 if (!$payload || empty($payload['sub'])) {
     jsonResponse(['error' => 'Invalid or expired token'], 401);
 }
@@ -121,7 +125,7 @@ if ($method === 'POST') {
     }
 
     $settingsJson = json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if (strlen($settingsJson) > 500000) {
+    if (strlen($settingsJson) > 512000) {
         jsonResponse(['error' => 'Settings snapshot is too large (max 500 KB)'], 400);
     }
 

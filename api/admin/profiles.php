@@ -121,7 +121,7 @@ if ($method === 'POST') {
             $chkU = $pdo->prepare('SELECT id FROM users WHERE id = ?');
             $chkU->execute([$userId]);
             if (!$chkU->fetch()) {
-                jsonResponse(['error' => 'User not found'], 404);
+                jsonResponse(['error' => 'Invalid user_id: user does not exist'], 400);
             }
 
             $ins = $pdo->prepare(
@@ -149,7 +149,7 @@ if ($method === 'POST') {
     }
 
     $settingsJson = json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if (strlen($settingsJson) > 500000) {
+    if (strlen($settingsJson) > 512000) {
         jsonResponse(['error' => 'Settings snapshot is too large (max 500 KB)'], 400);
     }
 
@@ -195,7 +195,7 @@ if ($method === 'PATCH') {
             jsonResponse(['error' => 'settings must be a JSON object'], 400);
         }
         $json = json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (strlen($json) > 500000) {
+        if (strlen($json) > 512000) {
             jsonResponse(['error' => 'Settings snapshot is too large (max 500 KB)'], 400);
         }
         $set[]    = 'settings_json = ?';

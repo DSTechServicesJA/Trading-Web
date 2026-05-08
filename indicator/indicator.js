@@ -14350,6 +14350,20 @@ function profileApiHeaders() {
 }
 
 /**
+ * Fetch a profiles API URL, automatically retrying with .php extension on 404
+ * (for hosts without mod_rewrite URL rewriting).
+ */
+async function profileApiFetch(url, options = {}) {
+  const opts = { ...options, headers: Object.assign(profileApiHeaders(), options.headers || {}) };
+  let resp = await fetch(url, opts);
+  if (resp.status === 404) {
+    const phpUrl = url.includes("?") ? url.replace("?", ".php?") : url + ".php";
+    resp = await fetch(phpUrl, opts);
+  }
+  return resp;
+}
+
+/**
  * Fetch profiles from the server and merge them into savedProfiles.
  * Own profiles and admin-assigned profiles are both included.
  * Falls back to localStorage-only when the user is not logged in or
@@ -14369,10 +14383,7 @@ async function loadProfiles() {
   }
 
   try {
-    let resp = await fetch(PROFILES_API_URL, { headers: profileApiHeaders() });
-    if (resp.status === 404) {
-      resp = await fetch(PROFILES_API_URL + ".php", { headers: profileApiHeaders() });
-    }
+    const resp = await profileApiFetch(PROFILES_API_URL);
     if (!resp.ok) return;
 
     const data = await resp.json();
@@ -14422,7 +14433,7 @@ async function saveProfile(name) {
     const isReadOnly = existing._readOnly || false;
 
     if (isReadOnly) {
-      showToast("Read-only Profile", `"${trimmed}" was assigned by admin and cannot be overwritten.`, "warning", 4000);
+      showToast("Read-only Profile", `"${trimmed}" was assigned by ${profile._assignedBy || "admin"} and cannot be overwritten.`, "warning", 4000);
       return;
     }
 
@@ -14439,18 +14450,10 @@ async function saveProfile(name) {
       const body = { name: trimmed, settings };
       if (serverId) body.id = serverId;
 
-      let resp = await fetch(PROFILES_API_URL, {
+      const resp = await profileApiFetch(PROFILES_API_URL, {
         method: "POST",
-        headers: profileApiHeaders(),
         body: JSON.stringify(body),
       });
-      if (resp.status === 404) {
-        resp = await fetch(PROFILES_API_URL + ".php", {
-          method: "POST",
-          headers: profileApiHeaders(),
-          body: JSON.stringify(body),
-        });
-      }
       if (resp.ok) {
         const result = await resp.json();
         if (result.id) {
@@ -14499,16 +14502,7 @@ async function deleteProfile(name) {
   /* Remove from server if it has a server id */
   if (serverId && typeof ITGuruAuth !== "undefined" && ITGuruAuth.isLoggedIn()) {
     try {
-      let resp = await fetch(PROFILES_API_URL + "?id=" + serverId, {
-        method: "DELETE",
-        headers: profileApiHeaders(),
-      });
-      if (resp.status === 404) {
-        resp = await fetch(PROFILES_API_URL + ".php?id=" + serverId, {
-          method: "DELETE",
-          headers: profileApiHeaders(),
-        });
-      }
+      await profileApiFetch(PROFILES_API_URL + "?id=" + serverId, { method: "DELETE" });
     } catch(e) {
       addLog("⚠️ Profile could not be removed from server");
     }
