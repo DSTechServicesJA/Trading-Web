@@ -151,6 +151,38 @@
     <!-- ── PAGINATION ── -->
     <div id="pagination" class="pagination"></div>
 
+    <!-- ── PROFILES MANAGEMENT SECTION ── -->
+    <section class="profiles-section" id="profilesSection">
+      <h1>💾 Profile Management</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        Create named settings profiles and assign them to users. Assigned profiles appear
+        in each user's indicator panel marked with a 📌 pin — they load the saved settings
+        with one click but cannot be overwritten by the user.
+      </p>
+
+      <div class="profiles-toolbar">
+        <button id="newProfileBtn" type="button" class="btn-primary">＋ New Profile</button>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <table class="profiles-table" id="profilesTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Created By</th>
+              <th>Assigned To</th>
+              <th>Last Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="profilesTableBody">
+            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -306,6 +338,56 @@
     <div class="modal-actions">
       <button id="resetPwSaveBtn"   type="button" class="btn-primary">Reset Password</button>
       <button id="resetPwCancelBtn" type="button" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ NEW PROFILE MODAL ═══════════════════════════ -->
+<div id="newProfileModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card">
+    <h3>＋ Create Profile</h3>
+    <div class="form-row">
+      <label>Profile Name <span class="req">*</span></label>
+      <input type="text" id="newProfileName" placeholder="e.g. R100 Scalp Setup" maxlength="60" />
+    </div>
+    <div class="form-row">
+      <label>
+        <input type="checkbox" id="newProfileIsAdmin" />
+        &nbsp;Mark as admin-managed profile
+      </label>
+      <small class="field-hint">Admin profiles are highlighted with a ⭐ badge in this panel.</small>
+    </div>
+    <div class="form-row">
+      <label>Settings JSON</label>
+      <textarea id="newProfileSettings" rows="8"
+        placeholder='{"symbol":"R_100","granularity":"60","risk":"1","reward":"2",…}'
+        style="font-family:var(--font-mono);font-size:12px;width:100%;resize:vertical;background:var(--bg-surface);color:var(--text);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:8px;"></textarea>
+      <small class="field-hint">Paste the full settings JSON from the indicator's browser console (<code>JSON.stringify(savedProfiles['YourProfile'])</code>). Leave blank to create an empty profile.</small>
+    </div>
+    <div id="newProfileError" class="form-error"></div>
+    <div class="modal-actions">
+      <button id="newProfileSaveBtn" type="button" class="btn-primary">Create Profile</button>
+      <button id="newProfileCancelBtn" type="button" class="btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ ASSIGN PROFILE MODAL ═══════════════════════════ -->
+<div id="assignProfileModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card">
+    <h3>📌 Assign Profile — <span id="assignProfileModalTitle"></span></h3>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+      Search for a user and assign or unassign this profile. Assigned users will see it
+      in their indicator as a read-only 📌 profile.
+    </p>
+    <div class="form-row">
+      <label>Search User</label>
+      <input type="text" id="profileAssignSearch" placeholder="Type username…" autocomplete="off" />
+    </div>
+    <div id="profileAssignSearchResults"></div>
+    <div id="assignProfileError" class="form-error"></div>
+    <div class="modal-actions">
+      <button id="assignProfileCloseBtn" type="button" class="btn-ghost">Close</button>
     </div>
   </div>
 </div>

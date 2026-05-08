@@ -3325,6 +3325,15 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   color: #ef4444;
   border-color: rgba(239,68,68,0.3);
 }
+.profile-row-assigned {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.06);
+}
+.profile-badge-admin {
+  font-size: 0.75rem;
+  margin-left: 4px;
+  cursor: default;
+}
 
 /* Feature 1: Backtest controls */
 .backtest-controls {

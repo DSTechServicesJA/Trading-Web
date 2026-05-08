@@ -151,6 +151,8 @@ async function initApp(user) {
   await loadUsers();
   bindToolbar();
   bindModals();
+  await loadProfiles();
+  bindProfileModals();
 }
 
 /* ═══════════════════════════════════════════════
@@ -902,3 +904,274 @@ function fmtDateTime(iso) {
     hour: "2-digit", minute: "2-digit"
   });
 }
+
+/* ═══════════════════════════════════════════════
+   Profiles Management
+   ═══════════════════════════════════════════════ */
+let assigningProfileId   = null;  /* profile id open in assign modal */
+let assigningProfileName = "";
+
+async function loadProfiles() {
+  const tbody = document.getElementById("profilesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" class="table-empty">Loading…</td></tr>`;
+
+  try {
+    const resp = await apiRequest("/admin/profiles");
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      tbody.innerHTML = `<tr><td colspan="6" class="table-empty" style="color:var(--danger-soft)">
+        Error: ${escHtml(err.error || "Failed to load profiles")}
+      </td></tr>`;
+      return;
+    }
+    const data = await resp.json();
+    renderProfilesTable(data.profiles || []);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="table-empty" style="color:var(--danger-soft)">
+      Network error — ${escHtml(e.message)}
+    </td></tr>`;
+  }
+}
+
+function renderProfilesTable(profiles) {
+  const tbody = document.getElementById("profilesTableBody");
+  if (!tbody) return;
+  if (!profiles.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="table-empty">No profiles yet. Click "＋ New Profile" to create one.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  for (const p of profiles) {
+    const tr = document.createElement("tr");
+    const typeBadge = p.is_admin_profile
+      ? `<span class="badge-admin-profile">⭐ Admin</span>`
+      : `<span class="badge-user-profile">👤 User</span>`;
+
+    tr.innerHTML = `
+      <td><strong>${escHtml(p.name)}</strong></td>
+      <td>${typeBadge}</td>
+      <td class="ts">${escHtml(p.created_by_username || "—")}</td>
+      <td class="ts">${p.assignment_count} user${p.assignment_count === 1 ? "" : "s"}</td>
+      <td class="ts">${fmtDate(p.updated_at)}</td>
+      <td class="actions-cell">
+        <button type="button" class="btn-icon btn-sm" data-paction="assign" data-pid="${p.id}" data-pname="${escHtml(p.name)}" title="Assign to users">📌</button>
+        <button type="button" class="btn-icon btn-sm btn-danger" data-paction="delete" data-pid="${p.id}" data-pname="${escHtml(p.name)}" title="Delete profile">🗑️</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll("[data-paction]").forEach(btn => {
+    btn.addEventListener("click", handleProfileAction);
+  });
+}
+
+async function handleProfileAction(e) {
+  const btn    = e.currentTarget;
+  const action = btn.dataset.paction;
+  const id     = parseInt(btn.dataset.pid, 10);
+  const name   = btn.dataset.pname;
+
+  if (action === "assign") {
+    openAssignProfileModal(id, name);
+    return;
+  }
+
+  if (action === "delete") {
+    if (!confirm(`Delete profile "${name}"?\n\nThis will also remove all user assignments.`)) return;
+    btn.disabled = true;
+    try {
+      const resp = await apiRequest("/admin/profiles?id=" + id, { method: "DELETE" });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert("Error: " + (err.error || "Could not delete profile"));
+      } else {
+        await loadProfiles();
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+}
+
+/* ── New Profile Modal ── */
+function openNewProfileModal() {
+  el("newProfileName").value      = "";
+  el("newProfileSettings").value  = "";
+  el("newProfileIsAdmin").checked = false;
+  el("newProfileError").textContent = "";
+  el("newProfileModal").style.display = "flex";
+  el("newProfileName").focus();
+}
+
+async function saveNewProfile() {
+  const btn   = el("newProfileSaveBtn");
+  const errEl = el("newProfileError");
+  errEl.textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Creating…";
+
+  const name    = el("newProfileName").value.trim();
+  const isAdmin = el("newProfileIsAdmin").checked;
+  const rawJson = el("newProfileSettings").value.trim();
+
+  if (!name) {
+    errEl.textContent = "Profile name is required";
+    btn.disabled = false; btn.textContent = "Create Profile";
+    return;
+  }
+
+  let settings = {};
+  if (rawJson) {
+    try { settings = JSON.parse(rawJson); }
+    catch {
+      errEl.textContent = "Settings JSON is invalid — check for syntax errors";
+      btn.disabled = false; btn.textContent = "Create Profile";
+      return;
+    }
+  }
+
+  try {
+    const resp = await apiRequest("/admin/profiles", {
+      method: "POST",
+      body: JSON.stringify({ name, settings, is_admin_profile: isAdmin }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Failed to create profile");
+    closeModal("newProfileModal");
+    await loadProfiles();
+  } catch (e) {
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Create Profile";
+  }
+}
+
+/* ── Assign Profile Modal ── */
+function openAssignProfileModal(profileId, profileName) {
+  assigningProfileId   = profileId;
+  assigningProfileName = profileName;
+  el("assignProfileModalTitle").textContent = profileName;
+  el("profileAssignSearch").value  = "";
+  el("profileAssignSearchResults").innerHTML = "";
+  el("assignProfileError").textContent = "";
+  el("assignProfileModal").style.display = "flex";
+  el("profileAssignSearch").focus();
+}
+
+async function searchUsersForAssign(query) {
+  const container = el("profileAssignSearchResults");
+  if (!query) { container.innerHTML = ""; return; }
+
+  container.innerHTML = `<div class="assign-user-row" style="color:var(--text-muted)">Searching…</div>`;
+
+  try {
+    /* Load first page filtered by search, then show top results */
+    const params = new URLSearchParams({ page: 1, per_page: 10, search: query });
+    const resp   = await apiRequest("/admin/users?" + params);
+    if (!resp.ok) { container.innerHTML = ""; return; }
+
+    const data  = await resp.json();
+    const users = data.users || [];
+
+    /* Also fetch current assignments so we can show assign/unassign buttons */
+    const assignResp = await apiRequest("/admin/profiles?action=assignments&user_id=0"); // placeholder
+    /* We need per-user state — fetch assignments for each result via the profile's assignment list */
+    /* Simpler: just fetch all assignments for this profile */
+    const assResp = await apiRequest("/admin/profiles?action=assignments_for_profile&profile_id=" + assigningProfileId);
+    let assignedUserIds = new Set();
+    if (assResp.ok) {
+      const assData = await assResp.json();
+      (assData.assigned_user_ids || []).forEach(id => assignedUserIds.add(id));
+    }
+
+    if (!users.length) {
+      container.innerHTML = `<div class="assign-user-row" style="color:var(--text-muted)">No users found</div>`;
+      return;
+    }
+
+    container.innerHTML = "";
+    for (const u of users) {
+      const isAssigned = assignedUserIds.has(u.id);
+      const row = document.createElement("div");
+      row.className = "assign-user-row";
+      row.innerHTML = `
+        <span>${escHtml(u.username)}${u.email ? ` <span style="color:var(--text-muted);font-size:11px;">(${escHtml(u.email)})</span>` : ""}</span>
+        <button type="button" class="${isAssigned ? "btn-unassign-user" : "btn-assign-user"}"
+                data-uid="${u.id}" data-uname="${escHtml(u.username)}">
+          ${isAssigned ? "Remove" : "Assign"}
+        </button>`;
+      row.querySelector("button").addEventListener("click", async (ev) => {
+        const btn    = ev.currentTarget;
+        const uid    = parseInt(btn.dataset.uid, 10);
+        const remove = btn.classList.contains("btn-unassign-user");
+        btn.disabled = true;
+        try {
+          let resp;
+          if (remove) {
+            resp = await apiRequest("/admin/profiles?action=unassign", {
+              method: "DELETE",
+              body: JSON.stringify({ profile_id: assigningProfileId, user_id: uid }),
+            });
+          } else {
+            resp = await apiRequest("/admin/profiles?action=assign", {
+              method: "POST",
+              body: JSON.stringify({ profile_id: assigningProfileId, user_id: uid }),
+            });
+          }
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            el("assignProfileError").textContent = err.error || "Request failed";
+          } else {
+            /* Toggle button state */
+            btn.textContent = remove ? "Assign" : "Remove";
+            btn.className   = remove ? "btn-assign-user" : "btn-unassign-user";
+            await loadProfiles(); /* refresh assignment count */
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      container.appendChild(row);
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="assign-user-row" style="color:var(--danger-soft)">${escHtml(e.message)}</div>`;
+  }
+}
+
+/* ── Bind profile modal buttons ── */
+function bindProfileModals() {
+  const newBtn = el("newProfileBtn");
+  if (newBtn) newBtn.addEventListener("click", openNewProfileModal);
+
+  const saveBtn = el("newProfileSaveBtn");
+  if (saveBtn) saveBtn.addEventListener("click", saveNewProfile);
+
+  const cancelBtn = el("newProfileCancelBtn");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => closeModal("newProfileModal"));
+
+  const closeAssign = el("assignProfileCloseBtn");
+  if (closeAssign) closeAssign.addEventListener("click", () => closeModal("assignProfileModal"));
+
+  /* Live search in assign modal */
+  const searchInput = el("profileAssignSearch");
+  if (searchInput) {
+    let timer;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => searchUsersForAssign(searchInput.value.trim()), 350);
+    });
+  }
+
+  /* Close on backdrop click */
+  ["newProfileModal", "assignProfileModal"].forEach(id => {
+    const el_ = document.getElementById(id);
+    if (el_) el_.addEventListener("click", e => { if (e.target === e.currentTarget) closeModal(id); });
+  });
+
+  /* Enter key in new profile name */
+  const nameInput = el("newProfileName");
+  if (nameInput) nameInput.addEventListener("keydown", e => { if (e.key === "Enter") saveNewProfile(); });
+}
+

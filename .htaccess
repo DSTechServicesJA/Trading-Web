@@ -20,10 +20,15 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/auth/(login|register|verify|status)$ api/auth/$1.php [L,QSA]
 
+# ── User profiles API URL rewriting ──
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/profiles$ api/profiles.php [L,QSA]
+
 # ── Admin API URL rewriting ──
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/admin/(users|user|strategies|strategy_access|auth_guard|telegram)$ api/admin/$1.php [L,QSA]
+RewriteRule ^api/admin/(users|user|strategies|strategy_access|auth_guard|telegram|profiles)$ api/admin/$1.php [L,QSA]
 
 # ── Telegram API URL rewriting (extensionless PHP) ──
 RewriteCond %{REQUEST_FILENAME} !-f
