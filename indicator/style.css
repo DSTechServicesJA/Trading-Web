@@ -1719,7 +1719,9 @@ body.light-theme .ms-card-footer {
 
 /* ---- Telegram Section ---- */
 .telegram-send-btn,
-.telegram-test-btn {
+.telegram-test-btn,
+.telegram-send-scalp-btn,
+.telegram-send-strategy-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1736,6 +1738,12 @@ body.light-theme .ms-card-footer {
 .telegram-send-btn {
   background: var(--primary);
 }
+.telegram-send-scalp-btn {
+  background: #b8860b;
+}
+.telegram-send-strategy-btn {
+  background: #2e7d52;
+}
 .telegram-test-btn {
   background: rgba(99, 128, 255, 0.25);
   border: 1px solid rgba(99, 128, 255, 0.35);
@@ -1744,6 +1752,14 @@ body.light-theme .ms-card-footer {
 .telegram-send-btn:hover {
   background: var(--primary-soft);
   box-shadow: 0 0 12px var(--primary-glow);
+}
+.telegram-send-scalp-btn:hover {
+  background: #d4a017;
+  box-shadow: 0 0 12px rgba(184, 134, 11, 0.5);
+}
+.telegram-send-strategy-btn:hover {
+  background: #3a9e67;
+  box-shadow: 0 0 12px rgba(46, 125, 82, 0.5);
 }
 .telegram-test-btn:hover {
   background: rgba(99, 128, 255, 0.35);
