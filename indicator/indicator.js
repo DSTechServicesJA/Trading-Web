@@ -4675,7 +4675,9 @@ function getAggregatedStrategyHistory() {
     { history: po3History,            label: "⚡ Power of 3" },
     { history: nyOpenRangeHistory,    label: "🕤 NY Open Range" },
     { history: sessionRangeHistory,   label: "🌍 Session Range" },
-    { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" }
+    { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" },
+    { history: fvgStratHistory,       label: "🎯 Fair Value Gap" },
+    { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" }
   ];
 
   if (multiPanels.size === 0) {
@@ -18480,17 +18482,11 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Manual send: latest Strategy signal → Telegram (bypasses auto-send toggle) */
   if (UI.telegramSendStrategyNowBtn) {
     UI.telegramSendStrategyNowBtn.addEventListener("click", () => {
-      const allHistories = [
-        liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
-        fibScalpHistory, po3History, nyOpenRangeHistory, sessionRangeHistory,
-        gridScalperMAHistory, fvgStratHistory, mtfTopDownHistory
-      ];
-      let latest = null;
-      for (const hist of allHistories) {
-        for (const s of hist) {
-          if (!latest || (s.epoch || 0) > (latest.epoch || 0)) latest = s;
-        }
-      }
+      /* Use getAggregatedStrategyHistory() so multi-panel signals from non-focused
+         panels are included — reading globals directly would only see the focused
+         panel's history after activatePanel() overwrites the globals. */
+      const allSignals = getAggregatedStrategyHistory();
+      const latest = allSignals.length > 0 ? allSignals[0] : null;
       if (!latest) {
         showToast("🧠 No Strategy Signal", "No strategy signal has fired yet. Enable a strategy and wait for a setup.", "warning");
         return;
