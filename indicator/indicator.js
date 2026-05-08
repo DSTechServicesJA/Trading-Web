@@ -390,6 +390,9 @@ const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side pr
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
 const TELEGRAM_EXPORT_HEIGHT      = 1080;  /* high-res export height for Telegram screenshots */
+
+/* Profiles API */
+const PROFILES_API_URL            = "../api/profiles";         /* server-side profiles endpoint */
 const TIMEFRAME_LABELS = { "60":"1m","120":"2m","180":"3m","300":"5m","600":"10m","900":"15m","1800":"30m","3600":"1h","7200":"2h","14400":"4h","28800":"8h","86400":"1d" };
 
 /* ================= SYMBOL SPECIFICATIONS (pip size / contract size / pip value) ================= */
@@ -14333,43 +14336,179 @@ function buildDivergenceMarkers() {
 }
 
 /* ---- Feature 4: Named Settings Profiles ---- */
-function loadProfiles() {
+
+/**
+ * Return Authorization headers for the profiles API.
+ * Falls back gracefully when ITGuruAuth is not available.
+ */
+function profileApiHeaders() {
+  const h = { "Content-Type": "application/json" };
+  if (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getToken()) {
+    h["Authorization"] = "Bearer " + ITGuruAuth.getToken();
+  }
+  return h;
+}
+
+/**
+ * Fetch a profiles API URL, automatically retrying with .php extension on 404
+ * (for hosts without mod_rewrite URL rewriting).
+ */
+async function profileApiFetch(url, options = {}) {
+  const opts = { ...options, headers: Object.assign(profileApiHeaders(), options.headers || {}) };
+  let resp = await fetch(url, opts);
+  if (resp.status === 404) {
+    const phpUrl = url.includes("?") ? url.replace("?", ".php?") : url + ".php";
+    resp = await fetch(phpUrl, opts);
+  }
+  return resp;
+}
+
+/**
+ * Fetch profiles from the server and merge them into savedProfiles.
+ * Own profiles and admin-assigned profiles are both included.
+ * Falls back to localStorage-only when the user is not logged in or
+ * the request fails.
+ */
+async function loadProfiles() {
+  /* Always restore localStorage first so profiles are available immediately */
   try {
     const raw = localStorage.getItem(PROFILES_LS_KEY);
     if (raw) savedProfiles = JSON.parse(raw);
   } catch(e) { savedProfiles = {}; }
+
+  /* Skip server sync when not logged in */
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) {
+    renderProfilesList();
+    return;
+  }
+
+  try {
+    const resp = await profileApiFetch(PROFILES_API_URL);
+    if (!resp.ok) return;
+
+    const data = await resp.json();
+
+    /* Merge server profiles into savedProfiles.
+       Server profiles carry an id; assigned profiles are marked read-only. */
+    const merged = Object.assign({}, savedProfiles);
+
+    for (const p of (data.own || [])) {
+      merged[p.name] = Object.assign({}, p.settings || {}, {
+        _serverId: p.id,
+        _readOnly: false,
+      });
+    }
+    for (const p of (data.assigned || [])) {
+      merged[p.name] = Object.assign({}, p.settings || {}, {
+        _serverId: p.id,
+        _readOnly: true,
+        _assignedBy: p.assigned_by_username || "admin",
+      });
+    }
+
+    savedProfiles = merged;
+    _persistProfiles();
+    renderProfilesList();
+  } catch(e) {
+    /* Non-fatal — continue with localStorage profiles */
+    addLog("⚠️ Could not load profiles from server");
+  }
 }
+
 function _persistProfiles() {
   try { localStorage.setItem(PROFILES_LS_KEY, JSON.stringify(savedProfiles)); }
   catch(e) { addLog("⚠️ Could not save profiles to storage"); }
 }
-function saveProfile(name) {
+
+async function saveProfile(name) {
   if (!name || !name.trim()) return;
+  const trimmed = name.trim();
   try {
     const raw = localStorage.getItem(LS_PREFIX + "settings");
-    savedProfiles[name.trim()] = raw ? JSON.parse(raw) : {};
+    const settings = raw ? JSON.parse(raw) : {};
+
+    /* Preserve server metadata if profile already exists */
+    const existing  = savedProfiles[trimmed] || {};
+    const serverId  = existing._serverId || null;
+    const isReadOnly = existing._readOnly || false;
+
+    if (isReadOnly) {
+      showToast("Read-only Profile", `"${trimmed}" was assigned by ${profile._assignedBy || "admin"} and cannot be overwritten.`, "warning", 4000);
+      return;
+    }
+
+    savedProfiles[trimmed] = Object.assign({}, settings, serverId ? { _serverId: serverId, _readOnly: false } : {});
     _persistProfiles();
     renderProfilesList();
-    addLog(`💾 Profile saved: "${name.trim()}"`);
-    showToast("Profile Saved", `"${name.trim()}" saved successfully.`, "success", 3000);
+    addLog(`💾 Profile saved: "${trimmed}"`);
+    showToast("Profile Saved", `"${trimmed}" saved successfully.`, "success", 3000);
+
+    /* Sync to server if logged in */
+    if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+
+    try {
+      const body = { name: trimmed, settings };
+      if (serverId) body.id = serverId;
+
+      const resp = await profileApiFetch(PROFILES_API_URL, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result.id) {
+          savedProfiles[trimmed]._serverId = result.id;
+          _persistProfiles();
+        }
+      }
+    } catch(e) {
+      addLog("⚠️ Profile could not be synced to server");
+    }
   } catch(e) { addLog("⚠️ Profile save failed"); }
 }
+
 function loadProfile(name) {
   if (!name || !savedProfiles[name]) return;
   try {
-    localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(savedProfiles[name]));
+    /* Strip internal metadata before restoring settings */
+    const snapshot = Object.assign({}, savedProfiles[name]);
+    delete snapshot._serverId;
+    delete snapshot._readOnly;
+    delete snapshot._assignedBy;
+
+    localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(snapshot));
     restoreSettings();
     addLog(`📂 Profile loaded: "${name}"`);
     showToast("Profile Loaded", `"${name}" applied. Reconnect to use new settings.`, "info", 5000);
   } catch(e) { addLog("⚠️ Profile load failed"); }
 }
-function deleteProfile(name) {
+
+async function deleteProfile(name) {
   if (!name || !savedProfiles[name]) return;
+  const profile   = savedProfiles[name];
+  const isReadOnly = profile._readOnly || false;
+  const serverId  = profile._serverId  || null;
+
+  if (isReadOnly) {
+    showToast("Read-only Profile", `"${name}" was assigned by admin and cannot be deleted.`, "warning", 4000);
+    return;
+  }
+
   delete savedProfiles[name];
   _persistProfiles();
   renderProfilesList();
   addLog(`🗑 Profile deleted: "${name}"`);
+
+  /* Remove from server if it has a server id */
+  if (serverId && typeof ITGuruAuth !== "undefined" && ITGuruAuth.isLoggedIn()) {
+    try {
+      await profileApiFetch(PROFILES_API_URL + "?id=" + serverId, { method: "DELETE" });
+    } catch(e) {
+      addLog("⚠️ Profile could not be removed from server");
+    }
+  }
 }
+
 function renderProfilesList() {
   const list = document.getElementById("profilesList");
   if (!list) return;
@@ -14380,22 +14519,41 @@ function renderProfilesList() {
     return;
   }
   for (const name of names) {
+    const profile   = savedProfiles[name] || {};
+    const isReadOnly = profile._readOnly  || false;
+    const assignedBy = profile._assignedBy || "admin";
+
     const row = document.createElement("div");
     row.className = "profile-row";
+    if (isReadOnly) row.classList.add("profile-row-assigned");
+
     const nameSpan = document.createElement("span");
     nameSpan.className = "profile-name";
     nameSpan.textContent = name;
+    if (isReadOnly) {
+      const badge = document.createElement("span");
+      badge.className = "profile-badge-admin";
+      badge.title     = `Assigned by ${assignedBy}`;
+      badge.textContent = "📌";
+      nameSpan.appendChild(badge);
+    }
+
     const loadBtn = document.createElement("button");
     loadBtn.className = "profile-btn profile-btn-load";
     loadBtn.textContent = "Load";
     loadBtn.addEventListener("click", () => loadProfile(name));
-    const delBtn = document.createElement("button");
-    delBtn.className = "profile-btn profile-btn-del";
-    delBtn.textContent = "✕";
-    delBtn.addEventListener("click", () => { if (confirm(`Delete profile "${name}"?`)) deleteProfile(name); });
+
     row.appendChild(nameSpan);
     row.appendChild(loadBtn);
-    row.appendChild(delBtn);
+
+    if (!isReadOnly) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "profile-btn profile-btn-del";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", () => { if (confirm(`Delete profile "${name}"?`)) deleteProfile(name); });
+      row.appendChild(delBtn);
+    }
+
     list.appendChild(row);
   }
 }

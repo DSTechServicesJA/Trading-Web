@@ -83,6 +83,55 @@ CREATE TABLE IF NOT EXISTS strategy_access (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ──────────────────────────────────────────────
+-- Named indicator settings profiles
+-- Users save their own; admins can create profiles and assign them to users.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS indicator_profiles (
+    id               INT UNSIGNED   AUTO_INCREMENT PRIMARY KEY,
+    name             VARCHAR(60)    NOT NULL,
+    settings_json    MEDIUMTEXT     NOT NULL,
+    created_by       INT UNSIGNED   NOT NULL,
+    is_admin_profile TINYINT(1)     NOT NULL DEFAULT 0,
+    created_at       TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_ip_creator (created_by),
+    INDEX idx_ip_admin   (is_admin_profile),
+
+    CONSTRAINT fk_ip_created_by
+        FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Admin-assigned profile access per user
+-- Admins can assign any profile to any user; users can load it read-only.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_profile_assignments (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id     INT UNSIGNED NOT NULL,
+    profile_id  INT UNSIGNED NOT NULL,
+    assigned_by INT UNSIGNED DEFAULT NULL,
+    assigned_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_upa_user_profile (user_id, profile_id),
+    INDEX idx_upa_user    (user_id),
+    INDEX idx_upa_profile (profile_id),
+
+    CONSTRAINT fk_upa_user
+        FOREIGN KEY (user_id)    REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_upa_profile
+        FOREIGN KEY (profile_id) REFERENCES indicator_profiles (id) ON DELETE CASCADE,
+    CONSTRAINT fk_upa_assigned_by
+        FOREIGN KEY (assigned_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Migration: add profiles tables to existing databases
+-- Run only if the tables do not already exist.
+-- ──────────────────────────────────────────────
+-- (The CREATE TABLE IF NOT EXISTS statements above are safe to re-run.)
+
+-- ──────────────────────────────────────────────
 -- One-time Telegram link tokens
 -- Each token ties a logged-in web session to a Telegram /start command.
 -- Tokens expire in 15 minutes and are single-use.
