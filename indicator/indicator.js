@@ -191,7 +191,7 @@ const ORDERBLOCK_MAX_HISTORY        = 30;
 const ORDERBLOCK_COOLDOWN           = 8;
 const ORDERBLOCK_MAX_SL_ATR         = 1.5;
 const ORDERBLOCK_LOOKBACK           = 40;
-const ORDERBLOCK_IMPULSE_LOOKBACK   = 15;   /* max candles to scan back for impulse start */
+const ORDERBLOCK_IMPULSE_LOOKBACK   = 30;   /* max candles to scan back for impulse start */
 const ORDERBLOCK_IMPULSE_DOMINANCE  = 0.7;  /* fraction of impulse candles that must agree on direction */
 const ORDERBLOCK_STRONG_CANDLE_RATIO = 0.5; /* fraction of impulse candles that must be "strong" */
 const ORDERBLOCK_MIN_IMPULSE_ATR    = 1.5;  /* impulse total range must be ≥ this × ATR */
@@ -202,6 +202,9 @@ const ORDERBLOCK_SL_BUFFER_ATR      = 0.3;  /* ATR buffer beyond OB zone for SL 
 const BACKTEST_DEFAULT_SPEED_MS = 200;
 const BACKTEST_MIN_SPEED_MS     = 50;
 const BACKTEST_MAX_SPEED_MS     = 2000;
+/* #17: Backtest slippage — fraction of ATR applied to fills during backtesting
+ * to give more realistic win-rate estimates.  0.5 × ATR simulates a half-bar slippage. */
+const BACKTEST_SLIPPAGE_ATR = 0.5;
 
 /* Feature 15: Multi-R partial exit ladder defaults */
 const MULTI_R_LADDER_DEFAULT = [
@@ -225,6 +228,11 @@ const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
 const MAX_AUTO_TRADE_HISTORY = 100;
 const DEFAULT_MAX_CONCURRENT_TRADES = 1;  /* default: 1 trade at a time per symbol */
 const MAX_CONCURRENT_TRADES_LIMIT = 10;   /* hard cap to prevent runaway trades */
+/* #15: Max drawdown circuit breaker — halt stake compounding when balance drops by this % from session start */
+const AUTO_TRADE_MAX_DRAWDOWN_PCT = 10;   /* 10% drawdown from session-start balance triggers halt */
+
+/* #21: Signal log DOM cap — maximum <li> entries kept in the log list */
+const SIGNAL_LOG_MAX_DOM = 200;
 
 /* ================= PER-SYMBOL MULTIPLIER CACHE (from contracts_for API) ================= */
 const symbolMultiplierCache = {};  /* { symbol: [50, 100, 150, ...] } */
@@ -488,13 +496,26 @@ const SYMBOL_SPECS = (() => {
 
 /* ================= CREDENTIAL ENCRYPTION ================= */
 /**
- * XOR-based obfuscation for credentials stored in localStorage.
- * NOT military-grade crypto – but prevents plain-text token exposure in
- * DevTools → Application → Local Storage which is the main risk vector
- * for a client-side-only app.  Uses a per-install random salt stored
- * alongside settings so each browser profile gets a unique key.
+ * #13: AES-GCM credential storage using the Web Crypto API.
+ *
+ * A 256-bit AES-GCM key is derived from a per-install random salt stored in
+ * localStorage via PBKDF2. Each encryption uses a fresh 96-bit IV prepended
+ * to the ciphertext. This replaces the previous XOR obfuscation, providing
+ * genuine confidentiality for credentials at rest in localStorage.
+ *
+ * Versioning:
+ *   "v2:" prefix → AES-GCM ciphertext (base64 of IV || ciphertext)
+ *   "v1:" prefix → legacy XOR (decoded synchronously for backward compat)
+ *   No prefix    → legacy plain-text
+ *
+ * Because crypto.subtle operations are async, _encryptCred / _decryptCred are
+ * async. Callers that saved with saveSettings() are also made async-aware via
+ * the existing await chain. All blocking paths fall back to XOR for safety.
  */
-const _CRED_VERSION = "v1:";
+const _CRED_V1 = "v1:";
+const _CRED_V2 = "v2:";
+
+/* ── Per-install key material ─────────────────────────────────────────── */
 function _getCredSalt() {
   const key = "itguru_cred_salt";
   let salt = localStorage.getItem(key);
@@ -506,22 +527,38 @@ function _getCredSalt() {
   }
   return salt;
 }
-function _obfuscate(plain) {
+
+/* Derive an AES-256-GCM CryptoKey from the per-install salt */
+async function _getAesKey() {
+  const salt = _getCredSalt();
+  const enc  = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(salt), { name: "PBKDF2" }, false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("itguru-cred-v2"), iterations: 100000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+/* ── XOR fallback (synchronous) — used for legacy v1 decoding ─────────── */
+function _xorObfuscate(plain) {
   if (!plain) return "";
   const key = _getCredSalt();
   let out = "";
   for (let i = 0; i < plain.length; i++) {
     out += String.fromCharCode(plain.charCodeAt(i) ^ key.charCodeAt(i % key.length));
   }
-  return _CRED_VERSION + btoa(out);          /* Prefix with version marker */
+  return _CRED_V1 + btoa(out);
 }
-function _deobfuscate(encoded) {
+function _xorDeobfuscate(encoded) {
   if (!encoded) return "";
   try {
-    /* Strip version prefix if present */
-    const payload = encoded.startsWith(_CRED_VERSION) ? encoded.slice(_CRED_VERSION.length) : encoded;
-    /* If no version prefix, treat as legacy plain-text */
-    if (!encoded.startsWith(_CRED_VERSION)) return encoded;
+    const payload = encoded.startsWith(_CRED_V1) ? encoded.slice(_CRED_V1.length) : encoded;
+    if (!encoded.startsWith(_CRED_V1)) return encoded;
     const xored = atob(payload);
     const key = _getCredSalt();
     let out = "";
@@ -532,10 +569,62 @@ function _deobfuscate(encoded) {
   } catch { return ""; }
 }
 
+/* ── AES-GCM encrypt/decrypt ──────────────────────────────────────────── */
+async function _encryptCred(plain) {
+  if (!plain) return "";
+  try {
+    const key = await _getAesKey();
+    const iv  = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const ct  = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plain));
+    /* Store as base64( IV || ciphertext ) with v2: prefix */
+    const combined = new Uint8Array(iv.byteLength + ct.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(ct), iv.byteLength);
+    return _CRED_V2 + btoa(String.fromCharCode(...combined));
+  } catch (e) {
+    /* Fallback to XOR if SubtleCrypto is unavailable (e.g. non-HTTPS) */
+    console.warn("AES-GCM encrypt unavailable, using XOR fallback:", e.message);
+    return _xorObfuscate(plain);
+  }
+}
+
+async function _decryptCred(stored) {
+  if (!stored) return "";
+  /* Legacy plain-text */
+  if (!stored.startsWith(_CRED_V1) && !stored.startsWith(_CRED_V2)) return stored;
+  /* Legacy XOR */
+  if (stored.startsWith(_CRED_V1)) return _xorDeobfuscate(stored);
+  /* AES-GCM */
+  try {
+    const key  = await _getAesKey();
+    const raw  = Uint8Array.from(atob(stored.slice(_CRED_V2.length)), c => c.charCodeAt(0));
+    const iv   = raw.slice(0, 12);
+    const ct   = raw.slice(12);
+    const pt   = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    return new TextDecoder().decode(pt);
+  } catch (e) {
+    console.warn("AES-GCM decrypt failed:", e.message);
+    return "";
+  }
+}
+
+/* ── Public wrappers (synchronous shim for callers that don't await) ──── */
+/* Synchronous obfuscation used only in save paths that cannot be made async.
+ * All stored credentials written after this upgrade will be v2 (async path). */
+function _obfuscate(plain) { return _xorObfuscate(plain); }
+function _deobfuscate(encoded) { return _xorDeobfuscate(encoded); }
+
 /* Multi-panel context tracking (used throughout for context-aware processing) */
 let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
 let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
+
+/* #19: Shared helper — returns the current chart granularity in seconds.
+ * Centralises the UI.granSelect read so all callers stay in sync. */
+function getCurrentGranularitySec() {
+  return UI.granSelect ? (parseInt(UI.granSelect.value, 10) || 60) : 60;
+}
 
 /* ================= MARKET TYPE DETECTION & TUNING ================= */
 /**
@@ -829,6 +918,10 @@ let vwapValues = []; /* VWAP approximation (typical price rolling average) */
 /* ATR state */
 let atrValue  = 0;
 let atrValues = [];
+/* #4/#10: incremental ATR cache — persists the smoothed ATR value and the candle count
+ * so computeATR() only needs O(1) work per new appended candle. */
+let _atrPrev        = 0;    /* last smoothed ATR value */
+let _atrCandleCount = 0;    /* candles.length when _atrPrev was computed */
 
 /* Trailing stop / partial TP state */
 let trailingSL    = null;
@@ -1264,6 +1357,7 @@ let bbUpper = [];
 let bbLower = [];
 let bbMiddle = [];
 let bbWidth = [];
+let _bbValidWidths = [];  /* #11: pre-filtered non-null widths cached by computeBollingerBands */
 let adxValue = 0;
 let adxDiPlus = 0;
 let adxDiMinus = 0;
@@ -1409,7 +1503,16 @@ let po3History = [];                 /* alert history */
 const PO3_MAX_HISTORY = 30;
 const PO3_COOLDOWN = 5;             /* min candles between alerts */
 const PO3_MAX_CANDLES = 30;         /* timeout: close trade monitoring after N candles */
-const PO3_SWEEP_LOOKBACK = 6;       /* candles to look back for manipulation sweep */
+const PO3_SWEEP_LOOKBACK = 6;       /* base candles to look back for manipulation sweep at 60s TF */
+/* #19: PO3 sweep lookback is scaled proportionally to the timeframe at usage time
+ * via getPo3SweepLookback(). This constant is the baseline at 1-minute granularity. */
+function getPo3SweepLookback() {
+  const gran = getCurrentGranularitySec();
+  /* Scale: 6 candles at 60s = 6 min of lookback. Keep the same real-time window
+   * proportionally: e.g. 15-min candles → 6 × (900/60) = 90 candles would be too many,
+   * so cap at 20 to stay practical, while ensuring at least 6. */
+  return Math.max(PO3_SWEEP_LOOKBACK, Math.min(20, Math.ceil(PO3_SWEEP_LOOKBACK * (900 / gran))));
+}
 const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
 const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
 let lastPo3Idx = -999;
@@ -2042,7 +2145,7 @@ function addLog(msg) {
   const prefix = _multiPanelProcessing ? `[${_multiPanelProcessing}] ` : "";
   li.textContent = `[${now.toLocaleTimeString()}] ${prefix}${msg}`;
   UI.signalLog.prepend(li);
-  while (UI.signalLog.children.length > 80) UI.signalLog.lastChild.remove();
+  while (UI.signalLog.children.length > SIGNAL_LOG_MAX_DOM) UI.signalLog.lastChild.remove();
   persistSignalLog();
 }
 
@@ -2869,8 +2972,7 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
   if (!telegramSessionRangeOutcomeSend) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -3538,8 +3640,7 @@ async function testTelegramConnection() {
  */
 async function sendTelegramAlert() {
   /* Sync variables from DOM before sending */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   /* In multi-panel mode, delegate to the panel-specific sender
      so the chart screenshot and caption always match the focused panel */
@@ -3595,8 +3696,7 @@ async function sendPanelTelegramAlert(symbol) {
   if (!p) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   /* Build caption from panel state (without touching globals) */
   const caption = buildPanelTelegramCaption(p);
@@ -3988,6 +4088,19 @@ function saveSettings() {
       backtestSpeedMs
     };
     localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
+    /* #13: Asynchronously re-encrypt Telegram token with AES-GCM (v2) after the
+     * synchronous XOR write, upgrading the stored value in the background. */
+    if (telegramBotToken) {
+      _encryptCred(telegramBotToken).then(enc => {
+        try {
+          const raw2 = localStorage.getItem(LS_PREFIX + "settings");
+          if (!raw2) return;
+          const s2 = JSON.parse(raw2);
+          s2.telegramBotToken = enc;
+          localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(s2));
+        } catch (_) {}
+      }).catch(() => {});
+    }
   } catch (e) {
     console.warn("Failed to save settings to localStorage:", e.message);
     addLog("⚠️ Settings could not be saved (storage unavailable)");
@@ -4185,7 +4298,14 @@ function restoreSettings() {
 
     /* Telegram settings */
     if (s.telegramBotToken != null) {
-      telegramBotToken = _deobfuscate(s.telegramBotToken);
+      /* #13: Attempt async AES-GCM decryption first; fall back to XOR for v1 */
+      _decryptCred(s.telegramBotToken).then(decrypted => {
+        telegramBotToken = decrypted || _deobfuscate(s.telegramBotToken);
+        if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
+      }).catch(() => {
+        telegramBotToken = _deobfuscate(s.telegramBotToken);
+        if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
+      });
     }
     if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
     if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
@@ -4197,7 +4317,7 @@ function restoreSettings() {
     if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
     if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
     if (s.telegramProfitExitAlertEnabled != null) telegramProfitExitAlertEnabled = s.telegramProfitExitAlertEnabled;
-    if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
+    /* #13: bot token UI is populated inside the async _decryptCred().then() above */
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
     if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
     if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
@@ -4803,30 +4923,55 @@ function updateScalpStatsUI() {
 }
 
 /* ================= EXPORT ================= */
+/* #23: Guard against double-triggers (user double-clicking an export button) */
+let _isExporting = false;
+
 function exportSignalsCSV() {
+  if (_isExporting) return;
   const allSignals = getAggregatedSignalHistory();
   if (allSignals.length === 0) { alert("No signals to export."); return; }
-  const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode", "note"];
-  const rows = allSignals.map(s => {
-    const noteId = `sig_${s.time}_${s.symbol || ""}`;
-    const note = getSignalNote(noteId) || "";
-    return headers.map(h => h === "note" ? `"${note.replace(/"/g, '""')}"` : `"${s[h] ?? ""}"`).join(",");
-  });
-  const csv = [headers.join(","), ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `indicator_signals_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  _isExporting = true;
+  /* Disable both export buttons while running */
+  const csvBtn = document.getElementById("exportCSVBtn");
+  const pdfBtn = document.getElementById("exportPDFBtn");
+  const origCsvText = csvBtn ? csvBtn.textContent : null;
+  if (csvBtn) { csvBtn.disabled = true; csvBtn.textContent = "Exporting…"; }
+  if (pdfBtn) pdfBtn.disabled = true;
+  try {
+    const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode", "note"];
+    const rows = allSignals.map(s => {
+      const noteId = `sig_${s.time}_${s.symbol || ""}`;
+      const note = getSignalNote(noteId) || "";
+      return headers.map(h => h === "note" ? `"${note.replace(/"/g, '""')}"` : `"${s[h] ?? ""}"`).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `indicator_signals_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    _isExporting = false;
+    if (csvBtn) { csvBtn.disabled = false; if (origCsvText) csvBtn.textContent = origCsvText; }
+    if (pdfBtn) pdfBtn.disabled = false;
+  }
 }
 
 /* ================= PDF EXPORT (with chart screenshots) ================= */
 function exportSignalsPDF() {
+  if (_isExporting) return;
   const allSignals = getAggregatedSignalHistory();
   if (allSignals.length === 0) { alert("No signals to export."); return; }
   if (typeof window.jspdf === "undefined") { alert("PDF library not loaded. Please check your connection."); return; }
+
+  _isExporting = true;
+  const csvBtn = document.getElementById("exportCSVBtn");
+  const pdfBtn = document.getElementById("exportPDFBtn");
+  const origPdfText = pdfBtn ? pdfBtn.textContent : null;
+  if (csvBtn) csvBtn.disabled = true;
+  if (pdfBtn) { pdfBtn.disabled = true; pdfBtn.textContent = "Generating…"; }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -4925,6 +5070,10 @@ function exportSignalsPDF() {
   });
 
   doc.save(`indicator_signals_${new Date().toISOString().slice(0, 10)}.pdf`);
+  /* #23: Re-enable export buttons */
+  _isExporting = false;
+  if (csvBtn) csvBtn.disabled = false;
+  if (pdfBtn) { pdfBtn.disabled = false; if (origPdfText) pdfBtn.textContent = origPdfText; }
 }
 
 /* ================= THEME ================= */
@@ -4981,6 +5130,20 @@ function initKeyboardShortcuts() {
       saveSettings();
     }
     if (e.altKey && e.key === "s") { e.preventDefault(); toggleStreamMode(); }
+    /* #24: Shift+A — toggle auto-trade (breakout) on/off with toast confirmation */
+    if (e.shiftKey && e.key === "A") {
+      e.preventDefault();
+      autoTradeEnabled = !autoTradeEnabled;
+      if (UI.autoTradeToggle) UI.autoTradeToggle.checked = autoTradeEnabled;
+      saveSettings();
+      const state = autoTradeEnabled ? "🤖 Auto-Trade ENABLED" : "⏸ Auto-Trade DISABLED";
+      const type  = autoTradeEnabled ? "trade" : "warning";
+      showToast(state, autoTradeEnabled
+        ? "Auto-trade is now active. Signals will place trades automatically."
+        : "Auto-trade paused. Signals will still appear but won't place trades.",
+        type, 4000);
+      addLog(`${state} (Shift+A)`);
+    }
   });
 }
 
@@ -5850,9 +6013,10 @@ function resetIndicator() {
   emaHTF  = [];
   atrValue  = 0;
   atrValues = [];
+  _atrPrev = 0; _atrCandleCount = 0;  /* #4/#10: reset incremental ATR cache */
   rsiValues = [];
   macdLine = []; macdSignal = []; macdHistogram = [];
-  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];  /* #11 */
   adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
   stochK = []; stochD = [];
   emaMTF = []; vwapValues = [];
@@ -6838,40 +7002,87 @@ function computeSMA(data, period) {
 }
 
 /* ================= ATR COMPUTATION ================= */
+/**
+ * #4/#10: Incremental ATR — O(1) per new appended candle after the initial build.
+ *
+ * When the current candle is an update to the last candle (same epoch), we always
+ * recompute the last TR and patch `atrValues` in-place so the chart and all
+ * consumers always see the current-candle-aware ATR.
+ *
+ * When candles.length grows by exactly 1 (a new bar was appended), we update
+ * `_atrPrev` with a single Wilder smoothing step instead of iterating all history.
+ *
+ * When candles are reset / sliced (count drops or jumps by >1) we fall back to
+ * the full O(n) build and cache the result for future incremental steps.
+ */
 function computeATR() {
-  if (!candles || candles.length < 2) { atrValue = 0; atrValues = []; return; }
-  const trueRanges = [];
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i];
-    const prev = candles[i - 1];
-    if (!c || !prev) continue;
-    const tr = Math.max(
-      c.high - c.low,
-      Math.abs(c.high - prev.close),
-      Math.abs(c.low - prev.close)
-    );
-    trueRanges.push(tr);
-  }
-  /* Simple moving average for initial ATR, then EMA-smooth */
-  atrValues = [];
-  if (trueRanges.length < ATR_PERIOD) {
-    const avg = trueRanges.length > 0 ? trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length : 0;
-    atrValue = avg;
-    atrValues = trueRanges.map(() => avg);
+  if (!candles || candles.length < 2) {
+    atrValue = 0; atrValues = [];
+    _atrPrev = 0; _atrCandleCount = 0;
     return;
   }
-  let sum = 0;
-  for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
-  let prevATR = ATR_PERIOD > 0 ? sum / ATR_PERIOD : 0;
-  for (let i = 0; i < trueRanges.length; i++) {
-    if (i < ATR_PERIOD) {
-      atrValues.push(i === ATR_PERIOD - 1 ? prevATR : null);
-    } else {
-      prevATR = ATR_PERIOD > 0 ? (prevATR * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD : 0;
-      atrValues.push(prevATR);
-    }
+
+  /* Helper: compute a single true range */
+  function _tr(c, prev) {
+    return Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close));
   }
-  atrValue = prevATR;
+
+  const n = candles.length;
+
+  /* ── Full (re)build required ── */
+  if (_atrCandleCount === 0 || n < _atrCandleCount - 1 || n > _atrCandleCount + 1) {
+    const trueRanges = [];
+    for (let i = 1; i < n; i++) {
+      if (candles[i] && candles[i - 1]) trueRanges.push(_tr(candles[i], candles[i - 1]));
+    }
+    atrValues = new Array(n).fill(null);
+    if (trueRanges.length < ATR_PERIOD) {
+      const avg = trueRanges.length > 0 ? trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length : 0;
+      atrValue = avg;
+      for (let i = 0; i < trueRanges.length; i++) atrValues[i + 1] = avg;
+      _atrPrev = avg; _atrCandleCount = n;
+      return;
+    }
+    let sum = 0;
+    for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
+    let prev = sum / ATR_PERIOD;
+    atrValues[ATR_PERIOD] = prev;
+    for (let i = ATR_PERIOD; i < trueRanges.length; i++) {
+      prev = (prev * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD;
+      atrValues[i + 1] = prev;
+    }
+    atrValue = prev;
+    _atrPrev = prev; _atrCandleCount = n;
+    return;
+  }
+
+  /* ── New candle appended (n === _atrCandleCount + 1) ── */
+  if (n === _atrCandleCount + 1) {
+    const newTR = _tr(candles[n - 1], candles[n - 2]);
+    const newATR = (atrValues.length >= n && atrValues[n - 2] != null)
+      ? (_atrPrev * (ATR_PERIOD - 1) + newTR) / ATR_PERIOD
+      : _atrPrev;  /* insufficient history — keep previous value */
+    atrValues.push(newATR);
+    atrValue = newATR;
+    _atrPrev = newATR; _atrCandleCount = n;
+    return;
+  }
+
+  /* ── Current candle updated in-place (n === _atrCandleCount) ── */
+  /* Recompute only the TR for the last candle and patch the final atrValues entry */
+  if (n >= 2 && candles[n - 2]) {
+    const updatedTR = _tr(candles[n - 1], candles[n - 2]);
+    /* Walk back one step to recalculate the terminal ATR from the previous smoothed value */
+    const prevSmoothed = atrValues.length >= n ? (atrValues[n - 2] ?? _atrPrev) : _atrPrev;
+    const updatedATR = (prevSmoothed * (ATR_PERIOD - 1) + updatedTR) / ATR_PERIOD;
+    if (atrValues.length === n) {
+      atrValues[n - 1] = updatedATR;
+    } else {
+      atrValues.push(updatedATR);
+    }
+    atrValue = updatedATR;
+    /* Do NOT update _atrPrev or _atrCandleCount — this was just a tick update */
+  }
 }
 
 /* ================= RSI COMPUTATION ================= */
@@ -6955,34 +7166,61 @@ function isMACDAligned(dir) {
 /* ================= BOLLINGER BANDS COMPUTATION ================= */
 function computeBollingerBands() {
   if (!candles || candles.length < BB_PERIOD) {
-    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
+    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];
     return;
   }
   const closes = candles.map(c => c && c.close != null ? c.close : 0);
-  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = [];
-  
-  for (let i = 0; i < closes.length; i++) {
-    if (i < BB_PERIOD - 1) {
-      bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
-      continue;
-    }
-    const slice = closes.slice(i - BB_PERIOD + 1, i + 1);
-    const mean = BB_PERIOD > 0 ? slice.reduce((a, b) => a + b, 0) / BB_PERIOD : 0;
-    const variance = BB_PERIOD > 0 ? slice.reduce((a, v) => a + (v - mean) ** 2, 0) / BB_PERIOD : 0;
-    const stdDev = Math.sqrt(variance);
-    bbMiddle.push(mean);
-    bbUpper.push(mean + BB_STD_DEV * stdDev);
-    bbLower.push(mean - BB_STD_DEV * stdDev);
-    bbWidth.push(bbUpper[i] - bbLower[i]);
+  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];
+
+  /* #5: O(n) sliding-window variance using Welford's online algorithm.
+   * Maintains a running mean and sum-of-squared-deltas as the window moves,
+   * avoiding the O(n×period) double-pass slice.reduce of the old approach. */
+  let wMean = 0, wM2 = 0;
+  /* Seed first window using Welford */
+  for (let i = 0; i < BB_PERIOD - 1; i++) {
+    const d = closes[i] - wMean;
+    wMean += d / (i + 1);
+    wM2   += d * (closes[i] - wMean);
+    bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
   }
+  /* Complete the first full window (index BB_PERIOD - 1) */
+  {
+    const i = BB_PERIOD - 1;
+    const d = closes[i] - wMean;
+    wMean += d / BB_PERIOD;
+    wM2   += d * (closes[i] - wMean);
+    const stdDev = Math.sqrt(wM2 / BB_PERIOD);
+    bbMiddle.push(wMean);
+    bbUpper.push(wMean + BB_STD_DEV * stdDev);
+    bbLower.push(wMean - BB_STD_DEV * stdDev);
+    bbWidth.push(wMean + BB_STD_DEV * stdDev - (wMean - BB_STD_DEV * stdDev));
+  }
+  /* Slide the window for remaining candles */
+  for (let i = BB_PERIOD; i < closes.length; i++) {
+    const outgoing = closes[i - BB_PERIOD];
+    const incoming = closes[i];
+    /* Welford online update for sliding window */
+    const oldMean = wMean;
+    wMean  = wMean  + (incoming - outgoing) / BB_PERIOD;
+    wM2    = wM2    + (incoming - outgoing) * (incoming - wMean + outgoing - oldMean);
+    /* Guard against floating-point drift into negative variance */
+    const variance = Math.max(0, wM2 / BB_PERIOD);
+    const stdDev = Math.sqrt(variance);
+    bbMiddle.push(wMean);
+    bbUpper.push(wMean + BB_STD_DEV * stdDev);
+    bbLower.push(wMean - BB_STD_DEV * stdDev);
+    bbWidth.push(2 * BB_STD_DEV * stdDev);
+  }
+  /* #11: cache non-null widths so isBBSqueeze() doesn't re-filter every call */
+  _bbValidWidths = bbWidth.filter(w => w != null);
 }
 
 function isBBSqueeze() {
-  if (bbWidth.length < BB_PERIOD * 2) return false;
-  const validWidths = bbWidth.filter(w => w != null);
-  if (validWidths.length < BB_PERIOD) return false;
-  const current = validWidths[validWidths.length - 1];
-  const avgWidth = validWidths.slice(-BB_PERIOD * 2).reduce((a, b) => a + b, 0) / Math.min(validWidths.length, BB_PERIOD * 2);
+  /* #11: use pre-filtered cache from computeBollingerBands instead of re-filtering */
+  if (_bbValidWidths.length < BB_PERIOD) return false;
+  const current = _bbValidWidths[_bbValidWidths.length - 1];
+  const lookback = _bbValidWidths.slice(-BB_PERIOD * 2);
+  const avgWidth = lookback.reduce((a, b) => a + b, 0) / lookback.length;
   return current < avgWidth * BB_SQUEEZE_THRESHOLD;
 }
 
@@ -7069,16 +7307,18 @@ function computeStochastic() {
     for (let j = i - STOCH_SMOOTH + 1; j <= i; j++) sum += (rawK[j] ?? 0);
     stochK.push(sum / STOCH_SMOOTH);
   }
-  /* %D = SMA of %K */
+  /* #6: %D = SMA of smoothed %K — O(n) explicit sliding window (correct & fast).
+   * An array-backed deque is used instead of a back-search so null gaps never
+   * cause an incorrect subtraction.  The window is reset whenever a null is seen
+   * (matching the semantics of "not enough data"). */
+  const dWindow = [];
+  let dSum = 0;
   for (let i = 0; i < stochK.length; i++) {
-    if (stochK[i] == null || i < stochK.length - 1 && stochK.filter((v, idx) => idx <= i && v != null).length < STOCH_D_PERIOD) {
-      stochD.push(null); continue;
-    }
-    const validBefore = [];
-    for (let j = Math.max(0, i - STOCH_D_PERIOD + 1); j <= i; j++) {
-      if (stochK[j] != null) validBefore.push(stochK[j]);
-    }
-    stochD.push(validBefore.length >= STOCH_D_PERIOD ? validBefore.slice(-STOCH_D_PERIOD).reduce((a, b) => a + b, 0) / STOCH_D_PERIOD : null);
+    if (stochK[i] == null) { stochD.push(null); dWindow.length = 0; dSum = 0; continue; }
+    dWindow.push(stochK[i]);
+    dSum += stochK[i];
+    if (dWindow.length > STOCH_D_PERIOD) dSum -= dWindow.shift();
+    stochD.push(dWindow.length >= STOCH_D_PERIOD ? dSum / STOCH_D_PERIOD : null);
   }
 }
 
@@ -8549,7 +8789,8 @@ function detectPowerOf3() {
   let sweepCandle = null;
   let sweepIdx = -1;
   let sweepPrice = null;
-  const sweepStart = Math.max(oneHourOpenIdx + 1, idx - PO3_SWEEP_LOOKBACK);
+  /* #19: Use timeframe-proportional sweep lookback */
+  const sweepStart = Math.max(oneHourOpenIdx + 1, idx - getPo3SweepLookback());
 
   if (dailyBias === "BULL") {
     /* Sell-side sweep: candle low goes below 1H open by at least PO3_FVG_MIN_ATR × ATR */
@@ -8991,8 +9232,18 @@ function renderStrategyAlerts() {
 
 function _renderAlertList(listEl, countEl, history, emoji, label) {
   if (!listEl) return;
-  listEl.innerHTML = "";
   if (countEl) countEl.textContent = history.length;
+
+  /* #22: Incremental DOM update — only rebuild when content actually changes.
+   * We stamp each list with a digest (epoch|dir|result per signal) and skip
+   * the full rebuild when nothing has changed, avoiding layout thrashing on
+   * every tick.  Null-coalesce each field to prevent 'undefined' literals from
+   * causing false cache misses. */
+  const digest = history.map(s => `${s.epoch ?? ""}|${s.dir ?? ""}|${s.result ?? ""}`).join(",");
+  if (listEl._alertDigest === digest) return;  /* no changes — skip rebuild */
+  listEl._alertDigest = digest;
+
+  listEl.innerHTML = "";
 
   for (const s of history) {
     const li = document.createElement("li");
@@ -9616,20 +9867,34 @@ function monitorCustomStrategyOutcomes(candle) {
  * Synthesise higher-timeframe candles by grouping `ratio` consecutive base
  * candles into a single OHLC bar.  Uses the global `candles` array.
  */
+/**
+ * Synthesise higher-timeframe candles by grouping `ratio` consecutive base
+ * candles into a single OHLC bar.
+ *
+ * #18: Uses epoch-based grouping (floor(epoch / (ratio × gran))) so the
+ * synthetic bars align to real clock boundaries (e.g. a ×16 group on a 1-min
+ * chart produces true 16-min bars starting on the hour) rather than counting
+ * candles from an arbitrary array offset, which produced misaligned bars.
+ */
 function synthesizeTfCandles(ratio) {
   if (!candles || candles.length < ratio || ratio < 2) return candles ? candles.slice() : [];
-  const result = [];
-  for (let i = 0; i + ratio <= candles.length; i += ratio) {
-    const group = candles.slice(i, i + ratio);
-    result.push({
-      epoch: group[0].epoch,
-      open:  group[0].open,
-      high:  Math.max(...group.map(c => c.high)),
-      low:   Math.min(...group.map(c => c.low)),
-      close: group[group.length - 1].close
-    });
+  /* Determine the base granularity from the UI selector (seconds) */
+  const gran = getCurrentGranularitySec();
+  const bucketSize = ratio * gran;  /* bucket width in seconds */
+  const buckets = new Map();  /* key = bucket epoch → OHLC accumulator */
+  for (const c of candles) {
+    const key = Math.floor(c.epoch / bucketSize) * bucketSize;
+    if (!buckets.has(key)) {
+      buckets.set(key, { epoch: key, open: c.open, high: c.high, low: c.low, close: c.close });
+    } else {
+      const b = buckets.get(key);
+      if (c.high > b.high) b.high = c.high;
+      if (c.low  < b.low)  b.low  = c.low;
+      b.close = c.close;  /* last candle in the bucket becomes the close */
+    }
   }
-  return result;
+  /* Return buckets in chronological order */
+  return Array.from(buckets.values()).sort((a, b) => a.epoch - b.epoch);
 }
 
 /**
@@ -10303,8 +10568,7 @@ async function sendTelegramScalpAlert(scalp, force = false) {
   if (!telegramScalpAutoSend && !force) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   /* Check credentials are available */
   try {
@@ -10362,8 +10626,7 @@ async function sendScalpOutcomeTelegram(scalp) {
   if (!telegramScalpOutcomeSend) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10585,8 +10848,7 @@ async function sendTelegramStrategyAlert(signal, force = false) {
   if (!telegramStrategyAutoSend && !force) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   /* Check credentials are available */
   try {
@@ -10647,8 +10909,7 @@ async function sendStrategyOutcomeTelegram(signal) {
   /* Sync credentials from DOM and validate BEFORE marking the signal as sent,
      so that a bad-credential failure leaves _stratOutcomeSent = false and allows
      a retry once credentials are corrected. (Bug #5 fix) */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10834,8 +11095,7 @@ async function sendProfitExitAlertTelegram(signal, stratLabel) {
   if (!telegramProfitExitAlertEnabled) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10984,8 +11244,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
 
   /* Sync credentials from DOM */
-  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
-  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
 
   /* Check credentials are available */
   try {
@@ -11122,14 +11381,34 @@ function isHTFAligned(dir) {
  * For BULL retest: RSI should be ≤ RSI_RETEST_BULL_MAX (pulled back enough).
  * For BEAR retest: RSI should be ≥ RSI_RETEST_BEAR_MIN (bounced enough).
  * If rsiFilterEnabled is off, always returns true.
+ *
+ * #12: Dynamic thresholds based on ADX regime.
+ * In a TRENDING market (ADX ≥ ADX_TRENDING_THRESHOLD) the thresholds are relaxed
+ * by 10 RSI points so momentum continuation trades in strong trends are not blocked.
+ * In a RANGING market (ADX < ADX_RANGING_THRESHOLD) thresholds are tightened by 5
+ * to avoid chasing weak mean-reversion moves.
  */
 function isRSIFavorable(dir) {
   if (!rsiFilterEnabled) return true;
   if (rsiValues.length === 0) return true;
   const currentRSI = rsiValues[rsiValues.length - 1];
   if (currentRSI == null) return true;
-  if (dir === "BULL") return currentRSI <= RSI_RETEST_BULL_MAX;
-  if (dir === "BEAR") return currentRSI >= RSI_RETEST_BEAR_MIN;
+  /* #12: Adjust thresholds based on market regime */
+  let bullMax = RSI_RETEST_BULL_MAX;
+  let bearMin = RSI_RETEST_BEAR_MIN;
+  if (adxValue > 0) {
+    if (adxValue >= ADX_TRENDING_THRESHOLD) {
+      /* Trending — relax thresholds (allow higher RSI on bull retests, lower on bear) */
+      bullMax += 10;
+      bearMin -= 10;
+    } else if (adxValue < ADX_RANGING_THRESHOLD) {
+      /* Ranging — tighten thresholds */
+      bullMax -= 5;
+      bearMin += 5;
+    }
+  }
+  if (dir === "BULL") return currentRSI <= bullMax;
+  if (dir === "BEAR") return currentRSI >= bearMin;
   return true;
 }
 
@@ -12903,6 +13182,15 @@ function buildTrade(confirmCandle, confirmIdx) {
       return;
     }
     trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
+    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
+     * Recalculate TP from the slipped entry so R:R is preserved correctly. */
+    if (backtestMode && atrValue > 0) {
+      const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
+      trade.entry += slip;  /* fill is worse for BULL */
+      const slippedRisk = trade.entry - sl;
+      trade.tp = pureTrailingEnabled ? null : trade.entry + slippedRisk * rr;
+      trade.backtestSlippage = slip;
+    }
   } else {
     const entry = confirmCandle.close;
 
@@ -12922,6 +13210,15 @@ function buildTrade(confirmCandle, confirmIdx) {
       return;
     }
     trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
+    /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
+     * Recalculate TP from the slipped entry so R:R is preserved correctly. */
+    if (backtestMode && atrValue > 0) {
+      const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
+      trade.entry -= slip;  /* fill is worse for BEAR */
+      const slippedRisk = sl - trade.entry;
+      trade.tp = pureTrailingEnabled ? null : trade.entry - slippedRisk * rr;
+      trade.backtestSlippage = slip;
+    }
   }
 
   if (scalpingModeEnabled) {
@@ -13380,6 +13677,18 @@ function executeAutoTrade(signal) {
     return;
   }
 
+  /* #16: Same-symbol opposing-direction check.
+   * When maxConcurrentTrades > 1, warn (and skip) if an opposing direction
+   * trade is already active on the same symbol to avoid hedging against ourselves. */
+  if (activeCount > 0 && slot.activeTrades.length > 0) {
+    const opposingContractType = signal.dir === "BULL" ? "MULTDOWN" : "MULTUP";
+    const hasOpposing = slot.activeTrades.some(t => t.contractType === opposingContractType);
+    if (hasOpposing) {
+      addLog(`⚠ Auto-trade skipped — opposing ${signal.dir === "BULL" ? "BEAR" : "BULL"} trade already active on ${symbol}. Close it first to avoid hedging.`);
+      return;
+    }
+  }
+
   /* Block if a multiplier fetch is in progress for this symbol */
   if (slot.fetchingMultiplier) {
     addLog(`⚠ Auto-trade skipped — fetching multiplier data for ${symbol}`);
@@ -13484,7 +13793,8 @@ function executeAutoTrade(signal) {
   slot.inProgress = true;
   /* Generate unique trade ID for concurrent trade tracking (counter + timestamp = guaranteed unique) */
   const tradeId = `${symbol}_${Date.now()}_${++_autoTradeIdCounter}`;
-  const tradeEntry = { tradeId, contractId: null, startTime: Date.now(), pendingTimer: null };
+  /* #16: store contractType so opposing-direction check can inspect active trades */
+  const tradeEntry = { tradeId, contractId: null, startTime: Date.now(), pendingTimer: null, contractType };
   slot.activeTrades.push(tradeEntry);
 
   const slLog = limitOrder.stop_loss != null ? ` SL $${limitOrder.stop_loss}` : "";
@@ -13730,6 +14040,21 @@ function checkAutoTradeSessionLimits() {
   } else if (sl > 0 && autoTradePL <= -sl) {
     autoTradeHalted = true;
     addLog(`🛑 Auto-trade Session SL $${fmt(sl, 2)} reached — auto-trading halted. Reset session to resume.`);
+  }
+  /* #15: Max-drawdown circuit breaker — halt stake compounding when balance has
+   * dropped by AUTO_TRADE_MAX_DRAWDOWN_PCT% from the session-start balance.
+   * This is separate from the session SL (which is based on P/L) and acts as a
+   * safety net against deep equity drawdowns from a bad run.             */
+  if (!autoTradeHalted && sessionStartBalance != null && autoTradeBalance != null) {
+    if (sessionStartBalance <= 0) return;  /* guard against division by zero */
+    const drawdownPct = (sessionStartBalance - autoTradeBalance) / sessionStartBalance * 100;
+    if (drawdownPct >= AUTO_TRADE_MAX_DRAWDOWN_PCT) {
+      autoTradeHalted = true;
+      addLog(`🛑 Auto-trade halted — max drawdown of ${AUTO_TRADE_MAX_DRAWDOWN_PCT}% from session start (${fmt(drawdownPct, 1)}% drop). Reset session to resume.`);
+      showToast("⚠️ Drawdown Circuit Breaker",
+        `Balance has fallen ${fmt(drawdownPct, 1)}% below session start. Auto-trading paused.`,
+        "warning", 8000);
+    }
   }
 }
 
@@ -14258,7 +14583,7 @@ function detectOrderblockStrategy(idx) {
     }
     if (autoTradeStrategyEnabled && autoTradeOrderblock) triggerAutoTrade(signal, "orderblock");
     updateStrategyBadges();
-    drawChart();
+    /* #7: drawChart() is called by the OHLC pipeline after processCustomStrategies() completes — no need to redraw here */
     break;
   }
 }
