@@ -1908,6 +1908,8 @@ function initUI() {
   UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
   UI.telegramProfitExitAlertToggle     = document.getElementById("telegramProfitExitAlertToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
+  UI.telegramSendScalpNowBtn    = document.getElementById("telegramSendScalpNowBtn");
+  UI.telegramSendStrategyNowBtn = document.getElementById("telegramSendStrategyNowBtn");
   UI.telegramStatus         = document.getElementById("telegramStatus");
 
   /* Feature 2: Orderblock toggle */
@@ -10295,8 +10297,8 @@ function buildScalpTelegramCaption(scalp) {
 /**
  * Send a live scalp alert to Telegram with chart screenshot.
  */
-async function sendTelegramScalpAlert(scalp) {
-  if (!telegramScalpAutoSend) return;
+async function sendTelegramScalpAlert(scalp, force = false) {
+  if (!telegramScalpAutoSend && !force) return;
 
   /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
@@ -10577,8 +10579,8 @@ function buildStrategyTelegramCaption(signal) {
  * Send a custom strategy alert to Telegram with chart screenshot.
  * Called from processLiquiditySweep, processStopLossHunt, processFailedPinBar.
  */
-async function sendTelegramStrategyAlert(signal) {
-  if (!telegramStrategyAutoSend) return;
+async function sendTelegramStrategyAlert(signal, force = false) {
+  if (!telegramStrategyAutoSend && !force) return;
 
   /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
@@ -18461,6 +18463,40 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramSendNowBtn) {
     UI.telegramSendNowBtn.addEventListener("click", () => sendTelegramAlert());
+  }
+
+  /* Manual send: latest Live Scalp signal → Telegram (bypasses auto-send toggle) */
+  if (UI.telegramSendScalpNowBtn) {
+    UI.telegramSendScalpNowBtn.addEventListener("click", () => {
+      const history = getAggregatedScalpHistory();
+      if (!history.length) {
+        showToast("⚡ No Live Scalp Signal", "No live scalp signal has fired yet. Wait for the scanner to detect a setup.", "warning");
+        return;
+      }
+      sendTelegramScalpAlert(history[0], true);
+    });
+  }
+
+  /* Manual send: latest Strategy signal → Telegram (bypasses auto-send toggle) */
+  if (UI.telegramSendStrategyNowBtn) {
+    UI.telegramSendStrategyNowBtn.addEventListener("click", () => {
+      const allHistories = [
+        liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
+        fibScalpHistory, po3History, nyOpenRangeHistory, sessionRangeHistory,
+        gridScalperMAHistory, fvgStratHistory, mtfTopDownHistory
+      ];
+      let latest = null;
+      for (const hist of allHistories) {
+        for (const s of hist) {
+          if (!latest || (s.epoch || 0) > (latest.epoch || 0)) latest = s;
+        }
+      }
+      if (!latest) {
+        showToast("🧠 No Strategy Signal", "No strategy signal has fired yet. Enable a strategy and wait for a setup.", "warning");
+        return;
+      }
+      sendTelegramStrategyAlert(latest, true);
+    });
   }
 
   /* Telegram test connection */
