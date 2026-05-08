@@ -18470,7 +18470,7 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.telegramSendScalpNowBtn.addEventListener("click", () => {
       const history = getAggregatedScalpHistory();
       if (!history.length) {
-        showToast("⚡ No Live Scalp Signal", "No live scalp signal has fired yet. Wait for the scanner to detect a setup.", "warning");
+        showToast("⚡ No Live Scalp Signal", "No live scalp signal has fired yet. Enable Live Scalp Scanner in Settings and wait for a setup.", "warning");
         return;
       }
       sendTelegramScalpAlert(history[0], true);
