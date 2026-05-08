@@ -163,8 +163,8 @@ if ($method === 'PATCH') {
                 if ($expIdx !== false) {
                     $params[$expIdx] = $autoExpiry;
                 } else {
-                    /* Insert before the final $targetId param */
-                    array_splice($set,    -0, 0, ['subscription_expires_at = ?']);
+                    /* Append the new clause; insert the value just before the final $targetId param */
+                    $set[]    = 'subscription_expires_at = ?';
                     array_splice($params, -1, 0, [$autoExpiry]);
                 }
             }

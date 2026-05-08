@@ -122,7 +122,10 @@ if ($isMultipart && $action === 'sendPhoto') {
     /* Attach the photo file */
     if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
         $tmpPath  = $_FILES['photo']['tmp_name'];
-        $mimeType = $_FILES['photo']['type'] ?: 'image/png';
+        /* Detect MIME type server-side — the client-supplied $_FILES['type'] is
+           user-controlled and must not be trusted. */
+        $finfo    = new \finfo(FILEINFO_MIME_TYPE);
+        $mimeType = $finfo->file($tmpPath) ?: 'image/png';
         $fileName = $_FILES['photo']['name'] ?: 'chart.png';
         $postFields['photo'] = new CURLFile($tmpPath, $mimeType, $fileName);
     } else {

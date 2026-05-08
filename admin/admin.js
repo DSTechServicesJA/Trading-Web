@@ -139,10 +139,13 @@ async function initApp(user) {
   if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
 
   /* Logout */
-  document.getElementById("adminLogoutBtn").addEventListener("click", () => {
-    ITGuruAuth.logout();
-    location.reload();
-  });
+  const logoutBtn = document.getElementById("adminLogoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      ITGuruAuth.logout();
+      location.reload();
+    });
+  }
 
   /* Load strategy list then users */
   await loadStrategies();
@@ -650,16 +653,24 @@ async function saveEdit() {
     const toRevoke = [...prev].filter(k => !next.has(k));
 
     for (const key of toGrant) {
-      await apiRequest("/admin/strategy_access", {
+      const grantResp = await apiRequest("/admin/strategy_access", {
         method: "POST",
         body: JSON.stringify({ user_id: editingUserId, strategy_key: key }),
       });
+      if (!grantResp.ok) {
+        const grantErr = await grantResp.json().catch(() => ({}));
+        throw new Error(grantErr.error || `Failed to grant strategy: ${key}`);
+      }
     }
     for (const key of toRevoke) {
-      await apiRequest("/admin/strategy_access", {
+      const revokeResp = await apiRequest("/admin/strategy_access", {
         method: "DELETE",
         body: JSON.stringify({ user_id: editingUserId, strategy_key: key }),
       });
+      if (!revokeResp.ok) {
+        const revokeErr = await revokeResp.json().catch(() => ({}));
+        throw new Error(revokeErr.error || `Failed to revoke strategy: ${key}`);
+      }
     }
 
     closeModal("editModal");
