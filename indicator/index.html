@@ -999,7 +999,10 @@
           <section class="box">
             <h3 class="collapsible">🔧 Advanced Parameters</h3>
             <div class="collapsible-body">
-              <label for="rangeDuration">Opening Range (min)</label>
+              <div class="section-header" style="margin-bottom:4px;">
+                <label for="rangeDuration">Opening Range (min)</label>
+                <label class="lock-label" style="margin-left:auto;"><input type="checkbox" id="lockRangeMinToggle" /> 🔒 Lock</label>
+              </div>
               <input type="number" id="rangeDuration" min="1" step="1" value="15" />
 
               <label for="touchTolerance" class="spaced-label">Level Touch Tolerance (%)</label>

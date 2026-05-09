@@ -1428,8 +1428,9 @@ const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
 let autoApplyRecommended = true;
 
 /* Lock checkboxes — prevent applyRecommendedSettings from overwriting timeframe / R:R */
-let lockTimeframe = false;
-let lockRR        = false;
+let lockTimeframe  = false;
+let lockRR         = false;
+let lockRangeMin   = false;
 
 /* Lock strategy filters — prevent applyRecommendedSettings from re-enabling
    any filter that the user has explicitly disabled (unchecked) */
@@ -1786,6 +1787,7 @@ function initUI() {
   UI.autoApplyRecToggle  = document.getElementById("autoApplyRecToggle");
   UI.lockTimeframeToggle = document.getElementById("lockTimeframeToggle");
   UI.lockRRToggle        = document.getElementById("lockRRToggle");
+  UI.lockRangeMinToggle  = document.getElementById("lockRangeMinToggle");
   UI.lockIndicatorFiltersToggle = document.getElementById("lockIndicatorFiltersToggle");
   UI.rsiDisplay          = document.getElementById("rsiDisplay");
   UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
@@ -4021,6 +4023,7 @@ function saveSettings() {
       autoApplyRecommended,
       lockTimeframe,
       lockRR,
+      lockRangeMin,
       lockIndicatorFilters,
       liveScalpEnabled,
       liveScalpMinConf,
@@ -4291,9 +4294,11 @@ function restoreSettings() {
     /* Lock toggles */
     if (s.lockTimeframe != null) lockTimeframe = s.lockTimeframe;
     if (s.lockRR != null) lockRR = s.lockRR;
+    if (s.lockRangeMin != null) lockRangeMin = s.lockRangeMin;
     if (s.lockIndicatorFilters != null) lockIndicatorFilters = s.lockIndicatorFilters;
     if (UI.lockTimeframeToggle) UI.lockTimeframeToggle.checked = lockTimeframe;
     if (UI.lockRRToggle) UI.lockRRToggle.checked = lockRR;
+    if (UI.lockRangeMinToggle) UI.lockRangeMinToggle.checked = lockRangeMin;
     if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
 
     /* Telegram settings */
@@ -5932,9 +5937,11 @@ function applyRecommendedSettings() {
   /* R:R — set reward to recommended minRR (risk stays at 1) — skip if locked */
   if (!lockRR && UI.rewardInput) UI.rewardInput.value = rec.rr.minRR;
 
-  /* Opening range */
-  RANGE_MINUTES = rec.range.minutes;
-  if (UI.rangeDuration) UI.rangeDuration.value = rec.range.minutes;
+  /* Opening range — skip if locked */
+  if (!lockRangeMin) {
+    RANGE_MINUTES = rec.range.minutes;
+    if (UI.rangeDuration) UI.rangeDuration.value = rec.range.minutes;
+  }
 
   /* Boolean strategy filter toggles — skip if filters are locked (keep user's disabled state) */
   if (!lockIndicatorFilters) {
@@ -7617,6 +7624,7 @@ function revertAllSettings() {
   autoApplyRecommended = true;
   lockTimeframe = false;
   lockRR        = false;
+  lockRangeMin  = false;
   liquiditySweepEnabled = false;
   stopLossHuntEnabled   = false;
   failedPinBarEnabled   = false;
@@ -7661,6 +7669,7 @@ function revertAllSettings() {
   if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
   if (UI.lockTimeframeToggle)    UI.lockTimeframeToggle.checked    = lockTimeframe;
   if (UI.lockRRToggle)           UI.lockRRToggle.checked           = lockRR;
+  if (UI.lockRangeMinToggle)     UI.lockRangeMinToggle.checked     = lockRangeMin;
   if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
   if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
   if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
@@ -18605,6 +18614,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.lockRRToggle) {
     UI.lockRRToggle.addEventListener("change", () => {
       lockRR = UI.lockRRToggle.checked;
+      saveSettings();
+    });
+  }
+  if (UI.lockRangeMinToggle) {
+    UI.lockRangeMinToggle.addEventListener("change", () => {
+      lockRangeMin = UI.lockRangeMinToggle.checked;
       saveSettings();
     });
   }
