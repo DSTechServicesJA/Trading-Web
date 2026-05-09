@@ -4498,10 +4498,9 @@ function restoreSignalHistory() {
          They cannot be monitored anymore (monitoringTrade is never persisted),
          so keeping them as PENDING would pollute the Live Signals banner and
          cause monitorTradeOutcome to resolve the wrong signal for the new trade. */
-      signalHistory = parsed.map(s => {
-        if (s && s.result === "PENDING") return Object.assign({}, s, { result: "EXPIRED" });
-        return s;
-      });
+      signalHistory = parsed.map(s =>
+        (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
+      );
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS").length;
       updateStatsUI();
