@@ -14416,18 +14416,23 @@ function monitorTradeOutcome(candle) {
     const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : TRAILING_STOP_ATR_MULT;
     if (trade.dir === "BULL") {
       const newTrail = candle.high - atrValue * trailMult;
-      /* Only activate/advance trail when it strictly improves (is higher than) the effective SL.
-         This intentionally prevents the trail from initialising below the original SL — the
-         trailing stop only engages once price has moved far enough in profit that the ATR-based
-         level exceeds the original SL.  Until that point checkSL falls back to trade.sl,
-         ensuring the original hard stop is always honoured. */
-      if (newTrail > effectiveSL) {
+      /* Only activate/advance trail when it strictly improves (is higher than) the effective SL
+         AND the new trail is above entry — i.e. only lock in genuine profit.
+         This prevents the trailing stop from initialising below entry on wide-SL trades,
+         which would cause a premature LOSS exit before price has moved in the trade's favour.
+         Until those conditions are met, checkSL falls back to trade.sl. */
+      if (newTrail > effectiveSL && newTrail > trade.entry) {
         trailingSL = newTrail;
       }
     } else {
       const newTrail = candle.low + atrValue * trailMult;
-      /* Only activate/advance trail when it strictly improves (is lower than) the effective SL. */
-      if (newTrail < effectiveSL) {
+      /* Only activate/advance trail when it strictly improves (is lower than) the effective SL
+         AND the new trail is below entry — i.e. only lock in genuine profit.
+         Without the entry guard, a wide original SL (e.g. 27 pts) combined with a small ATR
+         causes the formula candle.low + ATR*mult to satisfy the < effectiveSL gate while still
+         sitting above entry, triggering a LOSS on the very next adverse tick even though the
+         real SL was never reached (as observed: entry 524.39, trailSL 527.06, SL 551.56). */
+      if (newTrail < effectiveSL && newTrail < trade.entry) {
         trailingSL = newTrail;
       }
     }
