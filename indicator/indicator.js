@@ -3278,8 +3278,14 @@ function validateTelegramCredentials(token, chatId) {
   if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
     throw new Error("Invalid Bot Token format (expected 123456:ABC-DEF…)");
   }
-  if (!/^-?\d+$/.test(chatId)) {
-    throw new Error("Invalid Chat ID format (expected a numeric ID)");
+  const ids = chatId.split(",").map(s => s.trim()).filter(Boolean);
+  if (ids.length === 0) {
+    throw new Error("At least one Chat ID is required");
+  }
+  for (const id of ids) {
+    if (!/^-?\d+$/.test(id)) {
+      throw new Error(`Invalid Chat ID format: "${id}" (expected a numeric ID)`);
+    }
   }
 }
 
@@ -3297,6 +3303,7 @@ function telegramProxyHeaders(extra = {}) {
 
 /**
  * Send a photo (Blob) with caption to Telegram via Bot API.
+ * Sends to all Chat IDs defined in the settings (comma-separated).
  */
 async function sendTelegramPhoto(blob, caption) {
   /* Check rate limit before making API call */
@@ -3307,44 +3314,65 @@ async function sendTelegramPhoto(blob, caption) {
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
-  /** Build the base FormData fields shared by both proxy and direct paths */
-  function buildPhotoForm() {
+  const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
+
+  /** Build the base FormData fields for a specific chat */
+  function buildPhotoForm(id) {
     const f = new FormData();
-    f.append("chat_id", chatId);
+    f.append("chat_id", id);
     f.append("photo", blob, "chart.png");
     f.append("caption", caption);
     f.append("parse_mode", "HTML");
     return f;
   }
 
-  /* Try server-side proxy first (avoids CORS), fall back to direct API */
-  let resp;
-  let useDirectFallback = false;
-  try {
-    const form = buildPhotoForm();
-    form.append("action", "sendPhoto");
-    form.append("token", token);
-    resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
-    /* If proxy returns 401/403 (auth issue), fall back to direct API */
-    if (resp.status === 401 || resp.status === 403) {
-      useDirectFallback = true;
+  const errors = [];
+  let lastData = null;
+
+  for (const id of chatIds) {
+    try {
+      /* Try server-side proxy first (avoids CORS), fall back to direct API */
+      let resp;
+      let useDirectFallback = false;
+      try {
+        const form = buildPhotoForm(id);
+        form.append("action", "sendPhoto");
+        form.append("token", token);
+        resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
+        /* If proxy returns 401/403 (auth issue), fall back to direct API */
+        if (resp.status === 401 || resp.status === 403) {
+          useDirectFallback = true;
+        }
+      } catch (_proxyErr) {
+        /* Proxy unreachable — try direct Telegram API as fallback */
+        useDirectFallback = true;
+      }
+      if (useDirectFallback) {
+        resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm(id) });
+      }
+      const data = await safeJson(resp);
+      if (!data.ok) {
+        errors.push(`Chat ${id}: ${data.description || "Telegram API error"}`);
+      } else {
+        lastData = data;
+      }
+    } catch (err) {
+      errors.push(`Chat ${id}: ${err.message}`);
     }
-  } catch (_proxyErr) {
-    /* Proxy unreachable — try direct Telegram API as fallback */
-    useDirectFallback = true;
   }
-  if (useDirectFallback) {
-    resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm() });
+
+  if (errors.length > 0 && lastData === null) {
+    throw new Error(`All chats failed — ${errors.join("; ")}`);
   }
-  const data = await safeJson(resp);
-  if (!data.ok) {
-    throw new Error(data.description || "Telegram API error");
+  if (errors.length > 0) {
+    addLog(`📤 Telegram photo: some chats failed — ${errors.join("; ")}`);
   }
-  return data;
+  return lastData;
 }
 
 /**
  * Send a text-only message to Telegram via Bot API (HTML parse mode).
+ * Sends to all Chat IDs defined in the settings (comma-separated).
  */
 async function sendTelegramMessage(text) {
   /* Check rate limit before making API call */
@@ -3355,36 +3383,56 @@ async function sendTelegramMessage(text) {
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
-  const payload = { chat_id: chatId, text, parse_mode: "HTML" };
+  const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
 
-  /* Try server-side proxy first (avoids CORS), fall back to direct API */
-  let resp;
-  let useDirectFallback = false;
-  try {
-    resp = await fetch(TELEGRAM_PROXY_URL, {
-      method: "POST",
-      headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ action: "sendMessage", token, payload })
-    });
-    /* If proxy returns 401/403 (auth issue), fall back to direct API */
-    if (resp.status === 401 || resp.status === 403) {
-      useDirectFallback = true;
+  const errors = [];
+  let lastData = null;
+
+  for (const id of chatIds) {
+    const payload = { chat_id: id, text, parse_mode: "HTML" };
+
+    try {
+      /* Try server-side proxy first (avoids CORS), fall back to direct API */
+      let resp;
+      let useDirectFallback = false;
+      try {
+        resp = await fetch(TELEGRAM_PROXY_URL, {
+          method: "POST",
+          headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ action: "sendMessage", token, payload })
+        });
+        /* If proxy returns 401/403 (auth issue), fall back to direct API */
+        if (resp.status === 401 || resp.status === 403) {
+          useDirectFallback = true;
+        }
+      } catch (_proxyErr) {
+        useDirectFallback = true;
+      }
+      if (useDirectFallback) {
+        resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      }
+      const data = await safeJson(resp);
+      if (!data.ok) {
+        errors.push(`Chat ${id}: ${data.description || "Telegram API error"}`);
+      } else {
+        lastData = data;
+      }
+    } catch (err) {
+      errors.push(`Chat ${id}: ${err.message}`);
     }
-  } catch (_proxyErr) {
-    useDirectFallback = true;
   }
-  if (useDirectFallback) {
-    resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+
+  if (errors.length > 0 && lastData === null) {
+    throw new Error(`All chats failed — ${errors.join("; ")}`);
   }
-  const data = await safeJson(resp);
-  if (!data.ok) {
-    throw new Error(data.description || "Telegram API error");
+  if (errors.length > 0) {
+    addLog(`📤 Telegram message: some chats failed — ${errors.join("; ")}`);
   }
-  return data;
+  return lastData;
 }
 
 /**
@@ -3582,34 +3630,56 @@ async function testTelegramConnection() {
     const meData = await safeJson(meResp);
     if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
 
-    /* Verify the chat ID is reachable — proxy first, direct fallback */
-    let chatResp;
-    let chatUseDirectFallback = false;
-    try {
-      chatResp = await fetch(TELEGRAM_PROXY_URL, {
-        method: "POST",
-        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ action: "getChat", token, payload: { chat_id: chatId } })
-      });
-      if (chatResp.status === 401 || chatResp.status === 403) {
-        chatUseDirectFallback = true;
+    /* Verify each Chat ID is reachable — proxy first, direct fallback */
+    const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
+    const chatTitles = [];
+    const chatErrors = [];
+
+    for (const id of chatIds) {
+      try {
+        let chatResp;
+        let chatUseDirectFallback = false;
+        try {
+          chatResp = await fetch(TELEGRAM_PROXY_URL, {
+            method: "POST",
+            headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ action: "getChat", token, payload: { chat_id: id } })
+          });
+          if (chatResp.status === 401 || chatResp.status === 403) {
+            chatUseDirectFallback = true;
+          }
+        } catch (_proxyErr) {
+          chatUseDirectFallback = true;
+        }
+        if (chatUseDirectFallback) {
+          chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: id })
+          });
+        }
+        const chatData = await safeJson(chatResp);
+        if (!chatData.ok) {
+          chatErrors.push(`${id}: ${chatData.description || "Cannot reach chat"}`);
+        } else {
+          chatTitles.push(chatData.result.title || chatData.result.first_name || id);
+        }
+      } catch (err) {
+        chatErrors.push(`${id}: ${err.message}`);
       }
-    } catch (_proxyErr) {
-      chatUseDirectFallback = true;
     }
-    if (chatUseDirectFallback) {
-      chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId })
-      });
+
+    if (chatTitles.length === 0) {
+      throw new Error(`Cannot reach any chat — ${chatErrors.join("; ")}`);
     }
-    const chatData = await safeJson(chatResp);
-    if (!chatData.ok) throw new Error(chatData.description || "Cannot reach chat");
 
     const botName = meData.result.first_name || meData.result.username;
-    const chatTitle = chatData.result.title || chatData.result.first_name || chatId;
-    const msg = `✅ Connected! Bot: ${botName} → Chat: ${chatTitle}`;
+    const chatsLabel = chatTitles.join(", ");
+    const chatWord = chatTitles.length === 1 ? "Chat" : "Chats";
+    let msg = `✅ Connected! Bot: ${botName} → ${chatWord}: ${chatsLabel}`;
+    if (chatErrors.length > 0) {
+      msg += ` ⚠️ Failed: ${chatErrors.join("; ")}`;
+    }
     addLog(`📤 ${msg}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = msg;
