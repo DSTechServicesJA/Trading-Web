@@ -4494,7 +4494,14 @@ function restoreSignalHistory() {
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      signalHistory = parsed;
+      /* Mark any PENDING signals from the previous session as EXPIRED.
+         They cannot be monitored anymore (monitoringTrade is never persisted),
+         so keeping them as PENDING would pollute the Live Signals banner and
+         cause monitorTradeOutcome to resolve the wrong signal for the new trade. */
+      signalHistory = parsed.map(s => {
+        if (s && s.result === "PENDING") return Object.assign({}, s, { result: "EXPIRED" });
+        return s;
+      });
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS").length;
       updateStatsUI();
@@ -4636,7 +4643,7 @@ function renderSignalBanner() {
   UI.signalBannerTrack.innerHTML = "";
 
   /* Aggregate signals from ALL panels (multi-symbol) or global (single) */
-  const allSignals = getAggregatedSignalHistory();
+  const allSignals = getAggregatedSignalHistory().filter(s => s && s.result !== "EXPIRED");
 
   if (allSignals.length === 0) {
     const empty = document.createElement("span");
@@ -14291,7 +14298,10 @@ function restoreAutoTradeHistory() {
 
 function monitorTradeOutcome(candle) {
   if (!monitoringTrade || !trade) return;
-  const pending = signalHistory.find(s => s.result === "PENDING");
+  /* Use the most recent PENDING signal so that stale signals from previous
+     sessions (loaded via restoreSignalHistory) are not incorrectly resolved
+     instead of the current live trade's signal. */
+  const pending = signalHistory.findLast(s => s.result === "PENDING");
   if (!pending) { monitoringTrade = false; return; }
 
   const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
@@ -15232,7 +15242,7 @@ function updateScannerUI() {
   }
   for (const sym of scannerSymbols) {
     const panel = multiPanels.get(sym);
-    const ph    = panel ? (panel.state && panel.state.phase ? panel.state.phase : "WAITING") : "WAITING";
+    const ph    = panel ? (panel.phase || "WAITING") : "WAITING";
     const badgeClass = { TRADE: "enabled", BREAKOUT: "warning", RETEST: "warning", CONFIRM: "enabled" }[ph] || "disabled";
     const cell = document.createElement("div");
     cell.className = `scanner-cell ${badgeClass.toLowerCase()}-cell`;
@@ -16917,6 +16927,8 @@ function updateSignalBanners() {
     const agg = getAggregatedSignalHistory();
     UI.signalCount.textContent = agg.length;
   }
+  /* Keep the scanner grid in sync with live panel phases */
+  if (scannerEnabled) updateScannerUI();
 }
 
 /* ---- Panel state factory ---- */
