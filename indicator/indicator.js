@@ -13622,8 +13622,8 @@ function handleAutoTradeMessage(msg, msgWs) {
           }
         }
         clearAutoTradePendingTimeout(sym, tradeId);
-        const resolveId = resolveTradeId || tradeId;
-        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS", sym, resolveId);
+        const effectiveTradeId = resolveTradeId || tradeId;
+        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS", sym, effectiveTradeId);
         /* Request a fresh balance in case the balance subscription missed
            the update (e.g. brief disconnect during contract settlement). */
         if (msgWs && msgWs.readyState === WebSocket.OPEN) {
