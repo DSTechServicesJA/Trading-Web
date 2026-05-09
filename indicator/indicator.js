@@ -17566,6 +17566,21 @@ function connectPanel(p) {
     /* Authorize response – subscribe to candles after successful auth */
     if (msg.msg_type === "authorize") {
       addLog(`[Multi] ${p.symbol} authorized as ${msg.authorize.loginid}`);
+      /* Allow executeAutoTrade() to place trades through this panel's WS.
+         The global `authorized` flag is only set by the main WS handler, so
+         in multi-panel-only mode (main chart not connected) it stays false
+         and all auto-trades are silently blocked.  Setting it here fixes that. */
+      authorized = true;
+      /* Populate session balance if the main WS hasn't done so already */
+      if (autoTradeBalance === null) {
+        const acct = msg.authorize;
+        autoTradeBalance = parseFloat(acct.balance) || null;
+        if (sessionStartBalance === null) sessionStartBalance = autoTradeBalance;
+        updateAutoTradeBalanceUI();
+        updateAutoTradeBalanceVisibility();
+        /* Subscribe to live balance stream so the display stays current */
+        panelWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+      }
       /* Re-subscribe to any in-flight contracts for this panel's symbol */
       const slot = autoTradeSlots.get(p.symbol);
       if (slot && slot.pendingContractId) {
