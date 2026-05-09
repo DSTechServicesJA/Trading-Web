@@ -13483,7 +13483,8 @@ function handleAutoTradeMessage(msg, msgWs) {
       const slot = tradeSymbol ? getAutoTradeSlot(tradeSymbol) :
         (isAutoTradeByContractId ? isAutoTradeByContractId.slot : null);
       const tradeId = msg.passthrough && msg.passthrough.tradeId;
-      addLog(`⚠ [${sym}] Auto-trade error (${msg.msg_type}): ${msg.error.message}`);
+      const errCode = msg.error.code ? ` [${msg.error.code}]` : "";
+      addLog(`⚠ [${sym}] Auto-trade error (${msg.msg_type})${errCode}: ${msg.error.message}`);
       if (slot) {
         /* Remove the specific trade from activeTrades if tradeId is available */
         if (tradeId) {
@@ -13508,7 +13509,7 @@ function handleAutoTradeMessage(msg, msgWs) {
           clearAutoTradePendingTimeout(sym);
         }
       }
-      resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol);
+      resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol, tradeId);
       return true;
     }
     return false; /* not an auto-trade error — let caller handle */
@@ -13532,7 +13533,7 @@ function handleAutoTradeMessage(msg, msgWs) {
         slot.inProgress = false;
         clearAutoTradePendingTimeout(tradeSymbol);
       }
-      resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol);
+      resolveAutoTradeHistoryEntry(0, "ERROR", tradeSymbol, tradeId);
       return true;
     }
     const src = msg.passthrough.source || "breakout";
@@ -13621,7 +13622,8 @@ function handleAutoTradeMessage(msg, msgWs) {
           }
         }
         clearAutoTradePendingTimeout(sym, tradeId);
-        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS", sym);
+        const effectiveTradeId = resolveTradeId || tradeId;
+        resolveAutoTradeHistoryEntry(profit, won ? "WIN" : "LOSS", sym, effectiveTradeId);
         /* Request a fresh balance in case the balance subscription missed
            the update (e.g. brief disconnect during contract settlement). */
         if (msgWs && msgWs.readyState === WebSocket.OPEN) {
@@ -13680,7 +13682,7 @@ function autoTradeSourceLabel(source, strategyName) {
   return "📈 Breakout";
 }
 
-function executeAutoTrade(signal) {
+function executeAutoTrade(signal, _capturedWs) {
   /* Block if session TP/SL has been hit */
   if (autoTradeHalted) {
     addLog("⛔ Auto-trade blocked — session limit hit (reset session to resume)");
@@ -13688,8 +13690,11 @@ function executeAutoTrade(signal) {
   }
 
   /* Capture the WS that should carry this trade — in multi-panel mode
-     activatePanel() has already set `ws` to the panel's own WS. */
-  const tradeWs = ws;
+     activatePanel() has already set `ws` to the panel's own WS.
+     _capturedWs is provided by the async multiplier-fetch retry path to
+     preserve the correct panel WS even if activatePanel() has since
+     switched `ws` to a different panel. */
+  const tradeWs = _capturedWs || ws;
   if (!tradeWs || tradeWs.readyState !== WebSocket.OPEN) {
     addLog("⚠ Auto-trade skipped — WebSocket not connected");
     return;
@@ -13775,6 +13780,9 @@ function executeAutoTrade(signal) {
     /* No cached or fallback data yet — try fetching from API before trading */
     addLog(`⏳ Fetching valid multipliers for ${symbol} before placing trade…`);
     slot.fetchingMultiplier = true;
+    /* Capture the current panel WS now; `ws` may be swapped by activatePanel()
+       before the async .then() callback fires (multi-panel race condition). */
+    const capturedWs = tradeWs;
     fetchValidMultipliers(symbol).then(apiValid => {
       slot.fetchingMultiplier = false;
       if (!apiValid || apiValid.length === 0) {
@@ -13787,8 +13795,9 @@ function executeAutoTrade(signal) {
         if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = corrected;
         saveSettings();
       }
-      /* Re-invoke with the (now-cached) data */
-      executeAutoTrade(signal);
+      /* Re-invoke with the (now-cached) data, forwarding the captured WS so the
+         trade still goes through the correct panel connection. */
+      executeAutoTrade(signal, capturedWs);
     }).catch(err => {
       slot.fetchingMultiplier = false;
       addLog(`⚠ Failed to fetch multipliers for ${symbol}: ${err.message || err}`);
@@ -13803,7 +13812,7 @@ function executeAutoTrade(signal) {
      When the raw SL value falls below Deriv's minimum, scale BOTH SL and TP
      proportionally so the strategy's R:R ratio (e.g. 1:2) is preserved. */
   const limitOrder = {};
-  if (signal.entry != null) {
+  if (signal.entry != null && signal.entry > 0) {
     let slVal = null;
     let tpVal = null;
     if (tradeSl != null) {
@@ -13822,8 +13831,8 @@ function executeAutoTrade(signal) {
       if (tpVal !== null) tpVal *= scale;
       addLog(`ℹ️ ${tpVal !== null ? "SL/TP" : "SL"} scaled ×${fmt(scale, 2)} to meet $${MIN_LIMIT_ORDER_AMOUNT} minimum (preserving R:R ratio)`);
     }
-    if (slVal !== null) limitOrder.stop_loss = +fmt(slVal, 2);
-    if (tpVal !== null) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
+    if (slVal !== null && isFinite(slVal) && slVal > 0) limitOrder.stop_loss = +fmt(slVal, 2);
+    if (tpVal !== null && isFinite(tpVal) && tpVal > 0) limitOrder.take_profit = +fmt(Math.max(tpVal, MIN_LIMIT_ORDER_AMOUNT), 2);
   }
 
   slot.inProgress = true;
@@ -13840,7 +13849,7 @@ function executeAutoTrade(signal) {
 
   /* Record pending trade in history */
   const isOpposite = (effectiveDir !== signal.dir);
-  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, profit: null, result: "PENDING", originalDir: signal.dir, tradedDir: effectiveDir, isOpposite });
+  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, tradeId, profit: null, result: "PENDING", originalDir: signal.dir, tradedDir: effectiveDir, isOpposite });
 
   const payload = {
     proposal: 1,
@@ -13868,7 +13877,7 @@ function executeAutoTrade(signal) {
     if (tradeEntry.contractId) return;   /* buy succeeded — longer timeout running */
     addLog(`⚠ [${symbol}] Auto-trade proposal/buy timed out — cleaning up`);
     removeActiveTrade(symbol, tradeId);
-    resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+    resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol, tradeId);
   }, AUTO_TRADE_PROPOSAL_TIMEOUT_MS);
 }
 
@@ -13937,12 +13946,12 @@ function startAutoTradePendingTimeout(symbol, tradeWs, tradeId) {
           if (!slot.activeTrades.includes(tradeEntry)) return;
           addLog(`⚠ [${symbol}] Contract ${tradeEntry.contractId} did not resolve after timeout — marking as cancelled`);
           removeActiveTrade(symbol, tradeId);
-          resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+          resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol, tradeId);
         }, AUTO_TRADE_QUERY_TIMEOUT_MS);
       } else {
         addLog(`⚠ [${symbol}] Pending trade timeout — no active connection to query contract status, marking as cancelled`);
         removeActiveTrade(symbol, tradeId);
-        resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol);
+        resolveAutoTradeHistoryEntry(0, "CANCELLED", symbol, tradeId);
       }
     }, AUTO_TRADE_PENDING_TIMEOUT_MS);
   } else {
@@ -13994,13 +14003,14 @@ function recalcAutoTradePL() {
 }
 
 /** Add a new entry to the auto-trade history array and re-render. */
-function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, result, originalDir, tradedDir, isOpposite }) {
+function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId, profit, result, originalDir, tradedDir, isOpposite }) {
   const entry = {
     time: Date.now(),
     source: source || "breakout",
     strategyName: strategyName || null,
     type,
     symbol: symbol || "--",
+    tradeId: tradeId || null,
     profit: profit != null ? profit : null,
     result: result || "PENDING",
     originalDir: originalDir || null,
@@ -14017,11 +14027,23 @@ function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, profit, 
 /** Resolve the most recent PENDING entry with profit and result.
  *  @param {number} profit
  *  @param {string} result — "WIN" | "LOSS" | "ERROR" | "CANCELLED"
- *  @param {string} [symbol] — if provided, only resolve a PENDING entry for this symbol */
-function resolveAutoTradeHistoryEntry(profit, result, symbol) {
-  const pending = symbol
-    ? autoTradeHistory.find(e => e.result === "PENDING" && e.symbol === symbol)
-    : autoTradeHistory.find(e => e.result === "PENDING");
+ *  @param {string} [symbol] — if provided, only resolve a PENDING entry for this symbol
+ *  @param {string} [tradeId] — if provided, resolve the specific entry with this tradeId */
+function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
+  let pending;
+  if (tradeId) {
+    /* Prefer exact match by tradeId when available — prevents wrong-entry
+       resolution in concurrent-trade scenarios where multiple strategies fire
+       simultaneously on the same symbol. */
+    pending = autoTradeHistory.find(e => e.result === "PENDING" && e.tradeId === tradeId);
+  }
+  if (!pending) {
+    /* Fall back to symbol-based lookup (handles persisted history entries that
+       pre-date the tradeId field, and callers that don't supply a tradeId). */
+    pending = symbol
+      ? autoTradeHistory.find(e => e.result === "PENDING" && e.symbol === symbol)
+      : autoTradeHistory.find(e => e.result === "PENDING");
+  }
   if (!pending) return;  /* nothing to resolve */
   pending.profit = profit;
   pending.result = result;
