@@ -12389,7 +12389,34 @@ function processAllCandles() {
   if (openingRange) {
     for (let i = openingRange.endIdx + 1; i < candles.length; i++) {
       processCandle(i);
-      if (trade) break;
+      if (trade) {
+        if (autoResetEnabled) {
+          /* Simulate the live auto-reset so subsequent setups can be discovered
+             in the same historical batch.  Without this, processAllCandles()
+             stops at the first historical trade and leaves the panel in TRADE
+             phase; the first streaming OHLC then triggers a late auto-reset
+             that starts a brand-new range from the very latest candle, causing
+             all multi-symbol panels to show "BREAKOUT" even when the single-
+             chart has already advanced to RETEST or CONFIRM. */
+          openingRange   = null;
+          breakout       = null;
+          retestInfo     = null;
+          indecisionInfo = null;
+          confirmInfo    = null;
+          trade          = null;
+          trailingSL     = null;
+          partialTpHit   = false;
+          retestCount    = 0;
+          rangeStartEpoch = candles[i].epoch;
+          buildOpeningRange();
+          if (openingRange) {
+            i = openingRange.endIdx; /* loop will increment to endIdx + 1 */
+          }
+          /* Continue loop — process remaining candles against the new setup */
+        } else {
+          break;
+        }
+      }
     }
   }
 
