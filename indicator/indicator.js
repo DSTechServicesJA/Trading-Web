@@ -14617,7 +14617,9 @@ function detectOrderblockStrategy(idx) {
       addStrategyTickerItem({ dir, type: "orderblock", label: `🏦 OB ${dir}`, entry: c.close, epoch: c.epoch });
       if (telegramStrategyAutoSend) setTimeout(() => sendStrategyTelegramAlert(signal), CHART_RENDER_DELAY_MS);
     }
-    if (autoTradeStrategyEnabled && autoTradeOrderblock) triggerAutoTrade(signal, "orderblock");
+    if (autoTradeStrategyEnabled && autoTradeOrderblock && !_historicalProcessing) {
+      executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || getActiveSymbol(), source: "strategy", strategyName: "orderblock" });
+    }
     updateStrategyBadges();
     /* #7: drawChart() is called by the OHLC pipeline after processCustomStrategies() completes — no need to redraw here */
     break;
