@@ -12416,6 +12416,7 @@ function processAllCandles() {
           trailingSL     = null;
           partialTpHit   = false;
           retestCount    = 0;
+          monitoringTrade = false;  /* trade cleared — nothing left to monitor */
           rangeStartEpoch = candles[i].epoch;
           buildOpeningRange();
           if (openingRange) {
