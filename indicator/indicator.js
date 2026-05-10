@@ -117,6 +117,9 @@ const TESLA_T3_R = 9;  /* final target / runner exit */
 const TESLA_CONSERVATIVE_BE_TRIGGER = 1;  /* slide SL to BE when price reaches +1R */
 const TESLA_AGGRESSIVE_BE_TRIGGER   = 2;  /* slide SL to BE when price reaches +2R */
 
+/* Epsilon for floating-point price comparisons (e.g. detecting exact entry/SL equality) */
+const PRICE_EPSILON = 1e-6;
+
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
 /* Pin bar: the rejection wick must be this much larger than the other wick */
@@ -3549,7 +3552,7 @@ async function sendTradeOutcomeTelegram(signal) {
        dedicated label so traders are not misled into thinking it was a full loss. */
     const isBreakeven = result === "LOSS" && signal.partialTpHit === true &&
                         signal.exitPrice != null && signal.entry != null &&
-                        Math.abs(signal.exitPrice - signal.entry) < 1e-6;
+                        Math.abs(signal.exitPrice - signal.entry) < PRICE_EPSILON;
 
     const icon        = result === "WIN" ? "✅" : (isBreakeven ? "⚖️" : "❌");
     const resultLabel = result === "WIN" ? "Trade WIN" : (isBreakeven ? "Trade Breakeven" : "Trade LOSS");
@@ -14562,7 +14565,7 @@ function monitorTradeOutcome(candle) {
      (BULL) can be equal to entry for the entire candle period simply because the candle
      opened at entry; treating that as an SL hit would fire a false LOSS while the trade
      is still in profit.  candle.close reflects the actual current price. */
-  const atBreakeven = checkSL === trade.entry;
+  const atBreakeven = Math.abs(checkSL - trade.entry) < PRICE_EPSILON;
 
   if (trade.dir === "BULL") {
     const slHit = atBreakeven ? candle.close <= checkSL : candle.low <= checkSL;
