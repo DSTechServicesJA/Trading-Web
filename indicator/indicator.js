@@ -117,6 +117,9 @@ const TESLA_T3_R = 9;  /* final target / runner exit */
 const TESLA_CONSERVATIVE_BE_TRIGGER = 1;  /* slide SL to BE when price reaches +1R */
 const TESLA_AGGRESSIVE_BE_TRIGGER   = 2;  /* slide SL to BE when price reaches +2R */
 
+/* Epsilon for floating-point price comparisons (e.g. detecting exact entry/SL equality) */
+const PRICE_EPSILON = 1e-6;
+
 /* Pin bar: tail must be at least this multiple of body */
 const PIN_BAR_TAIL_RATIO = 2.0;
 /* Pin bar: the rejection wick must be this much larger than the other wick */
@@ -3460,7 +3463,12 @@ async function sendPartialTpTelegram(signal, partialLevel) {
     lines.push(`🔔 <b>Partial TP Hit — 1:1 Reached</b>`);
     lines.push(``);
     lines.push(`<b>Consider closing a portion of your position now to protect profits.</b>`);
-    lines.push(`Trade continues to full TP with original SL intact.`);
+    /* When Tesla 3-6-9 scaling is active, the SL is automatically moved to breakeven
+       at this level.  Inform the trader so they understand the SL change. */
+    const slNote = teslaScalingEnabled
+      ? "SL is being moved to breakeven. Trade continues to full TP."
+      : "Trade continues to full TP with original SL intact.";
+    lines.push(slNote);
     lines.push(``);
     lines.push(`${dir} ${sym}`);
     lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
@@ -3538,7 +3546,17 @@ async function sendTradeOutcomeTelegram(signal) {
     const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
-    const icon = result === "WIN" ? "✅" : "❌";
+
+    /* Detect a breakeven exit: partial TP was captured at 1:1 and the remaining
+       position was stopped exactly at entry (SL moved to breakeven).  Show a
+       dedicated label so traders are not misled into thinking it was a full loss. */
+    const isBreakeven = result === "LOSS" && signal.partialTpHit === true &&
+                        signal.exitPrice != null && signal.entry != null &&
+                        Math.abs(signal.exitPrice - signal.entry) < PRICE_EPSILON;
+
+    const icon        = result === "WIN" ? "✅" : (isBreakeven ? "⚖️" : "❌");
+    const resultLabel = result === "WIN" ? "Trade WIN" : (isBreakeven ? "Trade Breakeven" : "Trade LOSS");
+
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
     const exitStr  = signal.exitPrice != null ? fmtPrice(signal.exitPrice, activeSym) : "--";
     const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
@@ -3548,7 +3566,7 @@ async function sendTradeOutcomeTelegram(signal) {
     const pattern = signal.confirmPattern || "--";
 
     const lines = [];
-    lines.push(`${icon} <b>Trade ${result}</b> — ${dir} ${sym}`);
+    lines.push(`${icon} <b>${resultLabel}</b> — ${dir} ${sym}`);
     lines.push("");
     lines.push(`<b>Pattern:</b> ${pattern}`);
     lines.push(`<b>Entry:</b> ${entryStr}`);
@@ -3561,7 +3579,9 @@ async function sendTradeOutcomeTelegram(signal) {
       lines.push(`<b>Trailing SL:</b> ${fmtPrice(signal.trailingSL, activeSym)}`);
     }
     if (signal.partialTpHit) {
-      lines.push(`<b>Partial TP:</b> Hit at 1:1`);
+      lines.push(isBreakeven
+        ? `<b>Partial TP:</b> Hit at 1:1 — partial profits secured; remaining position closed at breakeven`
+        : `<b>Partial TP:</b> Hit at 1:1`);
     }
     /* Win/loss tally */
     const totalW = signalWins;
@@ -14429,6 +14449,11 @@ function monitorTradeOutcome(candle) {
         const beLabel = `+${beTrigger}R (${teslaScalingPlan} BE)`;
         addLog(`⚡ Tesla 3–6–9: SL moved to breakeven @ ${fmtPrice(trade.entry, pending.symbol)} at ${beLabel}`);
         showToast("⚡ Tesla BE", `SL locked at breakeven (${beLabel}) — running to T1 (3R)`, "info", 6000);
+        /* Defer SL/TP check to next candle.  The current forming candle's high (BEAR)
+           or low (BULL) may still be at entry because the candle opened there before the
+           trade moved in our favour.  Checking the SL now would fire an immediate false
+           LOSS — wait for the next tick where price data reflects the SL movement. */
+        return;
       }
     }
 
@@ -14534,8 +14559,16 @@ function monitorTradeOutcome(candle) {
   const checkSL = trailingSL != null ? trailingSL : trade.sl;
   let resolved = false;
 
+  /* When the SL is at exactly entry (breakeven — set by Tesla BE or a trailing stop
+     advanced to entry), use candle.close (current price) rather than candle.high/low
+     to determine whether the SL was hit.  A live forming candle's high (BEAR) or low
+     (BULL) can be equal to entry for the entire candle period simply because the candle
+     opened at entry; treating that as an SL hit would fire a false LOSS while the trade
+     is still in profit.  candle.close reflects the actual current price. */
+  const atBreakeven = Math.abs(checkSL - trade.entry) < PRICE_EPSILON;
+
   if (trade.dir === "BULL") {
-    const slHit = candle.low <= checkSL;
+    const slHit = atBreakeven ? candle.close <= checkSL : candle.low <= checkSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp;
     if (slHit && tpHit) {
       /* Both levels hit in same candle — closer level was hit first */
@@ -14568,7 +14601,7 @@ function monitorTradeOutcome(candle) {
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
     }
   } else {
-    const slHit = candle.high >= checkSL;
+    const slHit = atBreakeven ? candle.close >= checkSL : candle.high >= checkSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
     if (slHit && tpHit) {
       pending.result = checkSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
