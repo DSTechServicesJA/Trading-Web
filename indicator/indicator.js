@@ -17159,6 +17159,9 @@ function createPanelState(symbol) {
     connectTime: null,
     pingTimer: null,
     connected: false,
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    intentionalClose: false,
     /* Per-panel recommended filter settings (auto-applied from market type) */
     filters: {
       autoResetEnabled:    true,
@@ -17659,6 +17662,9 @@ function syncProfitDirToAllPanels() {
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
   if (p.unavailable) return; /* symbol rejected by the API – do not reconnect */
+  p.intentionalClose = false;
+  /* Clear any pending reconnect timer from a previous auto-reconnect cycle */
+  if (p.reconnectTimer) { clearTimeout(p.reconnectTimer); p.reconnectTimer = null; }
   /* Use per-symbol recommended timeframe from market type recommendations */
   const rec = getMarketRecommendations(p.symbol);
   let gran = rec.timeframe.gran;
@@ -17747,6 +17753,7 @@ function connectPanel(p) {
   panelWs.onopen = () => {
     if (p.ws !== panelWs) return; /* stale connection */
     p.connected = true;
+    p.reconnectAttempts = 0;
     p.connectTime = Date.now();
     updatePanelCardUI(p);
     addLog(`[Multi] ${p.symbol} connected`);
@@ -17948,6 +17955,11 @@ function connectPanel(p) {
       slot.inProgress = false;
       slot.contractId = null;
     }
+
+    /* Auto-reconnect unless the disconnect was intentional */
+    if (!p.intentionalClose) {
+      schedulePanelReconnect(p);
+    }
   };
 
   panelWs.onerror = () => {
@@ -17958,8 +17970,39 @@ function connectPanel(p) {
   p.ws = panelWs;
 }
 
+/* ---- Auto-reconnect for a multi-symbol panel (exponential backoff) ---- */
+function schedulePanelReconnect(p) {
+  if (p.intentionalClose) return;
+  if (p.unavailable) return;
+
+  const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, p.reconnectAttempts), RECONNECT_MAX_DELAY);
+  p.reconnectAttempts++;
+
+  if (p.reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    addLog(`[Multi] ${p.symbol} ⚠️ Max reconnection attempts reached. Remove and re-add the panel to retry.`);
+    return;
+  }
+
+  addLog(`[Multi] ${p.symbol} Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${p.reconnectAttempts})...`);
+
+  p.reconnectTimer = setTimeout(() => {
+    p.reconnectTimer = null;
+    if (!p.intentionalClose) {
+      try {
+        connectPanel(p);
+      } catch (err) {
+        console.error(`[Multi] ${p.symbol} reconnection error:`, err);
+        addLog(`[Multi] ${p.symbol} Reconnection failed: ${err.message}`);
+        schedulePanelReconnect(p);
+      }
+    }
+  }, delay);
+}
+
 /* ---- Disconnect a multi-symbol panel ---- */
 function disconnectPanel(p) {
+  p.intentionalClose = true;
+  if (p.reconnectTimer) { clearTimeout(p.reconnectTimer); p.reconnectTimer = null; }
   if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
 
   /* Clean up per-symbol auto-trade state */
