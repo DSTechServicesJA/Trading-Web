@@ -395,6 +395,15 @@ const SCALP_RR_TARGET           = 1.0;   /* quick 1:1 R:R target instead of larg
 const SCALP_LOOKBACK            = 10;    /* tighter swing lookback for closer SL */
 const SCALP_MAX_CANDLES         = 15;    /* auto-timeout: close trade monitoring after N candles */
 
+/* Lower-TF thresholds and SL ATR buffers.
+ * On faster time frames the ATR is smaller and market noise is relatively larger,
+ * so the SL buffer and the fast-track confirmation threshold are scaled by gran. */
+const LOWER_TF_1M_SEC           = 60;    /* 1-minute granularity (seconds) */
+const LOWER_TF_5M_SEC           = 300;   /* 5-minute granularity (seconds); also used as fast-track upper bound */
+const SL_ATR_BUF_1M             = 0.5;   /* SL ATR buffer for 1M — wider to survive 1M noise */
+const SL_ATR_BUF_5M             = 0.4;   /* SL ATR buffer for 5M */
+const SL_ATR_BUF_DEFAULT        = 0.3;   /* SL ATR buffer for higher TFs (original behaviour) */
+
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
 const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side proxy to bypass CORS */
@@ -620,12 +629,15 @@ function _deobfuscate(encoded) { return _xorDeobfuscate(encoded); }
 
 /* Multi-panel context tracking (used throughout for context-aware processing) */
 let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's symbol */
+let _multiPanelGran = null;        /* gran (seconds) for the panel currently being processed */
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
 let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
 
 /* #19: Shared helper — returns the current chart granularity in seconds.
- * Centralises the UI.granSelect read so all callers stay in sync. */
+ * When processing a multi-panel, returns that panel's own granularity so
+ * lower-TF logic (fast-track confirmation, SL buffer) uses the correct value. */
 function getCurrentGranularitySec() {
+  if (_multiPanelGran != null) return _multiPanelGran;
   return UI.granSelect ? (parseInt(UI.granSelect.value, 10) || 60) : 60;
 }
 
@@ -12966,6 +12978,65 @@ function processCandle(idx) {
   if (!indecisionInfo) {
     /* Allow the retest candle itself to also be indecision */
     if (idx < retestInfo.candleIdx) return;
+
+    /* Lower-TF fast-track: on 1M/5M (gran ≤ LOWER_TF_5M_SEC) a strong engulfing candle at the
+     * retest zone acts as a combined indecision+confirmation, cutting the pipeline by
+     * one candle and preventing stale entries on fast-moving lower time frames. */
+    if (getCurrentGranularitySec() <= LOWER_TF_5M_SEC && idx > 0) {
+      const prev = candles[idx - 1];
+      let fastPattern = "";
+      if (breakout.dir === "BULL" && isBullishEngulfing(prev, c)) {
+        fastPattern = "fast-track bullish engulfing";
+      } else if (breakout.dir === "BEAR" && isBearishEngulfing(prev, c)) {
+        fastPattern = "fast-track bearish engulfing";
+      }
+      if (fastPattern) {
+        indecisionInfo = { candleIdx: idx };
+        let confirmed = true;
+        if (!hasConsecutiveDirection(idx, breakout.dir)) {
+          addLog(`${fastPattern} at #${idx} BLOCKED — consecutive direction filter`);
+          confirmed = false;
+        }
+        if (confirmed && !isVWAPAligned(breakout.dir)) {
+          addLog(`${fastPattern} at #${idx} BLOCKED — VWAP filter`);
+          confirmed = false;
+        }
+        if (confirmed && !hasStochCrossover(breakout.dir)) {
+          addLog(`${fastPattern} at #${idx} BLOCKED — stochastic crossover filter`);
+          confirmed = false;
+        }
+        if (confirmed && !isConfirmBarValid(idx)) {
+          addLog(`${fastPattern} at #${idx} BLOCKED — confirm bar filter`);
+          confirmed = false;
+        }
+        if (confirmed) {
+          confirmInfo = { candleIdx: idx, pattern: fastPattern };
+          recordConfirmedSignal(fastPattern);
+          addLog(`${fastPattern} at #${idx} (lower-TF fast-track)`);
+          buildTrade(c, idx);
+          if (trade) {
+            confluenceScore = computeConfluenceScore();
+            if (!isConfluenceSufficient()) {
+              addLog(`⚠ Trade REJECTED — confluence ${confluenceScore}/${minConfluenceValue} below minimum`);
+              trade = null;
+              confirmInfo = null;
+              indecisionInfo = null;
+              return;
+            }
+            setPhase("TRADE");
+            multiRHitLevels = [];
+            addLog(`${fastPattern} at #${idx} — TRADE ENTRY (lower-TF)`);
+            addLog(`Confluence score: ${confluenceScore}`);
+            recordSignal(fastPattern);
+          }
+        } else {
+          /* Fast-track blocked by a filter — clear indecision so normal path resumes */
+          indecisionInfo = null;
+        }
+        return;
+      }
+    }
+
     if (isIndecision(c, idx)) {
       indecisionInfo = { candleIdx: idx };
       setPhase("CONFIRM");
@@ -13285,6 +13356,15 @@ function buildTrade(confirmCandle, confirmIdx) {
   /* Scalping mode: cap R:R at SCALP_RR_TARGET for quick profits (from MD: 5-10 pip profits) */
   const rr = scalpingModeEnabled ? Math.min(rewardUnits / riskUnits, SCALP_RR_TARGET) : rewardUnits / riskUnits;
 
+  /* ---- SL ATR buffer scaled by granularity ----
+   * Lower time-frames have smaller ATR values but higher relative noise, so SL gets
+   * more room (wider buffer) to avoid being hit by random wicks before the trade
+   * has a chance to develop.  Constants defined near the top of the file. */
+  const _gran = getCurrentGranularitySec();
+  const slAtrBuf = _gran <= LOWER_TF_1M_SEC ? SL_ATR_BUF_1M
+                 : _gran <= LOWER_TF_5M_SEC  ? SL_ATR_BUF_5M
+                 : SL_ATR_BUF_DEFAULT;
+
   /* ---- Resolve the retest/indecision zone candles for precise SL placement ----
    * Using the lowest point of the retest + indecision zone (BULL) or the highest
    * point (BEAR) with a small ATR buffer gives a structurally meaningful stop that
@@ -13302,7 +13382,7 @@ function buildTrade(confirmCandle, confirmIdx) {
     /* SL anchor: lowest low of the retest/indecision zone; fall back to swing */
     const zoneLows = [rtCandle, inCandle].filter(Boolean).map(c => c.low);
     const slAnchor = zoneLows.length > 0 ? Math.min(...zoneLows) : findSwingLow(confirmIdx);
-    const sl = slAnchor - atrValue * 0.3;  /* 0.3 ATR buffer below zone — tighter than 0.5×swing */
+    const sl = slAnchor - atrValue * slAtrBuf;
 
     const risk = entry - sl;
     if (risk <= 0) return;
@@ -13330,7 +13410,7 @@ function buildTrade(confirmCandle, confirmIdx) {
     /* SL anchor: highest high of the retest/indecision zone; fall back to swing */
     const zoneHighs = [rtCandle, inCandle].filter(Boolean).map(c => c.high);
     const slAnchor = zoneHighs.length > 0 ? Math.max(...zoneHighs) : findSwingHigh(confirmIdx);
-    const sl = slAnchor + atrValue * 0.3;  /* 0.3 ATR buffer above zone — tighter than 0.5×swing */
+    const sl = slAnchor + atrValue * slAtrBuf;
 
     const risk = sl - entry;
     if (risk <= 0) return;
@@ -17427,9 +17507,13 @@ function createPanelCard(p) {
   const card = document.createElement("div");
   card.className = "ms-card";
   card.dataset.symbol = p.symbol;
+  const recTF = getMarketRecommendations(p.symbol).timeframe.text;
   card.innerHTML = `
     <div class="ms-card-header">
-      <span class="ms-card-symbol">${getSymbolLabel(p.symbol)}</span>
+      <div class="ms-card-symbol-group">
+        <span class="ms-card-symbol">${getSymbolLabel(p.symbol)}</span>
+        <span class="ms-card-tf" title="Recommended timeframe">⏱ ${recTF}</span>
+      </div>
       <div class="ms-card-badges">
         <span class="ms-card-phase ms-phase-waiting">WAITING</span>
         <span class="ms-card-dir ms-dir-none">--</span>
@@ -17581,6 +17665,8 @@ function connectPanel(p) {
   if (lockTimeframe && UI.granSelect) {
     gran = parseInt(UI.granSelect.value, 10) || gran;
   }
+  /* Store granularity on the panel so lower-TF logic uses the correct value */
+  p.gran = gran;
 
   /* Re-apply recommended filters for this symbol's market type */
   p.filters.emaFilterEnabled     = rec.ema;
@@ -17753,6 +17839,7 @@ function connectPanel(p) {
 
     /* Activate this panel's state into globals */
     _multiPanelProcessing = p.symbol;
+    _multiPanelGran = p.gran || null;
     activatePanel(p);
 
     /* Historical batch */
@@ -17817,6 +17904,7 @@ function connectPanel(p) {
     }
 
     _multiPanelProcessing = null;
+    _multiPanelGran = null;
 
     /* Throttled card DOM update (badges, price, status) */
     const now = Date.now();
