@@ -10516,13 +10516,17 @@ function resolveScalpBothHit(s) {
 
 /**
  * Generic "both SL and TP hit in same candle" resolver for all strategies.
- * When `partialTpHit` is set the 1:1 alert has already fired and partial profit
- * has been noted — the trade is always a WIN in that case since reaching the TP
- * is considered the primary outcome.  Otherwise falls back to distance comparison:
- * the level closer to entry is assumed to have been hit first.
+ * Falls back to distance comparison: the level closer to entry is assumed to
+ * have been hit first.
+ *
+ * When `partialTpHit` is true and SL is at (or effectively at) entry, treat the
+ * resolution as LOSS (breakeven on the remaining size) so outcome notifications
+ * do not incorrectly report a full WIN on a profit→entry reversal.
  */
 function resolveBothHit(s) {
-  if (s.partialTpHit === true) return "WIN";
+  if (s.partialTpHit === true && s.entry != null && s.sl != null) {
+    if (Math.abs(s.sl - s.entry) < PRICE_EPSILON) return "LOSS";
+  }
   return resolveScalpBothHit(s);
 }
 
