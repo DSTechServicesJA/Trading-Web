@@ -14636,7 +14636,13 @@ function monitorTradeOutcome(candle) {
   }
 
   /* ---- Check SL / TP outcome ---- */
-  const checkSL = trailingSL != null ? trailingSL : trade.sl;
+  /* Use effectiveSL (initialised at the top of this function, before any trailing-stop
+     update) rather than re-reading trailingSL here.  This prevents a trailing-stop
+     advance driven by the current candle's high from immediately triggering an SL hit
+     on the same candle's low.  The advance takes effect from the next candle onwards,
+     eliminating false WIN resolutions that occurred when price barely ticked above
+     entry (advancing the trail above entry) and then reversed back through entry on
+     the same bar. */
   let resolved = false;
 
   /* When the SL is at exactly entry (breakeven — set by Tesla BE or a trailing stop
@@ -14645,33 +14651,33 @@ function monitorTradeOutcome(candle) {
      (BULL) can be equal to entry for the entire candle period simply because the candle
      opened at entry; treating that as an SL hit would fire a false LOSS while the trade
      is still in profit.  candle.close reflects the actual current price. */
-  const atBreakeven = Math.abs(checkSL - trade.entry) < PRICE_EPSILON;
+  const atBreakeven = Math.abs(effectiveSL - trade.entry) < PRICE_EPSILON;
 
   if (trade.dir === "BULL") {
-    const slHit = atBreakeven ? candle.close <= checkSL : candle.low <= checkSL;
+    const slHit = atBreakeven ? candle.close <= effectiveSL : candle.low <= effectiveSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.high >= trade.tp;
     if (slHit && tpHit) {
       /* Both levels hit in same candle — closer level was hit first */
-      pending.result = checkSL > trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
-      pending.exitPrice = pending.result === "WIN" ? trade.tp : checkSL;
+      pending.result = effectiveSL > trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: effectiveSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.exitPrice = pending.result === "WIN" ? trade.tp : effectiveSL;
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
       /* SL hit: only count as WIN if stop locked in genuine profit (strictly above entry). */
-      if (checkSL > trade.entry) {
+      if (effectiveSL > trade.entry) {
         pending.result = "WIN";
-        pending.exitPrice = checkSL;
+        pending.exitPrice = effectiveSL;
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(effectiveSL, 4)} (above entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
-        pending.exitPrice = checkSL;
+        pending.exitPrice = effectiveSL;
         signalLosses++;
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
-        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
+        addLog(`Signal LOSS — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
@@ -14681,28 +14687,28 @@ function monitorTradeOutcome(candle) {
       addLog(`Signal WIN — price hit TP at ${fmt(trade.tp, 4)}`);
     }
   } else {
-    const slHit = atBreakeven ? candle.close >= checkSL : candle.high >= checkSL;
+    const slHit = atBreakeven ? candle.close >= effectiveSL : candle.high >= effectiveSL;
     const tpHit = !pureTrailingEnabled && trade.tp != null && candle.low <= trade.tp;
     if (slHit && tpHit) {
-      pending.result = checkSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: checkSL, tp: trade.tp, partialTpHit: partialTpHit === true });
-      pending.exitPrice = pending.result === "WIN" ? trade.tp : checkSL;
+      pending.result = effectiveSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: effectiveSL, tp: trade.tp, partialTpHit: partialTpHit === true });
+      pending.exitPrice = pending.result === "WIN" ? trade.tp : effectiveSL;
       if (pending.result === "WIN") signalWins++; else signalLosses++;
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
-      if (checkSL < trade.entry) {
+      if (effectiveSL < trade.entry) {
         pending.result = "WIN";
-        pending.exitPrice = checkSL;
+        pending.exitPrice = effectiveSL;
         signalWins++;
         resolved = true;
-        addLog(`Signal WIN — trailing stop hit at ${fmt(checkSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
+        addLog(`Signal WIN — trailing stop hit at ${fmt(effectiveSL, 4)} (below entry, profit locked${partialTpHit ? " after partial TP alert" : ""})`);
       } else {
         pending.result = "LOSS";
-        pending.exitPrice = checkSL;
+        pending.exitPrice = effectiveSL;
         signalLosses++;
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
-        addLog(`Signal LOSS — price hit SL at ${fmt(checkSL, 4)}${exitNote}`);
+        addLog(`Signal LOSS — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
