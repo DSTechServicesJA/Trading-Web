@@ -403,6 +403,7 @@ const LOWER_TF_5M_SEC           = 300;   /* 5-minute granularity (seconds); also
 const SL_ATR_BUF_1M             = 0.5;   /* SL ATR buffer for 1M — wider to survive 1M noise */
 const SL_ATR_BUF_5M             = 0.4;   /* SL ATR buffer for 5M */
 const SL_ATR_BUF_DEFAULT        = 0.3;   /* SL ATR buffer for higher TFs (original behaviour) */
+const STRUCTURAL_SL_MIN_RISK_ATR = 0.9;  /* if zone-based SL risk is tighter than this, fall back to swing anchor */
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
@@ -921,6 +922,7 @@ const BANNER_DISPLAY_MAX = 100;        /* max cards rendered in any signal/scalp
 let signalHistory   = [];
 let signalWins      = 0;
 let signalLosses    = 0;
+let signalBreakevens = 0;
 let monitoringTrade = false;
 
 /* EMA state */
@@ -975,6 +977,7 @@ let currentTheme = "dark";
 
 /* Strategy filter toggles */
 let autoResetEnabled    = true;
+let candleCloseOnlyEnabled = true; /* process entries/outcomes only on closed candles */
 let emaFilterEnabled    = true;    /* EMA 8/21 trend alignment mandatory by default */
 let htfFilterEnabled    = false;
 let atrToleranceEnabled = false;
@@ -1764,6 +1767,7 @@ function initUI() {
   /* Stats */
   UI.signalWins       = document.getElementById("signalWins");
   UI.signalLosses     = document.getElementById("signalLosses");
+  UI.signalBreakevens = document.getElementById("signalBreakevens");
   UI.signalWinRate    = document.getElementById("signalWinRate");
   UI.signalCount      = document.getElementById("signalCount");
 
@@ -3546,6 +3550,14 @@ async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
     addLog(`📤 Tesla level Telegram error: ${err.message}`);
   }
 }
+function isBreakevenSignal(signal) {
+  return !!signal &&
+    signal.result === "LOSS" &&
+    signal.exitPrice != null &&
+    signal.entry != null &&
+    Math.abs(signal.exitPrice - signal.entry) < PRICE_EPSILON &&
+    (signal.partialTpHit === true || signal._breakeven === true);
+}
 async function sendTradeOutcomeTelegram(signal) {
   if (!telegramOutcomeSend) return;
   if (signal._outcomeSent) return;
@@ -3562,9 +3574,7 @@ async function sendTradeOutcomeTelegram(signal) {
     /* Detect a breakeven exit: partial TP was captured at 1:1 and the remaining
        position was stopped exactly at entry (SL moved to breakeven).  Show a
        dedicated label so traders are not misled into thinking it was a full loss. */
-    const isBreakeven = result === "LOSS" && signal.partialTpHit === true &&
-                        signal.exitPrice != null && signal.entry != null &&
-                        Math.abs(signal.exitPrice - signal.entry) < PRICE_EPSILON;
+    const isBreakeven = isBreakevenSignal(signal);
 
     const icon        = result === "WIN" ? "✅" : (isBreakeven ? "⚖️" : "❌");
     const resultLabel = result === "WIN" ? "Trade WIN" : (isBreakeven ? "Trade Breakeven" : "Trade LOSS");
@@ -3598,9 +3608,10 @@ async function sendTradeOutcomeTelegram(signal) {
     /* Win/loss tally */
     const totalW = signalWins;
     const totalL = signalLosses;
+    const totalB = signalBreakevens;
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
-    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L / ${totalB}BE (${wr} win rate)`);
 
     /* Opposite mode effectiveness from auto-trade history */
     const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
@@ -3997,7 +4008,7 @@ function _snapshotChartGlobals() {
     bbUpper, bbLower, bbMiddle, bbWidth,
     adxValue, adxDiPlus, adxDiMinus, stochK, stochD,
     trailingSL, partialTpHit, confluenceScore,
-    signalHistory, signalWins, signalLosses,
+    signalHistory, signalWins, signalLosses, signalBreakevens,
     liveScalpHistory, lastScalpCandleIdx, ws,
     autoResetEnabled, emaFilterEnabled, htfFilterEnabled,
     atrToleranceEnabled, trailingStopEnabled, partialTpEnabled,
@@ -4028,7 +4039,7 @@ function _restoreChartGlobals(s) {
   stochK = s.stochK; stochD = s.stochD;
   trailingSL = s.trailingSL; partialTpHit = s.partialTpHit;
   confluenceScore = s.confluenceScore;
-  signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses;
+  signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses; signalBreakevens = s.signalBreakevens || 0;
   liveScalpHistory = s.liveScalpHistory; lastScalpCandleIdx = s.lastScalpCandleIdx;
   ws = s.ws;
   autoResetEnabled = s.autoResetEnabled; emaFilterEnabled = s.emaFilterEnabled;
@@ -4604,7 +4615,8 @@ function restoreSignalHistory() {
         (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
       );
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
-      signalLosses = signalHistory.filter(s => s && s.result === "LOSS").length;
+      signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
+      signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
       updateStatsUI();
     }
   } catch (e) {
@@ -4620,6 +4632,7 @@ function updateStatsUI() {
   if (isFocusedOrSingle) {
     if (UI.signalWins) UI.signalWins.textContent = signalWins;
     if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
+    if (UI.signalBreakevens) UI.signalBreakevens.textContent = signalBreakevens;
     const total = signalWins + signalLosses;
     if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
     updateStrategyWinRatesUI();
@@ -6160,6 +6173,7 @@ function resetSession() {
   signalHistory = [];
   signalWins = 0;
   signalLosses = 0;
+  signalBreakevens = 0;
   updateStatsUI();
 
   /* Clear live scalp history */
@@ -6830,8 +6844,31 @@ function connect() {
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
       };
+      const hadPrev = candles.length > 0;
+      const sameEpoch = hadPrev && candles[candles.length - 1].epoch === c.epoch;
+      const closedCandle = (!sameEpoch && hadPrev) ? candles[candles.length - 1] : null;
 
-      if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
+      if (candleCloseOnlyEnabled && closedCandle) {
+        computeEMAs();
+        computeATR();
+        computeRSI();
+        computeMACD();
+        computeBollingerBands();
+        computeADX();
+        computeStochastic();
+        computeEMA200();
+        computeVWAP();
+        processLatestCandle();
+        processLiveScalp();
+        processCustomStrategies();
+        monitorTradeOutcome(closedCandle);
+        monitorScalpOutcomes(closedCandle);
+        monitorCustomStrategyOutcomes(closedCandle);
+        monitorSessionRangeTradeOutcome(closedCandle);
+        monitorNyOpenRangeTradeOutcome(closedCandle);
+      }
+
+      if (sameEpoch) {
         candles[candles.length - 1] = c;
       } else {
         candles.push(c);
@@ -6855,14 +6892,16 @@ function connect() {
       computeStochastic();
       computeEMA200();
       computeVWAP();
-      processLatestCandle();
-      processLiveScalp();
-      processCustomStrategies();
-      monitorTradeOutcome(c);
-      monitorScalpOutcomes(c);
-      monitorCustomStrategyOutcomes(c);
-      monitorSessionRangeTradeOutcome(c);
-      monitorNyOpenRangeTradeOutcome(c);
+      if (!candleCloseOnlyEnabled) {
+        processLatestCandle();
+        processLiveScalp();
+        processCustomStrategies();
+        monitorTradeOutcome(c);
+        monitorScalpOutcomes(c);
+        monitorCustomStrategyOutcomes(c);
+        monitorSessionRangeTradeOutcome(c);
+        monitorNyOpenRangeTradeOutcome(c);
+      }
       /* Feature 5: update BOS/ChoCH markers on each new candle */
       if (bosChochEnabled) detectBosChoch();
       drawChart();
@@ -13381,7 +13420,15 @@ function buildTrade(confirmCandle, confirmIdx) {
 
     /* SL anchor: lowest low of the retest/indecision zone; fall back to swing */
     const zoneLows = [rtCandle, inCandle].filter(Boolean).map(c => c.low);
-    const slAnchor = zoneLows.length > 0 ? Math.min(...zoneLows) : findSwingLow(confirmIdx);
+    const swingAnchor = findSwingLow(confirmIdx);
+    let slAnchor = zoneLows.length > 0 ? Math.min(...zoneLows) : swingAnchor;
+    if (zoneLows.length > 0) {
+      const zoneRisk = entry - (slAnchor - atrValue * slAtrBuf);
+      if (zoneRisk > 0 && zoneRisk < atrValue * STRUCTURAL_SL_MIN_RISK_ATR) {
+        slAnchor = swingAnchor;
+        addLog(`ℹ️ SL fallback: zone risk ${fmt(zoneRisk, 4)} too tight (< ${fmt(STRUCTURAL_SL_MIN_RISK_ATR, 1)} ATR), using swing low.`);
+      }
+    }
     const sl = slAnchor - atrValue * slAtrBuf;
 
     const risk = entry - sl;
@@ -13394,7 +13441,7 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
+    trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol() };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
@@ -13409,7 +13456,15 @@ function buildTrade(confirmCandle, confirmIdx) {
 
     /* SL anchor: highest high of the retest/indecision zone; fall back to swing */
     const zoneHighs = [rtCandle, inCandle].filter(Boolean).map(c => c.high);
-    const slAnchor = zoneHighs.length > 0 ? Math.max(...zoneHighs) : findSwingHigh(confirmIdx);
+    const swingAnchor = findSwingHigh(confirmIdx);
+    let slAnchor = zoneHighs.length > 0 ? Math.max(...zoneHighs) : swingAnchor;
+    if (zoneHighs.length > 0) {
+      const zoneRisk = (slAnchor + atrValue * slAtrBuf) - entry;
+      if (zoneRisk > 0 && zoneRisk < atrValue * STRUCTURAL_SL_MIN_RISK_ATR) {
+        slAnchor = swingAnchor;
+        addLog(`ℹ️ SL fallback: zone risk ${fmt(zoneRisk, 4)} too tight (< ${fmt(STRUCTURAL_SL_MIN_RISK_ATR, 1)} ATR), using swing high.`);
+      }
+    }
     const sl = slAnchor + atrValue * slAtrBuf;
 
     const risk = sl - entry;
@@ -13422,7 +13477,7 @@ function buildTrade(confirmCandle, confirmIdx) {
       addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
       return;
     }
-    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, symbol: getActiveSymbol() };
+    trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol() };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
@@ -13895,18 +13950,6 @@ function executeAutoTrade(signal, _capturedWs) {
     return;
   }
 
-  /* #16: Same-symbol opposing-direction check.
-   * When maxConcurrentTrades > 1, warn (and skip) if an opposing direction
-   * trade is already active on the same symbol to avoid hedging against ourselves. */
-  if (activeCount > 0 && slot.activeTrades.length > 0) {
-    const opposingContractType = signal.dir === "BULL" ? "MULTDOWN" : "MULTUP";
-    const hasOpposing = slot.activeTrades.some(t => t.contractType === opposingContractType);
-    if (hasOpposing) {
-      addLog(`⚠ Auto-trade skipped — opposing ${signal.dir === "BULL" ? "BEAR" : "BULL"} trade already active on ${symbol}. Close it first to avoid hedging.`);
-      return;
-    }
-  }
-
   /* Block if a multiplier fetch is in progress for this symbol */
   if (slot.fetchingMultiplier) {
     addLog(`⚠ Auto-trade skipped — fetching multiplier data for ${symbol}`);
@@ -13921,6 +13964,18 @@ function executeAutoTrade(signal, _capturedWs) {
   } else if (signal.source === "strategy" && autoTradeStrategyOpposite) {
     effectiveDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     addLog(`🔄 Opposite mode (Strategy): reversed ${signal.dir} → ${effectiveDir}`);
+  }
+
+  /* #16: Same-symbol opposing-direction check.
+   * Use effectiveDir (after opposite mode) so hedging protection matches
+   * the actual direction that would be traded. */
+  if (activeCount > 0 && slot.activeTrades.length > 0) {
+    const opposingContractType = effectiveDir === "BULL" ? "MULTDOWN" : "MULTUP";
+    const hasOpposing = slot.activeTrades.some(t => t.contractType === opposingContractType);
+    if (hasOpposing) {
+      addLog(`⚠ Auto-trade skipped — opposing ${effectiveDir === "BULL" ? "BEAR" : "BULL"} trade already active on ${symbol}. Close it first to avoid hedging.`);
+      return;
+    }
   }
 
   /* When opposite mode flips direction, swap SL and TP so they are on the
@@ -14474,6 +14529,8 @@ function monitorTradeOutcome(candle) {
   if (!pending) { monitoringTrade = false; return; }
 
   const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
+  const currentIdx = candles.length - 1;
+  if (trade.outcomeStartIdx != null && currentIdx < trade.outcomeStartIdx) return;
 
   /* ---- Partial TP at 1:1 ---- */
   if (partialTpEnabled && !partialTpHit) {
@@ -14624,7 +14681,14 @@ function monitorTradeOutcome(candle) {
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       pending.exitPrice = exitPrice;
-      if (inProfit) signalWins++; else signalLosses++;
+      if (inProfit) {
+        signalWins++;
+      } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
+        pending._breakeven = true;
+        signalBreakevens++;
+      } else {
+        signalLosses++;
+      }
       addLog(`⏱ Scalp TIMEOUT (${SCALP_MAX_CANDLES} candles) — exit at ${fmt(exitPrice, 4)} → ${pending.result}`);
       monitoringTrade = false;
       persistSignalHistory();
@@ -14660,7 +14724,14 @@ function monitorTradeOutcome(candle) {
       /* Both levels hit in same candle — closer level was hit first */
       pending.result = effectiveSL > trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: effectiveSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       pending.exitPrice = pending.result === "WIN" ? trade.tp : effectiveSL;
-      if (pending.result === "WIN") signalWins++; else signalLosses++;
+      if (pending.result === "WIN") {
+        signalWins++;
+      } else if (Math.abs(pending.exitPrice - trade.entry) < PRICE_EPSILON) {
+        pending._breakeven = true;
+        signalBreakevens++;
+      } else {
+        signalLosses++;
+      }
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
@@ -14674,10 +14745,15 @@ function monitorTradeOutcome(candle) {
       } else {
         pending.result = "LOSS";
         pending.exitPrice = effectiveSL;
-        signalLosses++;
+        if (Math.abs(effectiveSL - trade.entry) < PRICE_EPSILON) {
+          pending._breakeven = true;
+          signalBreakevens++;
+        } else {
+          signalLosses++;
+        }
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
-        addLog(`Signal LOSS — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
+        addLog(`Signal ${pending._breakeven ? "BREAKEVEN" : "LOSS"} — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
@@ -14692,7 +14768,14 @@ function monitorTradeOutcome(candle) {
     if (slHit && tpHit) {
       pending.result = effectiveSL < trade.entry ? "WIN" : resolveBothHit({ entry: trade.entry, sl: effectiveSL, tp: trade.tp, partialTpHit: partialTpHit === true });
       pending.exitPrice = pending.result === "WIN" ? trade.tp : effectiveSL;
-      if (pending.result === "WIN") signalWins++; else signalLosses++;
+      if (pending.result === "WIN") {
+        signalWins++;
+      } else if (Math.abs(pending.exitPrice - trade.entry) < PRICE_EPSILON) {
+        pending._breakeven = true;
+        signalBreakevens++;
+      } else {
+        signalLosses++;
+      }
       resolved = true;
       addLog(`Signal ${pending.result} — both levels hit (${pending.result === "WIN" ? "TP/breakeven" : "SL"} closer)`);
     } else if (slHit) {
@@ -14705,10 +14788,15 @@ function monitorTradeOutcome(candle) {
       } else {
         pending.result = "LOSS";
         pending.exitPrice = effectiveSL;
-        signalLosses++;
+        if (Math.abs(effectiveSL - trade.entry) < PRICE_EPSILON) {
+          pending._breakeven = true;
+          signalBreakevens++;
+        } else {
+          signalLosses++;
+        }
         resolved = true;
         const exitNote = trailingSL != null ? " (trailing)" : "";
-        addLog(`Signal LOSS — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
+        addLog(`Signal ${pending._breakeven ? "BREAKEVEN" : "LOSS"} — price hit SL at ${fmt(effectiveSL, 4)}${exitNote}`);
       }
     } else if (tpHit) {
       pending.result = "WIN";
@@ -17160,6 +17248,7 @@ function createPanelState(symbol) {
     signalHistory: [],
     signalWins: 0,
     signalLosses: 0,
+    signalBreakevens: 0,
     liveScalpHistory: [],
     lastScalpCandleIdx: -999,
     connectTime: null,
@@ -17269,6 +17358,7 @@ function activatePanel(p) {
   signalHistory  = p.signalHistory;
   signalWins     = p.signalWins;
   signalLosses   = p.signalLosses;
+  signalBreakevens = p.signalBreakevens || 0;
   liveScalpHistory  = p.liveScalpHistory;
   lastScalpCandleIdx = p.lastScalpCandleIdx;
   ws             = p.ws;
@@ -17405,6 +17495,7 @@ function savePanel(p) {
   p.signalHistory  = signalHistory;
   p.signalWins     = signalWins;
   p.signalLosses   = signalLosses;
+  p.signalBreakevens = signalBreakevens;
   p.liveScalpHistory  = liveScalpHistory;
   p.lastScalpCandleIdx = lastScalpCandleIdx;
   p.ws             = ws;
@@ -17871,8 +17962,31 @@ function connectPanel(p) {
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
       };
+      const hadPrev = candles.length > 0;
+      const sameEpoch = hadPrev && candles[candles.length - 1].epoch === c.epoch;
+      const closedCandle = (!sameEpoch && hadPrev) ? candles[candles.length - 1] : null;
 
-      if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
+      if (candleCloseOnlyEnabled && closedCandle) {
+        computeEMAs();
+        computeATR();
+        computeRSI();
+        computeMACD();
+        computeBollingerBands();
+        computeADX();
+        computeStochastic();
+        computeEMA200();
+        computeVWAP();
+        processLatestCandle();
+        processLiveScalp();
+        processCustomStrategies();
+        monitorTradeOutcome(closedCandle);
+        monitorScalpOutcomes(closedCandle);
+        monitorCustomStrategyOutcomes(closedCandle);
+        monitorSessionRangeTradeOutcome(closedCandle);
+        monitorNyOpenRangeTradeOutcome(closedCandle);
+      }
+
+      if (sameEpoch) {
         candles[candles.length - 1] = c;
       } else {
         candles.push(c);
@@ -17894,14 +18008,16 @@ function connectPanel(p) {
       computeStochastic();
       computeEMA200();
       computeVWAP();
-      processLatestCandle();
-      processLiveScalp();
-      processCustomStrategies();
-      monitorTradeOutcome(c);
-      monitorScalpOutcomes(c);
-      monitorCustomStrategyOutcomes(c);
-      monitorSessionRangeTradeOutcome(c);
-      monitorNyOpenRangeTradeOutcome(c);
+      if (!candleCloseOnlyEnabled) {
+        processLatestCandle();
+        processLiveScalp();
+        processCustomStrategies();
+        monitorTradeOutcome(c);
+        monitorScalpOutcomes(c);
+        monitorCustomStrategyOutcomes(c);
+        monitorSessionRangeTradeOutcome(c);
+        monitorNyOpenRangeTradeOutcome(c);
+      }
     }
 
     /* Save state back to panel */
@@ -18341,7 +18457,7 @@ function removeSymbolPanel(symbol) {
     adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
     stochK = []; stochD = [];
     trailingSL = null; partialTpHit = false; confluenceScore = 0;
-    signalHistory = []; signalWins = 0; signalLosses = 0;
+    signalHistory = []; signalWins = 0; signalLosses = 0; signalBreakevens = 0;
     liveScalpHistory = []; lastScalpCandleIdx = -999;
 
     /* Refresh the main chart and sidebar so they clear */
