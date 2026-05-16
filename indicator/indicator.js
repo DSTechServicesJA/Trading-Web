@@ -1042,6 +1042,18 @@ const AUTO_TRADE_WIN_STREAK_MIN = 2;   /* consecutive wins required before scali
 const AUTO_TRADE_MAX_LOSSES  = 3;      /* consecutive losses before pausing auto-trades */
 let autoTradeMultiplier      = DEFAULT_AUTO_TRADE_MULTIPLIER; /* multiplier for MULTUP/MULTDOWN */
 let maxConcurrentTrades      = DEFAULT_MAX_CONCURRENT_TRADES; /* max simultaneous trades per symbol */
+let autoTradeExecutionMode   = "deriv"; /* "deriv" | "mt5" */
+let mt5SignalApiUrl          = "/api/mt5/signal.php";
+let mt5StatusApiUrl          = "/api/mt5/order_status.php";
+let mt5MinStopPoints         = 0;
+let mt5FreezePoints          = 0;
+let mt5LotStep               = 0.01;
+let mt5MinLot                = 0.01;
+let mt5MaxLot                = 100;
+let mt5StatusPollingEnabled  = true;
+let mt5LastStatusSyncTs      = 0;
+const MT5_STATUS_POLL_MS     = 8000;
+const MT5_FINAL_STATUSES     = new Set(["FILLED", "REJECTED", "CANCELLED", "EXPIRED"]);
 /* --- Per-symbol auto-trade slots ---
  * Each symbol can have multiple in-flight trades (up to maxConcurrentTrades).
  * Key = Deriv symbol string (e.g. "R_100"), value = slot object.
@@ -1774,10 +1786,19 @@ function initUI() {
   UI.autoTradeSessionRangeToggle   = document.getElementById("autoTradeSessionRangeToggle");
   UI.autoTradeStake         = document.getElementById("autoTradeStake");
   UI.autoTradeMaxStake      = document.getElementById("autoTradeMaxStake");
+  UI.autoTradeExecutionMode = document.getElementById("autoTradeExecutionMode");
   UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
   UI.maxConcurrentTrades    = document.getElementById("maxConcurrentTrades");
   UI.autoTradeSessionTP     = document.getElementById("autoTradeSessionTP");
   UI.autoTradeSessionSL     = document.getElementById("autoTradeSessionSL");
+  UI.mt5SignalApiUrl        = document.getElementById("mt5SignalApiUrl");
+  UI.mt5StatusApiUrl        = document.getElementById("mt5StatusApiUrl");
+  UI.mt5MinStopPoints       = document.getElementById("mt5MinStopPoints");
+  UI.mt5FreezePoints        = document.getElementById("mt5FreezePoints");
+  UI.mt5LotStep             = document.getElementById("mt5LotStep");
+  UI.mt5MinLot              = document.getElementById("mt5MinLot");
+  UI.mt5MaxLot              = document.getElementById("mt5MaxLot");
+  UI.mt5StatusPollingToggle = document.getElementById("mt5StatusPollingToggle");
   UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
   UI.autoTradeBalanceValue   = document.getElementById("autoTradeBalanceValue");
   UI.autoTradePLValue        = document.getElementById("autoTradePLValue");
@@ -4199,8 +4220,17 @@ function saveSettings() {
       autoTradeMaxStake,
       autoTradeSessionTP,
       autoTradeSessionSL,
+      autoTradeExecutionMode,
       autoTradeMultiplier,
       maxConcurrentTrades,
+      mt5SignalApiUrl,
+      mt5StatusApiUrl,
+      mt5MinStopPoints,
+      mt5FreezePoints,
+      mt5LotStep,
+      mt5MinLot,
+      mt5MaxLot,
+      mt5StatusPollingEnabled,
       autoTradeScalpOpposite,
       autoTradeStrategyOpposite,
       autoTradeLiquiditySweep,
@@ -4495,6 +4525,9 @@ function restoreSettings() {
     if (s.autoTradeMaxStake != null) autoTradeMaxStake = s.autoTradeMaxStake;
     if (s.autoTradeSessionTP != null) autoTradeSessionTP = s.autoTradeSessionTP;
     if (s.autoTradeSessionSL != null) autoTradeSessionSL = s.autoTradeSessionSL;
+    if (s.autoTradeExecutionMode === "deriv" || s.autoTradeExecutionMode === "mt5") {
+      autoTradeExecutionMode = s.autoTradeExecutionMode;
+    }
     /* Initialise dynamic stake from restored base */
     autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
     if (s.autoTradeMultiplier != null) autoTradeMultiplier = s.autoTradeMultiplier;
@@ -4506,10 +4539,27 @@ function restoreSettings() {
     if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
     if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
     if (UI.autoTradeMaxStake) UI.autoTradeMaxStake.value = autoTradeMaxStake > 0 ? autoTradeMaxStake : "";
+    if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value = autoTradeExecutionMode;
     if (UI.autoTradeSessionTP) UI.autoTradeSessionTP.value = autoTradeSessionTP > 0 ? autoTradeSessionTP : "";
     if (UI.autoTradeSessionSL) UI.autoTradeSessionSL.value = autoTradeSessionSL > 0 ? autoTradeSessionSL : "";
     if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
     if (UI.maxConcurrentTrades) UI.maxConcurrentTrades.value = maxConcurrentTrades;
+    if (s.mt5SignalApiUrl != null) mt5SignalApiUrl = String(s.mt5SignalApiUrl || mt5SignalApiUrl);
+    if (s.mt5StatusApiUrl != null) mt5StatusApiUrl = String(s.mt5StatusApiUrl || mt5StatusApiUrl);
+    if (s.mt5MinStopPoints != null) mt5MinStopPoints = Math.max(0, parseFloat(s.mt5MinStopPoints) || 0);
+    if (s.mt5FreezePoints != null) mt5FreezePoints = Math.max(0, parseFloat(s.mt5FreezePoints) || 0);
+    if (s.mt5LotStep != null) mt5LotStep = Math.max(0.00001, parseFloat(s.mt5LotStep) || 0.01);
+    if (s.mt5MinLot != null) mt5MinLot = Math.max(mt5LotStep, parseFloat(s.mt5MinLot) || mt5LotStep);
+    if (s.mt5MaxLot != null) mt5MaxLot = Math.max(mt5MinLot, parseFloat(s.mt5MaxLot) || mt5MinLot);
+    if (s.mt5StatusPollingEnabled != null) mt5StatusPollingEnabled = !!s.mt5StatusPollingEnabled;
+    if (UI.mt5SignalApiUrl) UI.mt5SignalApiUrl.value = mt5SignalApiUrl;
+    if (UI.mt5StatusApiUrl) UI.mt5StatusApiUrl.value = mt5StatusApiUrl;
+    if (UI.mt5MinStopPoints) UI.mt5MinStopPoints.value = mt5MinStopPoints;
+    if (UI.mt5FreezePoints) UI.mt5FreezePoints.value = mt5FreezePoints;
+    if (UI.mt5LotStep) UI.mt5LotStep.value = mt5LotStep;
+    if (UI.mt5MinLot) UI.mt5MinLot.value = mt5MinLot;
+    if (UI.mt5MaxLot) UI.mt5MaxLot.value = mt5MaxLot;
+    if (UI.mt5StatusPollingToggle) UI.mt5StatusPollingToggle.checked = mt5StatusPollingEnabled;
     updateAutoTradeCurrentStakeUI();
     if (s.autoTradeScalpOpposite != null) autoTradeScalpOpposite = s.autoTradeScalpOpposite;
     if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
@@ -7888,6 +7938,16 @@ function revertAllSettings() {
   gridScalperMAPeriod   = 21;
   fvgStratEnabled       = false;
   mtfTopDownEnabled     = false;
+  autoTradeExecutionMode = "deriv";
+  mt5SignalApiUrl        = "/api/mt5/signal.php";
+  mt5StatusApiUrl        = "/api/mt5/order_status.php";
+  mt5MinStopPoints       = 0;
+  mt5FreezePoints        = 0;
+  mt5LotStep             = 0.01;
+  mt5MinLot              = 0.01;
+  mt5MaxLot              = 100;
+  mt5StatusPollingEnabled = true;
+  mt5LastStatusSyncTs     = 0;
   RANGE_MINUTES           = 15;
   LEVEL_TOUCH_TOLERANCE   = 0.15;
   DOJI_BODY_RATIO         = 0.2;
@@ -7955,6 +8015,15 @@ function revertAllSettings() {
   if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
   if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
   if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+  if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value   = autoTradeExecutionMode;
+  if (UI.mt5SignalApiUrl)        UI.mt5SignalApiUrl.value          = mt5SignalApiUrl;
+  if (UI.mt5StatusApiUrl)        UI.mt5StatusApiUrl.value          = mt5StatusApiUrl;
+  if (UI.mt5MinStopPoints)       UI.mt5MinStopPoints.value         = mt5MinStopPoints;
+  if (UI.mt5FreezePoints)        UI.mt5FreezePoints.value          = mt5FreezePoints;
+  if (UI.mt5LotStep)             UI.mt5LotStep.value               = mt5LotStep;
+  if (UI.mt5MinLot)              UI.mt5MinLot.value                = mt5MinLot;
+  if (UI.mt5MaxLot)              UI.mt5MaxLot.value                = mt5MaxLot;
+  if (UI.mt5StatusPollingToggle) UI.mt5StatusPollingToggle.checked = mt5StatusPollingEnabled;
 
   /* Advanced parameter UI sync */
   if (UI.rangeDuration)  UI.rangeDuration.value  = RANGE_MINUTES;
@@ -14228,6 +14297,161 @@ function calculateRiskAdjustedStake(signal, multiplier) {
   return +fmt(stake, 2);
 }
 
+function mt5BridgeHeaders(extra = {}) {
+  const h = Object.assign({ "Content-Type": "application/json" }, extra);
+  if (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getToken()) {
+    h["Authorization"] = "Bearer " + ITGuruAuth.getToken();
+  }
+  return h;
+}
+
+function buildMt5BridgePayload(signal, effectiveDir, tradeSl, tradeTp, symbol, stake) {
+  const currentPrice = candles.length > 0 ? Number(candles[candles.length - 1]?.close || candles[candles.length - 1]?.c || 0) : null;
+  const side = effectiveDir === "BULL" ? "BUY" : "SELL";
+  const orderType = (() => {
+    if (currentPrice == null || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+      return side === "BUY" ? "BUY_MARKET" : "SELL_MARKET";
+    }
+    if (side === "BUY") {
+      if (signal.entry > currentPrice) return "BUY_STOP";
+      if (signal.entry < currentPrice) return "BUY_LIMIT";
+      return "BUY_MARKET";
+    }
+    if (signal.entry < currentPrice) return "SELL_STOP";
+    if (signal.entry > currentPrice) return "SELL_LIMIT";
+    return "SELL_MARKET";
+  })();
+
+  const idempotencyKey = [
+    symbol,
+    side,
+    signal.entry != null ? fmtPrice(signal.entry, symbol) : "--",
+    tradeSl != null ? fmtPrice(tradeSl, symbol) : "--",
+    tradeTp != null ? fmtPrice(tradeTp, symbol) : "--",
+    signal.source || "breakout",
+    signal.strategyName || "none",
+    Math.floor(Date.now() / 1000)
+  ].join("|");
+
+  return {
+    symbol,
+    dir: side,
+    entry: signal.entry,
+    sl: tradeSl,
+    tp: tradeTp,
+    currentPrice: (currentPrice != null && Number.isFinite(currentPrice) && currentPrice > 0) ? currentPrice : null,
+    lot: stake,
+    orderType,
+    source: signal.source || "breakout",
+    strategyName: signal.strategyName || null,
+    idempotencyKey,
+    constraints: {
+      minStopPoints: mt5MinStopPoints,
+      freezePoints: mt5FreezePoints,
+      lotStep: mt5LotStep,
+      minLot: mt5MinLot,
+      maxLot: mt5MaxLot
+    }
+  };
+}
+
+function resolveMt5HistoryResult(status) {
+  if (status === "FILLED") return "WIN";
+  if (status === "REJECTED" || status === "CANCELLED" || status === "EXPIRED") return "LOSS";
+  return "PENDING";
+}
+
+function submitMt5BridgeTrade({
+  signal, effectiveDir, tradeSl, tradeTp, symbol, slot, regime, stake, contractType, label
+}) {
+  if (!mt5SignalApiUrl) {
+    addLog("⚠ MT5 bridge skipped — Signal API URL is empty");
+    return;
+  }
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) {
+    addLog("⚠ MT5 bridge skipped — please log in first");
+    return;
+  }
+
+  const payload = buildMt5BridgePayload(signal, effectiveDir, tradeSl, tradeTp, symbol, stake);
+  const headers = mt5BridgeHeaders({ "X-Idempotency-Key": payload.idempotencyKey });
+  const oppositeTag = (effectiveDir !== signal.dir) ? " [OPPOSITE]" : "";
+  addLog(`🤖 ${label} MT5 bridge: ${payload.orderType} ${symbol} lot ${fmt(payload.lot, 2)}${oppositeTag}` + (maxConcurrentTrades > 1 ? ` [${slot.activeTrades.length + 1}/${maxConcurrentTrades}]` : ""));
+
+  fetch(mt5SignalApiUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload)
+  }).then(async (resp) => {
+    const data = await safeJson(resp);
+    if (!resp.ok || !data?.ok || !data?.order?.orderId) {
+      throw new Error(data?.error || `HTTP ${resp.status}`);
+    }
+    const order = data.order;
+    const tradeId = String(order.orderId);
+    if (!slot.activeTrades.some(t => t.tradeId === tradeId)) {
+      slot.activeTrades.push({ tradeId, contractId: null, startTime: Date.now(), pendingTimer: null, contractType });
+      slot.inProgress = true;
+      addAutoTradeHistoryEntry({
+        source: signal.source,
+        strategyName: signal.strategyName,
+        type: payload.orderType,
+        symbol,
+        tradeId,
+        profit: null,
+        result: "PENDING",
+        originalDir: signal.dir,
+        tradedDir: effectiveDir,
+        isOpposite: effectiveDir !== signal.dir,
+        regime,
+        session: getActiveSessionName(),
+        timeframeSec: getCurrentGranularitySec(),
+        realismCost: 0
+      });
+    }
+    recordTradeFrequency(symbol, signal.strategyName || null);
+    addLog(`✅ MT5 bridge queued ${tradeId} (${order.status || "QUEUED"})`);
+    mt5LastStatusSyncTs = 0;
+  }).catch((err) => {
+    addLog(`⚠ MT5 bridge submit failed: ${err.message || err}`);
+  });
+}
+
+async function pollMt5BridgeStatus() {
+  if (autoTradeExecutionMode !== "mt5" || !mt5StatusPollingEnabled || !mt5StatusApiUrl) return;
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+
+  const url = `${mt5StatusApiUrl}${mt5StatusApiUrl.includes("?") ? "&" : "?"}since=${encodeURIComponent(mt5LastStatusSyncTs)}&limit=100`;
+  try {
+    const resp = await fetch(url, { headers: mt5BridgeHeaders() });
+    const data = await safeJson(resp);
+    if (!resp.ok || !data?.ok || !Array.isArray(data.orders)) return;
+    const serverTime = Number(data.serverTime || 0);
+    if (Number.isFinite(serverTime) && serverTime > mt5LastStatusSyncTs) {
+      mt5LastStatusSyncTs = serverTime;
+    }
+
+    for (const o of data.orders) {
+      const tradeId = String(o.orderId || "");
+      const status = String(o.status || "").toUpperCase();
+      const symbol = String(o.symbol || getActiveSymbol());
+      if (!tradeId || !status) continue;
+
+      if (MT5_FINAL_STATUSES.has(status)) {
+        removeActiveTrade(symbol, tradeId);
+        const result = resolveMt5HistoryResult(status);
+        resolveAutoTradeHistoryEntry(0, result, symbol, tradeId);
+      }
+      if (status === "REJECTED" || status === "CANCELLED") {
+        const msg = o.message ? ` — ${o.message}` : "";
+        addLog(`⚠ MT5 ${status} ${tradeId}${msg}`);
+      } else if (status === "FILLED") {
+        addLog(`✅ MT5 filled ${tradeId}${o.brokerTicket ? ` (ticket ${o.brokerTicket})` : ""}`);
+      }
+    }
+  } catch (_) { /* silent background poll */ }
+}
+
 function getTradeAnalytics(entries) {
   const resolved = (entries || []).filter(e => e && (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number");
   if (resolved.length === 0) return { samples: 0, pf: 0, expectancy: 0, maxDrawdown: 0 };
@@ -14339,23 +14563,26 @@ function executeAutoTrade(signal, _capturedWs) {
     return;
   }
 
+  if (!signal || !signal.dir || (signal.dir !== "BULL" && signal.dir !== "BEAR")) {
+    addLog("⚠ Auto-trade skipped — invalid signal direction");
+    return;
+  }
+
   /* Capture the WS that should carry this trade — in multi-panel mode
      activatePanel() has already set `ws` to the panel's own WS.
      _capturedWs is provided by the async multiplier-fetch retry path to
      preserve the correct panel WS even if activatePanel() has since
      switched `ws` to a different panel. */
   const tradeWs = _capturedWs || ws;
-  if (!tradeWs || tradeWs.readyState !== WebSocket.OPEN) {
-    addLog("⚠ Auto-trade skipped — WebSocket not connected");
-    return;
-  }
-  if (!authorized) {
-    addLog("⚠ Auto-trade skipped — not authorized (set Deriv token in Settings)");
-    return;
-  }
-  if (!signal || !signal.dir || (signal.dir !== "BULL" && signal.dir !== "BEAR")) {
-    addLog("⚠ Auto-trade skipped — invalid signal direction");
-    return;
+  if (autoTradeExecutionMode !== "mt5") {
+    if (!tradeWs || tradeWs.readyState !== WebSocket.OPEN) {
+      addLog("⚠ Auto-trade skipped — WebSocket not connected");
+      return;
+    }
+    if (!authorized) {
+      addLog("⚠ Auto-trade skipped — not authorized (set Deriv token in Settings)");
+      return;
+    }
   }
 
   const symbol = signal.symbol || getActiveSymbol();
@@ -14404,7 +14631,7 @@ function executeAutoTrade(signal, _capturedWs) {
   }
 
   /* Block if a multiplier fetch is in progress for this symbol */
-  if (slot.fetchingMultiplier) {
+  if (autoTradeExecutionMode !== "mt5" && slot.fetchingMultiplier) {
     addLog(`⚠ Auto-trade skipped — fetching multiplier data for ${symbol}`);
     return;
   }
@@ -14456,6 +14683,24 @@ function executeAutoTrade(signal, _capturedWs) {
 
   const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
   let stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake);
+  const label = autoTradeSourceLabel(signal.source, signal.strategyName);
+
+  if (autoTradeExecutionMode === "mt5") {
+    stake = Math.max(mt5MinLot, Math.min(mt5MaxLot, stake));
+    submitMt5BridgeTrade({
+      signal,
+      effectiveDir,
+      tradeSl,
+      tradeTp,
+      symbol,
+      slot,
+      regime,
+      stake,
+      contractType,
+      label
+    });
+    return;
+  }
 
   /* Validate multiplier against known valid values for this symbol.
      Check order: API cache → hardcoded fallback map → if neither exists,
@@ -14509,8 +14754,6 @@ function executeAutoTrade(signal, _capturedWs) {
     addLog(`⚠ Auto-trade skipped — realism stress failed (cost $${fmt(realism.cost,2)} too high vs expected reward)`);
     return;
   }
-
-  const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
   /* Build limit_order with SL and optional TP (distance from entry in USD).
      Dollar value formula: priceDist × multiplier × stake / entry
@@ -19202,7 +19445,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeToggle) {
     UI.autoTradeToggle.addEventListener("change", () => {
       autoTradeEnabled = UI.autoTradeToggle.checked;
-      if (autoTradeEnabled && !authorized) {
+      if (autoTradeEnabled && autoTradeExecutionMode === "deriv" && !authorized) {
         addLog("⚠ Auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
       updateAutoTradeBalanceVisibility();
@@ -19212,7 +19455,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeScalpToggle) {
     UI.autoTradeScalpToggle.addEventListener("change", () => {
       autoTradeScalpEnabled = UI.autoTradeScalpToggle.checked;
-      if (autoTradeScalpEnabled && !authorized) {
+      if (autoTradeScalpEnabled && autoTradeExecutionMode === "deriv" && !authorized) {
         addLog("⚠ Scalp auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
       updateAutoTradeBalanceVisibility();
@@ -19222,10 +19465,20 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeStrategyToggle) {
     UI.autoTradeStrategyToggle.addEventListener("change", () => {
       autoTradeStrategyEnabled = UI.autoTradeStrategyToggle.checked;
-      if (autoTradeStrategyEnabled && !authorized) {
+      if (autoTradeStrategyEnabled && autoTradeExecutionMode === "deriv" && !authorized) {
         addLog("⚠ Strategy auto-trade enabled but not authorized — trades won't execute until a Deriv token is set");
       }
       updateAutoTradeBalanceVisibility();
+      saveSettings();
+    });
+  }
+  if (UI.autoTradeExecutionMode) {
+    UI.autoTradeExecutionMode.addEventListener("change", () => {
+      autoTradeExecutionMode = UI.autoTradeExecutionMode.value === "mt5" ? "mt5" : "deriv";
+      addLog(`🤖 Auto-trade execution mode: ${autoTradeExecutionMode === "mt5" ? "MT5 Bridge" : "Deriv"}`);
+      if (autoTradeExecutionMode === "deriv" && (autoTradeEnabled || autoTradeScalpEnabled || autoTradeStrategyEnabled) && !authorized) {
+        addLog("⚠ Deriv mode is active but not authorized — set Deriv token in Settings.");
+      }
       saveSettings();
     });
   }
@@ -19339,6 +19592,62 @@ document.addEventListener("DOMContentLoaded", () => {
       if (maxConcurrentTrades > 1) {
         addLog(`🔄 Max concurrent trades set to ${maxConcurrentTrades} per symbol — multiple signals can open simultaneously`);
       }
+      saveSettings();
+    });
+  }
+  if (UI.mt5SignalApiUrl) {
+    UI.mt5SignalApiUrl.addEventListener("change", () => {
+      mt5SignalApiUrl = (UI.mt5SignalApiUrl.value || "").trim() || "/api/mt5/signal.php";
+      UI.mt5SignalApiUrl.value = mt5SignalApiUrl;
+      saveSettings();
+    });
+  }
+  if (UI.mt5StatusApiUrl) {
+    UI.mt5StatusApiUrl.addEventListener("change", () => {
+      mt5StatusApiUrl = (UI.mt5StatusApiUrl.value || "").trim() || "/api/mt5/order_status.php";
+      UI.mt5StatusApiUrl.value = mt5StatusApiUrl;
+      saveSettings();
+    });
+  }
+  if (UI.mt5MinStopPoints) {
+    UI.mt5MinStopPoints.addEventListener("input", () => {
+      mt5MinStopPoints = Math.max(0, parseFloat(UI.mt5MinStopPoints.value) || 0);
+      saveSettings();
+    });
+  }
+  if (UI.mt5FreezePoints) {
+    UI.mt5FreezePoints.addEventListener("input", () => {
+      mt5FreezePoints = Math.max(0, parseFloat(UI.mt5FreezePoints.value) || 0);
+      saveSettings();
+    });
+  }
+  if (UI.mt5LotStep) {
+    UI.mt5LotStep.addEventListener("input", () => {
+      mt5LotStep = Math.max(0.00001, parseFloat(UI.mt5LotStep.value) || 0.01);
+      if (mt5MinLot < mt5LotStep) mt5MinLot = mt5LotStep;
+      if (mt5MaxLot < mt5MinLot) mt5MaxLot = mt5MinLot;
+      if (UI.mt5MinLot) UI.mt5MinLot.value = mt5MinLot;
+      if (UI.mt5MaxLot) UI.mt5MaxLot.value = mt5MaxLot;
+      saveSettings();
+    });
+  }
+  if (UI.mt5MinLot) {
+    UI.mt5MinLot.addEventListener("input", () => {
+      mt5MinLot = Math.max(mt5LotStep, parseFloat(UI.mt5MinLot.value) || mt5LotStep);
+      if (mt5MaxLot < mt5MinLot) mt5MaxLot = mt5MinLot;
+      if (UI.mt5MaxLot) UI.mt5MaxLot.value = mt5MaxLot;
+      saveSettings();
+    });
+  }
+  if (UI.mt5MaxLot) {
+    UI.mt5MaxLot.addEventListener("input", () => {
+      mt5MaxLot = Math.max(mt5MinLot, parseFloat(UI.mt5MaxLot.value) || mt5MinLot);
+      saveSettings();
+    });
+  }
+  if (UI.mt5StatusPollingToggle) {
+    UI.mt5StatusPollingToggle.addEventListener("change", () => {
+      mt5StatusPollingEnabled = UI.mt5StatusPollingToggle.checked;
       saveSettings();
     });
   }
@@ -20146,6 +20455,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Fetch news calendar on load if enabled */
   if (newsPauseEnabled) fetchNewsCalendar();
+  setInterval(() => { pollMt5BridgeStatus(); }, MT5_STATUS_POLL_MS);
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();
