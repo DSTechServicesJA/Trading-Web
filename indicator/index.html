@@ -557,6 +557,13 @@
             <p class="param-group-title">Contract Settings</p>
             <div class="account-inputs">
               <div class="account-input-row">
+                <label class="hint" for="autoTradeExecutionMode">Execution Mode</label>
+                <select id="autoTradeExecutionMode">
+                  <option value="deriv">Deriv (MULTUP/MULTDOWN)</option>
+                  <option value="mt5">MT5 Bridge (Entry/SL/TP)</option>
+                </select>
+              </div>
+              <div class="account-input-row">
                 <label class="hint" for="autoTradeStake">Base Stake ($)</label>
                 <input type="number" id="autoTradeStake" min="0.35" step="0.01" value="1" placeholder="1.00" />
               </div>
@@ -585,7 +592,40 @@
                 <input type="number" id="autoTradeSessionSL" min="0.01" step="0.01" placeholder="e.g. 5.00" />
               </div>
             </div>
+            <p class="param-group-title">MT5 Bridge</p>
+            <div class="account-inputs">
+              <div class="account-input-row">
+                <label class="hint" for="mt5SignalApiUrl">Signal API URL</label>
+                <input type="text" id="mt5SignalApiUrl" value="/api/mt5/signal.php" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5StatusApiUrl">Status API URL</label>
+                <input type="text" id="mt5StatusApiUrl" value="/api/mt5/order_status.php" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5MinStopPoints">Min Stop Points</label>
+                <input type="number" id="mt5MinStopPoints" min="0" step="1" value="0" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5FreezePoints">Freeze Points</label>
+                <input type="number" id="mt5FreezePoints" min="0" step="1" value="0" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5LotStep">Lot Step</label>
+                <input type="number" id="mt5LotStep" min="0.00001" step="0.00001" value="0.01" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5MinLot">Min Lot</label>
+                <input type="number" id="mt5MinLot" min="0.00001" step="0.00001" value="0.01" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="mt5MaxLot">Max Lot</label>
+                <input type="number" id="mt5MaxLot" min="0.00001" step="0.00001" value="100" />
+              </div>
+            </div>
+            <label class="toggle-row"><input type="checkbox" id="mt5StatusPollingToggle" checked /> Poll MT5 status updates</label>
             <p class="hint" style="margin-bottom:2px;">Uses MULTUP/MULTDOWN contracts with SL &amp; TP from the signal's entry, stop-loss, and take-profit levels. Requires a valid Deriv token.</p>
+            <p class="hint" style="margin-bottom:2px;">In <b>MT5 Bridge</b> mode, signals are sent to your bridge API with normalized Entry/SL/TP + order type mapping (market/limit/stop) and broker constraints.</p>
             <p class="hint" style="margin-bottom:2px;"><b>Base Stake</b>: starting trade size. <b>Max Stake</b>: cap for compounding (leave blank = 4× base). Stake compounds after 2+ consecutive wins, resets to base on loss. Auto-trading also halts automatically after 3 consecutive losses.</p>
             <p class="hint" style="margin-bottom:2px;"><b>Session TP/SL</b>: halt all auto-trades when cumulative P/L reaches the take-profit or stop-loss dollar amount.</p>
             <p class="hint" style="margin-bottom:2px;">Max Concurrent Trades: allow multiple trades to run simultaneously per symbol when signals fire (1 = one trade at a time, like before).</p>

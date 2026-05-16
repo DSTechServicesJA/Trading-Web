@@ -1,0 +1,301 @@
+<?php
+/**
+ * api/mt5/common.php
+ * ──────────────────
+ * Shared helpers for MT5 bridge endpoints.
+ */
+
+declare(strict_types=1);
+require_once __DIR__ . '/../config.php';
+
+const MT5_ALLOWED_ORDER_TYPES = [
+    'BUY_MARKET', 'SELL_MARKET',
+    'BUY_LIMIT', 'SELL_LIMIT',
+    'BUY_STOP', 'SELL_STOP',
+];
+
+const MT5_ALLOWED_STATUS = [
+    'QUEUED', 'DISPATCHED', 'RECEIVED', 'FILLED', 'MODIFIED', 'REJECTED', 'CANCELLED', 'EXPIRED',
+];
+
+const MT5_FINAL_STATUS = ['FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED'];
+
+function mt5StoragePath(): string
+{
+    return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'itguru_mt5_bridge_' . sha1(__DIR__) . '.json';
+}
+
+/**
+ * @template T
+ * @param callable(array<string,mixed>):T $callback
+ * @return T
+ */
+function mt5WithStateLock(callable $callback): mixed
+{
+    $path = mt5StoragePath();
+    $fh = fopen($path, 'c+');
+    if ($fh === false) {
+        throw new RuntimeException('Cannot open MT5 bridge storage file');
+    }
+
+    if (!flock($fh, LOCK_EX)) {
+        fclose($fh);
+        throw new RuntimeException('Cannot lock MT5 bridge storage file');
+    }
+
+    $raw = stream_get_contents($fh);
+    $state = is_string($raw) && $raw !== '' ? (json_decode($raw, true) ?: []) : [];
+    if (!is_array($state)) $state = [];
+    if (!isset($state['orders']) || !is_array($state['orders'])) $state['orders'] = [];
+    if (!isset($state['idempotency']) || !is_array($state['idempotency'])) $state['idempotency'] = [];
+
+    $result = $callback($state);
+
+    $state['updatedAt'] = time();
+    $encoded = json_encode($state, JSON_UNESCAPED_SLASHES);
+    if ($encoded === false) {
+        flock($fh, LOCK_UN);
+        fclose($fh);
+        throw new RuntimeException('Cannot encode MT5 bridge state');
+    }
+
+    ftruncate($fh, 0);
+    rewind($fh);
+    fwrite($fh, $encoded);
+    fflush($fh);
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    return $result;
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function mt5ReadState(): array
+{
+    $path = mt5StoragePath();
+    if (!is_file($path)) {
+        return ['orders' => [], 'idempotency' => []];
+    }
+    $raw = @file_get_contents($path);
+    $state = $raw ? (json_decode($raw, true) ?: []) : [];
+    if (!is_array($state)) $state = [];
+    if (!isset($state['orders']) || !is_array($state['orders'])) $state['orders'] = [];
+    if (!isset($state['idempotency']) || !is_array($state['idempotency'])) $state['idempotency'] = [];
+    return $state;
+}
+
+function mt5AuthUserId(): int
+{
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION']
+        ?? (function_exists('apache_request_headers')
+            ? (apache_request_headers()['Authorization'] ?? '')
+            : '');
+    if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        jsonResponse(['error' => 'Authentication required'], 401);
+    }
+    $payload = jwtDecode($m[1]);
+    if (!$payload || empty($payload['sub'])) {
+        jsonResponse(['error' => 'Invalid or expired token'], 401);
+    }
+    return (int) $payload['sub'];
+}
+
+/**
+ * @param array<string,mixed> $body
+ */
+function mt5RequireBridgeKey(array $body = []): void
+{
+    $expected = env('MT5_BRIDGE_KEY');
+    if ($expected === '') {
+        jsonResponse(['error' => 'MT5 bridge is not configured'], 503);
+    }
+
+    $incoming = (string) ($_SERVER['HTTP_X_MT5_BRIDGE_KEY'] ?? '');
+    if ($incoming === '') {
+        $incoming = (string) ($_GET['bridge_key'] ?? $body['bridge_key'] ?? '');
+    }
+    if ($incoming === '' || !hash_equals($expected, $incoming)) {
+        jsonResponse(['error' => 'Unauthorized bridge key'], 403);
+    }
+}
+
+function mt5InferDigits(string $symbol, float $price): int
+{
+    $s = strtoupper($symbol);
+    if (str_contains($s, 'JPY')) return 3;
+    if (str_contains($s, 'XAU') || str_contains($s, 'XAG')) return 2;
+    if (str_starts_with($s, 'FRX') || preg_match('/^[A-Z]{6}$/', $s) === 1) return 5;
+
+    $txt = rtrim(rtrim(sprintf('%.8F', $price), '0'), '.');
+    $parts = explode('.', $txt);
+    $decimals = isset($parts[1]) ? strlen($parts[1]) : 2;
+    return max(2, min(8, $decimals));
+}
+
+function mt5ResolveOrderType(string $side, float $entry, ?float $currentPrice, string $requested = ''): string
+{
+    $req = strtoupper(trim($requested));
+    if ($req !== '' && in_array($req, MT5_ALLOWED_ORDER_TYPES, true)) return $req;
+
+    if ($currentPrice === null || $currentPrice <= 0) {
+        return $side === 'BUY' ? 'BUY_MARKET' : 'SELL_MARKET';
+    }
+    if ($side === 'BUY') {
+        if ($entry > $currentPrice) return 'BUY_STOP';
+        if ($entry < $currentPrice) return 'BUY_LIMIT';
+        return 'BUY_MARKET';
+    }
+    if ($entry < $currentPrice) return 'SELL_STOP';
+    if ($entry > $currentPrice) return 'SELL_LIMIT';
+    return 'SELL_MARKET';
+}
+
+/**
+ * @param array<string,mixed> $constraints
+ * @return array<string,float>
+ */
+function mt5NormalizeConstraints(array $constraints): array
+{
+    $minStopPoints = max(0.0, (float) ($constraints['minStopPoints'] ?? 0));
+    $freezePoints  = max(0.0, (float) ($constraints['freezePoints'] ?? 0));
+    $lotStep       = max(0.00001, (float) ($constraints['lotStep'] ?? 0.01));
+    $minLot        = max($lotStep, (float) ($constraints['minLot'] ?? $lotStep));
+    $maxLot        = max($minLot, (float) ($constraints['maxLot'] ?? 100));
+    return [
+        'minStopPoints' => $minStopPoints,
+        'freezePoints' => $freezePoints,
+        'lotStep' => $lotStep,
+        'minLot' => $minLot,
+        'maxLot' => $maxLot,
+    ];
+}
+
+/**
+ * @param array<string,mixed> $body
+ * @return array<string,mixed>
+ */
+function mt5NormalizeSignalPayload(array $body): array
+{
+    $symbol = trim((string) ($body['symbol'] ?? ''));
+    if ($symbol === '') {
+        throw new InvalidArgumentException('symbol is required');
+    }
+
+    $dirRaw = strtoupper(trim((string) ($body['dir'] ?? $body['direction'] ?? '')));
+    $side = match ($dirRaw) {
+        'BUY', 'BULL', 'LONG' => 'BUY',
+        'SELL', 'BEAR', 'SHORT' => 'SELL',
+        default => '',
+    };
+    if ($side === '') {
+        throw new InvalidArgumentException('dir must be BUY/SELL or BULL/BEAR');
+    }
+
+    $entry = (float) ($body['entry'] ?? 0);
+    $sl = (float) ($body['sl'] ?? 0);
+    $tp = (float) ($body['tp'] ?? 0);
+    if ($entry <= 0 || $sl <= 0 || $tp <= 0) {
+        throw new InvalidArgumentException('entry, sl, tp must be positive numbers');
+    }
+
+    if ($side === 'BUY') {
+        if ($sl >= $entry) throw new InvalidArgumentException('BUY orders require sl below entry');
+        if ($tp <= $entry) throw new InvalidArgumentException('BUY orders require tp above entry');
+    } else {
+        if ($sl <= $entry) throw new InvalidArgumentException('SELL orders require sl above entry');
+        if ($tp >= $entry) throw new InvalidArgumentException('SELL orders require tp below entry');
+    }
+
+    $currentPrice = isset($body['currentPrice']) ? (float) $body['currentPrice'] : null;
+    if ($currentPrice !== null && $currentPrice <= 0) $currentPrice = null;
+
+    $digits = mt5InferDigits($symbol, $entry);
+    $point  = pow(10, -$digits);
+    $entry  = round($entry, $digits);
+    $sl     = round($sl, $digits);
+    $tp     = round($tp, $digits);
+    if ($currentPrice !== null) $currentPrice = round($currentPrice, $digits);
+
+    $constraints = mt5NormalizeConstraints(
+        is_array($body['constraints'] ?? null) ? $body['constraints'] : []
+    );
+
+    $slPoints = abs($entry - $sl) / $point;
+    $tpPoints = abs($tp - $entry) / $point;
+    if ($constraints['minStopPoints'] > 0) {
+        if ($slPoints < $constraints['minStopPoints']) {
+            throw new InvalidArgumentException('SL distance is below broker minimum stop distance');
+        }
+        if ($tpPoints < $constraints['minStopPoints']) {
+            throw new InvalidArgumentException('TP distance is below broker minimum stop distance');
+        }
+    }
+
+    $orderType = mt5ResolveOrderType($side, $entry, $currentPrice, (string) ($body['orderType'] ?? ''));
+    if (($orderType === 'BUY_LIMIT' || $orderType === 'BUY_STOP' || $orderType === 'SELL_LIMIT' || $orderType === 'SELL_STOP')
+        && $constraints['freezePoints'] > 0
+        && $currentPrice !== null
+    ) {
+        $entryGapPoints = abs($entry - $currentPrice) / $point;
+        if ($entryGapPoints < $constraints['freezePoints']) {
+            throw new InvalidArgumentException('Entry is inside broker freeze level');
+        }
+    }
+
+    $lot = (float) ($body['lot'] ?? $body['lotSize'] ?? $constraints['minLot']);
+    if ($lot <= 0) $lot = $constraints['minLot'];
+    $lot = round($lot / $constraints['lotStep']) * $constraints['lotStep'];
+    $lot = min($constraints['maxLot'], max($constraints['minLot'], $lot));
+    $lot = (float) number_format($lot, 4, '.', '');
+
+    $source = trim((string) ($body['source'] ?? 'breakout'));
+    $strategyName = trim((string) ($body['strategyName'] ?? ''));
+    $idempotencyKey = trim((string) ($body['idempotencyKey'] ?? ''));
+
+    return [
+        'symbol' => $symbol,
+        'side' => $side,
+        'entry' => $entry,
+        'sl' => $sl,
+        'tp' => $tp,
+        'digits' => $digits,
+        'point' => $point,
+        'orderType' => $orderType,
+        'currentPrice' => $currentPrice,
+        'lot' => $lot,
+        'constraints' => $constraints,
+        'source' => $source,
+        'strategyName' => $strategyName,
+        'idempotencyKey' => $idempotencyKey,
+    ];
+}
+
+/**
+ * @param array<string,mixed> $order
+ * @return array<string,mixed>
+ */
+function mt5PublicOrder(array $order): array
+{
+    return [
+        'orderId' => $order['orderId'] ?? '',
+        'status' => $order['status'] ?? 'UNKNOWN',
+        'symbol' => $order['symbol'] ?? '',
+        'side' => $order['side'] ?? '',
+        'orderType' => $order['orderType'] ?? '',
+        'entry' => $order['entry'] ?? null,
+        'sl' => $order['sl'] ?? null,
+        'tp' => $order['tp'] ?? null,
+        'lot' => $order['lot'] ?? null,
+        'source' => $order['source'] ?? null,
+        'strategyName' => $order['strategyName'] ?? null,
+        'brokerTicket' => $order['brokerTicket'] ?? null,
+        'message' => $order['message'] ?? null,
+        'attempts' => $order['attempts'] ?? 0,
+        'createdAt' => $order['createdAt'] ?? null,
+        'updatedAt' => $order['updatedAt'] ?? null,
+    ];
+}
+
