@@ -234,17 +234,26 @@ const ITGuruAuth = (() => {
   /**
    * Update nav UI elements that reflect the current auth state:
    *   - #adminNavItem  → shown only for admin users
+   *   - #indicatorV2NavItem → shown for admins or users with indicator_v2 access
    *   - #userAccountInfo → subscription status + expiry badge
    * Safe to call at any time; silently no-ops when elements are absent.
    */
   function updateNavUI() {
     try {
       const u = getUser();
+      const isAdmin = !!(u && u.role === "admin");
+      const strategies = new Set(getStrategies());
 
       /* Admin nav link */
       const adminNavItem = document.getElementById("adminNavItem");
       if (adminNavItem) {
-        adminNavItem.style.display = (u && u.role === "admin") ? "" : "none";
+        adminNavItem.style.display = isAdmin ? "" : "none";
+      }
+
+      /* Indicator V2 nav link */
+      const indicatorV2NavItem = document.getElementById("indicatorV2NavItem");
+      if (indicatorV2NavItem) {
+        indicatorV2NavItem.style.display = (isAdmin || strategies.has("indicator_v2")) ? "" : "none";
       }
 
       /* User account info bar */
