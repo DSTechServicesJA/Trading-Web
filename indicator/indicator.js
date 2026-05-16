@@ -208,6 +208,30 @@ const BACKTEST_MAX_SPEED_MS     = 2000;
 /* #17: Backtest slippage — fraction of ATR applied to fills during backtesting
  * to give more realistic win-rate estimates.  0.5 × ATR simulates a half-bar slippage. */
 const BACKTEST_SLIPPAGE_ATR = 0.5;
+const BACKTEST_SPREAD_ATR   = 0.15; /* stress-test spread/fees approximation */
+const BACKTEST_LATENCY_CANDLES = 1; /* latency stress: 1-candle delayed reactivity */
+
+/* Data-driven optimization */
+const WALK_FORWARD_WINDOW_TRADES = 30;
+const WALK_FORWARD_MIN_SAMPLES   = 12;
+
+/* Dynamic quality gates */
+const DYNAMIC_CONF_TRENDING_DELTA      = -1;
+const DYNAMIC_CONF_TRANSITIONING_DELTA = 0;
+const DYNAMIC_CONF_RANGING_DELTA       = +2;
+
+/* Auto-trade risk/execution controls */
+const AUTO_TRADE_RISK_PER_TRADE_PCT    = 0.01;
+const AUTO_TRADE_DAILY_LOSS_CAP_PCT    = 4;
+const AUTO_TRADE_COOLDOWN_AFTER_LOSS_MS = 90 * 1000;
+const AUTO_TRADE_SYMBOL_FREQ_WINDOW_MS  = 15 * 60 * 1000;
+const AUTO_TRADE_MAX_TRADES_PER_SYMBOL_WINDOW = 4;
+const AUTO_TRADE_MAX_TRADES_PER_STRATEGY_WINDOW = 8;
+const AUTO_TRADE_STRATEGY_DEMOTE_PAUSE_MS = 30 * 60 * 1000;
+const AUTO_TRADE_STRATEGY_DEMOTE_MIN_SAMPLES = 12;
+
+/* Trade management */
+const GENERAL_TRADE_STALL_TIMEOUT_CANDLES = 24;
 
 /* Feature 15: Multi-R partial exit ladder defaults */
 const MULTI_R_LADDER_DEFAULT = [
@@ -1104,9 +1128,17 @@ let autoTradeStrategyOpposite = false; /* reverse strategy signal direction */
 let autoTradeHistory         = [];     /* trade history: { time, source, type, symbol, profit, result } */
 let autoTradePL              = 0;      /* cumulative P/L for auto-trades */
 let autoTradeBalance         = null;   /* latest Deriv account balance */
+let autoTradeDailyStartBalance = null; /* daily baseline balance for daily-loss cap */
+let autoTradeDailyDateKey      = null; /* YYYY-MM-DD UTC key for daily-loss baseline */
 const AUTO_TRADE_PENDING_TIMEOUT_MS = 3600000; /* 1 hour max for a pending multiplier trade */
 const AUTO_TRADE_QUERY_TIMEOUT_MS   = 15000;   /* 15s grace period for one-shot status query */
 const AUTO_TRADE_PROPOSAL_TIMEOUT_MS = 30000;  /* 30s max for proposal → buy to complete */
+const symbolTradeTimestamps = new Map();    /* symbol -> [ms timestamps] */
+const strategyTradeTimestamps = new Map();  /* strategy -> [ms timestamps] */
+const symbolCooldownUntil = new Map();      /* symbol -> epoch ms */
+const strategyRegimeStats = {};             /* key(strat|regime) -> {wins,losses,totalWin,totalLoss,samples} */
+const strategyRegimePausedUntil = {};       /* key(strat|regime) -> epoch ms */
+let walkForwardProfiles = {};               /* key(symbol|gran|regime) -> profile */
 
 /* Account sizing */
 let accountSize          = 0;     /* 0 = disabled / not entered */
@@ -6231,9 +6263,15 @@ function resetSession() {
   autoTradeWinStreak = 0;
   autoTradeLossCount = 0;
   autoTradeHalted = false;
+  symbolTradeTimestamps.clear();
+  strategyTradeTimestamps.clear();
+  symbolCooldownUntil.clear();
+  for (const k of Object.keys(strategyRegimePausedUntil)) delete strategyRegimePausedUntil[k];
   updateAutoTradeCurrentStakeUI();
   /* Reset session start balance so P/L recalculates from this point */
   sessionStartBalance = autoTradeBalance;
+  autoTradeDailyDateKey = getUtcDateKey();
+  autoTradeDailyStartBalance = autoTradeBalance;
   renderAutoTradeHistory();
   updateAutoTradePLUI();
 
@@ -6819,6 +6857,7 @@ function connect() {
       /* Set initial balance and subscribe to live balance stream */
       autoTradeBalance = parseFloat(acct.balance) || null;
       if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
+      ensureAutoTradeDailyBaseline();
       updateAutoTradeBalanceUI();
       updateAutoTradeBalanceVisibility();
       thisWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
@@ -7454,6 +7493,51 @@ function getVolatilityRegime() {
   return "TRANSITIONING";
 }
 
+function getCurrentRegimeTag() {
+  return adxValue > 0 ? getVolatilityRegime() : "TRANSITIONING";
+}
+
+function getUtcDateKey(ts = Date.now()) {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function ensureAutoTradeDailyBaseline() {
+  const today = getUtcDateKey();
+  if (autoTradeDailyDateKey !== today) {
+    autoTradeDailyDateKey = today;
+    autoTradeDailyStartBalance = autoTradeBalance;
+  } else if (autoTradeDailyStartBalance == null && autoTradeBalance != null) {
+    autoTradeDailyStartBalance = autoTradeBalance;
+  }
+}
+
+function getOptimizationProfile(symbol, granSec, regime) {
+  const s = symbol || getActiveSymbol();
+  const g = granSec || getCurrentGranularitySec();
+  const r = regime || getCurrentRegimeTag();
+  return walkForwardProfiles[`${s}|${g}|${r}`] || walkForwardProfiles[`${s}|${g}|TRANSITIONING`] || null;
+}
+
+function getDynamicMinConfluence(symbol, granSec, regime) {
+  const r = regime || getCurrentRegimeTag();
+  const profile = getOptimizationProfile(symbol, granSec, r);
+  let threshold = minConfluenceValue;
+  if (r === "TRENDING") threshold += DYNAMIC_CONF_TRENDING_DELTA;
+  else if (r === "RANGING") threshold += DYNAMIC_CONF_RANGING_DELTA;
+  else threshold += DYNAMIC_CONF_TRANSITIONING_DELTA;
+  if (profile && Number.isFinite(profile.requiredConfluence)) {
+    threshold = Math.max(threshold, profile.requiredConfluence);
+  }
+  return Math.max(6, Math.min(16, threshold));
+}
+
+function requiresStrongBreakoutNow(symbol, granSec, regime) {
+  const r = regime || getCurrentRegimeTag();
+  if (r === "RANGING") return true;
+  const profile = getOptimizationProfile(symbol, granSec, r);
+  return !!(profile && profile.requireStrongBreakout);
+}
+
 function isADXFavorable() {
   if (!adxFilterEnabled) return true;
   return adxValue >= ADX_RANGING_THRESHOLD;  /* block signals in ranging markets */
@@ -7547,7 +7631,8 @@ function computeVWAP() {
 function isConfluenceSufficient(overrideDir, overrideLevel, overrideCandleIdx) {
   if (!minConfluenceEnabled) return true;
   const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
-  return score >= minConfluenceValue;
+  const dynamicMin = getDynamicMinConfluence(getActiveSymbol(), getCurrentGranularitySec(), getCurrentRegimeTag());
+  return score >= dynamicMin;
 }
 
 /* 2. Double Retest — track retest count */
@@ -13407,12 +13492,32 @@ function buildTrade(confirmCandle, confirmIdx) {
     return;
   }
 
+  const regime = getCurrentRegimeTag();
+  const symbol = getActiveSymbol();
+  const granSec = getCurrentGranularitySec();
+  const dynamicConfluenceMin = getDynamicMinConfluence(symbol, granSec, regime);
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore();
+    if (confScore < dynamicConfluenceMin) {
+      addLog(`⚠ Trade REJECTED — dynamic confluence ${confScore}/${dynamicConfluenceMin} (${regime})`);
+      return;
+    }
+  }
+  if (requiresStrongBreakoutNow(symbol, granSec, regime) && !(breakout && breakout.strong)) {
+    addLog(`⚠ Trade REJECTED — breakout strength too weak for ${regime} regime`);
+    return;
+  }
+
   const riskVal   = parseFloat(UI.riskInput.value);
   const rewardVal = parseFloat(UI.rewardInput.value);
   const riskUnits  = (!isNaN(riskVal) && riskVal > 0) ? riskVal : 1;
   const rewardUnits = (!isNaN(rewardVal) && rewardVal > 0) ? rewardVal : 1;
   /* Scalping mode: cap R:R at SCALP_RR_TARGET for quick profits (from MD: 5-10 pip profits) */
-  const rr = scalpingModeEnabled ? Math.min(rewardUnits / riskUnits, SCALP_RR_TARGET) : rewardUnits / riskUnits;
+  const profile = getOptimizationProfile(symbol, granSec, regime);
+  const tunedRRFloor = profile && Number.isFinite(profile.minRR) ? profile.minRR : minRRValue;
+  const rrRaw = scalpingModeEnabled ? Math.min(rewardUnits / riskUnits, SCALP_RR_TARGET) : rewardUnits / riskUnits;
+  const rr = (!minRREnabled || scalpingModeEnabled) ? rrRaw : Math.max(rrRaw, tunedRRFloor);
+  const effectiveMinRR = minRREnabled ? tunedRRFloor : 0;
 
   /* ---- SL ATR buffer scaled by granularity ----
    * Lower time-frames have smaller ATR values but higher relative noise, so SL gets
@@ -13456,19 +13561,20 @@ function buildTrade(confirmCandle, confirmIdx) {
     const actualRR = pureTrailingEnabled ? rr : (tp - entry) / risk;
 
     /* Min R:R gate: reject trade if R:R is below minimum */
-    if (minRREnabled && actualRR < minRRValue) {
-      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
+    if (minRREnabled && actualRR < effectiveMinRR) {
+      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(effectiveMinRR, 1)}`);
       return;
     }
     trade = { entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol() };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
-      const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
+      const slip = atrValue * (BACKTEST_SLIPPAGE_ATR + BACKTEST_SPREAD_ATR);
       trade.entry += slip;  /* fill is worse for BULL */
       const slippedRisk = trade.entry - sl;
       trade.tp = pureTrailingEnabled ? null : trade.entry + slippedRisk * rr;
       trade.backtestSlippage = slip;
+      trade.outcomeStartIdx += BACKTEST_LATENCY_CANDLES;
     }
   } else {
     const entry = confirmCandle.close;
@@ -13492,19 +13598,20 @@ function buildTrade(confirmCandle, confirmIdx) {
     const actualRR = pureTrailingEnabled ? rr : (entry - tp) / risk;
 
     /* Min R:R gate: reject trade if R:R is below minimum */
-    if (minRREnabled && actualRR < minRRValue) {
-      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(minRRValue, 1)}`);
+    if (minRREnabled && actualRR < effectiveMinRR) {
+      addLog(`⚠ Trade REJECTED — R:R ${fmt(actualRR, 1)} below minimum ${fmt(effectiveMinRR, 1)}`);
       return;
     }
     trade = { entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled, entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol() };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
     if (backtestMode && atrValue > 0) {
-      const slip = atrValue * BACKTEST_SLIPPAGE_ATR;
+      const slip = atrValue * (BACKTEST_SLIPPAGE_ATR + BACKTEST_SPREAD_ATR);
       trade.entry -= slip;  /* fill is worse for BEAR */
       const slippedRisk = sl - trade.entry;
       trade.tp = pureTrailingEnabled ? null : trade.entry - slippedRisk * rr;
       trade.backtestSlippage = slip;
+      trade.outcomeStartIdx += BACKTEST_LATENCY_CANDLES;
     }
   }
 
@@ -13619,6 +13726,7 @@ function recordConfirmedSignal(confirmPattern) {
     adx: adxValue > 0 ? +fmt(adxValue, 1) : null,
     stochK: getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null,
     volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null,
+    timeframeSec: getCurrentGranularitySec(),
     scalpingMode: scalpingModeEnabled,
     lotSize: null,
     pipsAtRisk: null,
@@ -13671,6 +13779,7 @@ function recordSignal(confirmPattern) {
   signal.adx = adxValue > 0 ? +fmt(adxValue, 1) : null;
   signal.stochK = getCurrentStoch() != null ? +fmt(getCurrentStoch(), 1) : null;
   signal.volatilityRegime = adxValue > 0 ? getVolatilityRegime() : null;
+  signal.timeframeSec = getCurrentGranularitySec();
   signal.scalpingMode = scalpingModeEnabled;
   signal.lotSize = null;
   signal.pipsAtRisk = null;
@@ -13891,6 +14000,7 @@ function handleAutoTradeMessage(msg, msgWs) {
     if (bal && bal.balance != null) {
       autoTradeBalance = parseFloat(bal.balance);
       if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
+      ensureAutoTradeDailyBaseline();
       updateAutoTradeBalanceUI();
       updateAutoTradePLUI();
     }
@@ -13933,6 +14043,200 @@ function autoTradeSourceLabel(source, strategyName) {
   return "📈 Breakout";
 }
 
+function _pruneTimestamps(arr, now, windowMs) {
+  const keepFrom = now - windowMs;
+  return arr.filter(ts => ts >= keepFrom);
+}
+
+function canPlaceByFrequency(symbol, strategyName) {
+  const now = Date.now();
+  const symArr = _pruneTimestamps(symbolTradeTimestamps.get(symbol) || [], now, AUTO_TRADE_SYMBOL_FREQ_WINDOW_MS);
+  symbolTradeTimestamps.set(symbol, symArr);
+  if (symArr.length >= AUTO_TRADE_MAX_TRADES_PER_SYMBOL_WINDOW) {
+    return { ok: false, reason: `trade frequency cap reached for ${symbol}` };
+  }
+
+  if (strategyName) {
+    const stratArr = _pruneTimestamps(strategyTradeTimestamps.get(strategyName) || [], now, AUTO_TRADE_SYMBOL_FREQ_WINDOW_MS);
+    strategyTradeTimestamps.set(strategyName, stratArr);
+    if (stratArr.length >= AUTO_TRADE_MAX_TRADES_PER_STRATEGY_WINDOW) {
+      return { ok: false, reason: `${strategyName} frequency cap reached` };
+    }
+  }
+  return { ok: true };
+}
+
+function recordTradeFrequency(symbol, strategyName) {
+  const now = Date.now();
+  const symArr = _pruneTimestamps(symbolTradeTimestamps.get(symbol) || [], now, AUTO_TRADE_SYMBOL_FREQ_WINDOW_MS);
+  symArr.push(now);
+  symbolTradeTimestamps.set(symbol, symArr);
+  if (strategyName) {
+    const stratArr = _pruneTimestamps(strategyTradeTimestamps.get(strategyName) || [], now, AUTO_TRADE_SYMBOL_FREQ_WINDOW_MS);
+    stratArr.push(now);
+    strategyTradeTimestamps.set(strategyName, stratArr);
+  }
+}
+
+function getStrategyAllowedRegimes(strategyName) {
+  const map = {
+    liquiditySweep: ["RANGING", "TRANSITIONING"],
+    sessionRange:   ["RANGING", "TRANSITIONING"],
+    nyOpenRange:    ["TRANSITIONING", "RANGING"],
+    fvgStrat:       ["TRENDING", "TRANSITIONING"],
+    mtfTopDown:     ["TRENDING", "TRANSITIONING"],
+    orderblock:     ["TRENDING", "TRANSITIONING"],
+    po3:            ["TRENDING", "TRANSITIONING"],
+    fibScalp:       ["TRANSITIONING", "TRENDING"],
+    stopLossHunt:   ["TRANSITIONING", "RANGING"],
+    failedPinBar:   ["TRANSITIONING", "RANGING"],
+    gridScalperMA:  ["TRENDING", "TRANSITIONING"]
+  };
+  return map[strategyName] || ["TRENDING", "TRANSITIONING", "RANGING"];
+}
+
+function isStrategyTemporarilyPaused(strategyName, regime) {
+  const key = `${strategyName}|${regime}`;
+  const until = strategyRegimePausedUntil[key] || 0;
+  return until > Date.now();
+}
+
+function evaluateTradeRealism(signal, multiplier, stake) {
+  if (!signal || !signal.entry || signal.entry <= 0) return { passed: true, cost: 0 };
+  const entry = signal.entry;
+  const slDist = signal.sl != null ? Math.abs(entry - signal.sl) : 0;
+  const tpDist = signal.tp != null ? Math.abs(signal.tp - entry) : 0;
+  const riskDollar = slDist > 0 ? slDist * multiplier * stake / entry : 0;
+  const rewardDollar = tpDist > 0 ? tpDist * multiplier * stake / entry : 0;
+  const spreadDollar = atrValue > 0 ? (atrValue * BACKTEST_SPREAD_ATR * multiplier * stake / entry) : 0;
+  const slippageDollar = atrValue > 0 ? (atrValue * BACKTEST_SLIPPAGE_ATR * multiplier * stake / entry) : 0;
+  const latencyDollar = atrValue > 0 ? (atrValue * 0.25 * BACKTEST_LATENCY_CANDLES * multiplier * stake / entry) : 0;
+  const totalCost = spreadDollar + slippageDollar + latencyDollar;
+
+  if (signal.tp == null) return { passed: true, cost: totalCost, rewardDollar, riskDollar };
+  const robustReward = rewardDollar - totalCost;
+  const minRequired = Math.max(riskDollar * 0.6, totalCost * 1.2);
+  return { passed: robustReward > minRequired, cost: totalCost, rewardDollar, riskDollar };
+}
+
+function calculateRiskAdjustedStake(signal, multiplier) {
+  const baseStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
+  const maxStake = (autoTradeMaxStake > 0 && autoTradeMaxStake >= baseStake) ? autoTradeMaxStake : baseStake * 4;
+  let stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake || baseStake);
+
+  if (autoTradeBalance != null && autoTradeBalance > 0 && signal && signal.entry > 0 && signal.sl != null) {
+    const regime = getCurrentRegimeTag();
+    const volMult = regime === "TRENDING" ? 1.15 : (regime === "RANGING" ? 0.7 : 0.9);
+    const streakMult = autoTradeLossCount >= 2 ? 0.6 : (autoTradeLossCount === 1 ? 0.8 : 1.0);
+    const riskBudget = autoTradeBalance * AUTO_TRADE_RISK_PER_TRADE_PCT * volMult * streakMult;
+    const slDist = Math.abs(signal.entry - signal.sl);
+    if (slDist > 0 && multiplier > 0) {
+      const budgetStake = riskBudget * signal.entry / (slDist * multiplier);
+      if (Number.isFinite(budgetStake) && budgetStake > 0) {
+        stake = Math.min(stake, budgetStake);
+      }
+    }
+  }
+
+  stake = Math.max(MIN_AUTO_TRADE_STAKE, Math.min(maxStake, stake));
+  return +fmt(stake, 2);
+}
+
+function getTradeAnalytics(entries) {
+  const resolved = (entries || []).filter(e => e && (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number");
+  if (resolved.length === 0) return { samples: 0, pf: 0, expectancy: 0, maxDrawdown: 0 };
+  let wins = 0, losses = 0, totalWin = 0, totalLoss = 0;
+  let eq = 0, peak = 0, maxDrawdown = 0;
+  for (const e of resolved) {
+    eq += e.profit;
+    if (eq > peak) peak = eq;
+    maxDrawdown = Math.max(maxDrawdown, peak - eq);
+    if (e.profit > 0) { wins++; totalWin += e.profit; }
+    else { losses++; totalLoss += Math.abs(e.profit); }
+  }
+  const pf = totalLoss > 0 ? totalWin / totalLoss : (totalWin > 0 ? Infinity : 0);
+  const avgWin = wins > 0 ? totalWin / wins : 0;
+  const avgLoss = losses > 0 ? totalLoss / losses : 0;
+  const winRate = resolved.length > 0 ? wins / resolved.length : 0;
+  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
+  return { samples: resolved.length, pf, expectancy, maxDrawdown };
+}
+
+function updateStrategyRegimeStats(entry) {
+  if (!entry || !entry.strategyName || (entry.result !== "WIN" && entry.result !== "LOSS")) return;
+  const regime = entry.regime || "TRANSITIONING";
+  const key = `${entry.strategyName}|${regime}`;
+  if (!strategyRegimeStats[key]) strategyRegimeStats[key] = { wins: 0, losses: 0, totalWin: 0, totalLoss: 0, samples: 0 };
+  const s = strategyRegimeStats[key];
+  s.samples++;
+  if (entry.result === "WIN") { s.wins++; s.totalWin += Math.max(0, entry.profit || 0); }
+  else { s.losses++; s.totalLoss += Math.abs(entry.profit || 0); }
+  const pf = s.totalLoss > 0 ? s.totalWin / s.totalLoss : (s.totalWin > 0 ? Infinity : 0);
+  const avgWin = s.wins > 0 ? s.totalWin / s.wins : 0;
+  const avgLoss = s.losses > 0 ? s.totalLoss / s.losses : 0;
+  const winRate = s.samples > 0 ? s.wins / s.samples : 0;
+  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
+  if (s.samples >= AUTO_TRADE_STRATEGY_DEMOTE_MIN_SAMPLES && (pf < 0.9 || expectancy < 0)) {
+    strategyRegimePausedUntil[key] = Date.now() + AUTO_TRADE_STRATEGY_DEMOTE_PAUSE_MS;
+    addLog(`🧯 Strategy auto-pause: ${entry.strategyName} in ${regime} (PF ${fmt(pf,2)}, E ${fmt(expectancy,2)})`);
+  }
+}
+
+function rebuildWalkForwardProfilesFromHistory() {
+  const pools = [signalHistory, liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory, sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory, mtfTopDownHistory, orderblockHistory];
+  const all = [];
+  for (const p of pools) {
+    for (const s of (p || [])) {
+      if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
+      all.push(s);
+    }
+  }
+  const grouped = {};
+  for (const s of all) {
+    const symbol = s.symbol || getActiveSymbol();
+    const gran = s.timeframeSec || getCurrentGranularitySec();
+    const regime = s.volatilityRegime || "TRANSITIONING";
+    const key = `${symbol}|${gran}|${regime}`;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(s);
+  }
+  const nextProfiles = {};
+  for (const [key, arr] of Object.entries(grouped)) {
+    const recent = arr.slice(-WALK_FORWARD_WINDOW_TRADES);
+    if (recent.length < WALK_FORWARD_MIN_SAMPLES) continue;
+    let bestThreshold = minConfluenceValue;
+    let bestExpectancy = -Infinity;
+    for (let th = 6; th <= 16; th++) {
+      const filtered = recent.filter(s => !Number.isFinite(s.confluenceScore) || s.confluenceScore >= th);
+      if (filtered.length < Math.max(6, Math.floor(recent.length * 0.35))) continue;
+      const wins = filtered.filter(s => s.result === "WIN").length;
+      const losses = filtered.filter(s => s.result === "LOSS").length;
+      const total = wins + losses;
+      if (total === 0) continue;
+      const avgR = filtered.reduce((sum, s) => sum + ((Number.isFinite(s.rr) && s.rr > 0) ? s.rr : 1), 0) / total;
+      const wr = wins / total;
+      const expectancyR = wr * avgR - (1 - wr);
+      if (expectancyR > bestExpectancy) {
+        bestExpectancy = expectancyR;
+        bestThreshold = th;
+      }
+    }
+    const strong = recent.filter(s => s.breakoutStrength === "STRONG");
+    const weak = recent.filter(s => s.breakoutStrength === "WEAK");
+    const strongWr = strong.length > 0 ? strong.filter(s => s.result === "WIN").length / strong.length : 0;
+    const weakWr = weak.length > 0 ? weak.filter(s => s.result === "WIN").length / weak.length : 0;
+    const avgRR = recent.reduce((sum, s) => sum + ((Number.isFinite(s.rr) && s.rr > 0) ? s.rr : 1), 0) / recent.length;
+    nextProfiles[key] = {
+      requiredConfluence: bestThreshold,
+      requireStrongBreakout: (weak.length >= 4 && strongWr > weakWr + 0.08),
+      minRR: Math.max(1.5, Math.min(3.5, avgRR)),
+      samples: recent.length,
+      updatedAt: Date.now()
+    };
+  }
+  walkForwardProfiles = nextProfiles;
+}
+
 function executeAutoTrade(signal, _capturedWs) {
   /* Block if session TP/SL has been hit */
   if (autoTradeHalted) {
@@ -13961,6 +14265,41 @@ function executeAutoTrade(signal, _capturedWs) {
 
   const symbol = signal.symbol || getActiveSymbol();
   const slot = getAutoTradeSlot(symbol);
+  const regime = getCurrentRegimeTag();
+  ensureAutoTradeDailyBaseline();
+  if (autoTradeDailyStartBalance != null && autoTradeBalance != null && autoTradeDailyStartBalance > 0) {
+    const dailyDropPct = (autoTradeDailyStartBalance - autoTradeBalance) / autoTradeDailyStartBalance * 100;
+    if (dailyDropPct >= AUTO_TRADE_DAILY_LOSS_CAP_PCT) {
+      autoTradeHalted = true;
+      addLog(`🛑 Auto-trade blocked — daily loss cap reached (${fmt(dailyDropPct,1)}%).`);
+      return;
+    }
+  }
+
+  const cooldownUntil = symbolCooldownUntil.get(symbol) || 0;
+  if (cooldownUntil > Date.now()) {
+    const leftSec = Math.ceil((cooldownUntil - Date.now()) / 1000);
+    addLog(`⚠ Auto-trade skipped — cooldown active on ${symbol} (${leftSec}s left)`);
+    return;
+  }
+
+  const freq = canPlaceByFrequency(symbol, signal.strategyName || null);
+  if (!freq.ok) {
+    addLog(`⚠ Auto-trade skipped — ${freq.reason}`);
+    return;
+  }
+
+  if (signal.source === "strategy" && signal.strategyName) {
+    const allowed = getStrategyAllowedRegimes(signal.strategyName);
+    if (!allowed.includes(regime)) {
+      addLog(`⚠ Auto-trade skipped — ${signal.strategyName} gated in ${regime} regime`);
+      return;
+    }
+    if (isStrategyTemporarilyPaused(signal.strategyName, regime)) {
+      addLog(`⚠ Auto-trade skipped — ${signal.strategyName} temporarily paused in ${regime}`);
+      return;
+    }
+  }
 
   /* Allow multiple concurrent trades up to maxConcurrentTrades per symbol */
   const activeCount = slot.activeTrades.length;
@@ -14006,9 +14345,22 @@ function executeAutoTrade(signal, _capturedWs) {
     tradeTp = signal.sl;
   }
 
+  /* Dynamic quality gate by market regime + profile */
+  if (minConfluenceEnabled && signal.entry != null) {
+    const dynamicConfMin = getDynamicMinConfluence(symbol, getCurrentGranularitySec(), regime);
+    const confScore = computeConfluenceScore(effectiveDir, signal.entry, signal.candleIdx != null ? signal.candleIdx : candles.length - 1);
+    if (confScore < dynamicConfMin) {
+      addLog(`⚠ Auto-trade skipped — dynamic confluence ${confScore}/${dynamicConfMin} (${regime})`);
+      return;
+    }
+  }
+  if (signal.source === "breakout" && requiresStrongBreakoutNow(symbol, getCurrentGranularitySec(), regime) && !(breakout && breakout.strong)) {
+    addLog(`⚠ Auto-trade skipped — weak breakout blocked in ${regime} regime`);
+    return;
+  }
+
   const contractType = effectiveDir === "BULL" ? "MULTUP" : "MULTDOWN";
-  /* Use the dynamic current stake (compounds on wins, resets on losses) */
-  const stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake);
+  let stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake);
 
   /* Validate multiplier against known valid values for this symbol.
      Check order: API cache → hardcoded fallback map → if neither exists,
@@ -14056,6 +14408,13 @@ function executeAutoTrade(signal, _capturedWs) {
     return;
   }
 
+  stake = calculateRiskAdjustedStake({ entry: signal.entry, sl: tradeSl, tp: tradeTp }, multiplier);
+  const realism = evaluateTradeRealism({ entry: signal.entry, sl: tradeSl, tp: tradeTp }, multiplier, stake);
+  if (!realism.passed) {
+    addLog(`⚠ Auto-trade skipped — realism stress failed (cost $${fmt(realism.cost,2)} too high vs expected reward)`);
+    return;
+  }
+
   const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
   /* Build limit_order with SL and optional TP (distance from entry in USD).
@@ -14100,7 +14459,22 @@ function executeAutoTrade(signal, _capturedWs) {
 
   /* Record pending trade in history */
   const isOpposite = (effectiveDir !== signal.dir);
-  addAutoTradeHistoryEntry({ source: signal.source, strategyName: signal.strategyName, type: contractType, symbol, tradeId, profit: null, result: "PENDING", originalDir: signal.dir, tradedDir: effectiveDir, isOpposite });
+  addAutoTradeHistoryEntry({
+    source: signal.source,
+    strategyName: signal.strategyName,
+    type: contractType,
+    symbol,
+    tradeId,
+    profit: null,
+    result: "PENDING",
+    originalDir: signal.dir,
+    tradedDir: effectiveDir,
+    isOpposite,
+    regime,
+    session: getActiveSessionName(),
+    timeframeSec: getCurrentGranularitySec(),
+    realismCost: realism.cost || 0
+  });
 
   const payload = {
     proposal: 1,
@@ -14115,6 +14489,7 @@ function executeAutoTrade(signal, _capturedWs) {
   if (Object.keys(limitOrder).length > 0) payload.limit_order = limitOrder;
 
   tradeWs.send(JSON.stringify(payload));
+  recordTradeFrequency(symbol, signal.strategyName || null);
 
   /* Start a short safety timeout for the proposal → buy window.
      If the buy doesn't happen within AUTO_TRADE_PROPOSAL_TIMEOUT_MS
@@ -14254,7 +14629,7 @@ function recalcAutoTradePL() {
 }
 
 /** Add a new entry to the auto-trade history array and re-render. */
-function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId, profit, result, originalDir, tradedDir, isOpposite }) {
+function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId, profit, result, originalDir, tradedDir, isOpposite, regime, session, timeframeSec, realismCost }) {
   const entry = {
     time: Date.now(),
     source: source || "breakout",
@@ -14266,7 +14641,11 @@ function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId,
     result: result || "PENDING",
     originalDir: originalDir || null,
     tradedDir: tradedDir || null,
-    isOpposite: !!isOpposite
+    isOpposite: !!isOpposite,
+    regime: regime || getCurrentRegimeTag(),
+    session: session || getActiveSessionName(),
+    timeframeSec: timeframeSec || getCurrentGranularitySec(),
+    realismCost: Number.isFinite(realismCost) ? realismCost : 0
   };
   autoTradeHistory.unshift(entry);
   /* Cap history to 100 entries */
@@ -14298,6 +14677,7 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
   if (!pending) return;  /* nothing to resolve */
   pending.profit = profit;
   pending.result = result;
+  pending.resolvedAt = Date.now();
   /* Recompute P/L from all entries (prevents incremental drift) */
   recalcAutoTradePL();
 
@@ -14322,6 +14702,9 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
     autoTradeLossCount++;
     autoTradeCurrentStake = baseStake;  /* reset to base stake on every loss */
     addLog(`🔁 Auto-trade stake reset to $${fmt(baseStake, 2)} after loss`);
+    if (pending.symbol) {
+      symbolCooldownUntil.set(pending.symbol, Date.now() + AUTO_TRADE_COOLDOWN_AFTER_LOSS_MS);
+    }
     /* Loss cluster protection — pause after N consecutive losses */
     if (autoTradeLossCount >= AUTO_TRADE_MAX_LOSSES) {
       autoTradeHalted = true;
@@ -14329,6 +14712,17 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
     }
   }
   updateAutoTradeCurrentStakeUI();
+  updateStrategyRegimeStats(pending);
+  const scoped = autoTradeHistory.filter(e =>
+    e.strategyName &&
+    e.strategyName === pending.strategyName &&
+    e.regime === pending.regime &&
+    (e.result === "WIN" || e.result === "LOSS")
+  );
+  const scopedStats = getTradeAnalytics(scoped);
+  if (pending.strategyName && scopedStats.samples >= AUTO_TRADE_STRATEGY_DEMOTE_MIN_SAMPLES) {
+    addLog(`📊 ${pending.strategyName}/${pending.regime}: PF ${scopedStats.pf === Infinity ? "∞" : fmt(scopedStats.pf,2)} | E $${fmt(scopedStats.expectancy,2)} | DD $${fmt(scopedStats.maxDrawdown,2)}`);
+  }
 
   /* ── Session TP / SL check ── */
   checkAutoTradeSessionLimits();
@@ -14341,6 +14735,7 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
 /** Check session-level TP/SL — stop all auto-trading when cumulative P/L hits either limit. */
 function checkAutoTradeSessionLimits() {
   if (autoTradeHalted) return;
+  ensureAutoTradeDailyBaseline();
   const tp = parseFloat(autoTradeSessionTP) || 0;
   const sl = parseFloat(autoTradeSessionSL) || 0;
   if (tp > 0 && autoTradePL >= tp) {
@@ -14355,14 +14750,24 @@ function checkAutoTradeSessionLimits() {
    * This is separate from the session SL (which is based on P/L) and acts as a
    * safety net against deep equity drawdowns from a bad run.             */
   if (!autoTradeHalted && sessionStartBalance != null && autoTradeBalance != null) {
-    if (sessionStartBalance <= 0) return;  /* guard against division by zero */
-    const drawdownPct = (sessionStartBalance - autoTradeBalance) / sessionStartBalance * 100;
-    if (drawdownPct >= AUTO_TRADE_MAX_DRAWDOWN_PCT) {
+    if (sessionStartBalance > 0) {
+      const drawdownPct = (sessionStartBalance - autoTradeBalance) / sessionStartBalance * 100;
+      if (drawdownPct >= AUTO_TRADE_MAX_DRAWDOWN_PCT) {
+        autoTradeHalted = true;
+        addLog(`🛑 Auto-trade halted — max drawdown of ${AUTO_TRADE_MAX_DRAWDOWN_PCT}% from session start (${fmt(drawdownPct, 1)}% drop). Reset session to resume.`);
+        showToast("⚠️ Drawdown Circuit Breaker",
+          `Balance has fallen ${fmt(drawdownPct, 1)}% below session start. Auto-trading paused.`,
+          "warning", 8000);
+      }
+    }
+  }
+
+  if (!autoTradeHalted && autoTradeDailyStartBalance != null && autoTradeBalance != null && autoTradeDailyStartBalance > 0) {
+    const dailyDropPct = (autoTradeDailyStartBalance - autoTradeBalance) / autoTradeDailyStartBalance * 100;
+    if (dailyDropPct >= AUTO_TRADE_DAILY_LOSS_CAP_PCT) {
       autoTradeHalted = true;
-      addLog(`🛑 Auto-trade halted — max drawdown of ${AUTO_TRADE_MAX_DRAWDOWN_PCT}% from session start (${fmt(drawdownPct, 1)}% drop). Reset session to resume.`);
-      showToast("⚠️ Drawdown Circuit Breaker",
-        `Balance has fallen ${fmt(drawdownPct, 1)}% below session start. Auto-trading paused.`,
-        "warning", 8000);
+      addLog(`🛑 Auto-trade halted — daily loss cap ${AUTO_TRADE_DAILY_LOSS_CAP_PCT}% reached (${fmt(dailyDropPct,1)}% drop today).`);
+      showToast("Daily Loss Cap Hit", `Daily drawdown reached ${fmt(dailyDropPct,1)}%. Auto-trading paused.`, "warning", 7000);
     }
   }
 }
@@ -14664,7 +15069,8 @@ function monitorTradeOutcome(candle) {
   /* ---- Trailing stop (ATR-based) ---- */
   if (trailingStopEnabled && atrValue > 0) {
     /* Scalping mode uses a tighter trailing stop (from MD: take profit quickly / move SL tighter) */
-    const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : TRAILING_STOP_ATR_MULT;
+    const regimeTrailAdj = getCurrentRegimeTag() === "TRENDING" ? 1.15 : (getCurrentRegimeTag() === "RANGING" ? 0.8 : 1.0);
+    const trailMult = (trade.scalpingMode) ? SCALP_TRAILING_ATR_MULT : (TRAILING_STOP_ATR_MULT * regimeTrailAdj);
     if (trade.dir === "BULL") {
       const newTrail = candle.high - atrValue * trailMult;
       /* Only activate/advance trail when it strictly improves (is higher than) the effective SL
@@ -14688,6 +15094,33 @@ function monitorTradeOutcome(candle) {
       }
     }
     pending.trailingSL = trailingSL;
+  }
+
+  /* ---- Non-scalp time-stop for stalled trades ---- */
+  if (!trade.scalpingMode && trade.entryIdx != null) {
+    const candlesSinceEntry = candles.length - 1 - trade.entryIdx;
+    if (candlesSinceEntry >= GENERAL_TRADE_STALL_TIMEOUT_CANDLES) {
+      const exitPrice = candle.close;
+      const inProfit = (trade.dir === "BULL" && exitPrice >= trade.entry) ||
+                       (trade.dir === "BEAR" && exitPrice <= trade.entry);
+      pending.result = inProfit ? "WIN" : "LOSS";
+      pending.exitPrice = exitPrice;
+      if (inProfit) {
+        signalWins++;
+      } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
+        pending._breakeven = true;
+        signalBreakevens++;
+      } else {
+        signalLosses++;
+      }
+      addLog(`⏱ Time-stop (${GENERAL_TRADE_STALL_TIMEOUT_CANDLES} candles) — exit at ${fmt(exitPrice, 4)} → ${pending.result}`);
+      monitoringTrade = false;
+      persistSignalHistory();
+      updateStatsUI();
+      playPhaseAlert(inProfit ? "TRADE" : "RANGE");
+      sendTradeOutcomeTelegram(pending);
+      return;
+    }
   }
 
   /* ---- Scalping max-candle timeout ---- */
@@ -14836,6 +15269,7 @@ function monitorTradeOutcome(candle) {
     if (adaptiveConfluenceEnabled && pending._confFactors) {
       recordConfluenceOutcome(pending._confFactors, pending.result);
     }
+    if (!_historicalProcessing) rebuildWalkForwardProfilesFromHistory();
   }
 }
 
@@ -15348,18 +15782,25 @@ function drawEquityCurve() {
 function renderPLBreakdown() {
   const container = document.getElementById("plBreakdownTable");
   if (!container) return;
-  const byStrategy = {}, bySymbol = {};
+  const byStrategy = {}, bySymbol = {}, bySession = {};
   for (const e of autoTradeHistory) {
     if (e.result !== "WIN" && e.result !== "LOSS") continue;
     const profit = typeof e.profit === "number" ? e.profit : 0;
     const stratKey = e.strategyName || e.source || "breakout";
-    if (!byStrategy[stratKey]) byStrategy[stratKey] = { wins: 0, losses: 0, pl: 0 };
+    if (!byStrategy[stratKey]) byStrategy[stratKey] = { wins: 0, losses: 0, pl: 0, totalWin: 0, totalLoss: 0 };
     if (e.result === "WIN") byStrategy[stratKey].wins++; else byStrategy[stratKey].losses++;
+    if (profit >= 0) byStrategy[stratKey].totalWin += profit; else byStrategy[stratKey].totalLoss += Math.abs(profit);
     byStrategy[stratKey].pl += profit;
     const sym = e.symbol || "N/A";
-    if (!bySymbol[sym]) bySymbol[sym] = { wins: 0, losses: 0, pl: 0 };
+    if (!bySymbol[sym]) bySymbol[sym] = { wins: 0, losses: 0, pl: 0, totalWin: 0, totalLoss: 0 };
     if (e.result === "WIN") bySymbol[sym].wins++; else bySymbol[sym].losses++;
+    if (profit >= 0) bySymbol[sym].totalWin += profit; else bySymbol[sym].totalLoss += Math.abs(profit);
     bySymbol[sym].pl += profit;
+    const sess = e.session || "Off-Hours";
+    if (!bySession[sess]) bySession[sess] = { wins: 0, losses: 0, pl: 0, totalWin: 0, totalLoss: 0 };
+    if (e.result === "WIN") bySession[sess].wins++; else bySession[sess].losses++;
+    if (profit >= 0) bySession[sess].totalWin += profit; else bySession[sess].totalLoss += Math.abs(profit);
+    bySession[sess].pl += profit;
   }
   const makeTable = (title, data) => {
     const keys = Object.keys(data);
@@ -15368,13 +15809,17 @@ function renderPLBreakdown() {
       const s = data[k];
       const total = s.wins + s.losses;
       const wr = total > 0 ? Math.round(s.wins / total * 100) : 0;
+      const pf = s.totalLoss > 0 ? s.totalWin / s.totalLoss : (s.totalWin > 0 ? Infinity : 0);
+      const avgWin = s.wins > 0 ? s.totalWin / s.wins : 0;
+      const avgLoss = s.losses > 0 ? s.totalLoss / s.losses : 0;
+      const expectancy = (total > 0 ? s.wins / total : 0) * avgWin - (1 - (total > 0 ? s.wins / total : 0)) * avgLoss;
       const plColor = s.pl >= 0 ? "#22c55e" : "#ef4444";
       const label = k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-      return `<div class="pl-breakdown-row"><span class="pl-breakdown-name">${label}</span><span>${s.wins}</span><span>${s.losses}</span><span>${wr}%</span><span style="color:${plColor};font-weight:600">${s.pl >= 0 ? "+" : ""}$${fmt(s.pl,2)}</span></div>`;
+      return `<div class="pl-breakdown-row"><span class="pl-breakdown-name">${label}</span><span>${s.wins}</span><span>${s.losses}</span><span>${wr}%</span><span>${pf === Infinity ? "∞" : fmt(pf,2)}</span><span>${expectancy >= 0 ? "+" : ""}${fmt(expectancy,2)}</span><span style="color:${plColor};font-weight:600">${s.pl >= 0 ? "+" : ""}$${fmt(s.pl,2)}</span></div>`;
     }).join("");
-    return `<div class="pl-breakdown-group"><div class="pl-breakdown-heading">${title}</div><div class="pl-breakdown-header"><span></span><span>W</span><span>L</span><span>Win%</span><span>P/L</span></div>${rows}</div>`;
+    return `<div class="pl-breakdown-group"><div class="pl-breakdown-heading">${title}</div><div class="pl-breakdown-header"><span></span><span>W</span><span>L</span><span>Win%</span><span>PF</span><span>E</span><span>P/L</span></div>${rows}</div>`;
   };
-  const html = makeTable("By Strategy", byStrategy) + makeTable("By Symbol", bySymbol);
+  const html = makeTable("By Strategy", byStrategy) + makeTable("By Symbol", bySymbol) + makeTable("By Session", bySession);
   container.innerHTML = html || '<span class="hint" style="font-size:0.75rem;opacity:0.6;">No completed auto-trades yet</span>';
 }
 
@@ -15453,6 +15898,7 @@ function stopBacktest() {
   if (backtestInterval) { clearInterval(backtestInterval); backtestInterval = null; }
   backtestMode = false;
   if (_backtestCandles.length > 0) { candles = _backtestCandles.slice(); _backtestCandles = []; }
+  rebuildWalkForwardProfilesFromHistory();
   addLog("🔁 Backtest stopped");
   updateBacktestUI();
   drawChart();
