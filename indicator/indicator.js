@@ -924,6 +924,8 @@ let signalWins      = 0;
 let signalLosses    = 0;
 let signalBreakevens = 0;
 let monitoringTrade = false;
+/* User-selected banner signal overlay for chart Entry/SL/TP preview (display-only). */
+let selectedSignalOverlay = null;
 
 /* EMA state */
 let emaFast = [];
@@ -4731,11 +4733,28 @@ function scrollToChartView() {
 }
 
 /* ---- Handle signal card click from banner ---- */
+function toSelectedSignalOverlay(signal) {
+  if (!signal) return null;
+  const entry = Number(signal.entry);
+  const sl = Number(signal.sl);
+  if (!Number.isFinite(entry) || !Number.isFinite(sl)) return null;
+  const tp = signal.tp == null ? null : Number(signal.tp);
+  return {
+    symbol: signal.symbol || getActiveSymbol(),
+    dir: signal.dir === "BEAR" ? "BEAR" : "BULL",
+    entry,
+    sl,
+    tp: Number.isFinite(tp) ? tp : null,
+  };
+}
+
 function handleSignalCardClick(signal) {
   /* If multi-symbol, focus the panel for this signal's symbol */
   if (multiPanels.size > 0 && signal.symbol && multiPanels.has(signal.symbol)) {
     focusPanel(signal.symbol);
   }
+  selectedSignalOverlay = toSelectedSignalOverlay(signal);
+  drawChart();
   /* Scroll to chart view so the user can see the signal on the chart */
   scrollToChartView();
 }
@@ -15539,6 +15558,16 @@ function updateScannerUI() {
   }
 }
 
+function areTradeLevelsEqual(a, b) {
+  if (!a || !b) return false;
+  const tpA = a.tp != null ? a.tp : null;
+  const tpB = b.tp != null ? b.tp : null;
+  const entryEq = Math.abs((a.entry ?? 0) - (b.entry ?? 0)) <= PRICE_EPSILON;
+  const slEq = Math.abs((a.sl ?? 0) - (b.sl ?? 0)) <= PRICE_EPSILON;
+  const tpEq = (tpA == null && tpB == null) || (tpA != null && tpB != null && Math.abs(tpA - tpB) <= PRICE_EPSILON);
+  return entryEq && slEq && tpEq;
+}
+
 function drawChart() {
   const canvas = UI.canvas;
   const ctx = UI.ctx;
@@ -16169,6 +16198,18 @@ function drawChart() {
     }
     ctx.fillText(rrLabel, W - marginRight - 6, entryY - 6);
     ctx.textAlign = "left";
+  }
+
+  /* ---- Selected signal overlay from LIVE SIGNALS card click (display-only) ---- */
+  if (selectedSignalOverlay && selectedSignalOverlay.symbol === getActiveSymbol()) {
+    const sameAsActiveTrade = trade && areTradeLevelsEqual(selectedSignalOverlay, trade);
+    if (!sameAsActiveTrade) {
+      drawHLine(ctx, yOf(selectedSignalOverlay.entry), marginLeft, W - marginRight, "rgba(168,85,247,0.70)", "SEL ENTRY " + fmtPrice(selectedSignalOverlay.entry, getActiveSymbol()), W, marginRight);
+      drawHLine(ctx, yOf(selectedSignalOverlay.sl), marginLeft, W - marginRight, "rgba(244,63,94,0.70)", "SEL SL " + fmtPrice(selectedSignalOverlay.sl, getActiveSymbol()), W, marginRight);
+      if (selectedSignalOverlay.tp != null) {
+        drawHLine(ctx, yOf(selectedSignalOverlay.tp), marginLeft, W - marginRight, "rgba(16,185,129,0.70)", "SEL TP " + fmtPrice(selectedSignalOverlay.tp, getActiveSymbol()), W, marginRight);
+      }
+    }
   }
 
   /* ---- Live price line ---- */
