@@ -28,9 +28,23 @@ const ITGuruAuth = (() => {
   const AUTH_API_BASE = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
     ? window.ITGURU_AUTH_API_BASE
     : "https://trading.dsitservicesja.com/api/auth";
-  const SESSION_KEY   = "itguru_auth_token";
-  const USER_KEY      = "itguru_auth_user";
-  const STRATEGIES_KEY = "itguru_auth_strategies";
+  const AUTH_NAMESPACE = (() => {
+    const fromWindow = (typeof window !== "undefined" && typeof window.ITGURU_AUTH_NAMESPACE === "string")
+      ? window.ITGURU_AUTH_NAMESPACE
+      : "";
+    const fromQuery = (typeof window !== "undefined" && window.location && window.location.search)
+      ? (new URLSearchParams(window.location.search).get("auth_ns") || "")
+      : "";
+    const raw = (fromWindow || fromQuery || "").trim();
+    return raw.replace(/[^a-zA-Z0-9_\-]/g, "_");
+  })();
+  const withNamespace = (baseKey) => AUTH_NAMESPACE ? `${baseKey}__${AUTH_NAMESPACE}` : baseKey;
+
+  const SESSION_KEY      = withNamespace("itguru_auth_token");
+  const USER_KEY         = withNamespace("itguru_auth_user");
+  const STRATEGIES_KEY   = withNamespace("itguru_auth_strategies");
+  const REMEMBER_ME_KEY  = withNamespace("itguru_remember_login");
+  const SAVED_USER_KEY   = withNamespace("itguru_saved_user");
 
   /* -------- Helpers -------- */
 
@@ -96,6 +110,15 @@ const ITGuruAuth = (() => {
     } catch { return []; }
   }
 
+  /** Persist user info for the current auth namespace */
+  function setUser(user) {
+    if (!user) {
+      sessionStorage.removeItem(USER_KEY);
+      return;
+    }
+    sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
+
   /** Login with username + password */
   async function login(username, password) {
     const resp = await authFetch("login", {
@@ -117,16 +140,16 @@ const ITGuruAuth = (() => {
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);
-    sessionStorage.setItem(USER_KEY, JSON.stringify(data.user || { username }));
+    setUser(data.user || { username });
     if (Array.isArray(data.user?.strategies)) {
       sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
     }
 
     /* Persist "remember me" if requested */
     if (data.token) {
-      const remembered = localStorage.getItem("itguru_remember_login");
+      const remembered = localStorage.getItem(REMEMBER_ME_KEY);
       if (remembered === "1") {
-        localStorage.setItem("itguru_saved_user", username);
+        localStorage.setItem(SAVED_USER_KEY, username);
       }
     }
 
@@ -173,7 +196,7 @@ const ITGuruAuth = (() => {
     }
 
     sessionStorage.setItem(SESSION_KEY, data.token);
-    sessionStorage.setItem(USER_KEY, JSON.stringify(data.user || { username }));
+    setUser(data.user || { username });
     if (Array.isArray(data.user?.strategies)) {
       sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
     }
@@ -194,7 +217,7 @@ const ITGuruAuth = (() => {
       const data = await safeJson(resp);
       if (data.valid === true) {
         if (data.user) {
-          sessionStorage.setItem(USER_KEY, JSON.stringify(data.user));
+          setUser(data.user);
         }
         if (Array.isArray(data.user?.strategies)) {
           sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
@@ -269,8 +292,8 @@ const ITGuruAuth = (() => {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(STRATEGIES_KEY);
-    localStorage.removeItem("itguru_saved_user");
-    localStorage.removeItem("itguru_remember_login");
+    localStorage.removeItem(SAVED_USER_KEY);
+    localStorage.removeItem(REMEMBER_ME_KEY);
   }
 
   /**
@@ -291,9 +314,9 @@ const ITGuruAuth = (() => {
     if (!overlay) return;
 
     /* Restore remembered username */
-    if (rememberMe && localStorage.getItem("itguru_remember_login") === "1") {
+    if (rememberMe && localStorage.getItem(REMEMBER_ME_KEY) === "1") {
       rememberMe.checked = true;
-      const savedUser = localStorage.getItem("itguru_saved_user");
+      const savedUser = localStorage.getItem(SAVED_USER_KEY);
       if (savedUser && userInput) userInput.value = savedUser;
     }
 
@@ -330,11 +353,11 @@ const ITGuruAuth = (() => {
         /* Handle "remember me" */
         if (rememberMe) {
           if (rememberMe.checked) {
-            localStorage.setItem("itguru_remember_login", "1");
-            localStorage.setItem("itguru_saved_user", username);
+            localStorage.setItem(REMEMBER_ME_KEY, "1");
+            localStorage.setItem(SAVED_USER_KEY, username);
           } else {
-            localStorage.removeItem("itguru_remember_login");
-            localStorage.removeItem("itguru_saved_user");
+            localStorage.removeItem(REMEMBER_ME_KEY);
+            localStorage.removeItem(SAVED_USER_KEY);
           }
         }
 
@@ -366,6 +389,7 @@ const ITGuruAuth = (() => {
     isLoggedIn,
     getToken,
     getUser,
+    setUser,
     getStrategies,
     login,
     verify,

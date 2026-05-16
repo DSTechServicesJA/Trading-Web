@@ -249,7 +249,9 @@ document.getElementById("maxLosses").textContent = MAX_LOSSES;
   /* ---- Show Admin nav link for admin users ---- */
   (function () {
     try {
-      const u = JSON.parse(sessionStorage.getItem("itguru_auth_user") || "null");
+      const u = (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getUser)
+        ? ITGuruAuth.getUser()
+        : JSON.parse(sessionStorage.getItem("itguru_auth_user") || "null");
       if (u && u.role === "admin") {
         const item = document.getElementById("adminNavItem");
         if (item) item.style.display = "";
