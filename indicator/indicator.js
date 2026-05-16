@@ -9488,7 +9488,7 @@ function renderStrategyAlerts() {
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
-    + fvgStratHistory.length + mtfTopDownHistory.length;
+    + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -11137,6 +11137,18 @@ function buildStrategyTelegramCaption(signal) {
     }
     if (signal.obIdx != null) {
       lines.push(`<b>OB Candle:</b> #${signal.obIdx}`);
+    }
+    if (signal.impulseLen != null) {
+      lines.push(`<b>Impulse Candles:</b> ${signal.impulseLen}`);
+    }
+    if (signal.impulseAtr != null) {
+      lines.push(`<b>Impulse Strength:</b> ${fmt(signal.impulseAtr, 2)}× ATR`);
+    }
+    if (signal.impulseDominance != null) {
+      lines.push(`<b>Directional Dominance:</b> ${fmt(signal.impulseDominance * 100, 0)}%`);
+    }
+    if (signal.impulseStrongRatio != null) {
+      lines.push(`<b>Strong Candle Ratio:</b> ${fmt(signal.impulseStrongRatio * 100, 0)}%`);
     }
   }
   if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
@@ -15451,10 +15463,16 @@ function detectOrderblockStrategy(idx) {
     if (risk <= 0 || risk > ORDERBLOCK_MAX_SL_ATR * atrValue) continue;
     const rr = 2.0;
     const tp = dir === "BULL" ? c.close + risk * rr : c.close - risk * rr;
+    const impulseDominance = dir === "BULL"
+      ? (bullCount / impulseLen)
+      : (bearCount / impulseLen);
+    const impulseStrongRatio = strongCount / impulseLen;
+    const impulseAtr = totalMove / atrValue;
 
     const signal = {
       dir, entry: c.close, sl, tp, rr,
       obHigh: obCandle.high, obLow: obCandle.low, obIdx, candleIdx: idx,
+      impulseLen, impulseDominance, impulseStrongRatio, impulseAtr,
       symbol: getActiveSymbol(), epoch: c.epoch,
       type: "orderblock", result: "PENDING", strategyName: "orderblock",
       _stratOutcomeSent: false,
@@ -15473,6 +15491,7 @@ function detectOrderblockStrategy(idx) {
     if (autoTradeStrategyEnabled && autoTradeOrderblock && !_historicalProcessing) {
       executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || getActiveSymbol(), source: "strategy", strategyName: "orderblock" });
     }
+    renderStrategyAlerts();
     updateStrategyBadges();
     /* #7: drawChart() is called by the OHLC pipeline after processCustomStrategies() completes — no need to redraw here */
     break;
@@ -15492,7 +15511,6 @@ function monitorOrderblockOutcomes(idx) {
       s.result = result;
       addLog(`🏦 Orderblock ${s.dir} → ${result} (#${idx})`);
       if (!_historicalProcessing && telegramStrategyOutcomeSend && !s._stratOutcomeSent) {
-        s._stratOutcomeSent = true;
         sendStrategyOutcomeTelegram(s);
       }
       if (adaptiveConfluenceEnabled) recordConfluenceOutcome(s._confFactors || [], result);
