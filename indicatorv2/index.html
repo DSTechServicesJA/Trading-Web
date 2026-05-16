@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IT Guru – Breakout Retest Indicator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <!-- Feature 14: PWA meta tags -->
+  <meta name="theme-color" content="#0a0f1e" />
+  <meta name="description" content="IT Guru – Professional breakout-retest trading indicator for Deriv synthetic and forex indices." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 connect-src 'self' wss://ws.derivws.com https://trading.dsitservicesja.com https://api.telegram.org https://nfs.faireconomy.media;
+                 script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+                 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+                 font-src https://fonts.gstatic.com;
+                 img-src 'self' data:;" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main class="container">
+
+  <!-- Login Gate Overlay -->
+   <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+
+      <!-- ── Left: sign-in panel ── -->
+      <div class="login-panel">
+        <div class="login-brand">
+          <span class="login-logo-icon">🤖</span>
+          <span class="login-logo-text">IT Guru</span>
+        </div>
+        <h2>Welcome back</h2>
+        <p>Sign in to access IT Guru Indicator.</p>
+        <div id="loginFormSection">
+          <div class="login-field-wrap">
+            <label class="login-field-label" for="loginUsername">Username</label>
+            <input type="text" id="loginUsername" class="login-input" placeholder="Enter your username" autocomplete="username" />
+          </div>
+          <div class="login-field-wrap">
+            <label class="login-field-label" for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" class="login-input" placeholder="Enter your password" autocomplete="current-password" />
+          </div>
+          <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
+          <button id="loginBtn" type="button" class="login-action-btn">Sign In</button>
+          <div id="loginError" class="login-error"></div>
+        </div>
+      </div>
+
+      <!-- ── Right: subscription plans ── -->
+      <div class="login-plans-panel">
+        <p class="login-plans-eyebrow">Subscription Plans</p>
+        <h3 class="login-plans-title">Unlock Full Access</h3>
+        <p class="login-plans-subtitle">Choose a plan that works for you</p>
+
+        <div class="login-plans-grid">
+
+          <div class="login-plan-card">
+            <div class="login-plan-header">
+              <span class="login-plan-badge">Trial</span>
+              <div class="login-plan-price">
+                <span class="login-plan-amount">Free</span>
+              </div>
+            </div>
+            <ul class="login-plan-features">
+              <li>Limited strategy access</li>
+              <li>Demo trading only</li>
+              <li>Basic signals</li>
+            </ul>
+          </div>
+
+          <div class="login-plan-card">
+            <div class="login-plan-header">
+              <span class="login-plan-badge">Weekly</span>
+              <div class="login-plan-price">
+                <span class="login-plan-amount">$9.99</span>
+                <span class="login-plan-period">/ 7 days</span>
+              </div>
+            </div>
+            <ul class="login-plan-features">
+              <li>All strategies unlocked</li>
+              <li>Live &amp; demo trading</li>
+              <li>Telegram alerts</li>
+            </ul>
+          </div>
+
+          <div class="login-plan-card login-plan-card-featured">
+            <div class="login-plan-header">
+              <span class="login-plan-badge login-plan-badge-featured">⭐ Monthly</span>
+              <div class="login-plan-price">
+                <span class="login-plan-amount">$29.99</span>
+                <span class="login-plan-period">/ 30 days</span>
+              </div>
+            </div>
+            <ul class="login-plan-features">
+              <li>All strategies unlocked</li>
+              <li>Live &amp; demo trading</li>
+              <li>Telegram alerts</li>
+              <li>Priority support</li>
+            </ul>
+          </div>
+
+        </div>
+        <p class="login-plans-note">Contact your admin to activate a plan</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== STICKY STATUS BAR ===== -->
+  <header class="status-bar">
+    <div class="status-bar-left">
+      <div class="brand">🤖 IT Guru</div>
+      <span id="wsStatus" class="status-badge disabled">DISCONNECTED</span>
+      <span id="accountTypeBadge" class="status-badge disabled" title="Account type">--</span>
+      <span id="phaseLabel" class="status-badge disabled">WAITING</span>
+      <span id="breakoutDir" class="status-badge disabled">NONE</span>
+    </div>
+    <div class="status-bar-center">
+      <div class="status-chip"><span class="chip-label">Market</span><span id="marketTypeBadge" class="chip-value env-label">--</span></div>
+      <div class="status-chip"><span class="chip-label">Price</span><span id="livePrice" class="chip-value price">--</span></div>
+      <div class="status-chip"><span class="chip-label">Candle</span><span id="candleCountdown" class="countdown-badge">--</span></div>
+      <div class="status-chip"><span class="chip-label">Candles</span><span id="candleCount" class="chip-value">0</span></div>
+      <div class="status-chip"><span class="chip-label">Uptime</span><span id="uptimeDisplay" class="chip-value env-label">--</span></div>
+      <div class="status-chip"><span class="chip-label">Win%</span><span id="statusBarWinRate" class="chip-value">0%</span></div>
+    </div>
+    <div class="status-bar-right">
+      <button id="connectBtn" type="button" class="bar-btn bar-btn-connect" title="Connect">▶</button>
+      <button id="disconnectBtn" type="button" class="bar-btn bar-btn-disconnect" title="Disconnect" disabled>⏹</button>
+      <button id="resetSessionBtn" type="button" class="bar-btn bar-btn-reset" title="Reset Session (Alt+R)">🔄</button>
+      <button id="exportSignalsBtn" type="button" class="bar-btn bar-btn-tool" title="Export Signals CSV">📥</button>
+      <button id="exportPdfBtn" type="button" class="bar-btn bar-btn-tool" title="Export Signals PDF with Charts">📄</button>
+      <button id="themeToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Theme">☀️</button>
+      <button id="soundToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Sound">🔊</button>
+      <button id="notifToggleBtn" type="button" class="bar-btn bar-btn-tool" title="Toggle Notifications">🔕</button>
+      <button id="streamModeBtn" type="button" class="bar-btn bar-btn-tool" title="Stream Mode – hide sensitive info (Alt+S)">🎥</button>
+      <button id="authLogoutBtn" type="button" class="btn-logout" title="Logout">Logout</button>
+    </div>
+  </header>
+
+  <!-- Navigation -->
+  <nav class="bot-nav">
+    <ul class="bot-links">
+      <li><a href="https://trading.dsitservicesja.com/">Multiple Symbols</a></li>
+      <li><a href="https://trading.dsitservicesja.com/v751s/">V75 (1s)</a></li>
+      <li><a href="https://trading.dsitservicesja.com/indicator/">Indicator</a></li>
+      <li id="adminNavItem" style="display:none;"><a href="https://trading.dsitservicesja.com/admin/">Admin</a></li>
+    </ul>
+    <div id="userAccountInfo" class="user-account-info" style="display:none;"></div>
+    <div class="shortcut-hints">
+      <small>Alt+C Connect · Alt+D Disconnect · Alt+R Reset · Alt+T Theme · Alt+E Export CSV · Alt+P Export PDF · Alt+N Notifications · Alt+S Stream Mode</small>
+    </div>
+  </nav>
+
+  <!-- ===== LIVE SIGNAL TICKER BANNER ===== -->
+  <div id="signalBanner" class="signal-banner">
+    <div class="signal-banner-label">📡 LIVE SIGNALS</div>
+    <div id="signalBannerTrack" class="signal-banner-track"></div>
+  </div>
+
+  <!-- ===== LIVE SCALP TICKER BANNER ===== -->
+  <div id="scalpTickerBanner" class="signal-banner scalp-ticker-banner">
+    <div class="signal-banner-label scalp-ticker-label">⚡ LIVE SCALPS</div>
+    <div id="scalpTickerTrack" class="signal-banner-track"></div>
+  </div>
+
+  <!-- ===== LIVE STRATEGIES TICKER BANNER ===== -->
+  <div id="strategyTickerBanner" class="signal-banner strategy-ticker-banner">
+    <div class="signal-banner-label strategy-ticker-label">🧠 STRATEGIES</div>
+    <div id="strategyTickerTrack" class="signal-banner-track"></div>
+  </div>
+
+  <!-- ========== GRID ========== -->
+  <div class="layout-grid">
+
+    <!-- ===== LEFT PANEL ===== -->
+    <div class="left-panel" id="leftPanel">
+
+      <!-- Mobile toggle button (visible only on small screens) -->
+      <button id="panelToggleBtn" class="panel-toggle" type="button" aria-label="Toggle settings panel">⚙️ Settings</button>
+
+      <div id="panelContent" class="panel-content">
+
+        <!-- Tab Navigation -->
+        <div class="sidebar-tabs" role="tablist">
+          <button class="sidebar-tab active" data-tab="tab-settings" role="tab" aria-selected="true" aria-controls="tab-settings">⚙️ Settings</button>
+          <button class="sidebar-tab" data-tab="tab-state" role="tab" aria-selected="false" aria-controls="tab-state">📈 State</button>
+          <button class="sidebar-tab" data-tab="tab-stats" role="tab" aria-selected="false" aria-controls="tab-stats">🎯 Stats</button>
+        </div>
+
+        <!-- ===== TAB: SETTINGS ===== -->
+        <div id="tab-settings" class="tab-pane active" role="tabpanel" aria-labelledby="tab-settings">
+
+          <!-- API Configuration -->
+          <section class="box">
+            <div class="section-header">
+              <span class="icon">🔑</span>
+              <h3>API</h3>
+            </div>
+            <div class="api-fields-row">
+              <div class="api-field">
+                <label for="appIdInput">Deriv App ID</label>
+                <input type="number" id="appIdInput" class="param-input" value="120128" min="1" step="1" />
+              </div>
+              <div class="api-field">
+                <label for="derivTokenInput">Deriv API Token</label>
+                <input type="password" id="derivTokenInput" class="param-input" placeholder="Paste token…" />
+              </div>
+            </div>
+            <p class="hint">Your Deriv API app_id and API token. The token authorizes your account. Reconnect after changing.</p>
+          </section>
+
+          <!-- Symbol Selection -->
+          <section class="box">
+            <div class="section-header">
+              <span class="icon">📊</span>
+              <h3>Market</h3>
+            </div>
+            <label for="symbolSelect">Symbol</label>
+            <select id="symbolSelect">
+              <optgroup label="VOLATILITY (1s)">
+                <option value="1HZ10V">Volatility 10 (1s)</option>
+                <option value="1HZ15V">Volatility 15 (1s)</option>
+                <option value="1HZ25V">Volatility 25 (1s)</option>
+                <option value="1HZ30V">Volatility 30 (1s)</option>
+                <option value="1HZ50V">Volatility 50 (1s)</option>
+                <option value="1HZ75V" selected>Volatility 75 (1s)</option>
+                <option value="1HZ90V">Volatility 90 (1s)</option>
+                <option value="1HZ100V">Volatility 100 (1s)</option>
+                <option value="1HZ150V">Volatility 150 (1s)</option>
+                <option value="1HZ200V">Volatility 200 (1s)</option>
+                <option value="1HZ250V">Volatility 250 (1s)</option>
+                <option value="1HZ300V">Volatility 300 (1s)</option>
+              </optgroup>
+              <optgroup label="VOLATILITY (STANDARD)">
+                <option value="R_10">Volatility 10 Index</option>
+                <option value="R_25">Volatility 25 Index</option>
+                <option value="R_50">Volatility 50 Index</option>
+                <option value="R_75">Volatility 75 Index</option>
+                <option value="R_100">Volatility 100 Index</option>
+              </optgroup>
+              <optgroup label="BOOM INDICES">
+                <option value="BOOM300N">Boom 300 Index</option>
+                <option value="BOOM500">Boom 500 Index</option>
+                <option value="BOOM600">Boom 600 Index</option>
+                <option value="BOOM900">Boom 900 Index</option>
+                <option value="BOOM1000">Boom 1000 Index</option>
+              </optgroup>
+              <optgroup label="CRASH INDICES">
+                <option value="CRASH300N">Crash 300 Index</option>
+                <option value="CRASH500">Crash 500 Index</option>
+                <option value="CRASH600">Crash 600 Index</option>
+                <option value="CRASH900">Crash 900 Index</option>
+                <option value="CRASH1000">Crash 1000 Index</option>
+              </optgroup>
+              <optgroup label="JUMP INDICES">
+                <option value="JD10">Jump 10 Index</option>
+                <option value="JD25">Jump 25 Index</option>
+                <option value="JD50">Jump 50 Index</option>
+                <option value="JD75">Jump 75 Index</option>
+                <option value="JD100">Jump 100 Index</option>
+              </optgroup>
+              <optgroup label="STEP INDICES">
+                <option value="stpRNG">Step Index</option>
+                <option value="stpRNG2">Step Index 200</option>
+                <option value="stpRNG3">Step Index 300</option>
+                <option value="stpRNG4">Step Index 400</option>
+                <option value="stpRNG5">Step Index 500</option>
+              </optgroup>
+              <optgroup label="DAILY RESET INDICES">
+                <option value="RDBULL">Bull Market Index</option>
+                <option value="RDBEAR">Bear Market Index</option>
+              </optgroup>
+              <optgroup label="DEX INDICES">
+                <option value="DEX600DN">DEX 600 Down</option>
+                <option value="DEX600UP">DEX 600 Up</option>
+                <option value="DEX900DN">DEX 900 Down</option>
+                <option value="DEX900UP">DEX 900 Up</option>
+                <option value="DEX1500DN">DEX 1500 Down</option>
+                <option value="DEX1500UP">DEX 1500 Up</option>
+              </optgroup>
+              <optgroup label="DRIFT SWITCH INDICES">
+                <option value="DSI10">Drift Switch 10</option>
+                <option value="DSI20">Drift Switch 20</option>
+                <option value="DSI30">Drift Switch 30</option>
+              </optgroup>
+              <optgroup label="FOREX MAJORS">
+                <option value="frxEURUSD">EUR / USD</option>
+                <option value="frxGBPUSD">GBP / USD</option>
+                <option value="frxUSDJPY">USD / JPY</option>
+                <option value="frxUSDCHF">USD / CHF</option>
+                <option value="frxAUDUSD">AUD / USD</option>
+                <option value="frxUSDCAD">USD / CAD</option>
+                <option value="frxNZDUSD">NZD / USD</option>
+              </optgroup>
+              <optgroup label="FOREX CROSSES">
+                <option value="frxEURGBP">EUR / GBP</option>
+                <option value="frxEURJPY">EUR / JPY</option>
+                <option value="frxEURAUD">EUR / AUD</option>
+                <option value="frxEURCAD">EUR / CAD</option>
+                <option value="frxEURCHF">EUR / CHF</option>
+                <option value="frxEURNZD">EUR / NZD</option>
+                <option value="frxGBPJPY">GBP / JPY</option>
+                <option value="frxGBPAUD">GBP / AUD</option>
+                <option value="frxGBPCAD">GBP / CAD</option>
+                <option value="frxGBPCHF">GBP / CHF</option>
+                <option value="frxGBPNZD">GBP / NZD</option>
+                <option value="frxAUDJPY">AUD / JPY</option>
+                <option value="frxAUDNZD">AUD / NZD</option>
+                <option value="frxAUDCAD">AUD / CAD</option>
+                <option value="frxAUDCHF">AUD / CHF</option>
+                <option value="frxNZDJPY">NZD / JPY</option>
+                <option value="frxNZDCAD">NZD / CAD</option>
+                <option value="frxNZDCHF">NZD / CHF</option>
+                <option value="frxCADJPY">CAD / JPY</option>
+                <option value="frxCADCHF">CAD / CHF</option>
+                <option value="frxCHFJPY">CHF / JPY</option>
+              </optgroup>
+              <optgroup label="FOREX EXOTICS">
+                <option value="frxUSDMXN">USD / MXN</option>
+                <option value="frxUSDNOK">USD / NOK</option>
+                <option value="frxUSDSEK">USD / SEK</option>
+                <option value="frxUSDSGD">USD / SGD</option>
+                <option value="frxUSDZAR">USD / ZAR</option>
+                <option value="frxUSDPLN">USD / PLN</option>
+                <option value="frxUSDTRY">USD / TRY</option>
+                <option value="frxUSDHKD">USD / HKD</option>
+              </optgroup>
+              <optgroup label="COMMODITIES">
+                <option value="frxXAUUSD">Gold / USD (XAU/USD)</option>
+                <option value="frxXAGUSD">Silver / USD (XAG/USD)</option>
+                <option value="frxXPTUSD">Platinum / USD (XPT/USD)</option>
+                <option value="frxXPDUSD">Palladium / USD (XPD/USD)</option>
+              </optgroup>
+            </select>
+            <div style="margin-top:10px;">
+              <div class="lock-row">
+                <label for="granSelect">Timeframe</label>
+                <label class="lock-label"><input type="checkbox" id="lockTimeframeToggle" /> 🔒 Lock</label>
+              </div>
+              <select id="granSelect">
+                <option value="60" selected>1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="180">3 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+                <option value="7200">2 Hours</option>
+                <option value="14400">4 Hours</option>
+                <option value="28800">8 Hours</option>
+                <option value="86400">1 Day</option>
+              </select>
+            </div>
+          </section>
+
+          <!-- Multi-Symbol Picker -->
+          <section class="box">
+            <h3 class="collapsible">📊 Multi-Symbol Analysis</h3>
+            <div class="collapsible-body">
+              <p class="hint">Select symbols to analyze simultaneously.</p>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <button id="selectAllSymbols" class="btn btn-xs">Select All</button>
+                <button id="deselectAllSymbols" class="btn btn-xs">Deselect All</button>
+              </div>
+              <div id="multiSymbolPicker" class="multi-symbol-picker">
+                <div class="ms-group-label">Volatility (1s)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ10V" /> Vol 10 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ15V" /> Vol 15 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ25V" /> Vol 25 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ30V" /> Vol 30 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ50V" /> Vol 50 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ90V" /> Vol 90 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ150V" /> Vol 150 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ200V" /> Vol 200 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ250V" /> Vol 250 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ300V" /> Vol 300 (1s)</label>
+                <div class="ms-group-label">Volatility (Std)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_10" /> Vol 10 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_25" /> Vol 25 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_50" /> Vol 50 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <div class="ms-group-label">Boom Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM300N" /> Boom 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM600" /> Boom 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM900" /> Boom 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM1000" /> Boom 1000</label>
+                <div class="ms-group-label">Crash Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH300N" /> Crash 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH500" /> Crash 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH600" /> Crash 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH900" /> Crash 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH1000" /> Crash 1000</label>
+                <div class="ms-group-label">Jump Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD10" /> Jump 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD25" /> Jump 25</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD50" /> Jump 50</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD100" /> Jump 100</label>
+                <div class="ms-group-label">Step Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG2" /> Step 200</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG3" /> Step 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG4" /> Step 400</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG5" /> Step 500</label>
+                <div class="ms-group-label">Daily Reset</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBULL" /> Bull Market</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBEAR" /> Bear Market</label>
+                <div class="ms-group-label">DEX Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600DN" /> DEX 600 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600UP" /> DEX 600 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900DN" /> DEX 900 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900UP" /> DEX 900 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500DN" /> DEX 1500 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500UP" /> DEX 1500 Up</label>
+                <div class="ms-group-label">Drift Switch</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI10" /> Drift Switch 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI20" /> Drift Switch 20</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI30" /> Drift Switch 30</label>
+                <div class="ms-group-label">Forex Majors</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDJPY" /> USD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCHF" /> USD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDUSD" /> AUD/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCAD" /> USD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDUSD" /> NZD/USD</label>
+                <div class="ms-group-label">Forex Crosses</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURGBP" /> EUR/GBP</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURAUD" /> EUR/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCAD" /> EUR/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCHF" /> EUR/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURNZD" /> EUR/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPAUD" /> GBP/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCAD" /> GBP/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCHF" /> GBP/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPNZD" /> GBP/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDJPY" /> AUD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDNZD" /> AUD/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCAD" /> AUD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCHF" /> AUD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDJPY" /> NZD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCAD" /> NZD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCHF" /> NZD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADJPY" /> CAD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADCHF" /> CAD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCHFJPY" /> CHF/JPY</label>
+                <div class="ms-group-label">Forex Exotics</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDMXN" /> USD/MXN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDNOK" /> USD/NOK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSEK" /> USD/SEK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSGD" /> USD/SGD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDZAR" /> USD/ZAR</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDPLN" /> USD/PLN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDTRY" /> USD/TRY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDHKD" /> USD/HKD</label>
+                <div class="ms-group-label">Commodities</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold (XAU)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAGUSD" /> Silver (XAG)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPTUSD" /> Platinum (XPT)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPDUSD" /> Palladium (XPD)</label>
+              </div>
+              <p id="multiSymbolCount" class="hint" style="margin-top:6px;">0 of 90 selected</p>
+            </div>
+          </section>
+
+          <!-- Risk:Reward -->
+          <section class="box">
+            <div class="section-header">
+              <span class="icon">⚖️</span>
+              <h3>Risk : Reward</h3>
+              <label class="lock-label" style="margin-left:auto;"><input type="checkbox" id="lockRRToggle" /> 🔒 Lock</label>
+            </div>
+            <div class="rr-inputs">
+              <input type="number" id="riskInput" min="0.1" step="0.1" value="1" placeholder="1" />
+              <span class="rr-separator">:</span>
+              <input type="number" id="rewardInput" min="0.1" step="0.1" value="1" placeholder="1" />
+            </div>
+            <p class="hint">Default 1:1 — e.g. 1 and 3 = 1:3 R:R.</p>
+          </section>
+
+          <!-- Account Size -->
+          <section class="box">
+            <h3 class="collapsible">💰 Account Size</h3>
+            <div class="collapsible-body">
+              <div class="account-inputs">
+                <div class="account-input-row">
+                  <label class="hint" for="accountSizeInput">Balance ($)</label>
+                  <input type="number" id="accountSizeInput" min="0" step="1" value="" placeholder="e.g. 10000" />
+                </div>
+                <div class="account-input-row">
+                  <label class="hint" for="riskPercentInput">Risk per trade (%)</label>
+                  <input type="number" id="riskPercentInput" min="0.1" max="100" step="0.1" value="1" placeholder="1" />
+                </div>
+              </div>
+              <p class="hint">Enter account balance to auto-calculate $ risk, $ reward, and position size per trade.</p>
+            </div>
+          </section>
+
+          <!-- Auto-Trade -->
+          <section class="box">
+            <h3 class="collapsible">🤖 Auto-Trade</h3>
+            <div class="collapsible-body">
+
+            <!-- Account Balance (visible when auto-trade enabled + authorized) -->
+            <div id="autoTradeBalanceSection" class="auto-trade-balance-section" style="display:none;">
+              <div class="auto-trade-balance-row">
+                <span class="auto-trade-balance-label">💰 Account Balance</span>
+                <span id="autoTradeBalanceValue" class="auto-trade-balance-value">---</span>
+              </div>
+              <div class="auto-trade-balance-row">
+                <span class="auto-trade-balance-label">📊 Auto-Trade P/L</span>
+                <span id="autoTradePLValue" class="auto-trade-balance-value">$0.00</span>
+              </div>
+            </div>
+
+            <p class="param-group-title">Signal Sources</p>
+            <label class="toggle-row"><input type="checkbox" id="autoTradeToggle" /> 📈 Breakout-Retest Trades</label>
+            <p class="hint" style="margin-bottom:6px;">Place a multiplier contract when a TRADE signal fires from the breakout-retest engine.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="autoTradeScalpToggle" /> ⚡ Live Scalp Trades</label>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when a live scalp signal fires (confluence scanner).</p>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeScalpOppositeToggle" /> 🔄 Opposite Mode (Scalp)</label>
+            <p class="hint" style="margin-bottom:6px;">Reverse the scalp signal direction — if signal says BUY, place SELL and vice versa.</p>
+
+            <label class="toggle-row"><input type="checkbox" id="autoTradeStrategyToggle" /> 📊 Strategy Trades</label>
+            <p class="hint" style="margin-bottom:2px;">Place a multiplier contract when any of the 7 strategies fires. Use the sub-toggles below to select which strategies auto-trade.</p>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeLiquiditySweepToggle" checked /> 🌊 Liquidity Sweep</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStopLossHuntToggle" checked /> 🎯 Stop Loss Hunt</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFailedPinBarToggle" checked /> 📌 Failed Pin Bar</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFibScalpToggle" checked /> 📐 Fib Golden Zone</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradePo3Toggle" checked /> ⚡ Power of 3</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeNYOpenRangeToggle" checked /> 🕤 NY Open Range</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeSessionRangeToggle" checked /> 🌍 Session Range (London Sweep)</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeGridScalperMAToggle" checked /> 🔲 Grid Scalper MA</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeFvgStratToggle" checked /> 🎯 Fair Value Gap</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeMtfTopDownToggle" checked /> ⏱ MTF Top-Down</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeOrderblockToggle" checked /> 🏦 Orderblock</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
+            <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
+
+            <p class="param-group-title">Contract Settings</p>
+            <div class="account-inputs">
+              <div class="account-input-row">
+                <label class="hint" for="autoTradeStake">Base Stake ($)</label>
+                <input type="number" id="autoTradeStake" min="0.35" step="0.01" value="1" placeholder="1.00" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="autoTradeMaxStake">Max Stake ($)</label>
+                <input type="number" id="autoTradeMaxStake" min="0.35" step="0.01" placeholder="e.g. 5.00" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint">Live Stake</label>
+                <span id="autoTradeCurrentStakeDisplay" class="status-badge" style="min-width:60px;text-align:right;">$1.00</span>
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="autoTradeMultiplier">Multiplier (×)</label>
+                <input type="number" id="autoTradeMultiplier" min="1" max="1000" step="1" value="100" placeholder="100" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="maxConcurrentTrades">Max Concurrent Trades</label>
+                <input type="number" id="maxConcurrentTrades" min="1" max="10" step="1" value="1" placeholder="1" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="autoTradeSessionTP">Session TP ($)</label>
+                <input type="number" id="autoTradeSessionTP" min="0.01" step="0.01" placeholder="e.g. 10.00" />
+              </div>
+              <div class="account-input-row">
+                <label class="hint" for="autoTradeSessionSL">Session SL ($)</label>
+                <input type="number" id="autoTradeSessionSL" min="0.01" step="0.01" placeholder="e.g. 5.00" />
+              </div>
+            </div>
+            <p class="hint" style="margin-bottom:2px;">Uses MULTUP/MULTDOWN contracts with SL &amp; TP from the signal's entry, stop-loss, and take-profit levels. Requires a valid Deriv token.</p>
+            <p class="hint" style="margin-bottom:2px;"><b>Base Stake</b>: starting trade size. <b>Max Stake</b>: cap for compounding (leave blank = 4× base). Stake compounds after 2+ consecutive wins, resets to base on loss. Auto-trading also halts automatically after 3 consecutive losses.</p>
+            <p class="hint" style="margin-bottom:2px;"><b>Session TP/SL</b>: halt all auto-trades when cumulative P/L reaches the take-profit or stop-loss dollar amount.</p>
+            <p class="hint" style="margin-bottom:2px;">Max Concurrent Trades: allow multiple trades to run simultaneously per symbol when signals fire (1 = one trade at a time, like before).</p>
+            <p class="hint" style="color:var(--text-warn, #f59e0b);">⚠ Use with caution — real money will be placed when connected with a live Deriv account.</p>
+
+            <!-- Auto-Trade History -->
+            <p class="param-group-title">Trade History</p>
+            <div id="autoTradeHistorySection" class="auto-trade-history-section">
+              <ul id="autoTradeHistoryList" class="auto-trade-history-list"></ul>
+              <p id="autoTradeHistoryEmpty" class="hint" style="text-align:center;">No auto-trades yet.</p>
+              <div id="oppositeModeSummary"></div>
+            </div>
+
+            </div>
+          </section>
+
+          <!-- Strategies Enable/Disable -->
+          <section class="box">
+            <h3 class="collapsible">🧠 Strategies</h3>
+            <div class="collapsible-body open">
+              <p class="hint" style="margin-bottom:10px;">Enable or disable individual strategies. Active strategies scan every candle for signals, which appear in <b>🎯 Strategy Alerts</b> below. 🔒 = requires a subscription upgrade.</p>
+              <div class="strat-enable-grid">
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="liquiditySweepToggle" />
+                  <span class="strat-enable-icon">🌊</span>
+                  <span class="strat-enable-name">Liquidity Sweep</span>
+                  <span class="strat-enable-badge off" id="stratBadge-liquiditySweep">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="stopLossHuntToggle" />
+                  <span class="strat-enable-icon">🎯</span>
+                  <span class="strat-enable-name">Stop Loss Hunt</span>
+                  <span class="strat-enable-badge off" id="stratBadge-stopLossHunt">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="failedPinBarToggle" />
+                  <span class="strat-enable-icon">📌</span>
+                  <span class="strat-enable-name">Failed Pin Bar</span>
+                  <span class="strat-enable-badge off" id="stratBadge-failedPinBar">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="fibScalpToggle" />
+                  <span class="strat-enable-icon">📐</span>
+                  <span class="strat-enable-name">Fib Golden Zone</span>
+                  <span class="strat-enable-badge off" id="stratBadge-fibScalp">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="po3Toggle" />
+                  <span class="strat-enable-icon">🔀</span>
+                  <span class="strat-enable-name">Power of 3</span>
+                  <span class="strat-enable-badge off" id="stratBadge-po3">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="nyOpenRangeToggle" />
+                  <span class="strat-enable-icon">🕤</span>
+                  <span class="strat-enable-name">NY Open Range</span>
+                  <span class="strat-enable-badge off" id="stratBadge-nyOpenRange">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="sessionRangesToggle" />
+                  <span class="strat-enable-icon">🌍</span>
+                  <span class="strat-enable-name">Session Ranges</span>
+                  <span class="strat-enable-badge off" id="stratBadge-sessionRanges">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="liveScalpToggle" />
+                  <span class="strat-enable-icon">⚡</span>
+                  <span class="strat-enable-name">Live Scalp Scanner</span>
+                  <span class="strat-enable-badge off" id="stratBadge-liveScalp">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="gridScalperMAToggle" />
+                  <span class="strat-enable-icon">🔲</span>
+                  <span class="strat-enable-name">Grid Scalper MA</span>
+                  <span class="strat-enable-badge off" id="stratBadge-gridScalperMA">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="fvgStratToggle" />
+                  <span class="strat-enable-icon">📊</span>
+                  <span class="strat-enable-name">Fair Value Gap</span>
+                  <span class="strat-enable-badge off" id="stratBadge-fvgStrat">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="mtfTopDownToggle" />
+                  <span class="strat-enable-icon">⏱</span>
+                  <span class="strat-enable-name">MTF Top-Down</span>
+                  <span class="strat-enable-badge off" id="stratBadge-mtfTopDown">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="orderblockToggle" />
+                  <span class="strat-enable-icon">🏦</span>
+                  <span class="strat-enable-name">Orderblock (S12)</span>
+                  <span class="strat-enable-badge off" id="stratBadge-orderblock">OFF</span>
+                </label>
+
+              </div>
+            </div>
+          </section>
+
+          <!-- Strategy Filters -->
+          <section class="box">
+            <h3 class="collapsible">⚙️ Strategy Filters</h3>
+            <div class="collapsible-body">
+
+              <div class="lock-row" style="margin-bottom:10px;">
+                <label class="toggle-row" style="background:var(--bg-base);padding:6px 8px;border-radius:6px;border:1px solid var(--glass-border);flex:1;"><input type="checkbox" id="autoApplyRecToggle" /> 🔄 Auto-Apply Recommended</label>
+                <label class="lock-label" title="Lock all strategy filter states — symbol changes won't override your manual settings"><input type="checkbox" id="lockIndicatorFiltersToggle" /> 🔒 Lock Filters</label>
+              </div>
+              <p class="hint" style="margin-bottom:10px;">Auto-Apply: apply recommended filters on symbol change. <b>Lock Filters</b>: prevent symbol changes from overriding your current filter settings — disabled indicators stay disabled.</p>
+
+              <p class="param-group-title">Core Filters</p>
+
+              <label class="toggle-row"><input type="checkbox" id="autoResetToggle" checked /> Auto-Reset After Trade</label>
+              <p class="hint">Automatically scan for new setups after trade resolves.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="emaFilterToggle" /> EMA 8/21 Trend Filter</label>
+              <p class="hint">Only allow breakouts aligned with EMA crossover direction.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="htfFilterToggle" /> HTF Trend Filter</label>
+              <p class="hint">Require alignment with higher-timeframe trend (EMA 100).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="atrToleranceToggle" /> ATR-Based Tolerance</label>
+              <p class="hint">Use ATR(14) instead of candle range for retest detection.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="trailingStopToggle" /> Trailing Stop</label>
+              <p class="hint">Trail SL using 1.5× ATR as price moves favorably.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="partialTpToggle" /> Partial TP (1:1)</label>
+              <p class="hint">Move SL to breakeven when price reaches 1:1 reward.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="teslaScalingToggle" /> Tesla 3–6–9 Scaling</label>
+              <div style="margin-top:4px;margin-bottom:4px;">
+                <select id="teslaScalingPlan" style="width:100%;">
+                  <option value="conservative">Conservative (50/30/20)</option>
+                  <option value="aggressive">Aggressive (25/35/20+trail)</option>
+                </select>
+              </div>
+              <p class="hint">Alert at 3R (T1), 6R (T2), and 9R (T3) with position-sizing guidance and SL → BE lock.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="falseBreakoutToggle" /> False Breakout Filter</label>
+              <p class="hint">Invalidate breakout if next 3 candles close back inside range.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="minRRToggle" /> Min R:R Gate</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="minRRInput" style="margin-right:6px;">Min R:R</label>
+                <input type="number" id="minRRInput" min="1" max="10" step="0.5" value="2" style="width:60px;" />
+              </div>
+              <p class="hint">Reject trades with R:R below this threshold.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="pureTrailingToggle" /> Pure Trailing (No TP)</label>
+              <p class="hint">No fixed TP — rely solely on trailing stop to exit.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">Advanced Signals</p>
+
+              <label class="toggle-row"><input type="checkbox" id="rsiFilterToggle" /> RSI at Retest</label>
+              <p class="hint">Confirm pullback has room to reverse (RSI ≤ 50 for BULL, ≥ 50 for BEAR).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="volumeSpikeToggle" /> Volume Spike Filter</label>
+              <p class="hint">Require breakout candle range ≥ 1.5× average — filters weak/fake breakouts.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="sessionFilterToggle" /> Session Filter</label>
+              <div style="margin-top:4px;margin-bottom:4px;">
+                <select id="sessionFilterMode" style="width:100%;">
+                  <option value="london_ny">London + NY</option>
+                  <option value="london">London (07–16 UTC)</option>
+                  <option value="new_york">New York (12–21 UTC)</option>
+                  <option value="overlap">Overlap (12–16 UTC)</option>
+                  <option value="asian">Asian (00–09 UTC)</option>
+                </select>
+              </div>
+              <p class="hint">Only allow signals during high-liquidity sessions.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="fibRetestToggle" /> Fibonacci at Retest</label>
+              <p class="hint">Check if retest level aligns with a Fibonacci level (23.6%–78.6%).</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">GainzAlgo V2 Filters</p>
+
+              <label class="toggle-row"><input type="checkbox" id="macdFilterToggle" /> MACD Momentum</label>
+              <p class="hint">Require MACD histogram to align with breakout direction (12/26/9).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="bbSqueezeFilterToggle" /> BB Squeeze Detect</label>
+              <p class="hint">Bollinger Band squeeze detection — flags low-volatility compression before breakout.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="adxFilterToggle" /> ADX Trend Filter</label>
+              <p class="hint">Block signals when ADX &lt; 20 (ranging market). Only trade trending conditions.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="stochFilterToggle" /> Stochastic Filter</label>
+              <p class="hint">Confirm momentum with Stochastic (14/3/3) — avoid overbought buys / oversold sells.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Profit-Direction Constraints</p>
+
+              <label class="toggle-row"><input type="checkbox" id="minConfluenceToggle" /> Min Confluence Gate</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="minConfluenceInput" style="margin-right:6px;">Min Score (0–16)</label>
+                <input type="number" id="minConfluenceInput" min="0" max="16" step="1" value="6" style="width:60px;" />
+              </div>
+              <p class="hint">Reject trades below this confluence score threshold. Higher = stricter quality gate.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="doubleRetestToggle" /> Double Retest</label>
+              <p class="hint">Require breakout level to be retested twice before entering — confirms level is holding.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="confirmBarToggle" /> Confirmation Bar</label>
+              <p class="hint">After confirmation pattern, require the next candle to close in the trade direction before entry.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="divergenceFilterToggle" /> Momentum Divergence</label>
+              <p class="hint">Check for RSI divergence at retest — bullish divergence for BULL, bearish for BEAR trades.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="adxHardGateToggle" /> ADX Hard Gate</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="adxMaxInput" style="margin-right:6px;">Max ADX</label>
+                <input type="number" id="adxMaxInput" min="25" max="80" step="5" value="50" style="width:60px;" />
+              </div>
+              <p class="hint">Block trades when ADX &lt; 20 (choppy) or &gt; max (overextended). Only trade sweet-spot trends.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="breakoutDistToggle" /> Breakout Distance</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="breakoutDistInput" style="margin-right:6px;">Max ATR ×</label>
+                <input type="number" id="breakoutDistInput" min="1" max="10" step="0.5" value="3" style="width:60px;" />
+              </div>
+              <p class="hint">Reject retests too far from breakout level — prevents late/exhausted entries.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="timeDecayToggle" /> Time Decay Filter</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="timeDecayInput" style="margin-right:6px;">Max Candles</label>
+                <input type="number" id="timeDecayInput" min="5" max="100" step="1" value="20" style="width:60px;" />
+              </div>
+              <p class="hint">If too many candles pass between breakout and retest, the setup is stale — skip it.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="consecutiveDirToggle" /> Consecutive Direction</label>
+              <p class="hint">Require 2 of the last 3 candles to close in the trade direction — confirms immediate momentum.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="vwapFilterToggle" /> VWAP Alignment</label>
+              <p class="hint">For BULL, price should be near/above session VWAP. For BEAR, near/below. Confirms volume-weighted bias.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="stochCrossToggle" /> Stochastic Crossover</label>
+              <p class="hint">Require %K crossing %D from oversold (BULL) or overbought (BEAR) — stronger than level-only check.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="rangeSizeToggle" /> Range Size Filter</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="rangeSizeMinInput" style="margin-right:6px;">Min ATR ×</label>
+                <input type="number" id="rangeSizeMinInput" min="0.1" max="3" step="0.1" value="0.5" style="width:60px;" />
+                <label class="hint" for="rangeSizeMaxInput" style="margin-left:8px;margin-right:6px;">Max ATR ×</label>
+                <input type="number" id="rangeSizeMaxInput" min="1" max="10" step="0.5" value="3" style="width:60px;" />
+              </div>
+              <p class="hint">Opening range too narrow = noise. Too wide = excessive risk. Filter by ATR multiples.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="hhhlToggle" /> HH/HL Structure</label>
+              <p class="hint">For BULL: verify recent higher-highs & higher-lows. For BEAR: lower-highs & lower-lows. True price-action trend.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="followThroughToggle" /> Breakout Follow-Through</label>
+              <p class="hint">After breakout candle, next 1-2 candles must continue in breakout direction — proves momentum.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="mtfStructureToggle" /> MTF Structure (EMA 200)</label>
+              <p class="hint">Enhanced multi-timeframe filter using EMA 200 as a structural trend reference.</p>
+
+              <hr class="param-divider" />
+              <button id="revertSettingsBtn" class="btn btn-danger" style="width:100%;margin-top:8px;margin-bottom:4px;">🔄 Revert All Settings to Defaults</button>
+              <p class="hint">Reset all strategy filters and parameters back to their original default values.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🕤 NY Open Range (9:30 AM EST)</p>
+              <p class="hint">At 9:30 AM EST, marks the 9:30–9:35 range high/low. Enters on a clean breakout + valid retest (wick into range, close outside). SL at range midpoint, TP at 1:2 R:R.</p>
+              <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) and <b>Auto-Send Strategy Alerts</b> (Telegram) to auto-execute and receive Telegram notifications.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🌍 Session Ranges (Asian / London / NY)</p>
+              <p class="hint">Draws Asian (00–09 UTC), London (07–16 UTC), and NY (12–21 UTC) session high/low ranges. Detects tight Asian ranges (&lt;1× ATR) and London sweeps of the Asian range (liquidity grab → trade signal with entry, SL, TP).</p>
+              <p class="hint">Signals appear in <b>🎯 Strategy Alerts</b> below. Enable <b>📊 Strategy Trades</b> (Auto-Trade) to auto-execute. Enable <b>Auto-Send Session Range Signals</b> or <b>Auto-Send Strategy Alerts</b> in Telegram for notifications.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⚡ Scalping Mode</p>
+
+              <label class="toggle-row"><input type="checkbox" id="scalpingModeToggle" /> Scalping Mode</label>
+              <p class="hint">Quick 5-10 pip trades on short timeframes (from MD: use 5min range, tighter SL, quick TP at 1:1 R:R, auto-timeout after 15 candles).</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⚡ Live Scalp Scanner</p>
+              <p class="hint">Scans every candle for high-probability scalp setups using 7-point confluence: EMA momentum, RSI zone, MACD cross, Stochastic cross, Bollinger bounce, candle pattern, ADX trend. Alerts appear in real-time on the chart.</p>
+
+              <label for="liveScalpMinConf" class="spaced-label">Min Confluence (1–7)</label>
+              <input type="number" id="liveScalpMinConf" min="1" max="7" step="1" value="3" />
+              <p class="hint">Higher = fewer but higher-quality scalp signals. Recommended: 3–4 for active markets, 5+ for conservative.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🌊 Strategy 1: Liquidity Sweep (15m → 1m)</p>
+              <p class="hint">Identifies range from a single candle's high/low. If the next candle breaks the range but closes back inside → liquidity sweep signal. Entry at candle close, SL just outside the range, TP at 2:1 R:R. Works best on 15m/1m charts for scalp entries.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Strategy 2: Stop Loss Hunt</p>
+              <p class="hint">Finds key support/resistance levels tested multiple times. When price breaks beyond the level but closes back inside → stop hunt signal. Entry at candle close, SL beyond the hunt candle, TP at 2:1 R:R. Includes re-entry logic if your stop is hunted again (stop hunt of stop hunters).</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📌 Strategy 3: Failed Pin Bar (Fear/Greed)</p>
+              <p class="hint">Detects market fear (consecutive bearish candles) or greed (consecutive bullish candles). Spots a pin bar against the dominant emotion, then enters when the pin bar fails (breaks in direction of momentum). SL beyond the pin bar, TP at 1.5:1 R:R for quick scalp pips.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📐 Strategy 4: Fib Golden Zone Scalp</p>
+              <p class="hint">Pure price action + Fibonacci on the 1-minute chart. Identifies a micro-trend (higher lows / lower highs), waits for a break of structure, then enters when price retraces into the 0.5–0.618 Fibonacci retracement zone (the "Golden Zone"). Exits at the previous swing high (uptrend) or swing low (downtrend). SL beyond the 0.786 Fib level. Fast, clean 10-minute scalp strategy.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⚡ Strategy 5: Power of 3 (ICT)</p>
+              <p class="hint">ICT Power of 3 delivery: Accumulation → Manipulation → Expansion. Uses EMA 8/21 daily bias to define direction. Marks the 1-hour candle open, waits for a liquidity sweep (manipulation) beyond the open, then waits for a market structure shift (MSS) with displacement that leaves a Fair Value Gap (FVG). Enters when price returns into the FVG. SL below the sweep low (bullish) or above the sweep high (bearish). TP at the 1H high/low + external liquidity. Partial at 1–2R, let the rest run.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🔲 Strategy 8: Grid Scalper MA</p>
+              <p class="hint">Dynamic MA-based signal strategy with two modes: <b>Price vs MA</b> fires when price closes above/below a Simple Moving Average crossover, and <b>BOS</b> fires when price breaks above a confirmed swing high (BUY) or below a confirmed swing low (SELL). SL placed at the nearest swing point + ATR buffer. TP at 2:1 R:R.</p>
+
+              <div style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="gridScalperMAStrategySelect" style="margin-right:6px;">Signal Strategy</label>
+                <select id="gridScalperMAStrategySelect" style="width:100%;">
+                  <option value="price_vs_ma">Price vs MA (SMA Crossover)</option>
+                  <option value="bos">BOS (Break of Structure)</option>
+                </select>
+              </div>
+              <p class="hint">Select signal generation mode. "Price vs MA" uses a Simple Moving Average crossover. "BOS" detects confirmed swing high/low breakouts.</p>
+
+              <div id="gridScalperMAPeriodRow" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="gridScalperMAPeriodInput" style="margin-right:6px;">MA Period</label>
+                <input type="number" id="gridScalperMAPeriodInput" min="2" max="200" step="1" value="21" style="width:70px;" />
+              </div>
+              <p class="hint" id="gridScalperMAPeriodHint">Period for the Simple Moving Average (default: 21). Shorter = more signals, longer = stronger trends only.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
+              <p class="hint">ICT-style supply &amp; demand strategy using Fair Value Gaps as confluence. Detects a "big push" (3+ consecutive strong candles) that leaves FVG imbalances, then marks the origin candle (the demand/supply zone <em>before</em> the push). Waits for price to retrace back into that zone at a Fibonacci discount (&lt;50% retracement), confirms with a bullish/bearish engulfing pattern, and enters in the direction of the original push. SL below the demand zone (or above supply). TP at the recent swing high/low. Requires EMA trend alignment. Works on any timeframe.</p>
+
+            </div>
+          </section>
+
+          <!-- Strategy Alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, NY Open Range, Session Range) -->
+          <section class="box scalp-alerts-section">
+            <h3 class="collapsible">🎯 Strategy Alerts <span id="strategyAlertTotalCount" class="scalp-count-badge">0</span></h3>
+            <div class="collapsible-body open">
+              <p class="param-group-title">🌊 Liquidity Sweep Alerts</p>
+              <ul id="liquiditySweepAlertList" class="scalp-alert-list"></ul>
+              <span id="liquiditySweepCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Stop Loss Hunt Alerts</p>
+              <ul id="stopLossHuntAlertList" class="scalp-alert-list"></ul>
+              <span id="stopLossHuntCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📌 Failed Pin Bar Alerts</p>
+              <ul id="failedPinBarAlertList" class="scalp-alert-list"></ul>
+              <span id="failedPinBarCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">📐 Fib Golden Zone Alerts</p>
+              <ul id="fibScalpAlertList" class="scalp-alert-list"></ul>
+              <span id="fibScalpCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⚡ Power of 3 (ICT) Alerts</p>
+              <ul id="po3AlertList" class="scalp-alert-list"></ul>
+              <span id="po3Count" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🕤 NY Open Range Alerts</p>
+              <ul id="nyOpenRangeAlertList" class="scalp-alert-list"></ul>
+              <span id="nyOpenRangeAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🌍 Session Range Alerts (London Sweep)</p>
+              <ul id="sessionRangeAlertList" class="scalp-alert-list"></ul>
+              <span id="sessionRangeAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🔲 Grid Scalper MA Alerts</p>
+              <ul id="gridScalperMAAlertList" class="scalp-alert-list"></ul>
+              <span id="gridScalperMAAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🎯 Fair Value Gap Alerts</p>
+              <ul id="fvgStratAlertList" class="scalp-alert-list"></ul>
+              <span id="fvgStratAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">⏱ MTF Top-Down Alerts</p>
+              <ul id="mtfTopDownAlertList" class="scalp-alert-list"></ul>
+              <span id="mtfTopDownAlertCount" style="display:none;">0</span>
+
+              <p class="hint" style="margin-top:6px;">Recent signals from all custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
+            </div>
+          </section>
+
+          <!-- Live Scalp Alerts -->
+          <section class="box scalp-alerts-section">
+            <h3 class="collapsible">⚡ Live Scalp Alerts <span id="scalpAlertCount" class="scalp-count-badge">0</span></h3>
+            <div class="collapsible-body open">
+              <ul id="scalpAlertList" class="scalp-alert-list"></ul>
+              <p class="hint" style="margin-top:6px;">Recent scalp signals detected by the live scanner. Each shows direction, entry price, confluence score, and reasons.</p>
+            </div>
+          </section>
+
+          <!-- Advanced Parameters -->
+          <section class="box">
+            <h3 class="collapsible">🔧 Advanced Parameters</h3>
+            <div class="collapsible-body">
+              <label for="rangeDuration">Opening Range (min)</label>
+              <input type="number" id="rangeDuration" min="1" step="1" value="15" />
+
+              <label for="touchTolerance" class="spaced-label">Level Touch Tolerance (%)</label>
+              <input type="number" id="touchTolerance" min="5" max="30" step="1" value="15" />
+
+              <label for="dojiRatio" class="spaced-label">Doji Body Ratio (%)</label>
+              <input type="number" id="dojiRatio" min="5" max="40" step="1" value="20" />
+
+              <label for="lookbackPeriod" class="spaced-label">Swing Lookback (candles)</label>
+              <input type="number" id="lookbackPeriod" min="5" max="50" step="1" value="20" />
+            </div>
+          </section>
+
+          <!-- Chart Visual Enhancements -->
+          <section class="box">
+            <h3 class="collapsible">🎨 Chart Visual Enhancements</h3>
+            <div class="collapsible-body">
+
+              <label class="toggle-row"><input type="checkbox" id="sessionHeatmapToggle" /> Session Heatmap (Feature 17)</label>
+              <p class="hint">Colour chart candles by trading session: Asian (blue), London (green), NY (orange), Overlap (yellow).</p>
+
+              <label class="toggle-row"><input type="checkbox" id="candleAnnotationsToggle" checked /> Candle Pattern Annotations (Feature 6)</label>
+              <p class="hint">Draw doji, pin-bar, engulfing, and inside-bar labels directly on chart candles.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="volumeProfileToggle" /> Volume Profile (Feature 9)</label>
+              <p class="hint">Range-based horizontal histogram on chart right edge showing price activity distribution.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="fibExtensionsToggle" /> Fibonacci Extensions (Feature 10)</label>
+              <p class="hint">Draw 1.272, 1.414, 1.618, 2.0, 2.618 extension levels as potential take-profit targets.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="bosChochToggle" /> BOS / ChoCH Markers (Feature 5)</label>
+              <p class="hint">Draw Break-of-Structure and Change-of-Character labels on the chart at structural breaks.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="divergenceVisualToggle" /> RSI Divergence Lines (Feature 7)</label>
+              <p class="hint">Draw divergence lines connecting swing high/low on price chart when divergence is detected at retest.</p>
+
+            </div>
+          </section>
+
+          <!-- Named Settings Profiles -->
+          <section class="box">
+            <h3 class="collapsible">💾 Settings Profiles (Feature 4)</h3>
+            <div class="collapsible-body">
+              <p class="hint">Save the entire current settings snapshot under a named profile, then restore it with one click. Useful when switching between instruments or strategies.</p>
+              <div class="profile-save-row">
+                <input type="text" id="profileNameInput" placeholder="Profile name (e.g. R100 Scalp)" class="profile-name-input" maxlength="40" />
+                <button type="button" id="profileSaveBtn" class="btn-secondary">💾 Save</button>
+              </div>
+              <div id="profilesList" class="profiles-list"></div>
+            </div>
+          </section>
+
+          <!-- Backtesting Engine -->
+          <section class="box">
+            <h3 class="collapsible">🔁 Backtest Replay (Feature 1)</h3>
+            <div class="collapsible-body">
+              <p class="hint">Replay the currently loaded historical candles through all strategy detectors candle-by-candle. Connect first to load data, then start the backtest.</p>
+              <div class="backtest-controls">
+                <button type="button" id="backtestStartBtn" class="btn-primary">▶ Start Backtest</button>
+                <button type="button" id="backtestStopBtn" class="btn-secondary" disabled>⏹ Stop</button>
+                <span id="backtestStatus" class="backtest-status">Idle</span>
+              </div>
+              <label for="backtestSpeedInput" class="spaced-label">Step Speed (ms/candle)</label>
+              <input type="number" id="backtestSpeedInput" min="50" max="2000" step="50" value="200" />
+              <progress id="backtestProgress" value="0" max="100" class="backtest-progress"></progress>
+              <div id="backtestProgressLabel" class="backtest-progress-label">0% (0 / 0)</div>
+            </div>
+          </section>
+
+          <!-- Economic Calendar -->
+          <section class="box">
+            <h3 class="collapsible">📅 Economic Calendar / News Pause (Feature 11)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="newsPauseToggle" /> Pause Auto-Trades Around News</label>
+              <p class="hint">Block new trades within ±N minutes of high-impact economic events. Fetches the Forex Factory calendar weekly.</p>
+              <label for="newsPauseMinutesInput" class="spaced-label">Pause Window (minutes before/after event)</label>
+              <input type="number" id="newsPauseMinutesInput" min="1" max="60" step="1" value="5" />
+              <p class="hint" style="margin-top:4px;">News events are drawn as red dashed lines on the chart when loaded. Requires internet access.</p>
+            </div>
+          </section>
+
+          <!-- Multi-R Partial Exit Ladder -->
+          <section class="box">
+            <h3 class="collapsible">📊 Multi-R Exit Ladder (Feature 15)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="multiRLadderToggle" /> Enable Multi-R Partial Exit Ladder</label>
+              <p class="hint">Automatically exit portions of the trade at 1R, 2R, and 3R. Overrides the simple 1:1 partial TP when enabled. Default ladder: exit 25% at 1R, 25% at 2R, 50% at 3R (SL slides to BE after first partial exit).</p>
+            </div>
+          </section>
+
+          <!-- Multi-Symbol Scanner -->
+          <section class="box">
+            <h3 class="collapsible">📡 Multi-Symbol Scanner (Feature 8)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="scannerToggle" /> Enable Scanner Dashboard</label>
+              <p class="hint">Shows a live grid of symbols and their current indicator phases (WAITING / BREAKOUT / RETEST / TRADE).</p>
+              <p class="hint">Select symbols to include in the scanner watchlist.</p>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <button id="selectAllScannerSymbols" class="btn btn-xs">Select All</button>
+                <button id="deselectAllScannerSymbols" class="btn btn-xs">Deselect All</button>
+              </div>
+              <div id="scannerSymbolPicker" class="multi-symbol-picker">
+                <div class="ms-group-label">Volatility (1s)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ10V" /> Vol 10 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ15V" /> Vol 15 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ25V" /> Vol 25 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ30V" /> Vol 30 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ50V" /> Vol 50 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ75V" /> Vol 75 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ90V" /> Vol 90 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ100V" /> Vol 100 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ150V" /> Vol 150 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ200V" /> Vol 200 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ250V" /> Vol 250 (1s)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="1HZ300V" /> Vol 300 (1s)</label>
+                <div class="ms-group-label">Volatility (Std)</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_10" /> Vol 10 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_25" /> Vol 25 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_50" /> Vol 50 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_75" /> Vol 75 Std</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="R_100" /> Vol 100 Std</label>
+                <div class="ms-group-label">Boom Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM300N" /> Boom 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM500" /> Boom 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM600" /> Boom 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM900" /> Boom 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="BOOM1000" /> Boom 1000</label>
+                <div class="ms-group-label">Crash Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH300N" /> Crash 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH500" /> Crash 500</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH600" /> Crash 600</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH900" /> Crash 900</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="CRASH1000" /> Crash 1000</label>
+                <div class="ms-group-label">Jump Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD10" /> Jump 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD25" /> Jump 25</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD50" /> Jump 50</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD75" /> Jump 75</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="JD100" /> Jump 100</label>
+                <div class="ms-group-label">Step Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG" /> Step Index</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG2" /> Step 200</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG3" /> Step 300</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG4" /> Step 400</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="stpRNG5" /> Step 500</label>
+                <div class="ms-group-label">Daily Reset</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBULL" /> Bull Market</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="RDBEAR" /> Bear Market</label>
+                <div class="ms-group-label">DEX Indices</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600DN" /> DEX 600 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX600UP" /> DEX 600 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900DN" /> DEX 900 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX900UP" /> DEX 900 Up</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500DN" /> DEX 1500 Down</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DEX1500UP" /> DEX 1500 Up</label>
+                <div class="ms-group-label">Drift Switch</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI10" /> Drift Switch 10</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI20" /> Drift Switch 20</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="DSI30" /> Drift Switch 30</label>
+                <div class="ms-group-label">Forex Majors</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURUSD" /> EUR/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPUSD" /> GBP/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDJPY" /> USD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCHF" /> USD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDUSD" /> AUD/USD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDCAD" /> USD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDUSD" /> NZD/USD</label>
+                <div class="ms-group-label">Forex Crosses</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURGBP" /> EUR/GBP</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURJPY" /> EUR/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURAUD" /> EUR/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCAD" /> EUR/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURCHF" /> EUR/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxEURNZD" /> EUR/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPJPY" /> GBP/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPAUD" /> GBP/AUD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCAD" /> GBP/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPCHF" /> GBP/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxGBPNZD" /> GBP/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDJPY" /> AUD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDNZD" /> AUD/NZD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCAD" /> AUD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxAUDCHF" /> AUD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDJPY" /> NZD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCAD" /> NZD/CAD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxNZDCHF" /> NZD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADJPY" /> CAD/JPY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCADCHF" /> CAD/CHF</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxCHFJPY" /> CHF/JPY</label>
+                <div class="ms-group-label">Forex Exotics</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDMXN" /> USD/MXN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDNOK" /> USD/NOK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSEK" /> USD/SEK</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDSGD" /> USD/SGD</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDZAR" /> USD/ZAR</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDPLN" /> USD/PLN</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDTRY" /> USD/TRY</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxUSDHKD" /> USD/HKD</label>
+                <div class="ms-group-label">Commodities</div>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAUUSD" /> Gold (XAU)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXAGUSD" /> Silver (XAG)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPTUSD" /> Platinum (XPT)</label>
+                <label class="ms-check"><input type="checkbox" data-symbol="frxXPDUSD" /> Palladium (XPD)</label>
+              </div>
+              <p id="scannerSymbolCount" class="hint" style="margin-top:6px;">0 symbols selected</p>
+            </div>
+          </section>
+
+          <!-- Adaptive Confluence Weighting -->
+          <section class="box">
+            <h3 class="collapsible">🧠 Adaptive Confluence Weights (Feature 13)</h3>
+            <div class="collapsible-body">
+              <label class="toggle-row"><input type="checkbox" id="adaptiveConfluenceToggle" /> Enable Adaptive Weighting</label>
+              <p class="hint">Tracks empirical win rate per confluence factor. After 10+ trades per factor, shows colour-coded weight bar. High win-rate factors get more trust over time.</p>
+              <div id="adaptiveConfluenceTable" class="conf-weight-table"></div>
+            </div>
+          </section>
+
+          <!-- Telegram Integration -->
+          <section class="box">
+            <h3 class="collapsible">📤 Telegram Alerts</h3>
+            <div class="collapsible-body">
+              <label for="telegramBotToken">Bot Token</label>
+              <div class="input-with-toggle">
+                <input type="password" id="telegramBotToken" placeholder="123456:ABC-DEF…" autocomplete="off" />
+                <button type="button" id="telegramShowToken" class="token-toggle-btn" title="Show token">👁️</button>
+              </div>
+              <p class="hint">Get from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> on Telegram. Token is encrypted before saving.</p>
+
+              <label for="telegramChatId" class="spaced-label">Chat ID</label>
+              <input type="text" id="telegramChatId" placeholder="-100123456789" autocomplete="off" />
+              <p class="hint">Use a negative number for groups (e.g. <code>-5283135268</code>). DMs use a positive number.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramAutoSendToggle" /> Auto-Send on TRADE Phase</label>
+              <p class="hint">Automatically send chart screenshot + trade info when a signal fires.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramScalpAutoSendToggle" /> Auto-Send Live Scalp Alerts</label>
+              <p class="hint">Automatically send chart screenshot + scalp info to Telegram when the Live Scalp Scanner fires.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramOutcomeSendToggle" /> Auto-Send Trade Outcome (WIN/LOSS)</label>
+              <p class="hint">Automatically send a message to Telegram when a trade resolves as WIN or LOSS, with trade details and running win rate. <strong>Also controls the 1:1 Partial TP alert</strong> — the mid-trade notification sent when price reaches 1× risk (1:1 R:R). Both the outcome message and the 1:1 alert use this toggle.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramScalpOutcomeSendToggle" /> Auto-Send Scalp Outcome (WIN/LOSS)</label>
+              <p class="hint">Automatically send a message to Telegram when a scalp resolves as WIN or LOSS, with entry, SL, TP, R:R, and running scalp win rate.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramSessionRangeAutoSendToggle" /> Auto-Send Session Range Signals</label>
+              <p class="hint">Automatically send chart screenshot + details when a London sweep of the Asian range is detected or tight Asian range is identified.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramSessionRangeOutcomeSendToggle" /> Auto-Send Session Range Outcome (WIN/LOSS)</label>
+              <p class="hint">Automatically send a message when a session range trade (London sweep) resolves as WIN or LOSS. Auto-resets after SL/TP hit so new signals can be detected.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramStrategyAutoSendToggle" /> Auto-Send Strategy Alerts (Liq Sweep / SL Hunt / Failed Pin Bar / NY Range / Session Range / Grid Scalper MA)</label>
+              <p class="hint">Automatically send chart screenshot + strategy signal details (entry, SL, TP, R:R) to Telegram when any strategy fires — including Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, 🕤 NY Open Range, 🌍 Session Range (London Sweep), and 🔲 Grid Scalper MA.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramStrategyOutcomeSendToggle" /> Auto-Send Strategy Outcome (WIN/LOSS)</label>
+              <p class="hint">Automatically send a message when a custom strategy signal resolves as WIN or LOSS, with entry, SL, TP, lot size, and running strategy win rate.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="telegramProfitExitAlertToggle" /> Auto-Send Profit Exit Alert (protect gains after 1:1 profit)</label>
+              <p class="hint">Send a Telegram alert when a strategy or range trade that previously reached 1:1 profit (1× risk) reverses back to the entry price — reminding you to exit with profit before it turns into a loss. Applies to Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, NY Open Range, Session Range, and Grid Scalper MA.</p>
+
+              <div class="telegram-btn-row">
+                <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
+                <button id="telegramSendNowBtn" type="button" class="bar-btn telegram-send-btn" title="Send chart to Telegram now">📤 Send Now</button>
+                <button id="telegramSendScalpNowBtn" type="button" class="bar-btn telegram-send-scalp-btn" title="Manually send the latest ⚡ Live Scalp signal to group (works even if Auto-Send is off)">⚡ Send Live Scalp</button>
+                <button id="telegramSendStrategyNowBtn" type="button" class="bar-btn telegram-send-strategy-btn" title="Manually send the latest 🧠 Strategy signal to group (works even if Auto-Send is off)">🧠 Send Strategy</button>
+              </div>
+              <p id="telegramStatus" class="hint telegram-status"></p>
+            </div>
+          </section>
+
+        </div><!-- /tab-settings -->
+
+        <!-- ===== TAB: STATE ===== -->
+        <div id="tab-state" class="tab-pane" role="tabpanel" aria-labelledby="tab-state">
+
+          <!-- Indicator State -->
+          <section class="dashboard indicator-state">
+            <div class="section-header">
+              <span class="icon">📈</span>
+              <h3>Indicator State</h3>
+              <div class="symbol-nav">
+                <button id="prevSymbolBtn" type="button" class="sym-nav-btn" title="Previous Symbol">◀</button>
+                <span id="currentSymbolLabel" class="sym-nav-label">--</span>
+                <button id="nextSymbolBtn" type="button" class="sym-nav-btn" title="Next Symbol">▶</button>
+              </div>
+            </div>
+
+            <!-- Quick-glance grid at the top -->
+            <div class="state-grid-compact">
+              <div class="state-card">
+                <span class="state-card-label">Range High</span>
+                <span id="rangeHigh" class="state-card-value">--</span>
+              </div>
+              <div class="state-card">
+                <span class="state-card-label">Range Low</span>
+                <span id="rangeLow" class="state-card-value">--</span>
+              </div>
+              <div class="state-card">
+                <span class="state-card-label">Entry</span>
+                <span id="entryPrice" class="state-card-value">--</span>
+              </div>
+              <div class="state-card">
+                <span class="state-card-label">Stop Loss</span>
+                <span id="slPrice" class="state-card-value state-card-danger">--</span>
+              </div>
+              <div class="state-card">
+                <span class="state-card-label">Take Profit</span>
+                <span id="tpPrice" class="state-card-value state-card-success">--</span>
+              </div>
+              <div class="state-card">
+                <span class="state-card-label">R:R</span>
+                <span id="rrDisplay" class="state-card-value">--</span>
+              </div>
+              <div class="state-card" id="dollarRiskCard" style="display:none;">
+                <span class="state-card-label">$ Risk</span>
+                <span id="dollarRisk" class="state-card-value state-card-danger">--</span>
+              </div>
+              <div class="state-card" id="dollarRewardCard" style="display:none;">
+                <span class="state-card-label">$ Reward</span>
+                <span id="dollarReward" class="state-card-value state-card-success">--</span>
+              </div>
+              <div class="state-card" id="positionSizeCard" style="display:none;">
+                <span id="positionSizeLabel" class="state-card-label">Lot Size</span>
+                <span id="positionSize" class="state-card-value">--</span>
+              </div>
+              <div class="state-card" id="pipsCard" style="display:none;">
+                <span class="state-card-label">Pips at Risk</span>
+                <span id="pipsValue" class="state-card-value">--</span>
+              </div>
+            </div>
+
+            <hr class="param-divider" />
+
+            <div class="side-row">
+              <span>Next Action</span>
+              <span id="nextAction" class="status-badge disabled">--</span>
+            </div>
+            <div class="side-row">
+              <span>EMA Filter</span>
+              <span id="emaFilterStatus" class="env-label">OFF</span>
+            </div>
+            <div class="side-row">
+              <span>HTF Trend</span>
+              <span id="htfTrend" class="status-badge disabled">--</span>
+            </div>
+            <div class="side-row">
+              <span>ATR(14)</span>
+              <span id="atrDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Breakout Strength</span>
+              <span id="breakoutStrength" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Confluence Score</span>
+              <span id="confluenceDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>S/R Confluence</span>
+              <span id="srConfluenceDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>RSI(14)</span>
+              <span id="rsiDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Volume Spike</span>
+              <span id="volumeSpikeDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Session</span>
+              <span id="sessionDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Fib Level</span>
+              <span id="fibRetestDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>MACD Hist</span>
+              <span id="macdDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>BB Squeeze</span>
+              <span id="bbSqueezeDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>ADX(14)</span>
+              <span id="adxDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Stoch %K</span>
+              <span id="stochDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Volatility</span>
+              <span id="volatilityRegime" class="env-label">--</span>
+            </div>
+
+            <!-- Session Ranges Display -->
+            <div class="side-row">
+              <span>Asian Range</span>
+              <span id="sessionRangeAsianDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Asian Tight</span>
+              <span id="asianTightDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>London Range</span>
+              <span id="sessionRangeLondonDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>NY Range</span>
+              <span id="sessionRangeNYDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>London Sweep</span>
+              <span id="londonSweepDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Sweep Trade</span>
+              <span id="sessionRangeTradeDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Sweep Entry</span>
+              <span id="sessionRangeEntryDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Sweep SL</span>
+              <span id="sessionRangeSLDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Sweep TP</span>
+              <span id="sessionRangeTPDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Sweep R:R</span>
+              <span id="sessionRangeRRDisplay" class="env-label">--</span>
+            </div>
+
+            <!-- Signal Strength Gauge -->
+            <div class="side-row">
+              <span>Signal Strength</span>
+              <span id="signalStrengthLabel" class="env-label">--</span>
+            </div>
+            <div class="gauge-bar">
+              <div id="signalStrengthGauge" class="gauge-fill"></div>
+            </div>
+
+            <hr class="param-divider" />
+
+            <div class="side-row">
+              <span>Retest</span>
+              <span id="retestStatus" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Confirmation</span>
+              <span id="confirmStatus" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Trailing SL</span>
+              <span id="trailingSLDisplay" class="env-label">--</span>
+            </div>
+            <div class="side-row">
+              <span>Partial TP</span>
+              <span id="partialTpDisplay" class="env-label">--</span>
+            </div>
+          </section>
+
+        </div><!-- /tab-state -->
+
+        <!-- ===== TAB: STATS ===== -->
+        <div id="tab-stats" class="tab-pane" role="tabpanel" aria-labelledby="tab-stats">
+
+          <!-- Signal Accuracy Stats -->
+          <section class="dashboard">
+            <div class="section-header">
+              <span class="icon">🎯</span>
+              <h3>Signal Accuracy</h3>
+            </div>
+            <div class="stats-grid-compact">
+              <div class="stat-card stat-card-neutral">
+                <span class="stat-card-value" id="signalCount">0</span>
+                <span class="stat-card-label">Signals</span>
+              </div>
+              <div class="stat-card stat-card-success">
+                <span class="stat-card-value" id="signalWins">0</span>
+                <span class="stat-card-label">Wins</span>
+              </div>
+              <div class="stat-card stat-card-danger">
+                <span class="stat-card-value" id="signalLosses">0</span>
+                <span class="stat-card-label">Losses</span>
+              </div>
+              <div class="stat-card stat-card-primary">
+                <span class="stat-card-value" id="signalWinRate">0%</span>
+                <span class="stat-card-label">Win Rate</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Per-Strategy Stats -->
+          <section class="dashboard">
+            <div class="section-header">
+              <span class="icon">📊</span>
+              <h3>Strategy Win Rates</h3>
+            </div>
+            <div id="strategyWinRateGrid" style="display:flex;flex-direction:column;gap:4px;font-size:0.78rem;">
+              <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px 8px;align-items:center;padding:2px 0;opacity:0.6;font-weight:600;">
+                <span>Strategy</span><span>W</span><span>L</span><span>Rate</span>
+              </div>
+              <div id="stratWR_breakout" class="strat-wr-row" data-label="🔲 Breakout"></div>
+              <div id="stratWR_liquiditySweep" class="strat-wr-row" data-label="🌊 Liq. Sweep"></div>
+              <div id="stratWR_stopLossHunt" class="strat-wr-row" data-label="🎯 SL Hunt"></div>
+              <div id="stratWR_failedPinBar" class="strat-wr-row" data-label="📌 Failed PB"></div>
+              <div id="stratWR_fibScalp" class="strat-wr-row" data-label="📐 Fib Golden"></div>
+              <div id="stratWR_po3" class="strat-wr-row" data-label="⚡ Power of 3"></div>
+              <div id="stratWR_nyOpenRange" class="strat-wr-row" data-label="🕤 NY Open"></div>
+              <div id="stratWR_sessionRange" class="strat-wr-row" data-label="🌍 Session Rng"></div>
+              <div id="stratWR_gridScalper" class="strat-wr-row" data-label="🔲 Grid Scalper"></div>
+              <div id="stratWR_fvgStrat" class="strat-wr-row" data-label="🎯 FVG"></div>
+              <div id="stratWR_liveScalp" class="strat-wr-row" data-label="⚡ Live Scalp"></div>
+              <div id="stratWR_mtfTopDown" class="strat-wr-row" data-label="⏱ MTF Top-Down"></div>
+              <div id="stratWR_orderblock" class="strat-wr-row" data-label="🏦 Orderblock"></div>
+            </div>
+          </section>
+
+          <!-- Equity Curve (Feature 3) -->
+          <section class="box">
+            <div class="section-header"><span class="icon">📈</span><h3>Equity Curve (Feature 3)</h3></div>
+            <canvas id="equityCurveCanvas" class="equity-curve-canvas"></canvas>
+            <p class="hint" style="margin-top:4px;">Cumulative P/L from auto-trade history. DD = max drawdown, PF = profit factor, E = expectancy per trade.</p>
+          </section>
+
+          <!-- P&L Breakdown (Feature 16) -->
+          <section class="box">
+            <div class="section-header"><span class="icon">📊</span><h3>P&amp;L Breakdown (Feature 16)</h3></div>
+            <div id="plBreakdownTable" class="pl-breakdown-container"></div>
+          </section>
+
+          <!-- Multi-Symbol Scanner (Feature 8) -->
+          <section class="box" id="scannerPanel" style="display:none;">
+            <div class="section-header"><span class="icon">📡</span><h3>Symbol Scanner (Feature 8)</h3></div>
+            <div id="scannerGrid" class="scanner-grid"></div>
+          </section>
+
+          <!-- Live Scalp Stats -->
+          <section class="dashboard">
+            <div class="section-header">
+              <span class="icon">⚡</span>
+              <h3>Live Scalp Stats</h3>
+            </div>
+            <div class="stats-grid-compact">
+              <div class="stat-card stat-card-neutral">
+                <span class="stat-card-value" id="scalpStatsTotal">0</span>
+                <span class="stat-card-label">Total Alerts</span>
+              </div>
+              <div class="stat-card stat-card-success">
+                <span class="stat-card-value" id="scalpStatsWins">0</span>
+                <span class="stat-card-label">Wins</span>
+              </div>
+              <div class="stat-card stat-card-danger">
+                <span class="stat-card-value" id="scalpStatsLosses">0</span>
+                <span class="stat-card-label">Losses</span>
+              </div>
+              <div class="stat-card stat-card-primary">
+                <span class="stat-card-value" id="scalpStatsWinRate">0%</span>
+                <span class="stat-card-label">Win Rate</span>
+              </div>
+              <div class="stat-card stat-card-success">
+                <span class="stat-card-value" id="scalpStatsBull">0</span>
+                <span class="stat-card-label">Bull</span>
+              </div>
+              <div class="stat-card stat-card-danger">
+                <span class="stat-card-value" id="scalpStatsBear">0</span>
+                <span class="stat-card-label">Bear</span>
+              </div>
+              <div class="stat-card stat-card-primary">
+                <span class="stat-card-value" id="scalpStatsAvgConf">0/7</span>
+                <span class="stat-card-label">Avg Confluence</span>
+              </div>
+              <div class="stat-card stat-card-primary">
+                <span class="stat-card-value" id="scalpStatsBestConf">0/7</span>
+                <span class="stat-card-label">Best Confluence</span>
+              </div>
+              <div class="stat-card stat-card-neutral">
+                <span class="stat-card-value" id="scalpStatsLastTime">--</span>
+                <span class="stat-card-label">Last Alert</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Signal Log -->
+          <section class="history">
+            <div class="section-header">
+              <span class="icon">📋</span>
+              <h3>Signal Log</h3>
+            </div>
+            <ul id="signalLog"></ul>
+          </section>
+
+          <!-- Recommended Settings -->
+          <section class="dashboard recommended-settings">
+            <h3 class="collapsible">💡 Recommended Settings</h3>
+            <div class="collapsible-body">
+              <p id="recMarketLabel" class="hint" style="margin-bottom:6px;font-weight:600;">Best signal configuration for higher win rate:</p>
+              <div class="rec-header-row">
+                <span class="rec-col-name"></span>
+                <span class="rec-col-label">Rec</span>
+                <span class="rec-col-label">Active</span>
+              </div>
+              <div class="rec-row"><span class="rec-name">Timeframe</span><span id="recRec_timeframe" class="status-badge warning rec-badge-rec">5 min</span><span id="recActive_timeframe" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">Risk : Reward</span><span id="recRec_rr" class="status-badge warning rec-badge-rec">1:2–1:3</span><span id="recActive_rr" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">Opening Range</span><span id="recRec_range" class="status-badge warning rec-badge-rec">15 min</span><span id="recActive_range" class="env-label rec-badge-active">--</span></div>
+              <div class="rec-row"><span class="rec-name">EMA Filter</span><span id="recRec_ema" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_ema" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">HTF Filter</span><span id="recRec_htf" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_htf" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">ATR Tolerance</span><span id="recRec_atr" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_atr" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Trailing Stop</span><span id="recRec_trailing" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_trailing" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Partial TP</span><span id="recRec_partialTp" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_partialTp" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">False Breakout</span><span id="recRec_falseBreakout" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_falseBreakout" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Min R:R Gate</span><span id="recRec_minRR" class="status-badge bull rec-badge-rec">1:2 ✅</span><span id="recActive_minRR" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">RSI at Retest</span><span id="recRec_rsiFilter" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_rsiFilter" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Volume Spike</span><span id="recRec_volSpike" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_volSpike" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Session Filter</span><span id="recRec_session" class="status-badge bull rec-badge-rec">London+NY ✅</span><span id="recActive_session" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Fibonacci Retest</span><span id="recRec_fib" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_fib" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">MACD Momentum</span><span id="recRec_macd" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_macd" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">BB Squeeze</span><span id="recRec_bbSqueeze" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_bbSqueeze" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">ADX Trending</span><span id="recRec_adx" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_adx" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div class="rec-row"><span class="rec-name">Stochastic</span><span id="recRec_stoch" class="status-badge bull rec-badge-rec">ON ✅</span><span id="recActive_stoch" class="status-badge disabled rec-badge-active">OFF</span></div>
+              <div id="recMarketSignals" class="rec-market-signals" style="margin-top:8px;padding:6px;border-radius:6px;background:var(--bg-base);display:none;">
+                <p class="hint" style="margin:0;"><strong>🎯 Key Signals:</strong></p>
+                <ul id="recSignalsList" class="hint" style="margin:4px 0 0 16px;padding:0;"></ul>
+              </div>
+              <p id="recHintText" class="hint" style="margin-top:8px;">
+                <strong>Why:</strong> EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise.
+                ATR tolerance adapts retest detection to volatility.
+                Trailing stop locks in profits on extended moves.
+                Partial TP at 1:1 secures gains and moves SL to breakeven.
+                False breakout filter prevents entering on fake-outs.
+                Min R:R gate ensures every trade has at least 1:2 risk-reward.
+                RSI at retest confirms the pullback has room to reverse.
+                Volume spike filter ensures strong momentum behind breakouts.
+                Session filter avoids low-liquidity periods.
+                Fibonacci confluence adds a powerful S/R layer at retest.
+                Pin bar, inside bar, and morning/evening star patterns
+                provide additional confirmation beyond basic engulfing.
+                Confluence score (0-16) gauges overall setup quality.
+              </p>
+            </div>
+          </section>
+
+        </div><!-- /tab-stats -->
+
+      </div><!-- /panelContent -->
+    </div>
+
+    <!-- ===== RIGHT PANEL ===== -->
+    <div class="right-panel">
+
+      <!-- Multi-Symbol Grid (populated dynamically by JS) -->
+      <section id="multiSymbolSection" class="multi-symbol-section" style="display:none;">
+        <div class="multi-symbol-header">
+          <h3>📊 Multi-Symbol Analysis</h3>
+          <div class="multi-symbol-actions">
+            <button id="connectAllBtn" type="button" class="bar-btn bar-btn-connect" title="Connect All Panels">▶ All</button>
+            <button id="disconnectAllBtn" type="button" class="bar-btn bar-btn-disconnect" title="Disconnect All Panels">⏹ All</button>
+          </div>
+        </div>
+        <div id="multiSymbolGrid" class="multi-symbol-grid"></div>
+      </section>
+
+      <!-- Live Scalp Alert Banner (slides in from top when scalp detected) -->
+      <div id="scalpAlertBanner" class="scalp-banner">
+        <span class="scalp-banner-icon">⚡</span>
+        <span id="scalpAlertBannerText" class="scalp-banner-text">--</span>
+      </div>
+
+      <!-- Main Chart -->
+      <section class="chart-embed">
+        <canvas id="mainChart" width="900" height="500"></canvas>
+      </section>
+
+      <!-- Legend + EMA toggle -->
+      <section class="dashboard chart-legend">
+        <!-- Candle colours -->
+        <div class="legend-group-label">Candles</div>
+        <div class="legend-row">
+          <span class="legend-swatch bull-candle-swatch"></span> Bullish candle (close &gt; open)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch bear-candle-swatch"></span> Bearish candle (close &lt; open)
+        </div>
+
+        <!-- Phases / zones -->
+        <div class="legend-group-label">Phases &amp; Zones</div>
+        <div class="legend-row">
+          <span class="legend-swatch range-swatch"></span> Opening Range
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch breakout-bull-swatch"></span> Bullish Breakout
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch breakout-bear-swatch"></span> Bearish Breakout
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch retest-swatch"></span> Retest Zone
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch confirm-swatch"></span> Confirmation Zone
+        </div>
+
+        <!-- Trade levels -->
+        <div class="legend-group-label">Trade Levels</div>
+        <div class="legend-row">
+          <span class="legend-swatch entry-swatch"></span> Entry line
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch sl-swatch"></span> Stop Loss (SL)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch tp-swatch"></span> Take Profit (TP)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch partial-tp-swatch"></span> Partial TP — 1:1 level
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch trailing-sl-swatch"></span> Trailing Stop Loss
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch tesla-swatch"></span> Tesla T1 / T2 / T3 (3R / 6R / 9R)
+        </div>
+
+        <!-- Overlays -->
+        <div class="legend-group-label">Overlays</div>
+        <div class="legend-row">
+          <span class="legend-swatch ema-fast-swatch"></span> EMA 8 (fast trend)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch ema-slow-swatch"></span> EMA 21 (slow trend)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch htf-ema-swatch"></span> EMA 100 (HTF trend proxy)
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch bollinger-swatch"></span> Bollinger Bands
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch live-price-swatch"></span> Live Price line
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch scalp-swatch"></span> Live Scalp signal
+        </div>
+
+        <!-- Candle annotations -->
+        <div class="legend-group-label">Candle Annotations</div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#94a3b8;">⊙</span> Doji — indecision, body &lt; 10% of range
+        </div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#22c55e;">🔨</span> Hammer / Pin Bar — long lower wick (reversal up)
+        </div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#ef4444;">⭐</span> Shooting Star — long upper wick (reversal down)
+        </div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#22c55e;">▲</span> Bullish Engulfing — bull candle engulfs prior bear
+        </div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#ef4444;">▼</span> Bearish Engulfing — bear candle engulfs prior bull
+        </div>
+        <div class="legend-row">
+          <span class="legend-annotation" style="color:#a78bfa;">IB</span> Inside Bar — candle within prior candle's range
+        </div>
+
+        <div class="legend-row ema-toggle-row">
+          <label><input type="checkbox" id="emaToggle" /> Show EMA</label>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- ================= TELEGRAM GROUP SECTION ================= -->
+<section class="tg-section" id="telegramSection" style="display:none;">
+  <div class="tg-card" id="telegramCard">
+    <div class="tg-icon">📱</div>
+    <div class="tg-body">
+      <h3 class="tg-title">Join the Private Telegram Trading Group</h3>
+      <p class="tg-subtitle">Get real-time trade alerts and signals directly in Telegram.</p>
+
+      <!-- Unlinked state -->
+      <div id="tgUnlinkedState">
+        <p class="tg-hint">Click below to connect via our Telegram bot. Tap <strong>START</strong> in the bot when it opens — you will then receive a private group invite link directly in Telegram.</p>
+        <button id="tgLinkBtn" type="button" class="tg-btn">
+          <span>🔗 Link Telegram &amp; Join Group</span>
+        </button>
+        <div id="tgLinkSteps" style="display:none;" class="tg-hint tg-link-steps">
+          <strong>Step 1:</strong> The Telegram bot has opened in a new tab.<br>
+          <strong>Step 2:</strong> Tap the <strong>START</strong> button in the bot.<br>
+          <strong>Step 3:</strong> The bot will send you a group invite link — tap it to join! ✅
+        </div>
+        <div id="tgError" class="tg-error"></div>
+      </div>
+
+      <!-- Linked state -->
+      <div id="tgLinkedState" style="display:none;">
+        <p class="tg-linked-msg">
+          ✅ Linked as <strong id="tgLinkedUsername"></strong>
+        </p>
+        <p class="tg-hint" id="tgLinkedHint">Your Telegram account is connected. You are in the private trading group for the duration of your active subscription.</p>
+        <button id="tgRequestInviteBtn" type="button" class="tg-btn tg-btn-invite">
+          📨 Resend Group Invite
+        </button>
+        <div id="tgInviteMsg" class="tg-invite-msg" style="display:none;"></div>
+        <button id="tgUnlinkBtn" type="button" class="tg-btn tg-btn-ghost">
+          🔓 Unlink Telegram
+        </button>
+        <div id="tgUnlinkError" class="tg-error"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRICING SECTION ================= -->
+<section class="pricing-section" id="pricing">
+  <h2 class="pricing-title">💎 Subscription Plans</h2>
+  <p class="pricing-subtitle">Unlock full access to all strategies and real-time signals.</p>
+  <div class="pricing-grid">
+
+    <div class="pricing-card">
+      <div class="pricing-badge">Flexible</div>
+      <h3 class="pricing-plan-name">Weekly</h3>
+      <div class="pricing-price">
+        <span class="pricing-amount">$9.99</span>
+        <span class="pricing-period">/ week</span>
+      </div>
+      <ul class="pricing-features">
+        <li>✅ All 10 trading strategies</li>
+        <li>✅ Real-time indicator signals</li>
+        <li>✅ Multi-symbol bot access</li>
+        <li>✅ CSV &amp; PDF export</li>
+        <li>✅ 7-day access</li>
+      </ul>
+      <a href="https://wa.me/18762354053?text=Hi%2C%20I%27d%20like%20to%20subscribe%20to%20the%20Weekly%20plan%20%28%249.99%29"
+         target="_blank" rel="noopener noreferrer" class="pricing-btn">
+        Subscribe via WhatsApp
+      </a>
+    </div>
+
+    <div class="pricing-card pricing-card-featured">
+      <div class="pricing-badge pricing-badge-featured">Best Value</div>
+      <h3 class="pricing-plan-name">Monthly</h3>
+      <div class="pricing-price">
+        <span class="pricing-amount">$29.99</span>
+        <span class="pricing-period">/ month</span>
+      </div>
+      <ul class="pricing-features">
+        <li>✅ All 10 trading strategies</li>
+        <li>✅ Real-time indicator signals</li>
+        <li>✅ Multi-symbol bot access</li>
+        <li>✅ CSV &amp; PDF export</li>
+        <li>✅ 30-day access</li>
+        <li>🎁 Save ~25% vs weekly</li>
+      </ul>
+      <a href="https://wa.me/18762354053?text=Hi%2C%20I%27d%20like%20to%20subscribe%20to%20the%20Monthly%20plan%20%28%2429.99%29"
+         target="_blank" rel="noopener noreferrer" class="pricing-btn pricing-btn-featured">
+        Subscribe via WhatsApp
+      </a>
+    </div>
+
+  </div>
+  <p class="pricing-note">
+    After payment, your account will be activated within 24 hours.
+    Contact <a href="mailto:admin@dsitservicesja.com">admin@dsitservicesja.com</a> for support.
+  </p>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
+<script src="../auth.js"></script>
+<script src="indicator.js"></script>
+<script>
+  /* Mobile panel toggle */
+  (function() {
+    const btn = document.getElementById("panelToggleBtn");
+    const content = document.getElementById("panelContent");
+    if (btn && content) {
+      btn.addEventListener("click", () => {
+        content.classList.toggle("panel-open");
+        btn.textContent = content.classList.contains("panel-open") ? "✕ Close" : "⚙️ Settings";
+      });
+    }
+  })();
+
+  /* Sidebar tab switching */
+  (function() {
+    const tabs = document.querySelectorAll(".sidebar-tab");
+    const panes = document.querySelectorAll(".tab-pane");
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        tabs.forEach(t => { t.classList.remove("active"); t.setAttribute("aria-selected", "false"); });
+        panes.forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        tab.setAttribute("aria-selected", "true");
+        const target = document.getElementById(tab.dataset.tab);
+        if (target) target.classList.add("active");
+      });
+    });
+  })();
+
+  /* Mirror win rate to status bar */
+  (function() {
+    const src = document.getElementById("signalWinRate");
+    const dst = document.getElementById("statusBarWinRate");
+    if (!src || !dst) return;
+    const obs = new MutationObserver(() => { dst.textContent = src.textContent; });
+    obs.observe(src, { childList: true, characterData: true, subtree: true });
+  })();
+
+  /* ---- Show Admin nav link for admin users ---- */
+  (function () {
+    try {
+      const u = JSON.parse(sessionStorage.getItem("itguru_auth_user") || "null");
+      if (u && u.role === "admin") {
+        const item = document.getElementById("adminNavItem");
+        if (item) item.style.display = "";
+      }
+    } catch (_) {}
+  })();
+</script>
+
+<!-- ================= TELEGRAM INTEGRATION ================= -->
+<script>
+  (function () {
+    const AUTH_API = (typeof window !== "undefined" && window.ITGURU_AUTH_API_BASE)
+      ? window.ITGURU_AUTH_API_BASE.replace(/\/auth\/?$/, "")
+      : "https://trading.dsitservicesja.com/api";
+
+    async function apiCall(path, options = {}) {
+      const token = ITGuruAuth.getToken();
+      const headers = {
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": "Bearer " + token } : {}),
+        ...(options.headers || {}),
+      };
+      const resp = await fetch(AUTH_API + path, { ...options, headers });
+      if (resp.status === 404 && !path.endsWith(".php")) {
+        return fetch(AUTH_API + path + ".php", { ...options, headers });
+      }
+      return resp;
+    }
+
+    function refreshTelegramUI() {
+      const section  = document.getElementById("telegramSection");
+      const unlinked = document.getElementById("tgUnlinkedState");
+      const linked   = document.getElementById("tgLinkedState");
+      const nameEl   = document.getElementById("tgLinkedUsername");
+      const hintEl   = document.getElementById("tgLinkedHint");
+
+      if (!section) return;
+
+      const u = ITGuruAuth.getUser();
+      if (!u) {
+        section.style.display = "none";
+        return;
+      }
+
+      /* Show section for active subscribers and admins only */
+      const eligible = u.subscription_status === "active" || u.role === "admin";
+      section.style.display = eligible ? "" : "none";
+      if (!eligible) return;
+
+      if (u.telegram_linked) {
+        unlinked.style.display = "none";
+        linked.style.display   = "";
+        if (nameEl) {
+          nameEl.textContent = u.telegram_username ? "@" + u.telegram_username : "Telegram";
+        }
+        if (hintEl) {
+          hintEl.textContent = u.subscription_status === "active"
+            ? "Your Telegram account is connected. You are in the private trading group for the duration of your active subscription."
+            : "Your Telegram account is connected. Activate a subscription to gain access to the private trading group.";
+        }
+      } else {
+        unlinked.style.display = "";
+        linked.style.display   = "none";
+      }
+    }
+
+    /* ── Link button ── */
+    const linkBtn  = document.getElementById("tgLinkBtn");
+    const errEl    = document.getElementById("tgError");
+    if (linkBtn) {
+      linkBtn.addEventListener("click", async () => {
+        if (errEl) errEl.textContent = "";
+        linkBtn.disabled = true;
+        linkBtn.innerHTML = "<span>Generating link…</span>";
+        try {
+          const resp = await apiCall("/telegram/link_token", { method: "POST" });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            throw new Error(data.error || "Failed to generate link token");
+          }
+          /* Open the bot link in a new tab */
+          window.open(data.bot_link, "_blank", "noopener,noreferrer");
+          linkBtn.innerHTML = "<span>✅ Bot opened — tap START in Telegram to complete</span>";
+          const stepsEl = document.getElementById("tgLinkSteps");
+          if (stepsEl) stepsEl.style.display = "";
+          /* Re-verify after a short delay to pick up any changes. */
+          const TG_RECHECK_DELAY_MS = 8000;
+          setTimeout(async () => {
+            await ITGuruAuth.verify();
+            refreshTelegramUI();
+            linkBtn.disabled = false;
+            linkBtn.innerHTML = "<span>🔗 Link Telegram &amp; Join Group</span>";
+            if (stepsEl) stepsEl.style.display = "none";
+          }, TG_RECHECK_DELAY_MS);
+        } catch (ex) {
+          if (errEl) errEl.textContent = ex.message || "An error occurred";
+          linkBtn.disabled = false;
+          linkBtn.innerHTML = "<span>🔗 Link Telegram &amp; Join Group</span>";
+        }
+      });
+    }
+
+    /* ── Request Invite button (for already-linked active users) ── */
+    const requestInviteBtn = document.getElementById("tgRequestInviteBtn");
+    const inviteMsgEl      = document.getElementById("tgInviteMsg");
+    if (requestInviteBtn) {
+      requestInviteBtn.addEventListener("click", async () => {
+        if (inviteMsgEl) { inviteMsgEl.style.display = "none"; inviteMsgEl.textContent = ""; }
+        requestInviteBtn.disabled = true;
+        requestInviteBtn.textContent = "Sending…";
+        try {
+          const resp = await apiCall("/telegram/request_invite", { method: "POST" });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            throw new Error(data.error || "Failed to send invite");
+          }
+          if (inviteMsgEl) {
+            inviteMsgEl.textContent = "✅ " + (data.message || "Invite sent! Check your Telegram messages.");
+            inviteMsgEl.style.display = "";
+            inviteMsgEl.className = "tg-invite-msg tg-invite-msg-ok";
+          }
+        } catch (ex) {
+          if (inviteMsgEl) {
+            inviteMsgEl.textContent = "❌ " + (ex.message || "An error occurred");
+            inviteMsgEl.style.display = "";
+            inviteMsgEl.className = "tg-invite-msg tg-invite-msg-err";
+          }
+        } finally {
+          requestInviteBtn.disabled = false;
+          requestInviteBtn.textContent = "📨 Resend Group Invite";
+        }
+      });
+    }
+
+    /* ── Unlink button ── */
+    const unlinkBtn   = document.getElementById("tgUnlinkBtn");
+    const unlinkErrEl = document.getElementById("tgUnlinkError");
+    if (unlinkBtn) {
+      unlinkBtn.addEventListener("click", async () => {
+        if (!confirm("Unlink your Telegram account? You will lose access to the Telegram group.")) return;
+        if (unlinkErrEl) unlinkErrEl.textContent = "";
+        unlinkBtn.disabled = true;
+        unlinkBtn.textContent = "Unlinking…";
+        try {
+          const resp = await apiCall("/telegram/unlink", { method: "POST" });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            throw new Error(data.error || "Failed to unlink");
+          }
+          /* Update local session user to reflect unlinked state */
+          const u = ITGuruAuth.getUser();
+          if (u) {
+            u.telegram_linked   = false;
+            u.telegram_username = null;
+            sessionStorage.setItem("itguru_auth_user", JSON.stringify(u));
+          }
+          refreshTelegramUI();
+        } catch (ex) {
+          if (unlinkErrEl) unlinkErrEl.textContent = ex.message || "An error occurred";
+          unlinkBtn.disabled = false;
+          unlinkBtn.textContent = "🔓 Unlink Telegram";
+        }
+      });
+    }
+
+    /* ── Initial render and subscribe to login changes ── */
+    document.addEventListener("DOMContentLoaded", () => {
+      refreshTelegramUI();
+    });
+
+    /* Re-render whenever auth state updates (e.g. after login/verify) */
+    const _origUpdateNavUI = ITGuruAuth.updateNavUI;
+    if (_origUpdateNavUI) {
+      ITGuruAuth.updateNavUI = function () {
+        _origUpdateNavUI.call(ITGuruAuth);
+        refreshTelegramUI();
+      };
+    }
+  })();
+</script>
+
+<!-- On-Screen Toast Notifications -->
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+<!-- Feature 14: PWA Service Worker Registration -->
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").then((reg) => {
+      console.log("IT Guru SW registered, scope:", reg.scope);
+    }).catch((err) => {
+      console.info("SW registration skipped:", err.message);
+    });
+  });
+}
+</script>
+
+</body>
+</html>

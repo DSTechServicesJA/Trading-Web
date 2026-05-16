@@ -1948,23 +1948,11 @@ body.light-theme .ms-card-footer {
   border-bottom: 1px solid var(--glass-border);
   background: var(--bg-card);
 }
-.ms-card-symbol-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .ms-card-symbol {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--heading);
-}
-.ms-card-tf {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.3px;
-  opacity: 0.85;
 }
 .ms-card-badges {
   display: flex;
