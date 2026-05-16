@@ -8316,6 +8316,10 @@ function detectStopLossHunt() {
  * Run the stop loss hunt scanner and handle alerting.
  */
 function processStopLossHunt() {
+  /* Keep one active stop-loss-hunt setup at a time to avoid repeated alerts
+     while the current setup is still pending outcome (SL/TP). */
+  if (stopLossHuntHistory.some(s => s.result === "PENDING")) return;
+
   const signal = detectStopLossHunt();
   if (!signal) return;
 
@@ -11233,19 +11237,30 @@ async function sendStrategyOutcomeTelegram(signal) {
 
   /* ── WIN / LOSS ── */
   try {
-    const icon = result === "WIN" ? "✅" : "❌";
+    const isBreakevenOutcome = (s) => {
+      if (!s || s.result !== "LOSS") return false;
+      const raw = s.exitPrice != null ? s.exitPrice : s.sl;
+      return raw != null &&
+        s.entry != null &&
+        Math.abs(raw - s.entry) < PRICE_EPSILON &&
+        (s.partialTpHit === true || s._breakeven === true);
+    };
+
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
     /* Derive exit price: explicit value takes priority; fall back to TP (WIN) or SL (LOSS). */
     const rawExit = signal.exitPrice != null ? signal.exitPrice
       : result === "WIN" ? signal.tp
       : signal.sl;
+    const isBreakeven = isBreakevenOutcome(signal);
+    const icon = result === "WIN" ? "✅" : (isBreakeven ? "⚖️" : "❌");
+    const resultLabel = result === "WIN" ? "WIN" : (isBreakeven ? "BREAKEVEN" : "LOSS");
     const exitStr  = rawExit  != null ? fmtPrice(rawExit, activeSym)  : "--";
     const slStr    = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
     const tpStr    = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
     const rrStr    = signal.rr != null ? "1:" + fmt(signal.rr, 1) : "--";
 
     const lines = [];
-    lines.push(`${icon} <b>${stratLabel} ${result}</b> — ${dir} ${sym}`);
+    lines.push(`${icon} <b>${stratLabel} ${resultLabel}</b> — ${dir} ${sym}`);
     lines.push("");
     lines.push(`<b>📍 Entry:</b> ${entryStr}`);
     lines.push(`<b>🏁 Exit:</b> ${exitStr}`);
@@ -11280,7 +11295,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     }
 
     /* Win/loss tally across ALL strategy histories — exclude EXPIRED signals */
-    let totalW = 0, totalL = 0;
+    let totalW = 0, totalL = 0, totalB = 0;
     const allStratHistories = [
       liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
       po3History, fibScalpHistory, gridScalperMAHistory,
@@ -11290,7 +11305,7 @@ async function sendStrategyOutcomeTelegram(signal) {
        Note: this function is only called for secondary strategies — the main breakout
        strategy uses sendTradeOutcomeTelegram(), so signal.type for breakout signals is
        undefined and thisHistory will correctly be null (no per-strategy row shown). */
-    let thisW = 0, thisL = 0;
+    let thisW = 0, thisL = 0, thisB = 0;
     const thisHistory = signal.type === "liquidity_sweep" ? liquiditySweepHistory
       : signal.type === "stop_loss_hunt" ? stopLossHuntHistory
       : signal.type === "failed_pin_bar" ? failedPinBarHistory
@@ -11304,21 +11319,24 @@ async function sendStrategyOutcomeTelegram(signal) {
       const isThis = h === thisHistory;
       for (const s of h) {
         if (s.result === "WIN") { totalW++; if (isThis) thisW++; }
-        else if (s.result === "LOSS") { totalL++; if (isThis) thisL++; }
+        else if (s.result === "LOSS") {
+          if (isBreakevenOutcome(s)) { totalB++; if (isThis) thisB++; }
+          else { totalL++; if (isThis) thisL++; }
+        }
         /* EXPIRED signals are intentionally excluded — SL was not hit */
       }
     }
     const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
     lines.push("");
     /* Show this strategy's own record first, then combined */
-    if (thisHistory && (thisW + thisL) > 0) {
-      const thisWr = (thisW / (thisW + thisL) * 100).toFixed(1) + "%";
-      lines.push(`${stratEmoji} <b>${stratLabel} Record:</b> ${thisW}W / ${thisL}L (${thisWr})`);
+    if (thisHistory && (thisW + thisL + thisB) > 0) {
+      const thisWr = (thisW + thisL) > 0 ? (thisW / (thisW + thisL) * 100).toFixed(1) + "%" : "N/A";
+      lines.push(`${stratEmoji} <b>${stratLabel} Record:</b> ${thisW}W / ${thisL}L / ${thisB}BE (${thisWr})`);
     }
-    if (totalW + totalL > (thisW + thisL)) {
-      lines.push(`📊 <b>All Strategies Combined:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    if ((totalW + totalL + totalB) > (thisW + thisL + thisB)) {
+      lines.push(`📊 <b>All Strategies Combined:</b> ${totalW}W / ${totalL}L / ${totalB}BE (${wr} win rate)`);
     } else {
-      lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+      lines.push(`${stratEmoji} <b>Strategy Record:</b> ${totalW}W / ${totalL}L / ${totalB}BE (${wr} win rate)`);
     }
 
     /* Opposite mode effectiveness from auto-trade history */
@@ -15328,6 +15346,9 @@ function detectOrderblockStrategy(idx) {
   if (idx < ORDERBLOCK_LOOKBACK + 3) return;
   if (idx - lastOrderblockIdx < ORDERBLOCK_COOLDOWN) return;
   if (atrValue <= 0) return;
+  /* Keep one active orderblock setup at a time to avoid repeated alerts
+     while the current setup is still pending outcome (SL/TP). */
+  if (orderblockHistory.some(s => s.result === "PENDING")) return;
   const c = candles[idx];
   if (!c) return;
 
