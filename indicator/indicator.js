@@ -4974,7 +4974,8 @@ function getAggregatedStrategyHistory() {
     { history: sessionRangeHistory,   label: "🌍 Session Range" },
     { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" },
     { history: fvgStratHistory,       label: "🎯 Fair Value Gap" },
-    { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" }
+    { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
+    { history: orderblockHistory,     label: "🏦 Orderblock" }
   ];
 
   if (multiPanels.size === 0) {
@@ -5000,7 +5001,8 @@ function getAggregatedStrategyHistory() {
       { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" },
       { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
       { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" },
-      { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" }
+      { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" },
+      { history: p.orderblockHistory     || [], label: "🏦 Orderblock" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -14183,7 +14185,16 @@ function updateStrategyRegimeStats(entry) {
 }
 
 function rebuildWalkForwardProfilesFromHistory() {
-  const pools = [signalHistory, liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory, sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory, mtfTopDownHistory, orderblockHistory];
+  const pools = [
+    getAggregatedSignalHistory(),
+    getAggregatedScalpHistory(),
+    getAggregatedStrategyHistory().map(s => {
+      if (!s || typeof s !== "object") return s;
+      const next = Object.assign({}, s);
+      delete next._stratLabel;
+      return next;
+    })
+  ];
   const all = [];
   for (const p of pools) {
     for (const s of (p || [])) {
@@ -17738,6 +17749,8 @@ function createPanelState(symbol) {
     signalBreakevens: 0,
     liveScalpHistory: [],
     lastScalpCandleIdx: -999,
+    orderblockHistory: [],
+    lastOrderblockIdx: -999,
     connectTime: null,
     pingTimer: null,
     connected: false,
@@ -17867,6 +17880,8 @@ function activatePanel(p) {
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
+  orderblockHistory     = p.orderblockHistory     || [];
+  lastOrderblockIdx     = p.lastOrderblockIdx     != null ? p.lastOrderblockIdx     : -999;
   sessionRangeAsian   = p.sessionRangeAsian  || null;
   sessionRangeLondon  = p.sessionRangeLondon || null;
   sessionRangeNY      = p.sessionRangeNY     || null;
@@ -18004,6 +18019,8 @@ function savePanel(p) {
   p.lastFvgStratIdx       = lastFvgStratIdx;
   p.mtfTopDownHistory     = mtfTopDownHistory;
   p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
+  p.orderblockHistory     = orderblockHistory;
+  p.lastOrderblockIdx     = lastOrderblockIdx;
   p.sessionRangeAsian   = sessionRangeAsian;
   p.sessionRangeLondon  = sessionRangeLondon;
   p.sessionRangeNY      = sessionRangeNY;
@@ -18329,6 +18346,8 @@ function connectPanel(p) {
   p.lastFvgStratIdx       = -999;
   p.mtfTopDownHistory     = [];
   p.lastMtfTopDownIdx     = -999;
+  p.orderblockHistory     = [];
+  p.lastOrderblockIdx     = -999;
   p.sessionRangeHistory   = [];
   p.connected = false;
 
