@@ -11009,6 +11009,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "mtf_top_down") {
     stratEmoji = "⏱";
     stratLabel = "MTF Top-Down";
+  } else if (signal.type === "power_of_3") {
+    stratEmoji = "⚡";
+    stratLabel = "Power of 3";
   }
 
   const lines = [];
@@ -11032,6 +11035,35 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  }
+
+  lines.push(``);
+  lines.push(`<b>🧠 Trade Conditions:</b>`);
+  if (signal.type === "liquidity_sweep" && signal.range) {
+    lines.push(`• Sweep wick breached prior range and closed back inside.`);
+  } else if (signal.type === "stop_loss_hunt" && signal.level) {
+    const side = signal.level.type === "support" ? "support" : "resistance";
+    lines.push(`• Price hunted ${side} liquidity and reclaimed the key level.`);
+  } else if (signal.type === "failed_pin_bar") {
+    lines.push(`• Pin bar against ${signal.state === "fear" ? "fear" : "greed"} failed, so momentum continuation setup triggered.`);
+  } else if (signal.type === "fib_scalp") {
+    lines.push(`• BOS trend continuation plus retracement into the 0.5–0.618 golden zone.`);
+  } else if (signal.type === "power_of_3") {
+    lines.push(`• EMA bias aligned, liquidity sweep formed, MSS displacement created FVG, and price retraced for entry.`);
+  } else if (signal.type === "grid_scalper_ma") {
+    lines.push(`• ${signal.mode === "bos" ? "Break of structure beyond latest swing level." : `Price crossed SMA ${gridScalperMAPeriod} with confirmation.`}`);
+  } else if (signal.type === "fvg_strat") {
+    lines.push(`• Strong impulse + discount/premium retrace into origin zone with entry confirmation.`);
+  } else if (signal.type === "mtf_top_down") {
+    lines.push(`• HTF bias aligned with LTF retest and entry trigger at key level.`);
+  } else if (signal.type === "ny_open_range") {
+    lines.push(`• Candle body broke NY range, then retest wick held without closing back inside.`);
+  } else if (signal.type === "session_range") {
+    lines.push(`• London sweep of Asian range liquidity reversed from the swept side.`);
+  } else if (signal.type === "orderblock") {
+    lines.push(`• Dominant impulse identified orderblock and price retested OB zone for entry.`);
+  } else {
+    lines.push(`• Strategy-specific confirmation conditions were met for this setup.`);
   }
 
   /* Strategy-specific details */
@@ -11084,6 +11116,27 @@ function buildStrategyTelegramCaption(signal) {
     if (signal.patternType) {
       const pLabel = signal.patternType === "pin_bar" ? "Pin Bar" : signal.patternType === "engulfing" ? "Engulfing" : "Micro BOS";
       lines.push(`<b>🕯 Entry Pattern:</b> ${pLabel}`);
+    }
+  }
+  if (signal.type === "power_of_3") {
+    lines.push(``);
+    if (signal.oneHourOpen != null) {
+      lines.push(`<b>🕐 1H Open:</b> <code>${fmtPrice(signal.oneHourOpen, symbol)}</code>`);
+    }
+    if (signal.sweepPrice != null) {
+      lines.push(`<b>🧹 Sweep Price:</b> <code>${fmtPrice(signal.sweepPrice, symbol)}</code>`);
+    }
+    if (signal.fvgLow != null && signal.fvgHigh != null) {
+      lines.push(`<b>📊 FVG:</b> [${fmtPrice(signal.fvgLow, symbol)} – ${fmtPrice(signal.fvgHigh, symbol)}]`);
+    }
+  }
+  if (signal.type === "orderblock") {
+    lines.push(``);
+    if (signal.obLow != null && signal.obHigh != null) {
+      lines.push(`<b>🏦 OB Zone:</b> [${fmtPrice(signal.obLow, symbol)} – ${fmtPrice(signal.obHigh, symbol)}]`);
+    }
+    if (signal.obIdx != null) {
+      lines.push(`<b>OB Candle:</b> #${signal.obIdx}`);
     }
   }
   if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
@@ -11210,6 +11263,7 @@ async function sendStrategyOutcomeTelegram(signal) {
   else if (signal.type === "ny_open_range") { stratEmoji = "🕤"; stratLabel = "NY Open Range"; }
   else if (signal.type === "session_range") { stratEmoji = "🌍"; stratLabel = "Session Range"; }
   else if (signal.type === "power_of_3") { stratEmoji = "⚡"; stratLabel = "Power of 3"; }
+  else if (signal.type === "orderblock") { stratEmoji = "🏦"; stratLabel = "Orderblock"; }
 
   /* ── EXPIRED: distinct short message, no statistics block ── */
   if (result === "EXPIRED") {
@@ -15414,7 +15468,7 @@ function detectOrderblockStrategy(idx) {
     showToast(`🏦 Orderblock ${dir === "BULL" ? "▲" : "▼"}`, `Entry ${fmt(c.close,4)} | SL ${fmt(sl,4)} | TP ${fmt(tp,4)}`, "info", 8000);
     if (!_historicalProcessing) {
       addStrategyTickerItem({ dir, type: "orderblock", label: `🏦 OB ${dir}`, entry: c.close, epoch: c.epoch });
-      if (telegramStrategyAutoSend) setTimeout(() => sendStrategyTelegramAlert(signal), CHART_RENDER_DELAY_MS);
+      if (telegramStrategyAutoSend) setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
     }
     if (autoTradeStrategyEnabled && autoTradeOrderblock && !_historicalProcessing) {
       executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || getActiveSymbol(), source: "strategy", strategyName: "orderblock" });
