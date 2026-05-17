@@ -40,11 +40,11 @@ string TrimSlash(string s)
 
 string JsonEscape(string s)
 {
-   s = StringReplace(s, "\\", "\\\\");
-   s = StringReplace(s, "\"", "\\\"");
-   s = StringReplace(s, "\r", "\\r");
-   s = StringReplace(s, "\n", "\\n");
-   s = StringReplace(s, "\t", "\\t");
+   StringReplace(s, "\\", "\\\\");
+   StringReplace(s, "\"", "\\\"");
+   StringReplace(s, "\r", "\\r");
+   StringReplace(s, "\n", "\\n");
+   StringReplace(s, "\t", "\\t");
    return s;
 }
 
@@ -207,8 +207,7 @@ void PostStatus(string orderId, string status, string brokerTicket, string messa
       "\"status\":\""+JsonEscape(status)+"\","
       "\"brokerTicket\":\""+JsonEscape(brokerTicket)+"\","
       "\"message\":\""+JsonEscape(message)+"\","
-      "\"filledPrice\":"+DoubleToString(filledPrice,_Digits)
-      "}";
+      "\"filledPrice\":"+DoubleToString(filledPrice,_Digits)+"}";
 
    string resp, respHeaders;
    int code=-1;
