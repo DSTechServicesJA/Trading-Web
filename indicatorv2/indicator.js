@@ -348,7 +348,9 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "frxXAUUSD":[50, 100, 200, 300, 500],
   "frxXAGUSD":[50, 100, 200, 300, 500],
   "frxXPTUSD":[50, 100, 200, 300, 500],
-  "frxXPDUSD":[50, 100, 200, 300, 500]
+  "frxXPDUSD":[50, 100, 200, 300, 500],
+  "XAUUSDmicro":[50, 100, 200, 300, 500],
+  "XAUUSD.s":  [50, 100, 200, 300, 500]
 };
 
 /**
@@ -463,10 +465,12 @@ const SYMBOL_SPECS = (() => {
   fx("frxUSDHKD", "HKD", 0.0001, 100000);
 
   /* ---------- Commodities ---------- */
-  fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:      100 oz / lot, pip = $0.01 */
-  fx("frxXAGUSD", "USD", 0.001,  5000);   /* Silver:   5000 oz / lot, pip = $0.001 */
-  fx("frxXPTUSD", "USD", 0.01,   100);    /* Platinum:  100 oz / lot */
-  fx("frxXPDUSD", "USD", 0.01,   100);    /* Palladium: 100 oz / lot */
+  fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:          100 oz / lot, pip = $0.01 */
+  fx("frxXAGUSD", "USD", 0.001,  5000);   /* Silver:       5000 oz / lot, pip = $0.001 */
+  fx("frxXPTUSD", "USD", 0.01,   100);    /* Platinum:      100 oz / lot */
+  fx("frxXPDUSD", "USD", 0.01,   100);    /* Palladium:     100 oz / lot */
+  fx("XAUUSDmicro","USD", 0.01,   10);    /* Gold Micro:     10 oz / lot, pip = $0.01 */
+  fx("XAUUSD.s",  "USD", 0.01,   100);    /* Gold Spot:     100 oz / lot, pip = $0.01 */
 
   /* ---------- Synthetics (Deriv MT5 — lot-size applies, contractSize = 1) --- */
   const syntheticSymbols = [
@@ -561,8 +565,9 @@ function getMarketType(symbol) {
   if (/^DEX/i.test(symbol))   return "dex";
   if (/^DSI/i.test(symbol))   return "driftswitch";
   if (/^1HZ/i.test(symbol) || /^R_/i.test(symbol)) return "volatility";
-  if (/^frxX/i.test(symbol))  return "commodity";
-  if (/^frx/i.test(symbol))   return "forex";
+  if (/^XAUUSD/i.test(symbol))  return "commodity";   /* XAUUSDmicro, XAUUSD.s */
+  if (/^frxX/i.test(symbol))    return "commodity";
+  if (/^frx/i.test(symbol))     return "forex";
   return "volatility";
 }
 
@@ -1978,7 +1983,7 @@ function getSymbolDigits(symbol, priceSample) {
   const sp = getSymbolSpecs(symbol);
   if (sp && sp.pipSize) {
     const d = Math.round(-Math.log10(sp.pipSize));
-    const isMetal = /^frx(XAU|XAG|XPT|XPD)/i.test(symbol || "");
+    const isMetal = /^frx(XAU|XAG|XPT|XPD)/i.test(symbol || "") || /^XAUUSD/i.test(symbol || "");
     /* Standard forex pairs use 5-digit (fractional pip) precision on MT5 */
     if (!isMetal && sp.type === "forex" && sp.pipSize <= 0.0001) return d + 1;
     return d;
@@ -5532,7 +5537,55 @@ function getMarketRecommendations(symbol) {
             + "All standard indicators work well on 4H cross pair charts."
       };
     }
-    case "commodity":
+    case "commodity": {
+      /* Sub-branch: all XAUUSD variants (frxXAUUSD, XAUUSDmicro, XAUUSD.s) */
+      const IS_GOLD = /^(frxXAUUSD|XAUUSD)/i.test(sym);
+      if (IS_GOLD) {
+        const isMicro = /micro/i.test(sym);
+        return {
+          label: isMicro ? "🥇 Gold Micro — 1H Session Scalp Strategy" : "🥇 Gold Spot — 1H Session Strategy",
+          timeframe: { text: "1 hour", gran: 3600 },
+          rr: { text: "1:2–1:3", minRR: 2 },
+          range: { text: "4 hours (1 candle)", minutes: 240 },
+          ema: true,
+          htf: true,
+          atr: true,
+          trailing: { rec: true, note: "Standard (1.5× ATR)" },
+          partialTp: true,
+          falseBreakout: true,
+          minRR: { rec: true, value: "1:2 ✅" },
+          rsi: true,
+          volSpike: { rec: true, note: "Standard 1.5× average range" },
+          session: { rec: true, note: "London+NY ✅" },
+          fib: true,
+          macd: true,
+          bbSqueeze: true,
+          adx: true,
+          stoch: false,
+          signals: [
+            "Pin bar rejection at key S/R on 1H chart — reference Daily for major zones",
+            "Engulfing pattern at supply/demand zone for power shift",
+            "London and NY session breakouts — highest gold liquidity windows",
+            "Supply/demand zones — gold respects Daily and 4H zones powerfully",
+            "Fibonacci 50%/61% retracement of London session range",
+            "MACD momentum confirmation at breakout",
+            isMicro
+              ? "Micro contract (10 oz/lot) — reduced risk per pip, ideal for tighter SL placements"
+              : "Spot contract (100 oz/lot) — standard gold risk/lot sizing applies"
+          ],
+          hint: (isMicro
+            ? "XAUUSDmicro is a micro gold contract (10 oz/lot vs standard 100 oz/lot). "
+              + "Smaller lot size allows more precise position sizing with lower margin. "
+            : "XAUUSD.s is spot gold (100 oz/lot) — identical analysis to standard XAU/USD. ")
+            + "1H timeframe balances gold's intraday volatility with clean signal formation. "
+            + "Gold is strongly driven by London and NY sessions — enable the session filter. "
+            + "Supply/demand zones from Daily/4H charts are highly respected by gold price. "
+            + "Fibonacci retracements work well on gold's structured London/NY session swings. "
+            + "MACD and ADX confirm trend direction before entry. "
+            + "Stochastic disabled — gold's sharp momentum moves make it unreliable. "
+            + "London+NY session filter is essential — gold spreads widen sharply outside peak hours."
+        };
+      }
       return {
         label: "🥇 Commodity — 4H Breakout Strategy",
         timeframe: { text: "4 hours", gran: 14400 },
@@ -5570,6 +5623,7 @@ function getMarketRecommendations(symbol) {
             + "London+NY session filter essential — commodity spreads widen outside peak hours. "
             + "All standard indicators work well on 4H commodity charts."
       };
+    }
     default:
       return {
         label: "⚡ Breakout Strategy",
