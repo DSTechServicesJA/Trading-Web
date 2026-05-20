@@ -2528,6 +2528,10 @@ function buildNyOpenRange() {
       `High: ${fmt(high, 4)} | Low: ${fmt(low, 4)} — Watching for breakout…`,
       "success", 8000
     );
+    /* Telegram alert: range is now established — notify traders so they can prepare */
+    if (telegramStrategyAutoSend && !_historicalProcessing) {
+      setTimeout(() => sendTelegramNyOpenRangeAlert("RANGE_SET"), CHART_RENDER_DELAY_MS);
+    }
   }
 }
 
@@ -2553,11 +2557,19 @@ function processNyOpenRangeCandle(idx) {
       nyOpenRangePhase = "RETEST";
       addLog(`🕤 NY Open Range BULL breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully above high ${fmt(nyOpenRange.high, 4)}`);
       showToast("NY Range Breakout ▲", `Bullish breakout — waiting for retest…`, "info", 8000);
+      /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
+      if (telegramStrategyAutoSend && !_historicalProcessing) {
+        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
+      }
     } else if (bodyHigh < nyOpenRange.low) {
       nyOpenRangeBreakout = { dir: "BEAR", candleIdx: idx, level: nyOpenRange.low };
       nyOpenRangePhase = "RETEST";
       addLog(`🕤 NY Open Range BEAR breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully below low ${fmt(nyOpenRange.low, 4)}`);
       showToast("NY Range Breakout ▼", `Bearish breakout — waiting for retest…`, "info", 8000);
+      /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
+      if (telegramStrategyAutoSend && !_historicalProcessing) {
+        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
+      }
     }
     return;
   }
@@ -11767,6 +11779,126 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   }, TELEGRAM_STATUS_CLEAR_MS);
 }
 
+/* ================= TELEGRAM: NY OPEN RANGE PHASE ALERTS ================= */
+
+/**
+ * Build a Telegram caption for NY Open Range phase notifications.
+ * @param {"RANGE_SET"|"BREAKOUT"} phaseType
+ */
+function buildNyOpenRangeTelegramCaption(phaseType) {
+  const activeSym = getActiveSymbol() || "";
+  const symLabel  = getSymbolLabel ? getSymbolLabel(activeSym) : activeSym;
+  const gran      = UI.granSelect ? UI.granSelect.value : "--";
+  const tfLabel   = TIMEFRAME_LABELS[gran] || gran + "s";
+  const ts        = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+
+  const lines = [];
+
+  if (phaseType === "RANGE_SET") {
+    lines.push(`<b>🕤 NY Open Range — Range Established</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symLabel}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    lines.push(`<b>🧠 Why triggered:</b>`);
+    lines.push(`• The 9:30–9:35 AM EST opening window has closed. Range high and low are now locked in.`);
+    if (nyOpenRange) {
+      lines.push(``);
+      lines.push(`<b>📊 Opening Range:</b>`);
+      lines.push(`  <b>High:</b> <code>${fmtPrice(nyOpenRange.high, activeSym)}</code>`);
+      lines.push(`  <b>Low:</b> <code>${fmtPrice(nyOpenRange.low, activeSym)}</code>`);
+      const rangeSize = nyOpenRange.high - nyOpenRange.low;
+      lines.push(`  <b>Size:</b> <code>${fmtPrice(rangeSize, activeSym)}</code>`);
+      if (atrValue > 0) {
+        lines.push(`  <b>Range / ATR:</b> ${fmt(rangeSize / atrValue, 2)}×`);
+      }
+    }
+    lines.push(``);
+    lines.push(`<b>Next step:</b> Watching for a full candle body close outside the range — breakout trigger.`);
+  } else if (phaseType === "BREAKOUT") {
+    const dir       = nyOpenRangeBreakout ? nyOpenRangeBreakout.dir : "--";
+    const dirEmoji  = dir === "BULL" ? "▲" : "▼";
+    const dirWord   = dir === "BULL" ? "BULLISH" : "BEARISH";
+    const sideWord  = dir === "BULL" ? "above the range high" : "below the range low";
+    const nextWord  = dir === "BULL" ? "low wicks into the range but close stays above the high"
+                                     : "high wicks into the range but close stays below the low";
+    lines.push(`<b>🕤 NY Open Range — ${dirWord} Breakout ${dirEmoji}</b>`);
+    lines.push(``);
+    lines.push(`<b>Symbol:</b> ${symLabel}`);
+    lines.push(`<b>Timeframe:</b> ${tfLabel}`);
+    lines.push(``);
+    lines.push(`<b>🧠 Why triggered:</b>`);
+    lines.push(`• A full candle body (both open and close) closed ${sideWord}, confirming a directional breakout beyond the opening range.`);
+    if (nyOpenRange) {
+      lines.push(``);
+      lines.push(`<b>📊 Opening Range:</b>`);
+      lines.push(`  <b>High:</b> <code>${fmtPrice(nyOpenRange.high, activeSym)}</code>`);
+      lines.push(`  <b>Low:</b> <code>${fmtPrice(nyOpenRange.low, activeSym)}</code>`);
+    }
+    if (nyOpenRangeBreakout) {
+      lines.push(``);
+      lines.push(`<b>🔓 Breakout Level:</b> <code>${fmtPrice(nyOpenRangeBreakout.level, activeSym)}</code>`);
+      lines.push(`<b>Direction:</b> ${dir === "BULL" ? "🟢 BULL (BUY)" : "🔴 BEAR (SELL)"}`);
+    }
+    lines.push(``);
+    lines.push(`<b>Next step:</b> Waiting for retest — a candle whose ${nextWord} — to trigger the entry signal.`);
+  }
+
+  lines.push(``);
+  lines.push(`<i>${ts}</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Send a NY Open Range phase notification to Telegram with chart screenshot.
+ * Gated on telegramStrategyAutoSend.
+ * @param {"RANGE_SET"|"BREAKOUT"} phaseType
+ */
+async function sendTelegramNyOpenRangeAlert(phaseType) {
+  if (!telegramStrategyAutoSend) return;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 NY Open Range Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending NY range alert…";
+  const caption = buildNyOpenRangeTelegramCaption(phaseType);
+  try {
+    let blob;
+    try {
+      blob = await captureChartScreenshot();
+    } catch (screenshotErr) {
+      addLog(`📤 NY range screenshot failed, sending text-only: ${screenshotErr.message}`);
+    }
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
+    addLog(`📤 NY Open Range Telegram alert sent — ${phaseType}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ NY range alert sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 NY Open Range Telegram error: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ NY range: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
 function renderScalpAlerts() {
   if (!UI.scalpAlertList) return;
   UI.scalpAlertList.innerHTML = "";
@@ -15807,7 +15939,7 @@ function monitorOrderblockOutcomes(idx) {
     if (result) {
       s.result = result;
       addLog(`🏦 Orderblock ${s.dir} → ${result} (#${idx})`);
-      if (!_historicalProcessing && telegramStrategyOutcomeSend && !s._stratOutcomeSent) {
+      if (!_historicalProcessing && telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
       if (adaptiveConfluenceEnabled) recordConfluenceOutcome(s._confFactors || [], result);
