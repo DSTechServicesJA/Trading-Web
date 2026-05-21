@@ -11439,6 +11439,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "power_of_3") {
     stratEmoji = "⚡";
     stratLabel = "Power of 3";
+  } else if (signal.type === "tiktok") {
+    stratEmoji = "📈";
+    stratLabel = "TikTok Fibonacci";
   }
 
   const lines = [];
@@ -11489,6 +11492,8 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`• London sweep of Asian range liquidity reversed from the swept side.`);
   } else if (signal.type === "orderblock") {
     lines.push(`• Dominant impulse identified orderblock and price retested OB zone for entry.`);
+  } else if (signal.type === "tiktok") {
+    lines.push(`• 4-step Fibonacci retracement (A→B→C→D): price completed all steps and touched the 0.88 level.`);
   } else {
     lines.push(`• Strategy-specific confirmation conditions were met for this setup.`);
   }
@@ -11576,6 +11581,21 @@ function buildStrategyTelegramCaption(signal) {
     }
     if (signal.impulseStrongRatio != null) {
       lines.push(`<b>Strong Candle Ratio:</b> ${fmt(signal.impulseStrongRatio * 100, 0)}%`);
+    }
+  }
+  if (signal.type === "tiktok") {
+    lines.push(``);
+    if (signal.swingLow != null && signal.swingHigh != null) {
+      lines.push(`<b>📏 Impulse Range:</b> [${fmtPrice(signal.swingLow, symbol)} – ${fmtPrice(signal.swingHigh, symbol)}]`);
+    }
+    if (signal.lvl_88 != null) {
+      lines.push(`<b>🎯 0.88 Level (Entry):</b> <code>${fmtPrice(signal.lvl_88, symbol)}</code>`);
+    }
+    if (signal.lvl_618 != null && signal.lvl_5 != null) {
+      lines.push(`<b>📊 Step B Zone (0.5–0.618):</b> [${fmtPrice(signal.lvl_5, symbol)} – ${fmtPrice(signal.lvl_618, symbol)}]`);
+    }
+    if (signal.lvl_382 != null) {
+      lines.push(`<b>📊 Step C Zone (0–0.382):</b> ≤ ${fmtPrice(signal.lvl_382, symbol)}`);
     }
   }
   if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
@@ -11703,6 +11723,7 @@ async function sendStrategyOutcomeTelegram(signal) {
   else if (signal.type === "session_range") { stratEmoji = "🌍"; stratLabel = "Session Range"; }
   else if (signal.type === "power_of_3") { stratEmoji = "⚡"; stratLabel = "Power of 3"; }
   else if (signal.type === "orderblock") { stratEmoji = "🏦"; stratLabel = "Orderblock"; }
+  else if (signal.type === "tiktok") { stratEmoji = "📈"; stratLabel = "TikTok Fibonacci"; }
 
   /* ── EXPIRED: distinct short message, no statistics block ── */
   if (result === "EXPIRED") {
@@ -11792,7 +11813,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     const allStratHistories = [
       liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
       po3History, fibScalpHistory, gridScalperMAHistory,
-      nyOpenRangeHistory, sessionRangeHistory, fvgStratHistory
+      nyOpenRangeHistory, sessionRangeHistory, fvgStratHistory, tiktokHistory
     ];
     /* Per-strategy breakdown for this specific strategy.
        Note: this function is only called for secondary strategies — the main breakout
@@ -11807,7 +11828,8 @@ async function sendStrategyOutcomeTelegram(signal) {
       : signal.type === "ny_open_range" ? nyOpenRangeHistory
       : signal.type === "session_range" ? sessionRangeHistory
       : signal.type === "power_of_3" ? po3History
-      : signal.type === "fvg_strat" ? fvgStratHistory : null;
+      : signal.type === "fvg_strat" ? fvgStratHistory
+      : signal.type === "tiktok" ? tiktokHistory : null;
     for (const h of allStratHistories) {
       const isThis = h === thisHistory;
       for (const s of h) {
