@@ -13363,6 +13363,15 @@ function processLatestCandle() {
     resetForNextSetup();
     addLog("Auto-reset: scanning for new setup...");
   }
+
+  /* Session Ranges: rebuild ranges and check for London sweep on each candle.
+     Always runs before any phase-based early return so sweeps are never missed
+     while the main indicator is in TRADE, WAITING, or RANGE phases. */
+  if (sessionRangesEnabled) {
+    buildSessionRanges();
+    detectLondonAsianSweep();
+  }
+
   if (phase === "TRADE") { updateStateUI(); return; }
 
   if (phase === "WAITING" || phase === "RANGE") {
@@ -13410,12 +13419,6 @@ function processLatestCandle() {
     if (nyOpenRange && nyOpenRangePhase !== "TRADE") {
       processNyOpenRangeCandle(idx);
     }
-  }
-
-  /* Session Ranges: rebuild ranges and check for London sweep on each candle */
-  if (sessionRangesEnabled) {
-    buildSessionRanges();
-    detectLondonAsianSweep();
   }
 
   updateStateUI();
