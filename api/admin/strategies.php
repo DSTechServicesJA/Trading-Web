@@ -35,5 +35,6 @@ jsonResponse([
         ['key' => 'live_scalp',       'label' => 'Live Scalp Scanner'],
         ['key' => 'mtf_top_down',     'label' => 'MTF Top-Down'],
         ['key' => 'indicator_v2',     'label' => 'Indicator V2 Access'],
+        ['key' => 'tiktok',           'label' => 'TikTok Fibonacci'],
     ],
 ]);

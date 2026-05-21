@@ -1031,6 +1031,7 @@ let autoTradeStopLossHunt    = true;
 let autoTradeFailedPinBar    = true;
 let autoTradeFibScalp        = true;
 let autoTradePo3             = true;
+let autoTradeTiktok          = true;
 let autoTradeNYOpenRange     = true;
 let autoTradeSessionRange    = true;
 let autoTradeFvgStrat        = true;
@@ -1549,6 +1550,33 @@ const FIB_SCALP_TREND_SWINGS = 3;        /* min swing points to confirm micro-tr
 const FIB_SCALP_MAX_CANDLES = 15;        /* timeout: close trade monitoring after N candles */
 let lastFibScalpIdx = -999;
 
+/* ================= STRATEGY 13: TIKTOK FIBONACCI ================= */
+/**
+ * TikTok Fibonacci Strategy — 4-step sequential Fibonacci retracement.
+ *
+ * Concept:
+ *   Step A: Identify a large impulse swing (BULL = low→high, BEAR = high→low).
+ *           All fib levels are measured from swingLow (0) toward swingHigh (1).
+ *   Step B: Price must enter the 0.5–0.618 band and NOT break the outer boundary:
+ *           BULL — wick enters from above, must not break below the 0.5 level.
+ *           BEAR — wick enters from below, must not break above the 0.618 level.
+ *   Step C: Price must enter the 0–0.382 band without breaking below the 0 level
+ *           (swingLow). Applies to both BULL and BEAR.
+ *   Step D: Price rallies back UP to the 0.88 level → ENTRY.
+ *           BULL: enter LONG, TP = swingHigh, SL below swingLow.
+ *           BEAR: enter SHORT, TP = swingLow, SL above swingHigh.
+ */
+let tiktokEnabled  = false;           /* master toggle */
+let tiktokHistory  = [];              /* alert history */
+let lastTiktokIdx  = -999;
+const TIKTOK_MAX_HISTORY          = 30;
+const TIKTOK_COOLDOWN             = 5;    /* min candles between alerts */
+const TIKTOK_SWING_LOOKBACK       = 80;   /* candles to scan for the impulse swing */
+const TIKTOK_MAX_CANDLES          = 80;   /* trade monitoring timeout in candles */
+const TIKTOK_ZONE_TOLERANCE_ATR   = 0.1;  /* ATR multiplier for zone-touch tolerance */
+const TIKTOK_SL_BUFFER_ATR        = 0.3;  /* ATR buffer beyond swing extreme for SL */
+const TIKTOK_MIN_IMPULSE_ATR      = 1.5;  /* impulse range must be >= this × ATR */
+
 /* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
 /**
  * Power of 3 (PO3) strategy – Accumulation → Manipulation → Expansion.
@@ -1971,6 +1999,12 @@ function initUI() {
   UI.mtfTopDownAlertList       = document.getElementById("mtfTopDownAlertList");
   UI.mtfTopDownAlertCount      = document.getElementById("mtfTopDownAlertCount");
   UI.autoTradeMtfTopDownToggle = document.getElementById("autoTradeMtfTopDownToggle");
+
+  /* Strategy 13: TikTok Fibonacci */
+  UI.tiktokToggle          = document.getElementById("tiktokToggle");
+  UI.tiktokAlertList       = document.getElementById("tiktokAlertList");
+  UI.tiktokCount           = document.getElementById("tiktokCount");
+  UI.autoTradeTiktokToggle = document.getElementById("autoTradeTiktokToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -3322,6 +3356,7 @@ function buildTelegramCaption() {
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
   if (po3Enabled) filters.push("Power of 3");
+  if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
   if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
@@ -4255,6 +4290,7 @@ function saveSettings() {
       autoTradeFailedPinBar,
       autoTradeFibScalp,
       autoTradePo3,
+      autoTradeTiktok,
       autoTradeNYOpenRange,
       autoTradeSessionRange,
       gridScalperMAEnabled,
@@ -4263,6 +4299,7 @@ function saveSettings() {
       autoTradeGridScalperMA,
       fvgStratEnabled,
       autoTradeFvgStrat,
+      tiktokEnabled,
       teslaScalingEnabled,
       teslaScalingPlan,
       mtfTopDownEnabled,
@@ -4481,6 +4518,10 @@ function restoreSettings() {
     if (s.autoTradeMtfTopDown != null) autoTradeMtfTopDown = s.autoTradeMtfTopDown;
     if (UI.autoTradeMtfTopDownToggle) UI.autoTradeMtfTopDownToggle.checked = autoTradeMtfTopDown;
 
+    /* Strategy 13: TikTok Fibonacci */
+    if (s.tiktokEnabled != null) tiktokEnabled = s.tiktokEnabled;
+    if (UI.tiktokToggle) UI.tiktokToggle.checked = tiktokEnabled;
+
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
     if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
@@ -4588,6 +4629,7 @@ function restoreSettings() {
     if (s.autoTradeFailedPinBar != null)   autoTradeFailedPinBar   = s.autoTradeFailedPinBar;
     if (s.autoTradeFibScalp != null)       autoTradeFibScalp       = s.autoTradeFibScalp;
     if (s.autoTradePo3 != null)            autoTradePo3            = s.autoTradePo3;
+    if (s.autoTradeTiktok != null)         autoTradeTiktok         = s.autoTradeTiktok;
     if (s.autoTradeNYOpenRange != null)    autoTradeNYOpenRange    = s.autoTradeNYOpenRange;
     if (s.autoTradeSessionRange != null)   autoTradeSessionRange   = s.autoTradeSessionRange;
     if (s.autoTradeGridScalperMA != null)  autoTradeGridScalperMA  = s.autoTradeGridScalperMA;
@@ -4596,6 +4638,7 @@ function restoreSettings() {
     if (UI.autoTradeFailedPinBarToggle)   UI.autoTradeFailedPinBarToggle.checked   = autoTradeFailedPinBar;
     if (UI.autoTradeFibScalpToggle)       UI.autoTradeFibScalpToggle.checked       = autoTradeFibScalp;
     if (UI.autoTradePo3Toggle)            UI.autoTradePo3Toggle.checked            = autoTradePo3;
+    if (UI.autoTradeTiktokToggle)         UI.autoTradeTiktokToggle.checked         = autoTradeTiktok;
     if (UI.autoTradeNYOpenRangeToggle)    UI.autoTradeNYOpenRangeToggle.checked    = autoTradeNYOpenRange;
     if (UI.autoTradeSessionRangeToggle)   UI.autoTradeSessionRangeToggle.checked   = autoTradeSessionRange;
     if (UI.autoTradeGridScalperMAToggle)  UI.autoTradeGridScalperMAToggle.checked  = autoTradeGridScalperMA;
@@ -4778,7 +4821,8 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
     { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" },
     { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" },
-    { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" }
+    { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" },
+    { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -5042,7 +5086,8 @@ function getAggregatedStrategyHistory() {
     { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" },
     { history: fvgStratHistory,       label: "🎯 Fair Value Gap" },
     { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
-    { history: orderblockHistory,     label: "🏦 Orderblock" }
+    { history: orderblockHistory,     label: "🏦 Orderblock" },
+    { history: tiktokHistory,         label: "📈 TikTok Fib" }
   ];
 
   if (multiPanels.size === 0) {
@@ -5069,7 +5114,8 @@ function getAggregatedStrategyHistory() {
       { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
       { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" },
       { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" },
-      { history: p.orderblockHistory     || [], label: "🏦 Orderblock" }
+      { history: p.orderblockHistory     || [], label: "🏦 Orderblock" },
+      { history: p.tiktokHistory         || [], label: "📈 TikTok Fib" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -7999,6 +8045,7 @@ function revertAllSettings() {
   failedPinBarEnabled   = false;
   fibScalpEnabled       = false;
   po3Enabled            = false;
+  tiktokEnabled         = false;
   gridScalperMAEnabled  = false;
   gridScalperMAStrategy = "price_vs_ma";
   gridScalperMAPeriod   = 21;
@@ -8055,6 +8102,7 @@ function revertAllSettings() {
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
   if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
   if (UI.po3Toggle)              UI.po3Toggle.checked              = po3Enabled;
+  if (UI.tiktokToggle)           UI.tiktokToggle.checked           = tiktokEnabled;
   if (UI.gridScalperMAToggle)        UI.gridScalperMAToggle.checked        = gridScalperMAEnabled;
   if (UI.gridScalperMAStrategySelect) UI.gridScalperMAStrategySelect.value = gridScalperMAStrategy;
   if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
@@ -9093,6 +9141,245 @@ function monitorFibScalpOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 13: TIKTOK FIBONACCI ================= */
+
+/**
+ * Detect a TikTok Fibonacci setup on candle[idx].
+ *
+ * Returns a signal object on confirmed step D, or null otherwise.
+ */
+function detectTiktokStrategy(idx) {
+  if (!tiktokEnabled) return null;
+  if (candles.length < 10 || idx < 5) return null;
+
+  const c = candles[idx];
+  const tolerance = atrValue > 0 ? atrValue * TIKTOK_ZONE_TOLERANCE_ATR : 0;
+
+  /* Scan for swing highs and lows in the lookback window (excludes the current candle) */
+  const lookbackStart = Math.max(0, idx - TIKTOK_SWING_LOOKBACK);
+  const swingHighs = [];  /* sorted newest-first */
+  const swingLows  = [];
+
+  for (let i = idx - 1; i >= lookbackStart; i--) {
+    if (isTrueSwingHigh(i)) swingHighs.push({ idx: i, price: candles[i].high });
+    if (isTrueSwingLow(i))  swingLows.push({ idx: i, price: candles[i].low });
+  }
+
+  if (swingHighs.length < 1 || swingLows.length < 1) return null;
+
+  /*
+   * Try BULL and BEAR impulse setups (newest pair first for each direction).
+   * BULL: swingLow occurred BEFORE swingHigh (price moved UP).
+   * BEAR: swingHigh occurred BEFORE swingLow (price moved DOWN).
+   */
+  const setups = [];
+
+  /* BULL candidates */
+  for (const sh of swingHighs) {
+    const sl = swingLows.find(s => s.idx < sh.idx);
+    if (!sl) continue;
+    const range = sh.price - sl.price;
+    if (atrValue > 0 && range < TIKTOK_MIN_IMPULSE_ATR * atrValue) continue;
+    setups.push({ dir: "BULL", swingLow: sl.price, swingHigh: sh.price,
+                  swingLowIdx: sl.idx, swingHighIdx: sh.idx });
+    break; /* most recent only */
+  }
+
+  /* BEAR candidates */
+  for (const sl of swingLows) {
+    const sh = swingHighs.find(s => s.idx < sl.idx);
+    if (!sh) continue;
+    const range = sh.price - sl.price;
+    if (atrValue > 0 && range < TIKTOK_MIN_IMPULSE_ATR * atrValue) continue;
+    setups.push({ dir: "BEAR", swingLow: sl.price, swingHigh: sh.price,
+                  swingLowIdx: sl.idx, swingHighIdx: sh.idx });
+    break;
+  }
+
+  for (const setup of setups) {
+    const { dir, swingLow, swingHigh, swingHighIdx, swingLowIdx } = setup;
+    const range = swingHigh - swingLow;
+    if (range <= 0) continue;
+
+    /* Fibonacci levels — all measured from swingLow (0) toward swingHigh (1) */
+    const lvl_0   = swingLow;
+    const lvl_382 = swingLow + 0.382 * range;
+    const lvl_5   = swingLow + 0.5   * range;
+    const lvl_618 = swingLow + 0.618 * range;
+    const lvl_88  = swingLow + 0.88  * range;
+    const lvl_100 = swingHigh;
+
+    /* Impulse end: the HIGH for BULL, the LOW for BEAR */
+    const impulseEndIdx = (dir === "BULL") ? swingHighIdx : swingLowIdx;
+
+    /* Scan candles after the impulse end (steps B, C) */
+    let stepBDone = false;
+    let stepBIdx  = -1;
+    let invalid   = false;
+
+    for (let i = impulseEndIdx + 1; i < idx; i++) {
+      const cn = candles[i];
+
+      if (!stepBDone) {
+        /* Step B: price must enter [lvl_5, lvl_618] zone */
+        if (dir === "BULL") {
+          /* Price coming DOWN from above — wick breaks below lvl_618 = entered */
+          if (cn.low < lvl_5 - tolerance) { invalid = true; break; }  /* went past B zone */
+          if (cn.low <= lvl_618 + tolerance) { stepBDone = true; stepBIdx = i; }
+        } else {
+          /* BEAR: price bouncing UP from below — wick reaches above lvl_5 = entered */
+          if (cn.high > lvl_618 + tolerance) { invalid = true; break; } /* went past B zone top */
+          if (cn.high >= lvl_5 - tolerance) { stepBDone = true; stepBIdx = i; }
+        }
+      } else {
+        /* Step C: price must enter [lvl_0, lvl_382] zone (applies to both directions) */
+        if (cn.low < lvl_0 - tolerance) { invalid = true; break; } /* went past C zone bottom */
+      }
+    }
+
+    if (invalid || !stepBDone) continue;
+
+    /* Check if step C was satisfied somewhere after step B and before current candle */
+    let stepCDone = false;
+    for (let i = stepBIdx + 1; i < idx; i++) {
+      const cn = candles[i];
+      if (cn.low < lvl_0 - tolerance) { stepCDone = false; break; }
+      if (cn.low <= lvl_382 + tolerance) { stepCDone = true; }
+    }
+    if (!stepCDone) continue;
+
+    /* Step D: current candle must touch the 0.88 level (price came up from below) */
+    const stepDMet = (c.high >= lvl_88 - tolerance) && (c.low <= lvl_88 + tolerance);
+    if (!stepDMet) continue;
+
+    /* Build signal */
+    const entry = lvl_88;
+    let sl, tp;
+    if (dir === "BULL") {
+      sl = lvl_0 - (atrValue > 0 ? atrValue * TIKTOK_SL_BUFFER_ATR : range * 0.05);
+      tp = lvl_100;
+    } else {
+      sl = lvl_100 + (atrValue > 0 ? atrValue * TIKTOK_SL_BUFFER_ATR : range * 0.05);
+      tp = lvl_0;
+    }
+
+    const risk   = Math.abs(entry - sl);
+    const reward = Math.abs(tp - entry);
+    const rr     = risk > 0 ? reward / risk : 0;
+    if (rr < 1.0) continue;
+
+    return {
+      dir, entry, sl, tp, rr,
+      swingLow, swingHigh, lvl_88, lvl_618, lvl_5, lvl_382,
+      candleIdx: idx,
+      epoch: c.epoch,
+      symbol: getActiveSymbol(),
+      result: "PENDING",
+      type: "tiktok",
+      _stratOutcomeSent: false,
+      _sentViaTelegram: false
+    };
+  }
+  return null;
+}
+
+/**
+ * Run the TikTok Fibonacci scanner and fire alerts.
+ */
+function processTiktokStrategy() {
+  if (!tiktokEnabled) return;
+  if (candles.length < 10) return;
+
+  const idx = candles.length - 1;
+  if (idx - lastTiktokIdx < TIKTOK_COOLDOWN) return;
+
+  /* Prevent duplicate PENDING */
+  if (tiktokHistory.some(s => s.result === "PENDING")) return;
+
+  const signal = detectTiktokStrategy(idx);
+  if (!signal) return;
+
+  lastTiktokIdx = idx;
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  tiktokHistory.unshift(signal);
+  if (tiktokHistory.length > TIKTOK_MAX_HISTORY) tiktokHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  addLog(`📈 TIKTOK FIB ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | 0.88: ${fmtPrice(signal.lvl_88, sym)} | SL ${fmtPrice(signal.sl, sym)} | TP ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `TikTok Fib ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${sym} @ ${fmtPrice(signal.entry, sym)} | SL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `📈 ${signal.dir} TikTok Fib — ${sym} @ ${fmtPrice(signal.entry, sym)}\nSL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)}`;
+    throttledNotification("IT Guru: TikTok Fibonacci!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeTiktok && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp,
+                       symbol: signal.symbol || sym, source: "strategy", strategyName: "tiktok" });
+  }
+}
+
+/**
+ * Monitor pending TikTok Fib signals for SL/TP outcomes.
+ */
+function monitorTiktokOutcomes(candle) {
+  if (!tiktokEnabled) return;
+  let changed = false;
+
+  for (const s of tiktokHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    if (elapsed < 0 || elapsed >= TIKTOK_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      addLog(`📈 TikTok Fib EXPIRED (timeout ${TIKTOK_MAX_CANDLES} candles) — ${s.symbol || ""} @ ${fmt(candle.close, 4)}`);
+      changed = true;
+      continue;
+    }
+
+    if (s.dir === "BULL") {
+      if (_checkProfitExitAlert(s, candle, "TikTok Fib")) changed = true;
+      const slHit = candle.low  <= s.sl;
+      const tpHit = candle.high >= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`📈 TikTok Fib ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (slHit) { s.result = "LOSS"; addLog(`📈 TikTok Fib LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (tpHit) { s.result = "WIN";  addLog(`📈 TikTok Fib WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (_checkProfitExitAlert(s, candle, "TikTok Fib")) changed = true;
+      const slHit = candle.high >= s.sl;
+      const tpHit = candle.low  <= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`📈 TikTok Fib ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
+      else if (slHit) { s.result = "LOSS"; addLog(`📈 TikTok Fib LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (tpHit) { s.result = "WIN";  addLog(`📈 TikTok Fib WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of tiktokHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    lastTiktokIdx = candles.length - 1;
+    addLog("📈 TikTok Fib signal resolved — scanning for next trade…");
+  }
+}
+
 /* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
 /**
  * Detect a Power of 3 (ICT) setup.
@@ -9619,11 +9906,14 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.fvgStratAlertList, UI.fvgStratAlertCount, fvgStratHistory, "🎯", "Fair Value Gap");
   /* MTF Top-Down */
   _renderAlertList(UI.mtfTopDownAlertList, UI.mtfTopDownAlertCount, mtfTopDownHistory, "⏱", "MTF Top-Down");
+  /* TikTok Fibonacci */
+  _renderAlertList(UI.tiktokAlertList, UI.tiktokCount, tiktokHistory, "📈", "TikTok Fib");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
-    + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length;
+    + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
+    + tiktokHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -10240,6 +10530,7 @@ function processCustomStrategies() {
   processGridScalperMA();
   processFVGStrat();
   processMtfTopDown();
+  processTiktokStrategy();
   /* Feature 2: Orderblock (Strategy 12) */
   if (orderblockEnabled && candles.length > 0) detectOrderblockStrategy(candles.length - 1);
 }
@@ -10256,6 +10547,7 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorGridScalperMAOutcomes(candle);
   monitorFVGStratOutcomes(candle);
   monitorMtfTopDownOutcomes(candle);
+  monitorTiktokOutcomes(candle);
   /* Feature 2: Orderblock */
   monitorOrderblockOutcomes(candles.length - 1);
   /* Feature 15: Multi-R ladder */
@@ -14375,6 +14667,7 @@ function autoTradeSourceLabel(source, strategyName) {
       failedPinBar:   "📌 Failed Pin Bar",
       fibScalp:       "📐 Fib Golden Zone",
       po3:            "⚡ Power of 3",
+      tiktok:         "📈 TikTok Fib",
       nyOpenRange:    "🕤 NY Open Range",
       sessionRange:   "🌍 Session Range",
       gridScalperMA:  "🔲 Grid Scalper MA"
@@ -14431,7 +14724,8 @@ function getStrategyAllowedRegimes(strategyName) {
     fibScalp:       ["TRANSITIONING", "TRENDING"],
     stopLossHunt:   ["TRANSITIONING", "RANGING"],
     failedPinBar:   ["TRANSITIONING", "RANGING"],
-    gridScalperMA:  ["TRENDING", "TRANSITIONING"]
+    gridScalperMA:  ["TRENDING", "TRANSITIONING"],
+    tiktok:         ["TRENDING", "TRANSITIONING"]
   };
   return map[strategyName] || ["TRENDING", "TRANSITIONING", "RANGING"];
 }
@@ -17410,7 +17704,8 @@ function drawChart() {
     { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" },
     { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" },
     { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" },
-    { history: mtfTopDownHistory,     enabled: mtfTopDownEnabled,     emoji: "⏱", color: "#6366f1" }
+    { history: mtfTopDownHistory,     enabled: mtfTopDownEnabled,     emoji: "⏱", color: "#6366f1" },
+    { history: tiktokHistory,         enabled: tiktokEnabled,         emoji: "📈", color: "#14b8a6" }
   ];
   for (const strat of customStratHistories) {
     if (!strat.enabled || strat.history.length === 0) continue;
@@ -18052,6 +18347,7 @@ function applyStrategyAccess() {
     { id: "fvgStratToggle",        key: "fvg_strat",        fn: () => { fvgStratEnabled       = false; } },
     { id: "liveScalpToggle",       key: "live_scalp",       fn: () => { liveScalpEnabled      = false; } },
     { id: "mtfTopDownToggle",      key: "mtf_top_down",     fn: () => { mtfTopDownEnabled     = false; } },
+    { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -18094,6 +18390,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-fvgStrat",       toggleId: "fvgStratToggle",       enabled: fvgStratEnabled       },
     { badgeId: "stratBadge-mtfTopDown",     toggleId: "mtfTopDownToggle",     enabled: mtfTopDownEnabled     },
     { badgeId: "stratBadge-orderblock",     toggleId: "orderblockToggle",     enabled: orderblockEnabled     },
+    { badgeId: "stratBadge-tiktok",         toggleId: "tiktokToggle",         enabled: tiktokEnabled         },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -18404,6 +18701,8 @@ function activatePanel(p) {
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
   orderblockHistory     = p.orderblockHistory     || [];
   lastOrderblockIdx     = p.lastOrderblockIdx     != null ? p.lastOrderblockIdx     : -999;
+  tiktokHistory         = p.tiktokHistory         || [];
+  lastTiktokIdx         = p.lastTiktokIdx         != null ? p.lastTiktokIdx         : -999;
   sessionRangeAsian   = p.sessionRangeAsian  || null;
   sessionRangeLondon  = p.sessionRangeLondon || null;
   sessionRangeNY      = p.sessionRangeNY     || null;
@@ -18543,6 +18842,8 @@ function savePanel(p) {
   p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
   p.orderblockHistory     = orderblockHistory;
   p.lastOrderblockIdx     = lastOrderblockIdx;
+  p.tiktokHistory         = tiktokHistory;
+  p.lastTiktokIdx         = lastTiktokIdx;
   p.sessionRangeAsian   = sessionRangeAsian;
   p.sessionRangeLondon  = sessionRangeLondon;
   p.sessionRangeNY      = sessionRangeNY;
@@ -18870,6 +19171,8 @@ function connectPanel(p) {
   p.lastMtfTopDownIdx     = -999;
   p.orderblockHistory     = [];
   p.lastOrderblockIdx     = -999;
+  p.tiktokHistory         = [];
+  p.lastTiktokIdx         = -999;
   p.sessionRangeHistory   = [];
   p.connected = false;
 
@@ -19690,6 +19993,7 @@ document.addEventListener("DOMContentLoaded", () => {
     { ref: "autoTradeFailedPinBarToggle",   varName: "autoTradeFailedPinBar",   label: "📌 Failed Pin Bar" },
     { ref: "autoTradeFibScalpToggle",       varName: "autoTradeFibScalp",       label: "📐 Fib Golden Zone" },
     { ref: "autoTradePo3Toggle",            varName: "autoTradePo3",            label: "⚡ Power of 3" },
+    { ref: "autoTradeTiktokToggle",         varName: "autoTradeTiktok",         label: "📈 TikTok Fib" },
     { ref: "autoTradeNYOpenRangeToggle",    varName: "autoTradeNYOpenRange",    label: "🕤 NY Open Range" },
     { ref: "autoTradeSessionRangeToggle",   varName: "autoTradeSessionRange",   label: "🌍 Session Range" },
     { ref: "autoTradeGridScalperMAToggle",  varName: "autoTradeGridScalperMA",  label: "🔲 Grid Scalper MA" }
@@ -19705,6 +20009,7 @@ document.addEventListener("DOMContentLoaded", () => {
           case "autoTradeFailedPinBar":   autoTradeFailedPinBar   = checked; break;
           case "autoTradeFibScalp":       autoTradeFibScalp       = checked; break;
           case "autoTradePo3":            autoTradePo3            = checked; break;
+          case "autoTradeTiktok":         autoTradeTiktok         = checked; break;
           case "autoTradeNYOpenRange":    autoTradeNYOpenRange    = checked; break;
           case "autoTradeSessionRange":   autoTradeSessionRange   = checked; break;
           case "autoTradeGridScalperMA":  autoTradeGridScalperMA  = checked; break;
@@ -20298,6 +20603,28 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeMtfTopDownToggle) {
     UI.autoTradeMtfTopDownToggle.addEventListener("change", () => {
       autoTradeMtfTopDown = UI.autoTradeMtfTopDownToggle.checked;
+      saveSettings();
+    });
+  }
+
+  /* Strategy 13: TikTok Fibonacci listener */
+  if (UI.tiktokToggle) {
+    UI.tiktokToggle.addEventListener("change", () => {
+      tiktokEnabled = UI.tiktokToggle.checked;
+      saveSettings();
+      if (tiktokEnabled) {
+        addLog("📈 TikTok Fib strategy enabled — scanning for 4-step Fibonacci retracement setups");
+        showToast("TikTok Fib Enabled", "Scanning for 4-step Fibonacci retracement entries at the 0.88 level.", "info", 5000);
+      } else {
+        addLog("📈 TikTok Fib strategy disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeTiktokToggle) {
+    UI.autoTradeTiktokToggle.addEventListener("change", () => {
+      autoTradeTiktok = UI.autoTradeTiktokToggle.checked;
       saveSettings();
     });
   }
