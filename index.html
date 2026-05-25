@@ -318,6 +318,32 @@
             <span class="strategy-status-dot" id="fpbDot" title="Disabled"></span>
           </div>
           <p class="hint strategy-hint">Momentum pin bar failure entry.</p>
+
+          <div class="strategy-toggle-row">
+            <label class="strategy-toggle-label">
+              <input type="checkbox" id="po3Toggle" />
+              <span>⚡ Power of 3 (PO3)</span>
+            </label>
+            <span class="po3-preset-badge" id="po3PresetBadge" title="PO3 recommendation class for current symbol">DEFAULT</span>
+            <span class="strategy-status-dot" id="po3Dot" title="Disabled"></span>
+          </div>
+          <p class="hint strategy-hint">Accumulation → sweep manipulation → displacement/FVG retrace continuation entry.</p>
+
+          <div class="control-group" style="grid-column:1/-1; margin-top:4px;">
+            <label for="po3SweepLookbackInput">PO3 Sweep Lookback (candles)</label>
+            <input type="number" id="po3SweepLookbackInput" min="2" max="20" step="1" value="6" />
+
+            <label for="po3BodyThresholdInput">PO3 Body Threshold</label>
+            <input type="number" id="po3BodyThresholdInput" min="0.30" max="0.95" step="0.01" value="0.60" />
+
+            <label for="po3FvgMinPctInput">PO3 FVG Min Size (%)</label>
+            <input type="number" id="po3FvgMinPctInput" min="0.001" max="1" step="0.001" value="0.005" />
+
+            <button id="po3ApplyRecommendedBtn" type="button">Apply Recommended for Symbol</button>
+            <p class="hint" id="po3RecommendationHint" style="margin:6px 0 0 0; grid-column:1/-1;">
+              Recommended values update automatically when symbol changes.
+            </p>
+          </div>
         </section>
 
         <!-- Connection Info -->
@@ -736,6 +762,7 @@
         { toggle: 'liquiditySweepToggle', dot: 'liqSweepDot' },
         { toggle: 'stopLossHuntToggle',   dot: 'slHuntDot'   },
         { toggle: 'failedPinBarToggle',   dot: 'fpbDot'      },
+        { toggle: 'po3Toggle',            dot: 'po3Dot'      },
       ];
       function updateDot(dot, checked) {
         dot.className = 'strategy-status-dot' + (checked ? ' active-dot' : '');

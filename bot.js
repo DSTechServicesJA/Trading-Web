@@ -294,6 +294,7 @@ let lastFalseBreakout = null; // { direction: 'BULL'|'BEAR', level, time }
 let liquiditySweepEnabled = false;
 let stopLossHuntEnabled   = false;
 let failedPinBarEnabled   = false;
+let po3Enabled            = false;
 
 const SCALP_SIGNAL_EXPIRY_MS     = 30000;  // 30s — signals expire after this
 const SCALP_REENTRY_WINDOW_MS    = 60000;  // 60s — re-entry allowed within this window
@@ -312,6 +313,18 @@ let stopHuntReEntryState = null;  // tracks re-entry after "hunt of hunters"
 // Failed Pin Bar state
 let failedPinBarSignal   = null;  // { direction: 'BULL'|'BEAR', pinBarCandle, time }
 let momentumState        = null;  // 'FEAR' | 'GREED' | null
+
+// Power of 3 state (ICT-style)
+let po3Signal            = null;  // { direction: 'BULL'|'BEAR', oneHourOpen, fvgTop, fvgBottom, stopLoss, time }
+const PO3_SWEEP_LOOKBACK_DEFAULT = 6;       // candles to inspect for manipulation sweep
+const PO3_MSS_BODY_PCT_DEFAULT   = 0.6;     // displacement candle body >= 60% of range
+const PO3_FVG_MIN_PCT_DEFAULT    = 0.00005; // minimum FVG size as % of price to avoid tiny gaps
+
+let po3SweepLookback = PO3_SWEEP_LOOKBACK_DEFAULT;
+let po3MssBodyPct    = PO3_MSS_BODY_PCT_DEFAULT;
+let po3FvgMinPct     = PO3_FVG_MIN_PCT_DEFAULT;
+
+const PO3_TUNING_STORAGE_KEY = "itguru_po3_tuning_map";
 
 // --- IMPROVEMENT #1: Adaptive Confluence Threshold ---
 let adaptiveConfluenceMin = CONFLUENCE_MIN_SCORE;
@@ -1180,6 +1193,117 @@ function detectFailedPinBar() {
   }
 }
 
+// --- Strategy 4: Power of 3 (ICT) ---
+// Proxy implementation for bot timeframe:
+// 1) Bias from SMA8/SMA21
+// 2) Sweep around current long-candle open (hour-open proxy)
+// 3) Displacement candle after sweep
+// 4) FVG + retrace touch entry
+function detectPowerOf3() {
+  po3Signal = null;
+  if (!po3Enabled) return;
+  if (candles.length < 8 || candlesLg.length < 1) return;
+
+  const latest = candles[candles.length - 1];
+  const smaFast = smaFastArr.at(-1);
+  const smaSlow = smaSlowArr.at(-1);
+  if (smaFast == null || smaSlow == null) return;
+
+  const bias = smaFast > smaSlow ? "BULL" : smaFast < smaSlow ? "BEAR" : null;
+  if (!bias) return;
+
+  // Use current long candle open as PO3 session open proxy
+  const sessionOpen = candlesLg[candlesLg.length - 1].o;
+  const start = Math.max(1, candles.length - 1 - po3SweepLookback);
+
+  let sweepIdx = -1;
+  let sweepPrice = null;
+
+  if (bias === "BULL") {
+    for (let i = start; i < candles.length - 1; i++) {
+      if (candles[i].l < sessionOpen) {
+        if (sweepPrice == null || candles[i].l < sweepPrice) {
+          sweepPrice = candles[i].l;
+          sweepIdx = i;
+        }
+      }
+    }
+  } else {
+    for (let i = start; i < candles.length - 1; i++) {
+      if (candles[i].h > sessionOpen) {
+        if (sweepPrice == null || candles[i].h > sweepPrice) {
+          sweepPrice = candles[i].h;
+          sweepIdx = i;
+        }
+      }
+    }
+  }
+
+  if (sweepIdx < 0) return;
+
+  let mssIdx = -1;
+  let fvgTop = null;
+  let fvgBottom = null;
+
+  for (let i = sweepIdx + 1; i < candles.length; i++) {
+    const c = candles[i];
+    const range = candleRange(c);
+    if (range <= 0) continue;
+    const body = candleBody(c);
+    if (body / range < po3MssBodyPct) continue;
+
+    if (bias === "BULL") {
+      if (!isBullish(c) || c.c <= sessionOpen) continue;
+      if (i >= 2) {
+        const twoBack = candles[i - 2];
+        if (c.l > twoBack.h) {
+          fvgBottom = twoBack.h;
+          fvgTop = c.l;
+          mssIdx = i;
+          break;
+        }
+      }
+    } else {
+      if (!isBearish(c) || c.c >= sessionOpen) continue;
+      if (i >= 2) {
+        const twoBack = candles[i - 2];
+        if (c.h < twoBack.l) {
+          fvgBottom = c.h;
+          fvgTop = twoBack.l;
+          mssIdx = i;
+          break;
+        }
+      }
+    }
+  }
+
+  if (mssIdx < 0 || fvgTop == null || fvgBottom == null) return;
+
+  const fvgSizePct = Math.abs(fvgTop - fvgBottom) / Math.max(1e-9, latest.c);
+  if (fvgSizePct < po3FvgMinPct) return;
+
+  // Entry on retrace touch into the FVG after displacement
+  let touch = false;
+  for (let i = mssIdx + 1; i < candles.length; i++) {
+    const c = candles[i];
+    if (c.l <= fvgTop && c.h >= fvgBottom) {
+      touch = true;
+      break;
+    }
+  }
+  if (!touch) return;
+
+  po3Signal = {
+    direction: bias,
+    oneHourOpen: sessionOpen,
+    sweepPrice,
+    fvgTop,
+    fvgBottom,
+    stopLoss: bias === "BULL" ? sweepPrice : sweepPrice,
+    time: Date.now()
+  };
+}
+
 // --- Get the strongest active scalping strategy signal ---
 function getActiveScalpingSignal() {
   // Returns the strongest active signal, or null
@@ -1193,6 +1317,9 @@ function getActiveScalpingSignal() {
   }
   if (failedPinBarSignal && (Date.now() - failedPinBarSignal.time < SCALP_SIGNAL_EXPIRY_MS)) {
     signals.push({ ...failedPinBarSignal, strategy: "FAILED_PIN", priority: 2 });
+  }
+  if (po3Signal && (Date.now() - po3Signal.time < SCALP_SIGNAL_EXPIRY_MS)) {
+    signals.push({ ...po3Signal, strategy: "PO3", priority: 4 });
   }
 
   if (!signals.length) return null;
@@ -2131,6 +2258,7 @@ function onTickPriceAction(price) {
     detectLiquiditySweep();
     detectStopLossHunt();
     detectFailedPinBar();
+    detectPowerOf3();
     updateScalpStratBadge();
   }
 
@@ -2264,6 +2392,9 @@ function initUI() {
     dailyTargetInput: document.getElementById("dailyTargetInput"),
   };
 
+  populateBotSymbolSelectFromIndicatorList();
+  applyPo3TuningForSymbol(CURRENT_SYMBOL, { preferSaved: true, silent: true });
+
   console.log("UI INITIALIZED", UI);
 }
 
@@ -2354,10 +2485,224 @@ let modeDisabledUntil = {
 
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
-  FAST: ["1HZ75V", "1HZ50V", "1HZ100V"],
-  STANDARD: ["R_100", "R_75", "R_50"],
-  FOREX: ["frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY", "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"]
+  FAST: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
+  STANDARD: ["R_10", "R_25", "R_50", "R_75", "R_100"],
+  FOREX: [
+    "frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxUSDCHF", "frxAUDUSD", "frxUSDCAD", "frxNZDUSD",
+    "frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURCAD", "frxEURCHF", "frxEURNZD",
+    "frxGBPJPY", "frxGBPAUD", "frxGBPCAD", "frxGBPCHF", "frxGBPNZD",
+    "frxAUDJPY", "frxAUDNZD", "frxAUDCAD", "frxAUDCHF",
+    "frxNZDJPY", "frxNZDCAD", "frxNZDCHF",
+    "frxCADJPY", "frxCADCHF", "frxCHFJPY",
+    "frxUSDMXN", "frxUSDNOK", "frxUSDSEK", "frxUSDSGD", "frxUSDZAR", "frxUSDPLN", "frxUSDTRY", "frxUSDHKD",
+    "frxXAUUSD", "XAUUSDmicro", "XAUUSD.s", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"
+  ]
 };
+
+const INDICATOR_SYMBOL_GROUPS = {
+  FAST_1S: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
+  VOLATILITY: ["R_10", "R_25", "R_50", "R_75", "R_100"],
+  BOOM: ["BOOM300N", "BOOM500", "BOOM600", "BOOM900", "BOOM1000"],
+  CRASH: ["CRASH300N", "CRASH500", "CRASH600", "CRASH900", "CRASH1000"],
+  JUMP: ["JD10", "JD25", "JD50", "JD75", "JD100"],
+  STEP: ["stpRNG", "stpRNG2", "stpRNG3", "stpRNG4", "stpRNG5"],
+  DAILY_RESET: ["RDBULL", "RDBEAR"],
+  DEX: ["DEX600DN", "DEX600UP", "DEX900DN", "DEX900UP", "DEX1500DN", "DEX1500UP"],
+  DRIFT_SWITCH: ["DSI10", "DSI20", "DSI30"],
+  FOREX_MAJORS: ["frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxUSDCHF", "frxAUDUSD", "frxUSDCAD", "frxNZDUSD"],
+  FOREX_CROSSES: ["frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURCAD", "frxEURCHF", "frxEURNZD", "frxGBPJPY", "frxGBPAUD", "frxGBPCAD", "frxGBPCHF", "frxGBPNZD", "frxAUDJPY", "frxAUDNZD", "frxAUDCAD", "frxAUDCHF", "frxNZDJPY", "frxNZDCAD", "frxNZDCHF", "frxCADJPY", "frxCADCHF", "frxCHFJPY"],
+  FOREX_EXOTICS: ["frxUSDMXN", "frxUSDNOK", "frxUSDSEK", "frxUSDSGD", "frxUSDZAR", "frxUSDPLN", "frxUSDTRY", "frxUSDHKD"],
+  COMMODITIES: ["frxXAUUSD", "XAUUSDmicro", "XAUUSD.s", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"]
+};
+
+function listContains(list, sym) {
+  return Array.isArray(list) && list.includes(sym);
+}
+
+function formatSymbolLabel(sym) {
+  if (/^frx[A-Z]{6}$/.test(sym)) {
+    const p = sym.slice(3);
+    return `${p.slice(0, 3)}/${p.slice(3)}`;
+  }
+  return sym;
+}
+
+function populateBotSymbolSelectFromIndicatorList() {
+  const select = document.getElementById("symbolSelect");
+  if (!select) return;
+
+  const current = symbol || CURRENT_SYMBOL || select.value;
+  const groups = [
+    ["FAST 1s", INDICATOR_SYMBOL_GROUPS.FAST_1S],
+    ["Volatility", INDICATOR_SYMBOL_GROUPS.VOLATILITY],
+    ["Boom", INDICATOR_SYMBOL_GROUPS.BOOM],
+    ["Crash", INDICATOR_SYMBOL_GROUPS.CRASH],
+    ["Jump", INDICATOR_SYMBOL_GROUPS.JUMP],
+    ["Step", INDICATOR_SYMBOL_GROUPS.STEP],
+    ["Daily Reset", INDICATOR_SYMBOL_GROUPS.DAILY_RESET],
+    ["DEX", INDICATOR_SYMBOL_GROUPS.DEX],
+    ["Drift Switch", INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH],
+    ["Forex Majors", INDICATOR_SYMBOL_GROUPS.FOREX_MAJORS],
+    ["Forex Crosses", INDICATOR_SYMBOL_GROUPS.FOREX_CROSSES],
+    ["Forex Exotics", INDICATOR_SYMBOL_GROUPS.FOREX_EXOTICS],
+    ["Commodities", INDICATOR_SYMBOL_GROUPS.COMMODITIES]
+  ];
+
+  select.innerHTML = "";
+  groups.forEach(([label, symbols]) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = label;
+    symbols.forEach((sym) => {
+      const option = document.createElement("option");
+      option.value = sym;
+      option.textContent = formatSymbolLabel(sym);
+      optgroup.appendChild(option);
+    });
+    select.appendChild(optgroup);
+  });
+
+  const allSymbols = groups.flatMap(([, syms]) => syms);
+  select.value = allSymbols.includes(current) ? current : CURRENT_SYMBOL;
+}
+
+function getPo3RecommendedTuning(sym) {
+  if (listContains(INDICATOR_SYMBOL_GROUPS.FAST_1S, sym)) {
+    return { sweepLookback: 8, bodyPct: 0.68, fvgMinPct: 0.00008, note: "Fast 1s markets are noisy, so stricter displacement/FVG filters are safer." };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.VOLATILITY, sym)) {
+    return { sweepLookback: 6, bodyPct: 0.60, fvgMinPct: 0.00005, note: "Volatility index defaults balance frequency and quality." };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.BOOM, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.CRASH, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.JUMP, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.STEP, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DEX, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DAILY_RESET, sym)) {
+    return { sweepLookback: 10, bodyPct: 0.72, fvgMinPct: 0.00010, note: "Spike-style synthetics benefit from wider sweep context and stronger displacement confirmation." };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.FOREX_MAJORS, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.FOREX_CROSSES, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.FOREX_EXOTICS, sym)) {
+    return { sweepLookback: 5, bodyPct: 0.55, fvgMinPct: 0.00003, note: "Forex typically trends smoother, so slightly looser thresholds can capture earlier continuation." };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.COMMODITIES, sym)) {
+    return { sweepLookback: 7, bodyPct: 0.62, fvgMinPct: 0.00006, note: "Metals and commodities can impulse hard; keep moderate strictness." };
+  }
+  return { sweepLookback: PO3_SWEEP_LOOKBACK_DEFAULT, bodyPct: PO3_MSS_BODY_PCT_DEFAULT, fvgMinPct: PO3_FVG_MIN_PCT_DEFAULT, note: "Using standard PO3 defaults for this symbol." };
+}
+
+function getPo3PresetBadgeInfo(sym, hasCustom) {
+  if (hasCustom) {
+    return { text: "CUSTOM", className: "custom" };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.FAST_1S, sym)) {
+    return { text: "FAST", className: "fast" };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.VOLATILITY, sym)) {
+    return { text: "VOL", className: "vol" };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.BOOM, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.CRASH, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.JUMP, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.STEP, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DEX, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.DAILY_RESET, sym)) {
+    return { text: "SPIKE", className: "spike" };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.FOREX_MAJORS, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.FOREX_CROSSES, sym) ||
+      listContains(INDICATOR_SYMBOL_GROUPS.FOREX_EXOTICS, sym)) {
+    return { text: "FOREX", className: "forex" };
+  }
+  if (listContains(INDICATOR_SYMBOL_GROUPS.COMMODITIES, sym)) {
+    return { text: "METAL", className: "metal" };
+  }
+  return { text: "DEFAULT", className: "" };
+}
+
+function updatePo3PresetBadge(sym) {
+  const badge = document.getElementById("po3PresetBadge");
+  if (!badge) return;
+
+  const hasCustom = !!po3TuningBySymbol[sym];
+  const info = getPo3PresetBadgeInfo(sym, hasCustom);
+  badge.textContent = info.text;
+  badge.className = `po3-preset-badge${info.className ? ` ${info.className}` : ""}`;
+  badge.title = hasCustom
+    ? `PO3 preset class: ${info.text} (custom override active)`
+    : `PO3 preset class: ${info.text}`;
+}
+
+function clampPo3TuningValues(v) {
+  const sweepLookback = clamp(Math.round(Number(v.sweepLookback) || PO3_SWEEP_LOOKBACK_DEFAULT), 2, 20);
+  const bodyPct = clamp(Number(v.bodyPct) || PO3_MSS_BODY_PCT_DEFAULT, 0.30, 0.95);
+  const fvgMinPct = clamp(Number(v.fvgMinPct) || PO3_FVG_MIN_PCT_DEFAULT, 0.00001, 0.01);
+  return { sweepLookback, bodyPct, fvgMinPct };
+}
+
+function loadPo3TuningMap() {
+  try {
+    const raw = localStorage.getItem(PO3_TUNING_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function savePo3TuningMap() {
+  try {
+    localStorage.setItem(PO3_TUNING_STORAGE_KEY, JSON.stringify(po3TuningBySymbol));
+  } catch (_) {}
+}
+
+let po3TuningBySymbol = loadPo3TuningMap();
+
+function syncPo3TuningUI() {
+  const sweepInput = document.getElementById("po3SweepLookbackInput");
+  const bodyInput = document.getElementById("po3BodyThresholdInput");
+  const fvgInput = document.getElementById("po3FvgMinPctInput");
+
+  if (sweepInput) sweepInput.value = String(po3SweepLookback);
+  if (bodyInput) bodyInput.value = po3MssBodyPct.toFixed(2);
+  if (fvgInput) fvgInput.value = (po3FvgMinPct * 100).toFixed(3);
+}
+
+function updatePo3RecommendationHint(sym) {
+  const hint = document.getElementById("po3RecommendationHint");
+  if (!hint) return;
+  const rec = getPo3RecommendedTuning(sym);
+  const hasCustom = !!po3TuningBySymbol[sym];
+  updatePo3PresetBadge(sym);
+  const fvgPct = (rec.fvgMinPct * 100).toFixed(3);
+  hint.textContent = `Recommended for ${formatSymbolLabel(sym)}: lookback ${rec.sweepLookback}, body ${rec.bodyPct.toFixed(2)}, FVG ${fvgPct}% (${rec.note})${hasCustom ? " Custom override active for this symbol." : ""}`;
+}
+
+function applyPo3TuningForSymbol(sym, options = {}) {
+  const { persist = false, preferSaved = true, silent = false } = options;
+  const base = getPo3RecommendedTuning(sym);
+  const saved = preferSaved ? po3TuningBySymbol[sym] : null;
+  const next = clampPo3TuningValues(saved || base);
+
+  po3SweepLookback = next.sweepLookback;
+  po3MssBodyPct = next.bodyPct;
+  po3FvgMinPct = next.fvgMinPct;
+
+  if (persist) {
+    po3TuningBySymbol[sym] = { ...next };
+    savePo3TuningMap();
+  }
+
+  syncPo3TuningUI();
+  updatePo3RecommendationHint(sym);
+
+  if (!silent) {
+    setStatus(`PO3 tuned for ${sym}: lookback ${po3SweepLookback}, body ${po3MssBodyPct.toFixed(2)}, FVG ${(po3FvgMinPct * 100).toFixed(3)}%`, "#38bdf8");
+  }
+}
 const MARKET_SIGNAL_LABEL = {
   "1HZ75V":  "1-Second Vol 75",
   "1HZ50V":  "1-Second Vol 50",
@@ -2499,6 +2844,7 @@ if (autoSymbolToggle) {
 
   // Wire scalping strategy toggles
   wireScalpingStrategyToggles();
+  wirePo3TuningControls();
 
   console.log("CONTROLS WIRED");
 }
@@ -2509,6 +2855,7 @@ function wireScalpingStrategyToggles() {
   const liqToggle  = document.getElementById("liquiditySweepToggle");
   const huntToggle = document.getElementById("stopLossHuntToggle");
   const fpbToggle  = document.getElementById("failedPinBarToggle");
+  const po3Toggle  = document.getElementById("po3Toggle");
 
   // Helper: check if strategies are locked (respect the lock toggle in index.html)
   function strategiesLocked() {
@@ -2530,6 +2877,7 @@ function wireScalpingStrategyToggles() {
   restoreStrategyToggle("itguru_liq_sweep",  (v) => { liquiditySweepEnabled = v; }, liqToggle);
   restoreStrategyToggle("itguru_stop_hunt",   (v) => { stopLossHuntEnabled   = v; }, huntToggle);
   restoreStrategyToggle("itguru_failed_pin",  (v) => { failedPinBarEnabled   = v; }, fpbToggle);
+  restoreStrategyToggle("itguru_po3",         (v) => { po3Enabled            = v; }, po3Toggle);
 
   if (liqToggle) {
     liqToggle.addEventListener("change", () => {
@@ -2560,12 +2908,61 @@ function wireScalpingStrategyToggles() {
       updateScalpStratBadge();
     });
   }
+
+  if (po3Toggle) {
+    po3Toggle.addEventListener("change", () => {
+      po3Enabled = po3Toggle.checked;
+      try { localStorage.setItem("itguru_po3", po3Enabled ? "1" : "0"); } catch (e) {}
+      setStatus(`Power of 3 ${po3Enabled ? "enabled" : "disabled"}`, "#38bdf8");
+      if (!po3Enabled) po3Signal = null;
+      updateScalpStratBadge();
+    });
+  }
+}
+
+function wirePo3TuningControls() {
+  const sweepInput = document.getElementById("po3SweepLookbackInput");
+  const bodyInput = document.getElementById("po3BodyThresholdInput");
+  const fvgInput = document.getElementById("po3FvgMinPctInput");
+  const applyRecommendedBtn = document.getElementById("po3ApplyRecommendedBtn");
+
+  if (!sweepInput && !bodyInput && !fvgInput && !applyRecommendedBtn) return;
+
+  const saveCurrentSymbolPo3 = () => {
+    const parsed = clampPo3TuningValues({
+      sweepLookback: sweepInput ? sweepInput.value : po3SweepLookback,
+      bodyPct: bodyInput ? bodyInput.value : po3MssBodyPct,
+      fvgMinPct: fvgInput ? (Number(fvgInput.value) / 100) : po3FvgMinPct
+    });
+
+    po3SweepLookback = parsed.sweepLookback;
+    po3MssBodyPct = parsed.bodyPct;
+    po3FvgMinPct = parsed.fvgMinPct;
+
+    po3TuningBySymbol[CURRENT_SYMBOL] = { ...parsed };
+    savePo3TuningMap();
+    syncPo3TuningUI();
+    updatePo3RecommendationHint(CURRENT_SYMBOL);
+    setStatus(`PO3 custom saved for ${CURRENT_SYMBOL}`, "#38bdf8");
+  };
+
+  if (sweepInput) sweepInput.addEventListener("change", saveCurrentSymbolPo3);
+  if (bodyInput) bodyInput.addEventListener("change", saveCurrentSymbolPo3);
+  if (fvgInput) fvgInput.addEventListener("change", saveCurrentSymbolPo3);
+
+  if (applyRecommendedBtn) {
+    applyRecommendedBtn.addEventListener("click", () => {
+      applyPo3TuningForSymbol(CURRENT_SYMBOL, { persist: true, preferSaved: false });
+    });
+  }
+
+  applyPo3TuningForSymbol(CURRENT_SYMBOL, { preferSaved: true, silent: true });
 }
 
 function updateMarketSignalBySymbol(sym) {
   if (!marketSignalEl) return;
 
-  const label = MARKET_SIGNAL_LABEL[sym] || "UNKNOWN";
+  const label = MARKET_SIGNAL_LABEL[sym] || formatSymbolLabel(sym) || "UNKNOWN";
 
   marketSignalEl.textContent = label;
   marketSignalEl.className = "status-badge";
@@ -3190,13 +3587,44 @@ function requiredPayoutRatio(sym) {
   return clamp(dynamicMinPayoutRatio, floor, PAYOUT_RATIO_CAP);
 }
 
+function getDefaultSymbolPreset(sym) {
+  if (SYMBOL_SPEED.FAST.includes(sym)) {
+    return {
+      EXPECTANCY_WINDOW: 4,
+      ENTROPY_SLOPE_CUT: 0.04,
+      STAKE_SCALE: 1.04,
+      LOSS_CLUSTER_LIMIT: 1,
+      DRAWDOWN_MULTIPLIER: 1.2
+    };
+  }
+  if (SYMBOL_SPEED.STANDARD.includes(sym)) {
+    return {
+      EXPECTANCY_WINDOW: 6,
+      ENTROPY_SLOPE_CUT: 0.06,
+      STAKE_SCALE: 1.06,
+      LOSS_CLUSTER_LIMIT: 2,
+      DRAWDOWN_MULTIPLIER: 1.6
+    };
+  }
+  if (SYMBOL_SPEED.FOREX.includes(sym)) {
+    return { ...FOREX_TUNING };
+  }
+  return {
+    EXPECTANCY_WINDOW: 6,
+    ENTROPY_SLOPE_CUT: 0.07,
+    STAKE_SCALE: 1.05,
+    LOSS_CLUSTER_LIMIT: 2,
+    DRAWDOWN_MULTIPLIER: 1.6
+  };
+}
+
 function applySymbolTuning(sym) {
-  const preset = SYMBOL_TUNING[sym];
-  if (!preset) return;
+  const preset = SYMBOL_TUNING[sym] || getDefaultSymbolPreset(sym);
+  SYMBOL_TUNING[sym] = preset;
 
   symbol = sym;               // feed symbol
   CURRENT_SYMBOL = sym;       // tuning symbol
-  TUNING = SYMBOL_TUNING[sym];
+  TUNING = preset;
 
   EXPECTANCY_WINDOW   = TUNING.EXPECTANCY_WINDOW;
   ENTROPY_SLOPE_CUT   = TUNING.ENTROPY_SLOPE_CUT;
@@ -3212,6 +3640,7 @@ function applySymbolTuning(sym) {
   updateSymbolSpeedBadge(sym);
   updateMarketSignalBySymbol(sym);
   setLiveViewSymbol(sym);
+  applyPo3TuningForSymbol(sym, { preferSaved: true, silent: true });
 
   // Fetch real staking limits for this symbol (async, re-syncs stake on arrival)
   fetchStakingLimits(sym);
@@ -4109,7 +4538,7 @@ updatePerformanceUI();
 
   const modeBorderColors = {
     TREND: "#22c55e", ODD_EVEN: "#3b82f6", REVERSAL: "#f59e0b",
-    LIQ_SWEEP: "#a855f7", STOP_HUNT: "#ec4899", FAILED_PIN: "#14b8a6"
+    LIQ_SWEEP: "#a855f7", STOP_HUNT: "#ec4899", FAILED_PIN: "#14b8a6", PO3: "#06b6d4"
   };
   const borderColor = modeBorderColors[currentTradeMode];
   if (borderColor) li.style.borderLeft = `4px solid ${borderColor}`;
