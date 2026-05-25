@@ -2958,6 +2958,16 @@ body.stream-mode #autoTradePLValue {
   color: var(--warning-soft);
   border: 1px solid rgba(245, 158, 11, 0.25);
 }
+.strat-enable-badge.mode-safe {
+  background: rgba(14, 165, 233, 0.14);
+  color: #7dd3fc;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+.strat-enable-badge.mode-strict {
+  background: rgba(251, 146, 60, 0.14);
+  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
 
 /* Light theme overrides */
 body.light-theme .strat-enable-row {

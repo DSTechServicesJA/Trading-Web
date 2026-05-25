@@ -686,8 +686,17 @@
                   <input type="checkbox" id="po3Toggle" />
                   <span class="strat-enable-icon">🔀</span>
                   <span class="strat-enable-name">Power of 3</span>
+                  <span class="strat-enable-badge mode-safe" id="po3FreshnessBadge" title="PO3 entry freshness mode">SAFE</span>
                   <span class="strat-enable-badge off" id="stratBadge-po3">OFF</span>
                 </label>
+
+                <div style="grid-column:1 / -1; margin:-4px 0 6px 0; padding:0 10px 6px 36px;">
+                  <label class="hint" for="po3FreshnessModeQuick" style="display:block; margin-bottom:4px;">PO3 Entry Freshness (Quick Switch)</label>
+                  <select id="po3FreshnessModeQuick" style="width:100%; max-width:460px;">
+                    <option value="1">Keep 1-candle freshness (current behavior, safer)</option>
+                    <option value="0">Switch to 0-candle freshness (strictest timing)</option>
+                  </select>
+                </div>
 
                 <label class="strat-enable-row">
                   <input type="checkbox" id="nyOpenRangeToggle" />
@@ -955,6 +964,15 @@
               <hr class="param-divider" />
               <p class="param-group-title">⚡ Strategy 5: Power of 3 (ICT)</p>
               <p class="hint">ICT Power of 3 delivery: Accumulation → Manipulation → Expansion. Uses EMA 8/21 daily bias to define direction. Marks the 1-hour candle open, waits for a liquidity sweep (manipulation) beyond the open, then waits for a market structure shift (MSS) with displacement that leaves a Fair Value Gap (FVG). Enters when price returns into the FVG. SL below the sweep low (bullish) or above the sweep high (bearish). TP at the 1H high/low + external liquidity. Partial at 1–2R, let the rest run.</p>
+
+              <div style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="po3FreshnessMode" style="margin-right:6px;">PO3 Entry Freshness</label>
+                <select id="po3FreshnessMode" style="width:100%;">
+                  <option value="1">Keep 1-candle freshness (current behavior, safer)</option>
+                  <option value="0">Switch to 0-candle freshness (strictest timing)</option>
+                </select>
+              </div>
+              <p class="hint">Controls how recent the last FVG touch must be before a PO3 alert is fired. 0-candle mode only alerts on the current touch candle.</p>
 
               <hr class="param-divider" />
               <p class="param-group-title">🔲 Strategy 8: Grid Scalper MA</p>

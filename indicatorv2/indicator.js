@@ -1445,6 +1445,9 @@ const PO3_MAX_CANDLES = 30;         /* timeout: close trade monitoring after N c
 const PO3_SWEEP_LOOKBACK = 6;       /* candles to look back for manipulation sweep */
 const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
 const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
+const PO3_ENTRY_MAX_AGE_SAFE = 1;   /* allows 1-candle lag after a touch (safer, less strict) */
+const PO3_ENTRY_MAX_AGE_STRICT = 0; /* only current-touch candle is valid (strictest timing) */
+let po3EntryMaxAge = PO3_ENTRY_MAX_AGE_SAFE;
 let lastPo3Idx = -999;
 
 /* ================= STRATEGY 8: GRID SCALPER MA ================= */
@@ -1798,6 +1801,7 @@ function initUI() {
 
   /* Strategy 5: Power of 3 (ICT) */
   UI.po3Toggle             = document.getElementById("po3Toggle");
+  UI.po3FreshnessMode      = document.getElementById("po3FreshnessMode");
   UI.po3AlertList          = document.getElementById("po3AlertList");
   UI.po3Count              = document.getElementById("po3Count");
 
@@ -3993,6 +3997,11 @@ function _updateGridScalperMAPeriodVisibility() {
   if (row) row.style.display = gridScalperMAStrategy === "price_vs_ma" ? "" : "none";
 }
 
+function _normalizePo3EntryMaxAge(value) {
+  const n = parseInt(value, 10);
+  return n === PO3_ENTRY_MAX_AGE_STRICT ? PO3_ENTRY_MAX_AGE_STRICT : PO3_ENTRY_MAX_AGE_SAFE;
+}
+
 function saveSettings() {
   try {
     const settings = {
@@ -4063,6 +4072,7 @@ function saveSettings() {
       failedPinBarEnabled,
       fibScalpEnabled,
       po3Enabled,
+      po3EntryMaxAge,
       telegramBotToken: _obfuscate(telegramBotToken),
       telegramChatId,
       telegramAutoSend,
@@ -4291,7 +4301,9 @@ function restoreSettings() {
 
     /* Strategy 5: Power of 3 (ICT) */
     if (s.po3Enabled != null) po3Enabled = s.po3Enabled;
+    if (s.po3EntryMaxAge != null) po3EntryMaxAge = _normalizePo3EntryMaxAge(s.po3EntryMaxAge);
     if (UI.po3Toggle) UI.po3Toggle.checked = po3Enabled;
+    if (UI.po3FreshnessMode) UI.po3FreshnessMode.value = String(po3EntryMaxAge);
 
     /* Strategy 9: Fair Value Gap (FVG) */
     if (s.fvgStratEnabled != null) fvgStratEnabled = s.fvgStratEnabled;
@@ -7565,6 +7577,7 @@ function revertAllSettings() {
   failedPinBarEnabled   = false;
   fibScalpEnabled       = false;
   po3Enabled            = false;
+  po3EntryMaxAge        = PO3_ENTRY_MAX_AGE_SAFE;
   gridScalperMAEnabled  = false;
   gridScalperMAStrategy = "price_vs_ma";
   gridScalperMAPeriod   = 21;
@@ -7610,6 +7623,7 @@ function revertAllSettings() {
   if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
   if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
   if (UI.po3Toggle)              UI.po3Toggle.checked              = po3Enabled;
+  if (UI.po3FreshnessMode)       UI.po3FreshnessMode.value         = String(po3EntryMaxAge);
   if (UI.gridScalperMAToggle)        UI.gridScalperMAToggle.checked        = gridScalperMAEnabled;
   if (UI.gridScalperMAStrategySelect) UI.gridScalperMAStrategySelect.value = gridScalperMAStrategy;
   if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
@@ -8839,31 +8853,33 @@ function detectPowerOf3() {
   if (fvgSize < atrValue * PO3_FVG_MIN_ATR * 0.5) return null;
 
   /* --- Step 5: Entry — price returns into the FVG --- */
-  /* Check if the current candle (or one since MSS) has retraced into the FVG */
-  let entryFound = false;
+  /*
+   Keep alerts timely: only signal if the most recent FVG touch is fresh.
+   This prevents stale PO3 alerts that appear long after the retrace,
+   when price is already close to TP.
+  */
+  let entryTouchIdx = -1;
   const fvgTop = Math.max(fvgHigh, fvgLow);
   const fvgBottom = Math.min(fvgHigh, fvgLow);
 
   for (let i = mssIdx + 1; i <= idx; i++) {
     const ec = candles[i];
     if (ec.low <= fvgTop && ec.high >= fvgBottom) {
-      entryFound = true;
-      break;
+      entryTouchIdx = i;
     }
   }
 
-  /* Also check if current candle is in the FVG */
-  if (c.close >= fvgBottom && c.close <= fvgTop) entryFound = true;
-  if (c.low <= fvgTop && c.high >= fvgBottom) entryFound = true;
-
-  if (!entryFound) return null;
+  if (entryTouchIdx < 0) return null;
+  if (idx - entryTouchIdx > po3EntryMaxAge) return null;
 
   /* --- Step 6: Compute entry / SL / TP --- */
-  /* Entry at the midpoint of the FVG (or current close if inside FVG) */
+  /* Entry anchored to a realistic fill inside the FVG zone */
+  const entryTouch = candles[entryTouchIdx];
   const fvgMid = (fvgTop + fvgBottom) / 2;
-  const entry = (c.close >= fvgBottom && c.close <= fvgTop)
-              ? c.close
-              : fvgMid;
+  const entryClose = entryTouch.close;
+  const entry = (entryClose >= fvgBottom && entryClose <= fvgTop)
+    ? entryClose
+    : fvgMid;
 
   let sl, tp;
   if (dailyBias === "BULL") {
@@ -18510,6 +18526,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       drawChart();
       updateStrategyBadges();
+    });
+  }
+  if (UI.po3FreshnessMode) {
+    UI.po3FreshnessMode.addEventListener("change", () => {
+      po3EntryMaxAge = _normalizePo3EntryMaxAge(UI.po3FreshnessMode.value);
+      UI.po3FreshnessMode.value = String(po3EntryMaxAge);
+      saveSettings();
+      addLog(`⚡ PO3 freshness updated — ${po3EntryMaxAge === 0 ? "strict (0-candle)" : "safe (1-candle)"} mode`);
     });
   }
 
