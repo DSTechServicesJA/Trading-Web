@@ -388,6 +388,7 @@ const SCALP_MAX_CANDLES         = 15;    /* auto-timeout: close trade monitoring
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
+const TELEGRAM_SCREENSHOT_TIMEOUT_MS = 1200; /* fall back to text quickly if screenshot is slow */
 const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side proxy to bypass CORS */
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
@@ -771,14 +772,14 @@ let chartRedrawPending = false;
 /* API rate limiting */
 const apiCallTimestamps = new Map(); /* endpoint -> array of timestamps */
 const API_RATE_LIMIT_WINDOW_MS = 60000; /* 1 minute window */
-const API_RATE_LIMIT_MAX_CALLS = 30; /* max calls per window */
+const API_RATE_LIMIT_MAX_CALLS = 120; /* max calls per window */
 
 /**
  * Check if an API call is allowed based on rate limiting.
  * @param {string} endpoint - The API endpoint identifier (e.g., "telegram", "contracts_for")
  * @returns {boolean} - True if the call is allowed, false if rate limited
  */
-function isApiCallAllowed(endpoint) {
+function getApiRateLimitWaitMs(endpoint) {
   const now = Date.now();
   if (!apiCallTimestamps.has(endpoint)) {
     apiCallTimestamps.set(endpoint, []);
@@ -793,14 +794,39 @@ function isApiCallAllowed(endpoint) {
   /* Check if we've exceeded the limit */
   if (validTimestamps.length >= API_RATE_LIMIT_MAX_CALLS) {
     const oldestCall = validTimestamps[0];
-    const waitTime = Math.ceil((API_RATE_LIMIT_WINDOW_MS - (now - oldestCall)) / 1000);
-    addLog(`⚠️ Rate limit reached for ${endpoint}. Please wait ${waitTime}s.`);
-    return false;
+    return Math.max(1, API_RATE_LIMIT_WINDOW_MS - (now - oldestCall));
   }
   
   /* Record this call */
   validTimestamps.push(now);
+  return 0;
+}
+
+function isApiCallAllowed(endpoint) {
+  const waitMs = getApiRateLimitWaitMs(endpoint);
+  if (waitMs > 0) {
+    const waitTime = Math.ceil(waitMs / 1000);
+    addLog(`⚠️ Rate limit reached for ${endpoint}. Please wait ${waitTime}s.`);
+    return false;
+  }
   return true;
+}
+
+async function waitForApiCallSlot(endpoint, maxWaitMs = 20000) {
+  const deadline = Date.now() + maxWaitMs;
+  let warned = false;
+
+  while (true) {
+    const waitMs = getApiRateLimitWaitMs(endpoint);
+    if (waitMs === 0) return true;
+    if (!warned) {
+      addLog(`⏳ ${endpoint} rate-limited, queueing send...`);
+      if (endpoint === "telegram") recordTelegramDeliveryStat("queued", 1);
+      warned = true;
+    }
+    if (Date.now() + waitMs > deadline) return false;
+    await new Promise(resolve => setTimeout(resolve, Math.min(waitMs, 1000)));
+  }
 }
 
 /* ================= STATE ================= */
@@ -1250,6 +1276,8 @@ let telegramSessionRangeOutcomeSend = false; /* auto-send WIN/LOSS outcome for s
 let telegramStrategyAutoSend     = false;  /* auto-send custom strategy alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) to Telegram */
 let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for custom strategies to Telegram */
 let telegramProfitExitAlertEnabled = false;  /* auto-send alert when trade that reached 1:1 profit reverses back to entry */
+let telegramDeliveryHudEl = null;
+let telegramDeliveryStats = { queued: 0, sent: 0, failed: 0 };
 
 /* RSI state */
 let rsiValues = [];
@@ -3169,6 +3197,113 @@ function getTelegramCredentials() {
   return { token, chatId };
 }
 
+function withTimeout(promise, timeoutMs, timeoutError) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(timeoutError), timeoutMs);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      err => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+async function captureTelegramScreenshot(panel = null) {
+  const label = panel ? `panel ${panel.symbol || "chart"}` : "chart";
+  const capturePromise = panel ? capturePanelScreenshot(panel) : captureChartScreenshot();
+  try {
+    return await withTimeout(
+      capturePromise,
+      TELEGRAM_SCREENSHOT_TIMEOUT_MS,
+      new Error("Screenshot timed out")
+    );
+  } catch (err) {
+    addLog(`📤 ${label} screenshot unavailable, sending text-only signal: ${err.message}`);
+    return null;
+  }
+}
+
+function ensureTelegramDeliveryHud() {
+  if (telegramDeliveryHudEl || typeof document === "undefined") return;
+
+  const el = document.createElement("div");
+  const textEl = document.createElement("span");
+  const resetBtn = document.createElement("button");
+  el.id = "telegramDeliveryHud";
+  el.setAttribute("aria-live", "polite");
+  el.style.position = "fixed";
+  el.style.right = "12px";
+  el.style.bottom = "12px";
+  el.style.zIndex = "99999";
+  el.style.padding = "6px 10px";
+  el.style.borderRadius = "10px";
+  el.style.border = "1px solid rgba(148,163,184,0.45)";
+  el.style.background = "rgba(2,6,23,0.82)";
+  el.style.backdropFilter = "blur(6px)";
+  el.style.color = "#e2e8f0";
+  el.style.fontSize = "12px";
+  el.style.fontWeight = "600";
+  el.style.letterSpacing = "0.2px";
+  el.style.pointerEvents = "auto";
+  el.style.display = "flex";
+  el.style.alignItems = "center";
+  el.style.gap = "8px";
+  el.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
+
+  textEl.id = "telegramDeliveryHudText";
+
+  resetBtn.type = "button";
+  resetBtn.textContent = "Reset";
+  resetBtn.title = "Reset Telegram delivery counters";
+  resetBtn.style.pointerEvents = "auto";
+  resetBtn.style.cursor = "pointer";
+  resetBtn.style.border = "1px solid rgba(148,163,184,0.55)";
+  resetBtn.style.background = "rgba(15,23,42,0.9)";
+  resetBtn.style.color = "#cbd5e1";
+  resetBtn.style.borderRadius = "6px";
+  resetBtn.style.padding = "1px 6px";
+  resetBtn.style.fontSize = "11px";
+  resetBtn.style.fontWeight = "700";
+  resetBtn.style.lineHeight = "1.3";
+  resetBtn.addEventListener("click", () => {
+    telegramDeliveryStats.queued = 0;
+    telegramDeliveryStats.sent = 0;
+    telegramDeliveryStats.failed = 0;
+    updateTelegramDeliveryHud();
+    addLog("📤 Telegram delivery counters reset");
+  });
+
+  el.appendChild(textEl);
+  el.appendChild(resetBtn);
+
+  telegramDeliveryHudEl = el;
+  document.body.appendChild(el);
+  updateTelegramDeliveryHud();
+}
+
+function updateTelegramDeliveryHud() {
+  ensureTelegramDeliveryHud();
+  if (!telegramDeliveryHudEl) return;
+  const s = telegramDeliveryStats;
+  const textEl = telegramDeliveryHudEl.querySelector("#telegramDeliveryHudText");
+  if (textEl) {
+    textEl.textContent = `TG Q:${s.queued} | S:${s.sent} | F:${s.failed}`;
+  }
+  telegramDeliveryHudEl.title = "Telegram delivery health: queued, sent, failed";
+}
+
+function recordTelegramDeliveryStat(kind, delta = 1) {
+  if (!Object.prototype.hasOwnProperty.call(telegramDeliveryStats, kind)) return;
+  telegramDeliveryStats[kind] += delta;
+  if (telegramDeliveryStats[kind] < 0) telegramDeliveryStats[kind] = 0;
+  updateTelegramDeliveryHud();
+}
+
 /**
  * Validate Telegram credentials and throw descriptive errors.
  */
@@ -3201,7 +3336,7 @@ function telegramProxyHeaders(extra = {}) {
  */
 async function sendTelegramPhoto(blob, caption) {
   /* Check rate limit before making API call */
-  if (!isApiCallAllowed("telegram")) {
+  if (!(await waitForApiCallSlot("telegram", 20000))) {
     throw new Error("Rate limit exceeded. Please wait before sending another message.");
   }
 
@@ -3239,8 +3374,10 @@ async function sendTelegramPhoto(blob, caption) {
   }
   const data = await safeJson(resp);
   if (!data.ok) {
+    recordTelegramDeliveryStat("failed", 1);
     throw new Error(data.description || "Telegram API error");
   }
+  recordTelegramDeliveryStat("sent", 1);
   return data;
 }
 
@@ -3249,7 +3386,7 @@ async function sendTelegramPhoto(blob, caption) {
  */
 async function sendTelegramMessage(text) {
   /* Check rate limit before making API call */
-  if (!isApiCallAllowed("telegram")) {
+  if (!(await waitForApiCallSlot("telegram", 20000))) {
     throw new Error("Rate limit exceeded. Please wait before sending another message.");
   }
 
@@ -3283,8 +3420,10 @@ async function sendTelegramMessage(text) {
   }
   const data = await safeJson(resp);
   if (!data.ok) {
+    recordTelegramDeliveryStat("failed", 1);
     throw new Error(data.description || "Telegram API error");
   }
+  recordTelegramDeliveryStat("sent", 1);
   return data;
 }
 
@@ -3555,12 +3694,7 @@ async function sendTelegramAlert() {
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
   try {
     const caption = buildTelegramCaption();
-    let blob;
-    try {
-      blob = await captureChartScreenshot();
-    } catch (screenshotErr) {
-      addLog(`📤 Screenshot failed, sending text-only signal: ${screenshotErr.message}`);
-    }
+    const blob = await captureTelegramScreenshot();
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
@@ -3607,12 +3741,7 @@ async function sendPanelTelegramAlert(symbol) {
   const caption = buildPanelTelegramCaption(p);
 
   /* Capture screenshot from the panel's mini-chart canvas */
-  let blob;
-  try {
-    blob = await capturePanelScreenshot(p);
-  } catch (err) {
-    addLog(`📤 [${symbol}] Screenshot failed, sending text-only signal: ${err.message}`);
-  }
+  const blob = await captureTelegramScreenshot(p);
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
   try {
@@ -10373,16 +10502,8 @@ async function sendTelegramScalpAlert(scalp, force = false) {
   const caption = buildScalpTelegramCaption(scalp);
   try {
     /* In multi-panel mode, capture the correct panel's chart (not whatever is currently in globals) */
-    let blob;
-    try {
-      if (scalp.symbol && multiPanels.has(scalp.symbol)) {
-        blob = await capturePanelScreenshot(multiPanels.get(scalp.symbol));
-      } else {
-        blob = await captureChartScreenshot();
-      }
-    } catch (screenshotErr) {
-      addLog(`📤 Scalp screenshot failed, sending text-only signal: ${screenshotErr.message}`);
-    }
+    const panel = (scalp.symbol && multiPanels.has(scalp.symbol)) ? multiPanels.get(scalp.symbol) : null;
+    const blob = await captureTelegramScreenshot(panel);
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
@@ -10655,16 +10776,8 @@ async function sendTelegramStrategyAlert(signal, force = false) {
   const caption = buildStrategyTelegramCaption(signal);
   try {
     /* In multi-panel mode, capture the correct panel's chart */
-    let blob;
-    try {
-      if (signal.symbol && multiPanels.has(signal.symbol)) {
-        blob = await capturePanelScreenshot(multiPanels.get(signal.symbol));
-      } else {
-        blob = await captureChartScreenshot();
-      }
-    } catch (screenshotErr) {
-      addLog(`📤 Strategy screenshot failed, sending text-only signal: ${screenshotErr.message}`);
-    }
+    const panel = (signal.symbol && multiPanels.has(signal.symbol)) ? multiPanels.get(signal.symbol) : null;
+    const blob = await captureTelegramScreenshot(panel);
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
@@ -11054,13 +11167,8 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
     /* In multi-panel mode, capture the correct panel's chart */
-    let blob;
     const p = panelSymbol ? multiPanels.get(panelSymbol) : null;
-    if (p) {
-      blob = await capturePanelScreenshot(p);
-    } else {
-      blob = await captureChartScreenshot();
-    }
+    const blob = await captureTelegramScreenshot(p || null);
     /* Build caption — if in multi-panel mode, temporarily activate panel globals
        so the caption reads the correct session range data for this panel */
     let caption;
@@ -18568,6 +18676,8 @@ document.addEventListener("DOMContentLoaded", () => {
       telegramShowTokenBtn.title = isPassword ? "Hide token" : "Show token";
     });
   }
+
+  updateTelegramDeliveryHud();
 
   /* Tool buttons */
   if (UI.exportBtn) UI.exportBtn.addEventListener("click", exportSignalsCSV);
