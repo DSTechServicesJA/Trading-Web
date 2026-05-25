@@ -233,6 +233,28 @@
               </optgroup>
             </select>
           </div>
+
+          <div class="multiview-config">
+            <label class="auto-symbol-label" style="margin-top:4px;">
+              <input type="checkbox" id="multiViewToggle" />
+              Multi-View Analyze + Auto-Trade Queue
+            </label>
+            <label for="multiViewSymbolsInput">Watchlist Symbols (comma-separated)</label>
+            <input
+              type="text"
+              id="multiViewSymbolsInput"
+              placeholder="R_100, R_50, frxEURUSD, BOOM500"
+              value="R_100, R_50, R_10, frxEURUSD, frxGBPUSD"
+            />
+            <p class="hint" id="multiViewStatus">Scanner OFF</p>
+            <div class="multiview-panel" id="multiViewPanel">
+              <div class="multiview-panel-head">
+                <span>Multi-View Symbols</span>
+                <span id="multiViewQueueDepth" class="status-badge disabled">Queue: 0</span>
+              </div>
+              <div class="multiview-rows" id="multiViewRows"></div>
+            </div>
+          </div>
         </section>
 
         <!-- Risk Controls-->
@@ -372,7 +394,40 @@
         <div id="tab-overview" class="tab-panel active" role="tabpanel" aria-labelledby="btn-tab-overview">
 
           <!-- Live Chart -->
-          <section class="chart-embed">
+          <section class="chart-embed chart-hero">
+            <div class="chart-hero-head">
+              <div>
+                <p class="chart-eyebrow">Market Pulse</p>
+                <h3 class="chart-title">Live Price Structure</h3>
+              </div>
+              <div class="chart-badges">
+                <span id="chartLivePrice" class="status-badge standard">--</span>
+                <span id="chartDeltaBadge" class="status-badge disabled">Δ --</span>
+                <span id="chartVolBadge" class="status-badge disabled">Vol --</span>
+              </div>
+            </div>
+
+            <div class="chart-toolbar">
+              <label for="chartRangeSelect">Window</label>
+              <select id="chartRangeSelect">
+                <option value="80" selected>80 pts</option>
+                <option value="120">120 pts</option>
+                <option value="200">200 pts</option>
+              </select>
+
+              <div class="chart-presets" role="group" aria-label="Chart presets">
+                <button type="button" class="chart-preset-btn active" data-chart-preset="scalp">Scalp</button>
+                <button type="button" class="chart-preset-btn" data-chart-preset="intraday">Intraday</button>
+                <button type="button" class="chart-preset-btn" data-chart-preset="swing">Swing</button>
+              </div>
+
+              <label for="chartAutoScaleToggle">Auto Scale</label>
+              <input type="checkbox" id="chartAutoScaleToggle" checked />
+
+              <label for="chartMiniCandleToggle">Mini Candles</label>
+              <input type="checkbox" id="chartMiniCandleToggle" />
+            </div>
+
             <canvas id="priceChart" width="620" height="320"></canvas>
           </section>
 
