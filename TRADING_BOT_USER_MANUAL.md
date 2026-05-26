@@ -17,6 +17,8 @@
 8. [Limitations of the Indicator](#8-limitations-of-the-indicator)
 9. [Quick Start Summary](#9-quick-start-summary)
 10. [Frequently Asked Questions (FAQ)](#10-frequently-asked-questions-faq)
+11. [MT5 Bridge Integration](#11-mt5-bridge-integration)
+12. [Indicator V2](#12-indicator-v2)
 
 ---
 
@@ -246,6 +248,8 @@ The top of the IT Guru screen shows three live scrolling banners:
 - **LIVE SCALPS** — scalp scanner alerts
 - **STRATEGIES** — alerts from the 12 strategy modules
 
+> **Tip:** Clicking a card in the **LIVE SIGNALS** or **STRATEGIES** banner selects that signal and draws the **Entry, Stop Loss, and Take Profit lines** directly on the chart as a visual overlay — without changing your active trade state. This lets you review any historical signal visually without disrupting a live trade.
+
 ---
 
 ### Technical Indicators Running in the Background
@@ -385,6 +389,11 @@ IT Guru sends Telegram alerts automatically when a signal fires. Each alert incl
 - A **1920x1080 screenshot** of the live chart with all indicators and levels drawn
 - Signal details: symbol, direction, entry, SL, TP, RR, confluence score
 - The strategy or phase that triggered the alert
+- A **Trade Conditions block** summarising the key factors behind the setup (EMA alignment, HTF trend, RSI, session, ATR volatility, etc.)
+
+**Strategy Outcome Notifications:**
+- When a strategy trade closes at a WIN or LOSS, IT Guru sends a follow-up Telegram message with the outcome.
+- If partial TP was hit (SL moved to breakeven) and price then closes at the entry level, the outcome is classified as **BREAKEVEN** rather than LOSS — this is tracked separately in your strategy record.
 
 To receive Telegram alerts, link your Telegram account via the Telegram section in Settings or contact your administrator.
 
@@ -520,6 +529,8 @@ IT Guru runs up to 12 independent strategies simultaneously alongside the core b
 
 **Best for:** Traders who understand key support/resistance levels.
 
+> **One-at-a-time:** IT Guru will not fire a new Stop Loss Hunt signal while a previous one is still PENDING (active and unresolved). This prevents spam and keeps you focused on the live trade.
+
 ---
 
 ### Strategy 3: Failed Pin Bar
@@ -551,7 +562,28 @@ IT Guru runs up to 12 independent strategies simultaneously alongside the core b
 
 **Trade setup:** Entry into the Fair Value Gap after the displacement candle. SL below the manipulation low or above the manipulation high. Partial TP at 1R, SL moves to breakeven, let the rest run.
 
-**Best for:** Intermediate-to-advanced traders familiar with ICT concepts. Best on 15m-1h charts.
+**Best timeframes:**
+
+| Timeframe | Notes |
+|---|---|
+| **1 min** | Highest signal frequency; freshest FVG entries; best for Volatility indices |
+| **5 min** | Good balance of frequency and quality; sweep lookback auto-scales to 18 candles |
+| **15 min** | Fewer setups per hour; use STRICT entry freshness to avoid stale entries |
+
+The strategy always anchors to the current 1-hour block regardless of chart timeframe.
+
+**Entry Freshness Mode** (configurable in the PO3 settings):
+
+| Mode | Behaviour | When to Use |
+|---|---|---|
+| **SAFE** (default) | Allows entry up to 1 candle after the FVG touch — more signals | 1–5 min charts |
+| **STRICT** | Entry only on the exact FVG-touch candle — fewer but cleaner signals | 15 min+ charts |
+
+**Required conditions:** EMA 8/21 trend alignment plus EMA 100 (HTF) confirmation. A minimum R:R of 1.0 is enforced automatically.
+
+**Best for:** Intermediate-to-advanced traders familiar with ICT concepts. Recommended minimum confluence score: 11.
+
+> **One-at-a-time:** IT Guru will not fire a new PO3 signal while a previous one is still PENDING.
 
 ---
 
@@ -630,6 +662,8 @@ IT Guru runs up to 12 independent strategies simultaneously alongside the core b
 **Trade setup:** Entry when price retests the orderblock zone with a confirmation pattern.
 
 **Best for:** Advanced traders who understand institutional order flow and supply/demand.
+
+> **One-at-a-time:** IT Guru will not fire a new Orderblock signal while a previous one is still PENDING. Telegram alerts for Orderblock setups include **impulse metrics** (displacement strength, body ratio) in the caption for additional context.
 
 ---
 
@@ -762,6 +796,10 @@ Auto-Trade places **multiplier contracts** on your Deriv account automatically w
 **Compounding:** Stake automatically increases after 2 or more consecutive wins and resets to base on a loss.
 
 **Safety cut:** Auto-trading halts after 3 consecutive losses to protect your account.
+
+**Opposite Mode:** Enable **Opposite Mode** to automatically reverse every signal direction — a BUY signal fires a SELL contract, and vice versa. This is useful for markets where you have tested a counter-directional edge. The opposing-direction guard (which prevents opening a trade while one is already active in the opposite direction) checks the effective post-reversal direction so there are no conflicts.
+
+**Candle-Close Processing:** By default, strategy entries and trade outcomes are evaluated only on **closed candles**. This prevents premature signals from wicks that do not confirm on close, and applies to both the main chart and any additional multi-symbol panels.
 
 > CAUTION: Auto-Trade uses real money when connected with a live Deriv account. Fully understand the risks before enabling. Start on a demo account first.
 
@@ -1044,7 +1082,92 @@ IT Guru will automatically attempt to reconnect using exponential backoff. The c
 
 ---
 
-*Thank you for choosing IT Guru. We are committed to providing you with the most powerful, precise, and transparent trading indicator available.*
+**What is the Power of 3 Entry Freshness Mode?**
+
+Entry Freshness controls how strictly IT Guru requires the FVG retrace to be timed:
+- **SAFE** (default): allows entry up to 1 candle after the FVG touch — recommended for 1–5 min charts
+- **STRICT**: only accepts the exact candle that touches the FVG — recommended for 15 min+ charts
+
+You can change this in the Power of 3 settings panel next to the PO3 toggle.
+
+---
+
+**What does BREAKEVEN mean in a strategy outcome?**
+
+If a strategy trade hits partial TP (price reached 1:1 profit and SL was moved to breakeven), and price then reverses back to close at the entry level, the outcome is classified as **BREAKEVEN** — not LOSS. This is tracked separately in your win/loss statistics and Telegram outcome messages.
+
+---
+
+**What is the MT5 bridge?**
+
+The MT5 bridge is an optional integration that lets a MetaTrader 5 Expert Advisor (EA) receive IT Guru signals and execute trades automatically on your MT5 broker. See Section 11 for full details, or consult your administrator.
+
+---
+
+**What is Indicator V2?**
+
+Indicator V2 is a second-generation version of IT Guru with an improved interface, accessible at `trading.dsitservicesja.com/indicatorv2/`. It runs with an isolated login session separate from V1. Access must be enabled by your administrator. See Section 12 for details.
+
+---
+
+**What is Opposite Mode in Auto-Trade?**
+
+Opposite Mode reverses every signal direction before placing the auto-trade — a BUY signal triggers a SELL contract and vice versa. It is useful if you have tested a counter-trend edge on a specific market. Enable it in the Auto-Trade settings.
+
+---
+
+---
+
+## 11. MT5 BRIDGE INTEGRATION
+
+IT Guru includes a **MetaTrader 5 (MT5) bridge** that allows an MT5 Expert Advisor (EA) to receive signals from IT Guru and execute trades on any MT5-connected broker.
+
+### How It Works
+
+1. **IT Guru fires a signal** → the signal is queued via the web bridge at `api/mt5/signal.php`
+2. **Your MT5 EA polls** `api/mt5/pull.php` every few seconds to pick up pending signals
+3. **The EA executes the trade** on your MT5 broker account (entry, SL, TP automatically applied)
+4. **The EA reports back** to `api/mt5/status.php` with order status (filled, partial, rejected)
+5. **IT Guru polls** `api/mt5/order_status.php` to display the MT5 order status in the UI
+
+### Bridge Endpoints Summary
+
+| Endpoint | Direction | Purpose |
+|---|---|---|
+| `api/mt5/signal.php` | Web → Queue | IT Guru queues a new signal for MT5 |
+| `api/mt5/pull.php` | EA → Web | EA fetches the next pending signal |
+| `api/mt5/status.php` | EA → Web | EA reports back order fill status |
+| `api/mt5/order_status.php` | Web → UI | UI polls for current MT5 order status |
+
+### Setup Requirements
+
+- A working MetaTrader 5 installation with an EA configured to call the bridge endpoints
+- Your IT Guru server URL accessible from the MT5 machine
+- Refer to `api/mt5/README.md` in the IT Guru files for the full payload format
+
+> **Note:** MT5 bridge integration is an advanced feature intended for traders who run their own MT5 instance alongside IT Guru. Contact your administrator for setup assistance.
+
+---
+
+## 12. INDICATOR V2
+
+IT Guru offers a second-generation interface, **Indicator V2**, accessible at `trading.dsitservicesja.com/indicatorv2/`.
+
+### Key Differences
+
+- V2 runs with an **isolated authentication session** — your V2 login is stored separately from the standard indicator, so you can be logged into both simultaneously.
+- Access to V2 must be **granted by an administrator** (via the `indicator_v2` strategy key in the admin panel). Users without this key will not see the V2 option in the navigation.
+- V2 uses the same core signal engine and strategies as V1, with improvements to the interface layout and panel management.
+
+### Accessing V2
+
+1. Log in at `trading.dsitservicesja.com/indicatorv2/`
+2. If you have V2 access enabled, you will be taken to the V2 interface automatically
+3. Your V2 settings are stored independently from your V1 settings
+
+> Contact your administrator if you need V2 access enabled on your account.
+
+---
 
 *Trade smart. Manage your risk. Stay consistent.*
 
