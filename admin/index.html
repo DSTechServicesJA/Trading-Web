@@ -162,6 +162,7 @@
 
       <div class="profiles-toolbar">
         <button id="newProfileBtn" type="button" class="btn-primary">＋ New Profile</button>
+        <button id="refreshProfilesBtn" type="button" class="btn-ghost">🔄 Refresh</button>
       </div>
 
       <div class="profiles-table-wrapper">
@@ -234,6 +235,16 @@
     <div class="form-row strat-form-row">
       <label>Strategies</label>
       <div id="editStrategyChecks" class="strategy-checks"></div>
+    </div>
+    <div class="form-row strat-form-row">
+      <label>Assigned Profiles</label>
+      <div id="editProfilesList" class="edit-profiles-list">Loading…</div>
+      <div class="profile-assign-row" style="margin-top:6px;">
+        <select id="editProfileSelect" class="filter-select" style="flex:1;min-width:0;">
+          <option value="">— Select a profile to assign —</option>
+        </select>
+        <button type="button" id="editProfileAssignBtn" class="btn-secondary btn-sm">＋ Assign</button>
+      </div>
     </div>
 
     <div id="editError" class="form-error"></div>

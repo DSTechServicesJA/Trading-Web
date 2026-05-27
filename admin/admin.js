@@ -616,7 +616,109 @@ function openEditModal(userId) {
 
   editingUserStrategies = strategies;
   buildStrategyChecks("editStrategyChecks", strategies);
+
+  /* Load profiles section */
+  loadEditModalProfiles(userId);
+
   document.getElementById("editModal").style.display = "flex";
+}
+
+/* ── Profiles section inside the Edit modal ── */
+async function loadEditModalProfiles(userId) {
+  const listEl   = el("editProfilesList");
+  const selectEl = el("editProfileSelect");
+  if (!listEl || !selectEl) return;
+
+  listEl.textContent = "Loading…";
+  selectEl.innerHTML = `<option value="">— Select a profile to assign —</option>`;
+
+  try {
+    /* Fetch assigned profiles for this user and all available profiles in parallel */
+    const [assignedResp, allResp] = await Promise.all([
+      apiRequest("/admin/profiles?action=assignments&user_id=" + userId),
+      apiRequest("/admin/profiles"),
+    ]);
+
+    const assignedData  = assignedResp.ok ? await assignedResp.json() : { assignments: [] };
+    const allData       = allResp.ok      ? await allResp.json()      : { profiles: [] };
+
+    const assigned    = assignedData.assignments || [];
+    const allProfiles = allData.profiles || [];
+    const assignedIds = new Set(assigned.map(p => p.id));
+
+    /* Render currently assigned profiles */
+    if (!assigned.length) {
+      listEl.innerHTML = `<span style="color:var(--text-muted);font-size:12px;">No profiles assigned yet.</span>`;
+    } else {
+      listEl.innerHTML = "";
+      for (const p of assigned) {
+        const tag = document.createElement("span");
+        tag.className = "profile-assigned-tag";
+        tag.innerHTML = `${escHtml(p.name)} <button type="button" class="btn-unassign-profile" data-pid="${p.id}" title="Remove profile" aria-label="Remove profile ${escHtml(p.name)}">✕</button>`;
+        tag.querySelector(".btn-unassign-profile").addEventListener("click", async () => {
+          await unassignProfileFromEditModal(userId, p.id);
+        });
+        listEl.appendChild(tag);
+      }
+    }
+
+    /* Populate select with profiles not yet assigned */
+    const unassigned = allProfiles.filter(p => !assignedIds.has(p.id));
+    if (unassigned.length) {
+      for (const p of unassigned) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name + (p.is_admin_profile ? " ⭐" : "");
+        selectEl.appendChild(opt);
+      }
+    }
+  } catch (e) {
+    listEl.textContent = "Failed to load profiles.";
+  }
+}
+
+async function unassignProfileFromEditModal(userId, profileId) {
+  try {
+    const resp = await apiRequest("/admin/profiles?action=unassign", {
+      method: "DELETE",
+      body: JSON.stringify({ profile_id: profileId, user_id: userId }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert("Error: " + (err.error || "Could not remove profile"));
+      return;
+    }
+    await loadEditModalProfiles(userId);
+    await loadProfiles();
+  } catch (e) {
+    alert("Network error: " + e.message);
+  }
+}
+
+async function assignProfileFromEditModal(userId) {
+  const selectEl  = el("editProfileSelect");
+  const profileId = parseInt(selectEl?.value || "0", 10);
+  if (!profileId) return;
+
+  const btn = el("editProfileAssignBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await apiRequest("/admin/profiles?action=assign", {
+      method: "POST",
+      body: JSON.stringify({ profile_id: profileId, user_id: userId }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert("Error: " + (err.error || "Could not assign profile"));
+      return;
+    }
+    await loadEditModalProfiles(userId);
+    await loadProfiles();
+  } catch (e) {
+    alert("Network error: " + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /* ── Save edit ── */
@@ -844,6 +946,11 @@ async function confirmDelete() {
 function bindModals() {
   document.getElementById("editSaveBtn").addEventListener("click",   saveEdit);
   document.getElementById("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
+
+  const assignBtn = el("editProfileAssignBtn");
+  if (assignBtn) {
+    assignBtn.addEventListener("click", () => assignProfileFromEditModal(editingUserId));
+  }
 
   document.getElementById("resetPwSaveBtn").addEventListener("click",   saveResetPassword);
   document.getElementById("resetPwCancelBtn").addEventListener("click", () => closeModal("resetPwModal"));
@@ -1152,6 +1259,9 @@ async function searchUsersForAssign(query) {
 function bindProfileModals() {
   const newBtn = el("newProfileBtn");
   if (newBtn) newBtn.addEventListener("click", openNewProfileModal);
+
+  const refreshBtn = el("refreshProfilesBtn");
+  if (refreshBtn) refreshBtn.addEventListener("click", loadProfiles);
 
   const saveBtn = el("newProfileSaveBtn");
   if (saveBtn) saveBtn.addEventListener("click", saveNewProfile);
