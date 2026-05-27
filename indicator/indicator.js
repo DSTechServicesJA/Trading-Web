@@ -16485,6 +16485,47 @@ async function profileApiFetch(url, options = {}) {
 }
 
 /**
+ * Sync locally saved profiles that were never persisted to the server.
+ * This allows admin profile management to see older local-only saves.
+ */
+async function syncUnsyncedProfilesToServer() {
+  const entries = Object.entries(savedProfiles || {});
+  if (!entries.length) return;
+
+  let syncedCount = 0;
+  for (const [name, profile] of entries) {
+    if (!name || !profile || typeof profile !== "object") continue;
+    if (profile._readOnly || profile._serverId) continue;
+
+    const settings = Object.assign({}, profile);
+    delete settings._serverId;
+    delete settings._readOnly;
+    delete settings._assignedBy;
+
+    try {
+      const resp = await profileApiFetch(PROFILES_API_URL, {
+        method: "POST",
+        body: JSON.stringify({ name, settings }),
+      });
+      if (!resp.ok) continue;
+      const result = await resp.json().catch(() => ({}));
+      if (result.id) {
+        savedProfiles[name] = Object.assign({}, profile, {
+          _serverId: result.id,
+          _readOnly: false,
+        });
+      }
+      syncedCount += 1;
+    } catch(e) {}
+  }
+
+  if (syncedCount > 0) {
+    _persistProfiles();
+    addLog(`☁️ Synced ${syncedCount} local profile${syncedCount === 1 ? "" : "s"} to server`);
+  }
+}
+
+/**
  * Fetch profiles from the server and merge them into savedProfiles.
  * Own profiles and admin-assigned profiles are both included.
  * Falls back to localStorage-only when the user is not logged in or
@@ -16504,6 +16545,7 @@ async function loadProfiles() {
   }
 
   try {
+    await syncUnsyncedProfilesToServer();
     const resp = await profileApiFetch(PROFILES_API_URL);
     if (!resp.ok) return;
 
