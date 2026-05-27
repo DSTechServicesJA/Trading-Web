@@ -14618,7 +14618,7 @@ async function saveProfile(name) {
     const isReadOnly = existing._readOnly || false;
 
     if (isReadOnly) {
-      showToast("Read-only Profile", `"${trimmed}" was assigned by ${profile._assignedBy || "admin"} and cannot be overwritten.`, "warning", 4000);
+      showToast("Read-only Profile", `"${trimmed}" was assigned by ${existing._assignedBy || "admin"} and cannot be overwritten.`, "warning", 4000);
       return;
     }
 
@@ -14629,7 +14629,11 @@ async function saveProfile(name) {
     showToast("Profile Saved", `"${trimmed}" saved successfully.`, "success", 3000);
 
     /* Sync to server if logged in */
-    if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+    if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) {
+      addLog("ℹ️ Profile synced locally only (not logged in)");
+      showToast("Saved Locally Only", `"${trimmed}" is available on this browser, but sign in to make it appear in Admin Profile Management.`, "warning", 5000);
+      return;
+    }
 
     try {
       const body = { name: trimmed, settings };
@@ -14639,15 +14643,18 @@ async function saveProfile(name) {
         method: "POST",
         body: JSON.stringify(body),
       });
-      if (resp.ok) {
-        const result = await resp.json();
-        if (result.id) {
-          savedProfiles[trimmed]._serverId = result.id;
-          _persistProfiles();
-        }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const result = await resp.json();
+      if (result.id) {
+        savedProfiles[trimmed]._serverId = result.id;
+        _persistProfiles();
       }
     } catch(e) {
-      addLog("⚠️ Profile could not be synced to server");
+      addLog(`⚠️ Profile could not be synced to server: ${e.message || e}`);
+      showToast("Server Sync Failed", `"${trimmed}" was saved locally only, so it may not appear in Admin Profile Management yet.`, "warning", 6000);
     }
   } catch(e) { addLog("⚠️ Profile save failed"); }
 }
