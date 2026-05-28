@@ -9458,6 +9458,14 @@ function processTiktokStrategy() {
   const signal = detectTiktokStrategy(idx);
   if (!signal) return;
 
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ TikTok Fib REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
   lastTiktokIdx = idx;
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -10237,6 +10245,14 @@ function detectGridScalperMA() {
 function processGridScalperMA() {
   const signal = detectGridScalperMA();
   if (!signal) return;
+
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Grid Scalper MA REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastGridScalperMAIdx = signal.candleIdx;
 
