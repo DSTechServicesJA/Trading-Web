@@ -11619,6 +11619,17 @@ function buildStrategyTelegramCaption(signal) {
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
   }
+  let strategyConfluence = Number.isFinite(signal.confluenceScore) ? signal.confluenceScore : null;
+  if (strategyConfluence == null &&
+      signal.dir &&
+      signal.entry != null &&
+      Number.isFinite(signal.candleIdx)) {
+    strategyConfluence = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    signal.confluenceScore = strategyConfluence;
+  }
+  if (Number.isFinite(strategyConfluence)) {
+    lines.push(`<b>Confluence:</b> ${fmt(strategyConfluence, 0)}/16`);
+  }
 
   lines.push(``);
   lines.push(`<b>🧠 Trade Conditions:</b>`);
