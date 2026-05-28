@@ -9458,6 +9458,14 @@ function processTiktokStrategy() {
   const signal = detectTiktokStrategy(idx);
   if (!signal) return;
 
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ TikTok Fib REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
   lastTiktokIdx = idx;
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -10237,6 +10245,14 @@ function detectGridScalperMA() {
 function processGridScalperMA() {
   const signal = detectGridScalperMA();
   if (!signal) return;
+
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Grid Scalper MA REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
 
   lastGridScalperMAIdx = signal.candleIdx;
 
@@ -11618,6 +11634,17 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  }
+  let strategyConfluence = Number.isFinite(signal.confluenceScore) ? signal.confluenceScore : null;
+  if (strategyConfluence == null &&
+      signal.dir &&
+      signal.entry != null &&
+      Number.isFinite(signal.candleIdx)) {
+    strategyConfluence = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    signal.confluenceScore = strategyConfluence;
+  }
+  if (Number.isFinite(strategyConfluence)) {
+    lines.push(`<b>Confluence:</b> ${fmt(strategyConfluence, 0)}/16`);
   }
 
   lines.push(``);

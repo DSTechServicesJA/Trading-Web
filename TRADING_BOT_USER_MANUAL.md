@@ -685,6 +685,31 @@ The chart shows amber T1/T2/T3 horizontal lines so you can visually see your tar
 
 ---
 
+### Recommended Strategy Playbook (Timeframe, Hold Time & Confluence)
+
+Use this as your default operating guide when you enable strategy alerts and Telegram auto-send.
+
+| Strategy | Recommended Timeframe | Typical Hold Window | Recommended Minimum Confluence* |
+|---|---|---|---|
+| **Liquidity Sweep** | 1m-5m | 5-20 candles | **9/16** |
+| **Stop Loss Hunt** | 5m-15m | 10-30 candles | **10/16** |
+| **Failed Pin Bar** | 1m-5m | 3-12 candles | **8/16** |
+| **Fib Golden Zone Scalp** | 1m | 3-10 candles | **9/16** |
+| **Power of 3 (ICT PO3)** | 1m-5m (15m with STRICT mode) | 10-40 candles | **11/16** |
+| **NY Open Range** | 1m-5m during NY open | 5-20 candles | **10/16** |
+| **Session Range (London Sweep)** | 5m-15m during London open | 10-30 candles | **10/16** |
+| **Live Scalp Scanner** | 1m | 2-8 candles | **3/7 scanner score** + **8/16+ confluence** |
+| **Grid Scalper MA** | 1m-5m | 5-20 candles | **8/16** |
+| **Fair Value Gap (FVG)** | 5m-15m | 10-40 candles | **10/16** |
+| **MTF Top-Down Analysis** | 15m-1h | 20-80 candles | **11/16** |
+| **Orderblock Detection** | 5m-15m | 15-60 candles | **10/16** |
+| **TikTok Fibonacci** | 1m-5m | 8-25 candles | **9/16** |
+| **Tesla 3-6-9 Scaling Model** | Follow parent setup timeframe | Hold until T1/T2/T3 milestones | Match parent setup confluence |
+
+\*Confluence guidance uses the main 0-16 quality score where available. Strategy Telegram alerts now include this confluence value so you can rank opportunities quickly.
+
+---
+
 ## 6. ADVANCED USAGE — THE ANCHOR (POWER USERS)
 
 ### Reading Market Bias from the State Panel
