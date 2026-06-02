@@ -876,7 +876,7 @@ function getMarketTuning() {
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
-const MAX_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_ATTEMPTS = 50;  /* Allow many reconnect attempts for long-running sessions */
 let reconnectAttempts = 0;
 let reconnectTimer    = null;
 let intentionalClose  = false;
@@ -888,6 +888,14 @@ const TOAST_ERROR_DURATION_MS = 10000;
 /* Ping/keepalive (Deriv WS sessions time out after inactivity) */
 const PING_INTERVAL_MS = 30000;
 let pingTimer = null;
+
+/* Stream watchdog — detect stale connections that stop delivering OHLC data.
+   If no candle/tick data arrives within WATCHDOG_TIMEOUT_MS, force a reconnect.
+   This addresses the issue where WebSocket connections stay "open" but the
+   Deriv server stops sending market data after extended periods. */
+const WATCHDOG_TIMEOUT_MS = 120000; /* 2 minutes without data → reconnect */
+let watchdogTimer = null;
+let lastDataTimestamp = 0;  /* epoch ms of last OHLC message on the main WS */
 
 /* Debounce */
 let reconnectDebounceTimer = null;
@@ -5325,10 +5333,15 @@ function renderStrategyTickerBanner() {
     card.appendChild(mkSpan("strategy-card-levels", "SL " + slStr + " · TP " + tpStr));
     card.appendChild(mkSpan("strategy-card-sep", "·"));
     card.appendChild(mkSpan("strategy-card-rr", rrStr));
+    /* Confluence score badge */
+    if (Number.isFinite(s.confluenceScore)) {
+      card.appendChild(mkSpan("strategy-card-confluence", `C:${s.confluenceScore}/16`));
+    }
     card.appendChild(mkSpan("strategy-card-time", ts));
     card.appendChild(mkSpan("strategy-card-result " + resultLower, s.result || "PENDING"));
 
-    card.title = `Click to view details · ${typeLabel} ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nResult: ${s.result || "PENDING"}`;
+    const confStr = Number.isFinite(s.confluenceScore) ? `\nConfluence: ${s.confluenceScore}/16` : "";
+    card.title = `Click to view details · ${typeLabel} ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}${confStr}\nResult: ${s.result || "PENDING"}`;
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} ${typeLabel} details`);
@@ -7069,6 +7082,65 @@ function stopPing() {
   }
 }
 
+/* ================= STREAM WATCHDOG ================= */
+/**
+ * Start a watchdog that monitors the main WS for data stalls.
+ * If no OHLC data arrives within WATCHDOG_TIMEOUT_MS the connection is
+ * torn down and auto-reconnect kicks in, preventing the need to manually
+ * stop/play after extended monitoring sessions.
+ */
+function startWatchdog() {
+  stopWatchdog();
+  lastDataTimestamp = Date.now();
+  watchdogTimer = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const elapsed = Date.now() - lastDataTimestamp;
+    if (elapsed >= WATCHDOG_TIMEOUT_MS) {
+      addLog(`⚠️ Watchdog: No market data for ${Math.round(elapsed / 1000)}s — forcing reconnect`);
+      showToast("Stream Stall Detected", "No data received — reconnecting…", "warning", TOAST_WARNING_DURATION_MS);
+      intentionalClose = false;
+      ws.close();
+    }
+  }, 30000); /* check every 30s */
+}
+
+function stopWatchdog() {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+}
+
+/** Reset the watchdog timestamp (called whenever real data arrives). */
+function feedWatchdog() {
+  lastDataTimestamp = Date.now();
+}
+
+/**
+ * Start a per-panel watchdog. If no OHLC arrives within WATCHDOG_TIMEOUT_MS
+ * force-close the panel WS so it auto-reconnects.
+ */
+function startPanelWatchdog(p) {
+  stopPanelWatchdog(p);
+  p._lastDataTs = Date.now();
+  p._watchdogTimer = setInterval(() => {
+    if (!p.ws || p.ws.readyState !== WebSocket.OPEN) return;
+    const elapsed = Date.now() - p._lastDataTs;
+    if (elapsed >= WATCHDOG_TIMEOUT_MS) {
+      addLog(`⚠️ [Multi] ${p.symbol} Watchdog: No data for ${Math.round(elapsed / 1000)}s — forcing reconnect`);
+      p.intentionalClose = false;
+      p.ws.close();
+    }
+  }, 30000);
+}
+
+function stopPanelWatchdog(p) {
+  if (p._watchdogTimer) {
+    clearInterval(p._watchdogTimer);
+    p._watchdogTimer = null;
+  }
+}
+
 /* ================= ACCOUNT / AUTH HELPERS ================= */
 
 /** Send a candles subscription request on a WebSocket */
@@ -7125,6 +7197,7 @@ function connect() {
     reconnectAttempts = 0;
     startUptimeTimer();
     startPing();
+    startWatchdog();
 
     /* Start NY Open Range timer if enabled */
     if (nyOpenRangeEnabled) startNyOpenRangeTimer();
@@ -7207,6 +7280,7 @@ function connect() {
 
     /* Historical batch */
     if (msg.candles) {
+      feedWatchdog();
       candles = msg.candles.map(c => ({
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
@@ -7219,6 +7293,7 @@ function connect() {
 
     /* Streaming OHLC */
     if (msg.ohlc) {
+      feedWatchdog();
       const o = msg.ohlc;
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
@@ -7293,6 +7368,7 @@ function connect() {
   ws.onclose = () => {
     if (thisWs !== ws) return; /* stale connection – don't touch current state */
     stopPing();
+    stopWatchdog();
     stopCandleCountdown();
     UI.wsStatus.textContent = "DISCONNECTED";
     UI.wsStatus.className = "status-badge disabled";
@@ -8445,6 +8521,9 @@ function processLiquiditySweep() {
 
   lastLiquiditySweepIdx = signal.candleIdx;
 
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   liquiditySweepHistory.unshift(signal);
@@ -8675,6 +8754,9 @@ function processStopLossHunt() {
   }
 
   lastStopLossHuntIdx = signal.candleIdx;
+
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
 
   /* Check for "stop hunt of stop hunters" — re-entry if previous was stopped out */
   const levelTol = signal.level.level * SLH_LEVEL_TOLERANCE_PCT;
@@ -8907,6 +8989,9 @@ function processFailedPinBar() {
   }
 
   lastFailedPinBarIdx = signal.candleIdx;
+
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
@@ -9204,6 +9289,9 @@ function processFibScalp() {
 
   lastFibScalpIdx = signal.candleIdx;
 
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   fibScalpHistory.unshift(signal);
@@ -9467,6 +9555,10 @@ function processTiktokStrategy() {
   }
 
   lastTiktokIdx = idx;
+
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   tiktokHistory.unshift(signal);
@@ -9840,6 +9932,9 @@ function processPowerOf3() {
 
   lastPo3Idx = signal.candleIdx;
 
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
   po3History.unshift(signal);
@@ -10115,10 +10210,14 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
                       : s.result === "EXPIRED" ? ' <span style="color:#f59e0b;">EXPIRED ⏱</span>'
                       : ' <span style="color:#94a3b8;">PENDING…</span>';
     const ts = new Date(s.epoch * 1000).toLocaleTimeString();
+    const confBadge = Number.isFinite(s.confluenceScore)
+      ? ` <span style="color:#60a5fa;font-size:0.85em;" title="Confluence Score">C:${s.confluenceScore}/16</span>`
+      : "";
     li.innerHTML = `<span style="color:${dirColor};font-weight:700;">${emoji} ${dirIcon} ${s.dir}</span> `
                  + `<span style="opacity:0.7;">${s.symbol || "--"}</span> `
                  + `@ <b>${fmt(s.entry, 4)}</b> `
                  + `| SL ${fmt(s.sl, 4)} | TP ${fmt(s.tp, 4)}`
+                 + confBadge
                  + resultBadge
                  + ` <small style="opacity:0.5;">${ts}</small>`;
     listEl.appendChild(li);
@@ -10255,6 +10354,9 @@ function processGridScalperMA() {
   }
 
   lastGridScalperMAIdx = signal.candleIdx;
+
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -10615,6 +10717,9 @@ function processFVGStrat() {
 
   lastFvgStratIdx = signal.candleIdx;
 
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   fvgStratHistory.unshift(signal);
@@ -10964,6 +11069,10 @@ function processMtfTopDown() {
   }
 
   lastMtfTopDownIdx = signal.candleIdx;
+
+  /* Always compute and store confluence score on the signal for UI display */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   mtfTopDownHistory.unshift(signal);
@@ -16385,6 +16494,7 @@ function detectOrderblockStrategy(idx) {
       impulseLen, impulseDominance, impulseStrongRatio, impulseAtr,
       symbol: getActiveSymbol(), epoch: c.epoch,
       type: "orderblock", result: "PENDING", strategyName: "orderblock",
+      confluenceScore: computeConfluenceScore(dir, c.close, idx),
       _stratOutcomeSent: false,
       _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing)
     };
@@ -19436,6 +19546,9 @@ function connectPanel(p) {
         panelWs.send(JSON.stringify({ ping: 1 }));
       }
     }, PING_INTERVAL_MS);
+
+    /* Stream watchdog — force reconnect if no OHLC data for extended period */
+    startPanelWatchdog(p);
   };
 
   panelWs.onmessage = (evt) => {
@@ -19515,6 +19628,7 @@ function connectPanel(p) {
 
     /* Historical batch */
     if (msg.candles) {
+      p._lastDataTs = Date.now();
       candles = msg.candles.map(c => ({
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
@@ -19525,6 +19639,7 @@ function connectPanel(p) {
 
     /* Streaming OHLC */
     if (msg.ohlc) {
+      p._lastDataTs = Date.now();
       const o = msg.ohlc;
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
@@ -19624,6 +19739,7 @@ function connectPanel(p) {
   panelWs.onclose = () => {
     if (p.ws !== panelWs) return; /* stale connection – don't touch panel state */
     if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+    stopPanelWatchdog(p);
     p.connected = false;
     p.ws = null;
     updatePanelCardUI(p);
@@ -19693,6 +19809,7 @@ function disconnectPanel(p) {
   p.intentionalClose = true;
   if (p.reconnectTimer) { clearTimeout(p.reconnectTimer); p.reconnectTimer = null; }
   if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+  stopPanelWatchdog(p);
 
   /* Clean up per-symbol auto-trade state */
   const slot = autoTradeSlots.get(p.symbol);
