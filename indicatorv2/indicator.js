@@ -747,7 +747,7 @@ function getMarketTuning() {
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
-const MAX_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_ATTEMPTS = 50;
 let reconnectAttempts = 0;
 let reconnectTimer    = null;
 let intentionalClose  = false;
@@ -759,6 +759,10 @@ const TOAST_ERROR_DURATION_MS = 10000;
 /* Ping/keepalive (Deriv WS sessions time out after inactivity) */
 const PING_INTERVAL_MS = 30000;
 let pingTimer = null;
+
+/* Stream watchdog – force-close stale connections if no OHLC/candle data arrives */
+const STREAM_WATCHDOG_TIMEOUT_MS = 120000; /* 2 minutes */
+let streamWatchdogTimer = null;
 
 /* Debounce */
 let reconnectDebounceTimer = null;
@@ -6593,6 +6597,58 @@ function stopPing() {
   }
 }
 
+/* ================= STREAM WATCHDOG ================= */
+/**
+ * Monitors whether OHLC/candle data is flowing on the main WebSocket.
+ * If no candle data arrives within STREAM_WATCHDOG_TIMEOUT_MS (2 min),
+ * force-closes the connection which triggers the auto-reconnect logic.
+ */
+function startStreamWatchdog() {
+  stopStreamWatchdog();
+  streamWatchdogTimer = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      addLog("⚠️ Stream watchdog: no candle data for 2 min – force-closing connection");
+      ws.close(); /* triggers onclose → scheduleReconnect */
+    }
+  }, STREAM_WATCHDOG_TIMEOUT_MS);
+}
+
+function resetStreamWatchdog() {
+  if (streamWatchdogTimer) startStreamWatchdog();
+}
+
+function stopStreamWatchdog() {
+  if (streamWatchdogTimer) {
+    clearTimeout(streamWatchdogTimer);
+    streamWatchdogTimer = null;
+  }
+}
+
+/**
+ * Panel-level watchdog: monitors candle flow on each multi-panel WebSocket.
+ * Force-closes and auto-reconnects the panel if silent for 2 min.
+ */
+function startPanelWatchdog(p) {
+  stopPanelWatchdog(p);
+  p._watchdogTimer = setTimeout(() => {
+    if (p.ws && p.ws.readyState === WebSocket.OPEN) {
+      addLog(`⚠️ [Multi] ${p.symbol} stream watchdog: no candle data for 2 min – force-closing`);
+      p.ws.close(); /* triggers panel onclose → auto-reconnect */
+    }
+  }, STREAM_WATCHDOG_TIMEOUT_MS);
+}
+
+function resetPanelWatchdog(p) {
+  if (p._watchdogTimer) startPanelWatchdog(p);
+}
+
+function stopPanelWatchdog(p) {
+  if (p._watchdogTimer) {
+    clearTimeout(p._watchdogTimer);
+    p._watchdogTimer = null;
+  }
+}
+
 /* ================= ACCOUNT / AUTH HELPERS ================= */
 
 /** Send a candles subscription request on a WebSocket */
@@ -6649,6 +6705,7 @@ function connect() {
     reconnectAttempts = 0;
     startUptimeTimer();
     startPing();
+    startStreamWatchdog();
 
     /* Start NY Open Range timer if enabled */
     if (nyOpenRangeEnabled) startNyOpenRangeTimer();
@@ -6730,6 +6787,7 @@ function connect() {
 
     /* Historical batch */
     if (msg.candles) {
+      resetStreamWatchdog();
       candles = msg.candles.map(c => ({
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
@@ -6742,6 +6800,7 @@ function connect() {
 
     /* Streaming OHLC */
     if (msg.ohlc) {
+      resetStreamWatchdog();
       const o = msg.ohlc;
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
@@ -6791,6 +6850,7 @@ function connect() {
   ws.onclose = () => {
     if (thisWs !== ws) return; /* stale connection – don't touch current state */
     stopPing();
+    stopStreamWatchdog();
     stopCandleCountdown();
     UI.wsStatus.textContent = "DISCONNECTED";
     UI.wsStatus.className = "status-badge disabled";
@@ -6865,6 +6925,7 @@ function disconnect() {
   if (chartRedrawTimer) { cancelAnimationFrame(chartRedrawTimer); chartRedrawTimer = null; }
   chartRedrawPending = false;
   stopPing();
+  stopStreamWatchdog();
   stopCandleCountdown();
   stopUptimeTimer();
   stopNyOpenRangeTimer();
@@ -17362,6 +17423,9 @@ function connectPanel(p) {
         panelWs.send(JSON.stringify({ ping: 1 }));
       }
     }, PING_INTERVAL_MS);
+
+    /* Start panel stream watchdog */
+    startPanelWatchdog(p);
   };
 
   panelWs.onmessage = (evt) => {
@@ -17425,6 +17489,7 @@ function connectPanel(p) {
 
     /* Historical batch */
     if (msg.candles) {
+      resetPanelWatchdog(p);
       candles = msg.candles.map(c => ({
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
@@ -17435,6 +17500,7 @@ function connectPanel(p) {
 
     /* Streaming OHLC */
     if (msg.ohlc) {
+      resetPanelWatchdog(p);
       const o = msg.ohlc;
       const c = {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
@@ -17508,6 +17574,7 @@ function connectPanel(p) {
   panelWs.onclose = () => {
     if (p.ws !== panelWs) return; /* stale connection – don't touch panel state */
     if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+    stopPanelWatchdog(p);
     p.connected = false;
     p.ws = null;
     updatePanelCardUI(p);
@@ -17528,6 +17595,23 @@ function connectPanel(p) {
       slot.inProgress = false;
       slot.contractId = null;
     }
+
+    /* Auto-reconnect panel if not intentionally removed */
+    if (!p.unavailable && multiPanels.has(p.symbol)) {
+      const panelDelay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, (p._reconnectAttempts || 0)), RECONNECT_MAX_DELAY);
+      p._reconnectAttempts = (p._reconnectAttempts || 0) + 1;
+      if (p._reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+        addLog(`[Multi] ${p.symbol} reconnecting in ${(panelDelay / 1000).toFixed(1)}s (attempt ${p._reconnectAttempts})…`);
+        p._reconnectTimer = setTimeout(() => {
+          if (multiPanels.has(p.symbol) && !p.ws) {
+            p._reconnectAttempts = 0;
+            connectPanel(p);
+          }
+        }, panelDelay);
+      } else {
+        addLog(`⚠️ [Multi] ${p.symbol} max reconnect attempts reached`);
+      }
+    }
   };
 
   panelWs.onerror = () => {
@@ -17541,6 +17625,9 @@ function connectPanel(p) {
 /* ---- Disconnect a multi-symbol panel ---- */
 function disconnectPanel(p) {
   if (p.pingTimer) { clearInterval(p.pingTimer); p.pingTimer = null; }
+  stopPanelWatchdog(p);
+  if (p._reconnectTimer) { clearTimeout(p._reconnectTimer); p._reconnectTimer = null; }
+  p._reconnectAttempts = 0;
 
   /* Clean up per-symbol auto-trade state */
   const slot = autoTradeSlots.get(p.symbol);
