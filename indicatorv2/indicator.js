@@ -1473,6 +1473,14 @@ const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
 const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
 const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 
+/* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
+ *  Volatility 1s (1HZ*) — fast tick action, tighter TP for rapid captures.
+ *  Volatility Standard (R_*) — slower structure, wider TP for bigger moves.
+ *  Default fallback for other asset classes keeps the original 2:1 R:R.          */
+const GRID_SCALPER_MA_RR_VOL1S     = 1.5; /* Volatility 1s: quick 1.5:1 scalp */
+const GRID_SCALPER_MA_RR_STANDARD  = 2.5; /* Volatility Standard: ride 2.5:1 */
+const GRID_SCALPER_MA_RR_DEFAULT   = 2.0; /* all other symbols: balanced 2:1 */
+
 /* ================= STRATEGY 9: FAIR VALUE GAP (FVG) ================= */
 /**
  * Fair Value Gap (FVG) Strategy — Supply & Demand with FVG confluence.
@@ -9372,18 +9380,25 @@ function detectGridScalperMA() {
   }
   if (risk < atr * 0.05) return null;
 
-  /* ── TP at 2:1 R:R ── */
-  const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
+  /* ── TP: symbol-aware R:R for optimised profits ── */
+  const sym = getActiveSymbol() || "";
+  let rrMultiplier = GRID_SCALPER_MA_RR_DEFAULT;
+  let volCategory  = "default";
+  if (/^1HZ/i.test(sym))     { rrMultiplier = GRID_SCALPER_MA_RR_VOL1S;    volCategory = "vol1s"; }
+  else if (/^R_/i.test(sym)) { rrMultiplier = GRID_SCALPER_MA_RR_STANDARD; volCategory = "standard"; }
+
+  const tp = dir === "BULL" ? entry + risk * rrMultiplier : entry - risk * rrMultiplier;
   const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
 
   return {
     dir, entry, sl, tp, rr,
     candleIdx: idx,
     epoch: candles[idx].epoch,
-    symbol: getActiveSymbol(),
+    symbol: sym,
     result: "PENDING",
     type: "grid_scalper_ma",
     mode: gridScalperMAStrategy,
+    volCategory,
     breakLevel
   };
 }
