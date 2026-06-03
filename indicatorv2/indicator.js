@@ -744,6 +744,66 @@ function getMarketTuning() {
   }
 }
 
+/* ================= PROFIT-OPTIMIZED STRATEGY PARAMETERS (per symbol type) ================= */
+/**
+ * Returns profit-optimized strategy parameters for Volatility 1s and Standard indices.
+ * Other symbols get default (unmodified) values so existing behaviour is preserved.
+ *
+ * @param {string} [symbol] – symbol string; defaults to active symbol
+ */
+function getStrategyProfitParams(symbol) {
+  if (!symbol) symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  const isVol1s  = /^1HZ/i.test(symbol);
+  const isVolStd = /^R_/i.test(symbol);
+
+  if (isVol1s) {
+    return {
+      rrLiquiditySweep: 2.5,
+      rrStopLossHunt:   2.5,
+      rrFailedPinBar:   2.0,
+      rrGridScalperMA:  2.5,
+      rrFVGFallback:    2.5,
+      rrPO3Fallback:    2.5,
+      rrMTFMin:         2.5,
+      slBufferMult:     0.8,
+      trailingMult:     1.8,
+      cooldownReduction: 0.5,
+      minImpulseATR:    1.2
+    };
+  }
+
+  if (isVolStd) {
+    return {
+      rrLiquiditySweep: 2.5,
+      rrStopLossHunt:   2.5,
+      rrFailedPinBar:   2.0,
+      rrGridScalperMA:  2.5,
+      rrFVGFallback:    2.5,
+      rrPO3Fallback:    2.5,
+      rrMTFMin:         2.5,
+      slBufferMult:     0.9,
+      trailingMult:     1.7,
+      cooldownReduction: 0.7,
+      minImpulseATR:    1.3
+    };
+  }
+
+  /* All other symbols: default (unchanged) behaviour */
+  return {
+    rrLiquiditySweep: 2.0,
+    rrStopLossHunt:   2.0,
+    rrFailedPinBar:   1.5,
+    rrGridScalperMA:  2.0,
+    rrFVGFallback:    2.0,
+    rrPO3Fallback:    2.0,
+    rrMTFMin:         2.0,
+    slBufferMult:     1.0,
+    trailingMult:     1.0,
+    cooldownReduction: 1.0,
+    minImpulseATR:    1.5
+  };
+}
+
 /* Auto-reconnect */
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY  = 30000;
@@ -2464,15 +2524,16 @@ function processNyOpenRangeCandle(idx) {
 
       nyOpenRangePhase = "TRADE";
 
-      /* Build the trade: SL at midpoint, TP at 1:2 R:R */
+      /* Build the trade: SL at midpoint, TP at profit-optimized R:R */
       const midpoint = (rangeH + rangeL) / 2;
       const entry    = c.close;
       const sl       = midpoint;
       const risk     = Math.abs(entry - sl);
+      const _profParams = getStrategyProfitParams();
 
       if (risk > 0) {
-        const tp = dir === "BULL" ? entry + risk * 2 : entry - risk * 2;
-        const rr = 2.0;
+        const tp = dir === "BULL" ? entry + risk * _profParams.rrLiquiditySweep : entry - risk * _profParams.rrLiquiditySweep;
+        const rr = _profParams.rrLiquiditySweep;
         nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
 
         /* Push to history for strategy alerts panel */
@@ -7807,17 +7868,14 @@ function detectLiquiditySweep() {
   const entry = sweepCandle.close;
   const rangeSize = rangeHigh - rangeLow;
   const atr = atrValue > 0 ? atrValue : rangeSize;
+  const _profParams = getStrategyProfitParams();
 
   /* SL: pick the closer-to-entry reference (tighter stop) from range vs sweep candle */
-  const slBuffer = atr * 0.1;
+  const slBuffer = atr * 0.1 * _profParams.slBufferMult;
   let sl;
   if (dir === "BULL") {
-    /* For BULL: SL is below entry. Higher value = closer to entry = tighter.
-       sweepCandle.low < rangeLow (by definition), so Math.max picks rangeLow. */
     sl = Math.max(rangeLow, sweepCandle.low) - slBuffer;
   } else {
-    /* For BEAR: SL is above entry. Lower value = closer to entry = tighter.
-       sweepCandle.high > rangeHigh (by definition), so Math.min picks rangeHigh. */
     sl = Math.min(rangeHigh, sweepCandle.high) + slBuffer;
   }
 
@@ -7833,8 +7891,8 @@ function detectLiquiditySweep() {
   /* Reject if risk is negligible (likely noise) */
   if (risk < atr * 0.05) return null;
 
-  /* Fixed 2:1 R:R per strategy spec (entry at candle close, TP at 2× risk) */
-  const rrTarget = 2;
+  /* R:R target — profit-optimized per symbol type */
+  const rrTarget = _profParams.rrLiquiditySweep;
   const tp = dir === "BULL" ? entry + risk * rrTarget : entry - risk * rrTarget;
   const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
 
@@ -8030,15 +8088,16 @@ function detectStopLossHunt() {
 
   const atr = atrValue > 0 ? atrValue : (c.high - c.low);
   const tolerance = atr * 0.2;
+  const _profParams = getStrategyProfitParams();
 
   for (const kl of keyLevels) {
     /* Support hunt: price breaks below support but closes back above */
     if (kl.type === "support") {
       if (c.low < kl.level - tolerance && c.close > kl.level) {
         const entry = c.close;
-        const sl = c.low - tolerance * 0.5; /* just beyond the hunt candle low */
+        const sl = c.low - tolerance * 0.5 * _profParams.slBufferMult;
         const risk = Math.abs(entry - sl);
-        const tp = entry + risk * 2;
+        const tp = entry + risk * _profParams.rrStopLossHunt;
 
         return {
           dir: "BULL", entry, sl, tp,
@@ -8056,9 +8115,9 @@ function detectStopLossHunt() {
     if (kl.type === "resistance") {
       if (c.high > kl.level + tolerance && c.close < kl.level) {
         const entry = c.close;
-        const sl = c.high + tolerance * 0.5; /* just beyond the hunt candle high */
+        const sl = c.high + tolerance * 0.5 * _profParams.slBufferMult;
         const risk = Math.abs(entry - sl);
-        const tp = entry - risk * 2;
+        const tp = entry - risk * _profParams.rrStopLossHunt;
 
         return {
           dir: "BEAR", entry, sl, tp,
@@ -8288,13 +8347,14 @@ function detectFailedPinBar() {
   /* Compute entry / SL / TP */
   const entry = breakCandle.close;
   const atr = atrValue > 0 ? atrValue : pinRange;
+  const _profParams = getStrategyProfitParams();
 
   /* SL: beyond the pin bar (the opposite extreme) */
-  const slBuffer = atr * 0.1;
+  const slBuffer = atr * 0.1 * _profParams.slBufferMult;
   const sl = dir === "BULL" ? pinBarCandle.low - slBuffer : pinBarCandle.high + slBuffer;
   const risk = Math.abs(entry - sl);
-  /* TP: quick scalp — 1.5:1 R:R (in direction of momentum for fast pips) */
-  const tp = dir === "BULL" ? entry + risk * 1.5 : entry - risk * 1.5;
+  /* TP: profit-optimized R:R (momentum direction for fast pips) */
+  const tp = dir === "BULL" ? entry + risk * _profParams.rrFailedPinBar : entry - risk * _profParams.rrFailedPinBar;
   const rr = risk > 0 ? Math.abs(tp - entry) / risk : 0;
 
   return {
@@ -8951,21 +9011,22 @@ function detectPowerOf3() {
     : fvgMid;
 
   let sl, tp;
+  const _profParams = getStrategyProfitParams();
   if (dailyBias === "BULL") {
     /* SL below the manipulation low with small ATR buffer */
-    sl = sweepPrice - atrValue * 0.15;
+    sl = sweepPrice - atrValue * 0.15 * _profParams.slBufferMult;
     /* TP at the 1H high or above — external liquidity */
     tp = oneHourHighPrice;
-    /* If 1H high is too close, extend TP by 1× risk */
+    /* If 1H high is too close, extend TP by profit-optimized R:R */
     const risk = Math.abs(entry - sl);
-    if (tp <= entry + risk * 0.5) tp = entry + risk * 2;
+    if (tp <= entry + risk * 0.5) tp = entry + risk * _profParams.rrPO3Fallback;
   } else {
     /* SL above the manipulation high */
-    sl = sweepPrice + atrValue * 0.15;
+    sl = sweepPrice + atrValue * 0.15 * _profParams.slBufferMult;
     /* TP at the 1H low — external liquidity */
     tp = oneHourLowPrice;
     const risk = Math.abs(sl - entry);
-    if (tp >= entry - risk * 0.5) tp = entry - risk * 2;
+    if (tp >= entry - risk * 0.5) tp = entry - risk * _profParams.rrPO3Fallback;
   }
 
   const risk = Math.abs(entry - sl);
@@ -9702,22 +9763,23 @@ function detectFVGStrat() {
   /* ---- Build trade ---- */
   const entry = c.close;
   let sl, tp;
+  const _profParams = getStrategyProfitParams();
 
   if (pushDir === "BULL") {
     /* SL: below demand zone low with ATR buffer */
-    sl = zoneBottom - atrValue * FVG_ZONE_ATR_BUFFER;
+    sl = zoneBottom - atrValue * FVG_ZONE_ATR_BUFFER * _profParams.slBufferMult;
     /* TP: swing high (the push high) + small extension */
     tp = swingHigh;
-    /* Extend TP if too close */
+    /* Extend TP if too close — profit-optimized R:R fallback */
     const risk = Math.abs(entry - sl);
-    if (tp <= entry + risk * 0.8) tp = entry + risk * 2;
+    if (tp <= entry + risk * 0.8) tp = entry + risk * _profParams.rrFVGFallback;
   } else {
     /* SL: above supply zone high with ATR buffer */
-    sl = zoneTop + atrValue * FVG_ZONE_ATR_BUFFER;
+    sl = zoneTop + atrValue * FVG_ZONE_ATR_BUFFER * _profParams.slBufferMult;
     /* TP: swing low */
     tp = swingLow;
     const risk = Math.abs(sl - entry);
-    if (tp >= entry - risk * 0.8) tp = entry - risk * 2;
+    if (tp >= entry - risk * 0.8) tp = entry - risk * _profParams.rrFVGFallback;
   }
 
   const risk   = Math.abs(entry - sl);
@@ -10049,29 +10111,31 @@ function detectMtfTopDown() {
 
   const entry    = c.close;
   const slBuffer = atrValue * MTF_SL_ATR_BUFFER;
+  const _profParams = getStrategyProfitParams();
+  const _mtfRR = _profParams.rrMTFMin;
 
   /* Pre-compute the 4H synthesised slice once for both TP directions */
   const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
   let sl, tp;
 
   if (dir === "BULL") {
-    sl = c.low - slBuffer;
+    sl = c.low - slBuffer * _profParams.slBufferMult;
     tp = biasSlice.length > 0
       ? Math.max(...biasSlice.map(b => b.high))
-      : entry + Math.abs(entry - sl) * MTF_MIN_RR;
+      : entry + Math.abs(entry - sl) * _mtfRR;
   } else {
-    sl = c.high + slBuffer;
+    sl = c.high + slBuffer * _profParams.slBufferMult;
     tp = biasSlice.length > 0
       ? Math.min(...biasSlice.map(b => b.low))
-      : entry - Math.abs(sl - entry) * MTF_MIN_RR;
+      : entry - Math.abs(sl - entry) * _mtfRR;
   }
 
   const risk = Math.abs(entry - sl);
   if (risk <= 0) return null;
 
-  /* Guarantee minimum R:R */
-  if (Math.abs(tp - entry) / risk < MTF_MIN_RR) {
-    tp = dir === "BULL" ? entry + risk * MTF_MIN_RR : entry - risk * MTF_MIN_RR;
+  /* Guarantee minimum R:R — profit-optimized per symbol */
+  if (Math.abs(tp - entry) / risk < _mtfRR) {
+    tp = dir === "BULL" ? entry + risk * _mtfRR : entry - risk * _mtfRR;
   }
   const rr = Math.abs(tp - entry) / risk;
 
@@ -14488,11 +14552,11 @@ function detectOrderblockStrategy(idx) {
       if (computeConfluenceScore(dir, c.close, idx) < minConfluenceValue) continue;
     }
 
-    const sl = dir === "BULL" ? obCandle.low  - atrValue * ORDERBLOCK_SL_BUFFER_ATR
-                              : obCandle.high + atrValue * ORDERBLOCK_SL_BUFFER_ATR;
+    const sl = dir === "BULL" ? obCandle.low  - atrValue * ORDERBLOCK_SL_BUFFER_ATR * getStrategyProfitParams().slBufferMult
+                              : obCandle.high + atrValue * ORDERBLOCK_SL_BUFFER_ATR * getStrategyProfitParams().slBufferMult;
     const risk = Math.abs(c.close - sl);
     if (risk <= 0 || risk > ORDERBLOCK_MAX_SL_ATR * atrValue) continue;
-    const rr = 2.0;
+    const rr = getStrategyProfitParams().rrLiquiditySweep;
     const tp = dir === "BULL" ? c.close + risk * rr : c.close - risk * rr;
 
     const signal = {
