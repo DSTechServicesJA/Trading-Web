@@ -1255,7 +1255,7 @@ function autoUpdateMultiplier(sym) {
       addLog(`🔧 Multiplier refined to ×${best} for ${sym} via API (valid: ${apiValid.join(", ")})`);
       saveSettings();
     }
-  });
+  }).catch(() => { /* silent — multiplier refinement is best-effort */ });
 }
 
 /**
@@ -1286,7 +1286,7 @@ function getPipValuePerLot(symbol, currentPrice) {
  */
 function calcPositionMetrics(tradeObj) {
   if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
-  if (tradeObj.entry == null || tradeObj.sl == null) return null;
+  if (tradeObj.entry === null || tradeObj.entry === undefined || tradeObj.sl === null || tradeObj.sl === undefined) return null;
 
   const dollarRisk   = accountSize * (riskPercent / 100);
   const dollarReward = dollarRisk * (tradeObj.rr || 0);
@@ -2439,7 +2439,7 @@ function buildNyOpenRange() {
     }
   }
 
-  if (startIdx < 0 || high === -Infinity) return;
+  if (startIdx < 0 || high === -Infinity || candles.length === 0) return;
 
   /* Check if the window has closed (latest candle is past 9:35 AM EST) */
   const lastCandle = candles[candles.length - 1];
@@ -2910,14 +2910,14 @@ function monitorSessionRangeTradeOutcome(candle) {
   if (srt.dir === "BULL") {
     /* BUY trade: SL below entry, TP above entry */
     const srSlHit = candle.low <= srt.sl;
-    const srTpHit = srt.tp != null && candle.high >= srt.tp;
+    const srTpHit = srt.tp !== null && srt.tp !== undefined && candle.high >= srt.tp;
     if (srSlHit && srTpHit)     result = resolveBothHit(srt);
     else if (srSlHit)           result = "LOSS";
     else if (srTpHit)           result = "WIN";
   } else {
     /* SELL trade: SL above entry, TP below entry */
     const srSlHit = candle.high >= srt.sl;
-    const srTpHit = srt.tp != null && candle.low <= srt.tp;
+    const srTpHit = srt.tp !== null && srt.tp !== undefined && candle.low <= srt.tp;
     if (srSlHit && srTpHit)     result = resolveBothHit(srt);
     else if (srSlHit)           result = "LOSS";
     else if (srTpHit)           result = "WIN";
@@ -7544,10 +7544,10 @@ function hasConsecutiveDirection(idx, dir) {
 /* 9. VWAP Alignment — price near/above VWAP for BULL, near/below for BEAR */
 function isVWAPAligned(dir) {
   if (!vwapFilterEnabled) return true;
-  if (vwapValues.length === 0) return true;
+  if (vwapValues.length === 0 || candles.length === 0) return true;
   const vwap = vwapValues[vwapValues.length - 1];
   const price = candles[candles.length - 1].close;
-  if (vwap == null) return true;
+  if (vwap === null || vwap === undefined) return true;
   /* Allow within 0.5 ATR of VWAP as "near" */
   const tolerance = atrValue > 0 ? atrValue * VWAP_ATR_TOLERANCE : Math.abs(price * VWAP_PRICE_TOLERANCE_PCT);
   if (dir === "BULL") return price >= vwap - tolerance;
@@ -7631,10 +7631,10 @@ function hasFollowThrough() {
 /* 14. MTF Structure — EMA 200 alignment */
 function isMTFStructureAligned(dir) {
   if (!mtfStructureEnabled) return true;
-  if (emaMTF.length === 0) return true;
+  if (emaMTF.length === 0 || candles.length === 0) return true;
   const ema200 = emaMTF[emaMTF.length - 1];
   const price = candles[candles.length - 1].close;
-  if (ema200 == null) return true;
+  if (ema200 === null || ema200 === undefined) return true;
   if (dir === "BULL") return price > ema200;
   if (dir === "BEAR") return price < ema200;
   return true;
@@ -12560,7 +12560,7 @@ function buildOpeningRange() {
     endIdx = i;
   }
 
-  if (high === -Infinity) return;
+  if (high === -Infinity || candles.length === 0) return;
 
   openingRange = { high, low, startIdx, endIdx };
 
@@ -16633,7 +16633,7 @@ function initLoginGate() {
           if (derivToken) sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
         }
         /* Refresh user data (role + strategies) from server */
-        ITGuruAuth.verify().then(() => applyStrategyAccess());
+        ITGuruAuth.verify().then(() => applyStrategyAccess()).catch(() => { /* silent auth verify */ });
       }
     });
 
@@ -16648,7 +16648,7 @@ function initLoginGate() {
 
     /* If already logged in, apply strategy access after restoring settings */
     if (ITGuruAuth.isLoggedIn()) {
-      ITGuruAuth.verify().then(() => applyStrategyAccess());
+      ITGuruAuth.verify().then(() => applyStrategyAccess()).catch(() => { /* silent auth verify */ });
     }
     return;
   }
