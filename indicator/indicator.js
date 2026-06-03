@@ -1745,6 +1745,14 @@ const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
 const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
 const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 
+/* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
+ *  Volatility 1s (1HZ*) — fast tick action, tighter TP for rapid captures.
+ *  Volatility Standard (R_*) — slower structure, wider TP for bigger moves.
+ *  Default fallback for other asset classes keeps the original 2:1 R:R.          */
+const GRID_SCALPER_MA_RR_VOL1S     = 1.5; /* Volatility 1s: quick 1.5:1 scalp */
+const GRID_SCALPER_MA_RR_STANDARD  = 2.5; /* Volatility Standard: ride 2.5:1 */
+const GRID_SCALPER_MA_RR_DEFAULT   = 2.0; /* all other symbols: balanced 2:1 */
+
 /* ================= STRATEGY 9: FAIR VALUE GAP (FVG) ================= */
 /**
  * Fair Value Gap (FVG) Strategy — Supply & Demand with FVG confluence.
@@ -10400,19 +10408,25 @@ function detectGridScalperMA() {
   }
   if (risk < atr * 0.05) return null;
 
-  /* ── TP — profit-optimized R:R per symbol type ── */
-  const _profParams = getStrategyProfitParams();
-  const tp = dir === "BULL" ? entry + risk * _profParams.rrGridScalperMA : entry - risk * _profParams.rrGridScalperMA;
+  /* ── TP: symbol-aware R:R for optimised profits ── */
+  const sym = getActiveSymbol() || "";
+  let rrMultiplier = GRID_SCALPER_MA_RR_DEFAULT;
+  let volCategory  = "default";
+  if (/^1HZ/i.test(sym))     { rrMultiplier = GRID_SCALPER_MA_RR_VOL1S;    volCategory = "vol1s"; }
+  else if (/^R_/i.test(sym)) { rrMultiplier = GRID_SCALPER_MA_RR_STANDARD; volCategory = "standard"; }
+
+  const tp = dir === "BULL" ? entry + risk * rrMultiplier : entry - risk * rrMultiplier;
   const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
 
   return {
     dir, entry, sl, tp, rr,
     candleIdx: idx,
     epoch: candles[idx].epoch,
-    symbol: getActiveSymbol(),
+    symbol: sym,
     result: "PENDING",
     type: "grid_scalper_ma",
     mode: gridScalperMAStrategy,
+    volCategory,
     breakLevel
   };
 }
@@ -10446,7 +10460,9 @@ function processGridScalperMA() {
 
   const sym = getActiveSymbol() || "--";
   const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
-  addLog(`🔲 GRID SCALPER MA [${modeLabel}] ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+  const volLabel  = signal.volCategory === "vol1s" ? "Vol1s" : signal.volCategory === "standard" ? "VolStd" : "";
+  const rrTag     = volLabel ? ` [${volLabel} ${fmt(signal.rr,1)}R]` : "";
+  addLog(`🔲 GRID SCALPER MA [${modeLabel}]${rrTag} ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
 
   showToast(
     `Grid Scalper MA ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} [${modeLabel}]`,
