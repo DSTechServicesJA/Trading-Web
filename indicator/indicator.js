@@ -1460,7 +1460,7 @@ function getPipValuePerLot(symbol, currentPrice) {
  */
 function calcPositionMetrics(tradeObj) {
   if (!tradeObj || accountSize <= 0 || riskPercent <= 0) return null;
-  if (tradeObj.entry == null || tradeObj.sl == null) return null;
+  if (tradeObj.entry === null || tradeObj.entry === undefined || tradeObj.sl === null || tradeObj.sl === undefined) return null;
 
   const dollarRisk   = accountSize * (riskPercent / 100);
   const dollarReward = dollarRisk * (tradeObj.rr || 0);
@@ -2296,7 +2296,7 @@ function initUI() {
 function fmt(v, d) {
   if (v == null) return "--";
   const n = Number(v);
-  return isNaN(n) ? "--" : n.toFixed(d != null ? d : 2);
+  return isNaN(n) ? "--" : n.toFixed(d != null ? d : 2); /* == null intentional: catches both null and undefined */
 }
 
 /**
@@ -2342,7 +2342,7 @@ function getSymbolDigits(symbol, priceSample) {
  * @returns {string}
  */
 function fmtPrice(price, symbol) {
-  if (price == null) return "--";
+  if (price === null || price === undefined) return "--";
   const n = Number(price);
   if (isNaN(n)) return "--";
   const d = getSymbolDigits(symbol, n);
@@ -2363,7 +2363,7 @@ function fmtPrice(price, symbol) {
 function getRecommendedOrderType() {
   if (!breakout) return null;
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
-  if (currentPrice == null) return null;
+  if (currentPrice === null || currentPrice === undefined) return null;
 
   /* Use trade entry if available, otherwise fall back to breakout level */
   const entryLevel = trade ? trade.entry : breakout.level;
@@ -2670,7 +2670,7 @@ function buildNyOpenRange() {
     }
   }
 
-  if (startIdx < 0 || high === -Infinity) return;
+  if (startIdx < 0 || high === -Infinity || candles.length === 0) return;
 
   /* Check if the window has closed (latest candle is past 9:35 AM EST) */
   const lastCandle = candles[candles.length - 1];
@@ -3352,7 +3352,7 @@ function _renderChartToBlob() {
       try {
         Object.defineProperty(window, "devicePixelRatio",
           { value: origDpr, writable: true, configurable: true });
-      } catch (_) { /* ignore restore failure */ }
+      } catch { /* ignore restore failure */ }
     }
 
     offscreen.toBlob(blob => {
@@ -4576,7 +4576,7 @@ function saveSettings() {
           const s2 = JSON.parse(raw2);
           s2.telegramBotToken = enc;
           localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(s2));
-        } catch (_) {}
+        } catch {}
       }).catch(() => {});
     }
   } catch (e) {
@@ -5127,7 +5127,7 @@ function toSelectedSignalOverlay(signal) {
   const entry = Number(signal.entry);
   const sl = Number(signal.sl);
   if (!Number.isFinite(entry) || !Number.isFinite(sl)) return null;
-  const tp = signal.tp == null ? null : Number(signal.tp);
+  const tp = signal.tp === null || signal.tp === undefined ? null : Number(signal.tp);
   return {
     symbol: signal.symbol || getActiveSymbol(),
     dir: signal.dir === "BEAR" ? "BEAR" : "BULL",
@@ -7331,7 +7331,7 @@ function connect() {
       }
       /* Set initial balance and subscribe to live balance stream */
       autoTradeBalance = parseFloat(acct.balance) || null;
-      if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
+      if (sessionStartBalance === null || sessionStartBalance === undefined) sessionStartBalance = autoTradeBalance;
       ensureAutoTradeDailyBaseline();
       updateAutoTradeBalanceUI();
       updateAutoTradeBalanceVisibility();
@@ -7749,7 +7749,7 @@ function computeATR() {
   /* ── New candle appended (n === _atrCandleCount + 1) ── */
   if (n === _atrCandleCount + 1) {
     const newTR = _tr(candles[n - 1], candles[n - 2]);
-    const newATR = (atrValues.length >= n && atrValues[n - 2] != null)
+    const newATR = (atrValues.length >= n && atrValues[n - 2] !== null && atrValues[n - 2] !== undefined)
       ? (_atrPrev * (ATR_PERIOD - 1) + newTR) / ATR_PERIOD
       : _atrPrev;  /* insufficient history — keep previous value */
     atrValues.push(newATR);
@@ -7829,11 +7829,11 @@ function computeMACD() {
   macdSignal = computeEMA(macdLine.map(v => v ?? 0), MACD_SIGNAL_PERIOD);
   /* Fix: null out signal where MACD was null */
   for (let i = 0; i < macdLine.length; i++) {
-    if (macdLine[i] == null) macdSignal[i] = null;
+    if (macdLine[i] === null || macdLine[i] === undefined) macdSignal[i] = null;
   }
   macdHistogram = [];
   for (let i = 0; i < macdLine.length; i++) {
-    if (macdLine[i] != null && macdSignal[i] != null) {
+    if (macdLine[i] !== null && macdLine[i] !== undefined && macdSignal[i] !== null && macdSignal[i] !== undefined) {
       macdHistogram.push(macdLine[i] - macdSignal[i]);
     } else {
       macdHistogram.push(null);
@@ -7849,7 +7849,7 @@ function getCurrentMACD() {
 function isMACDAligned(dir) {
   if (!macdFilterEnabled) return true;
   const hist = getCurrentMACD();
-  if (hist == null) return true;
+  if (hist === null || hist === undefined) return true;
   return dir === "BULL" ? hist > 0 : hist < 0;
 }
 
@@ -7917,7 +7917,7 @@ function isBBSqueeze() {
 function getBBPosition() {
   if (candles.length === 0 || bbUpper.length === 0) return null;
   const i = candles.length - 1;
-  if (bbUpper[i] == null || bbLower[i] == null) return null;
+  if (bbUpper[i] === null || bbUpper[i] === undefined || bbLower[i] === null || bbLower[i] === undefined) return null;
   const price = candles[i].close;
   const width = bbUpper[i] - bbLower[i];
   if (width <= 0) return null;
@@ -7984,7 +7984,7 @@ function ensureAutoTradeDailyBaseline() {
   if (autoTradeDailyDateKey !== today) {
     autoTradeDailyDateKey = today;
     autoTradeDailyStartBalance = autoTradeBalance;
-  } else if (autoTradeDailyStartBalance == null && autoTradeBalance != null) {
+  } else if ((autoTradeDailyStartBalance === null || autoTradeDailyStartBalance === undefined) && autoTradeBalance !== null && autoTradeBalance !== undefined) {
     autoTradeDailyStartBalance = autoTradeBalance;
   }
 }
@@ -8195,10 +8195,10 @@ function hasConsecutiveDirection(idx, dir) {
 /* 9. VWAP Alignment — price near/above VWAP for BULL, near/below for BEAR */
 function isVWAPAligned(dir) {
   if (!vwapFilterEnabled) return true;
-  if (vwapValues.length === 0) return true;
+  if (vwapValues.length === 0 || candles.length === 0) return true;
   const vwap = vwapValues[vwapValues.length - 1];
   const price = candles[candles.length - 1].close;
-  if (vwap == null) return true;
+  if (vwap === null || vwap === undefined) return true;
   /* Allow within 0.5 ATR of VWAP as "near" */
   const tolerance = atrValue > 0 ? atrValue * VWAP_ATR_TOLERANCE : Math.abs(price * VWAP_PRICE_TOLERANCE_PCT);
   if (dir === "BULL") return price >= vwap - tolerance;
@@ -8282,10 +8282,10 @@ function hasFollowThrough() {
 /* 14. MTF Structure — EMA 200 alignment */
 function isMTFStructureAligned(dir) {
   if (!mtfStructureEnabled) return true;
-  if (emaMTF.length === 0) return true;
+  if (emaMTF.length === 0 || candles.length === 0) return true;
   const ema200 = emaMTF[emaMTF.length - 1];
   const price = candles[candles.length - 1].close;
-  if (ema200 == null) return true;
+  if (ema200 === null || ema200 === undefined) return true;
   if (dir === "BULL") return price > ema200;
   if (dir === "BEAR") return price < ema200;
   return true;
@@ -15026,7 +15026,7 @@ function handleAutoTradeMessage(msg, msgWs) {
     const bal = msg.balance;
     if (bal && bal.balance != null) {
       autoTradeBalance = parseFloat(bal.balance);
-      if (sessionStartBalance == null) sessionStartBalance = autoTradeBalance;
+      if (sessionStartBalance === null || sessionStartBalance === undefined) sessionStartBalance = autoTradeBalance;
       ensureAutoTradeDailyBaseline();
       updateAutoTradeBalanceUI();
       updateAutoTradePLUI();
@@ -15323,7 +15323,7 @@ async function pollMt5BridgeStatus() {
         addLog(`✅ MT5 filled ${tradeId}${o.brokerTicket ? ` (ticket ${o.brokerTicket})` : ""}`);
       }
     }
-  } catch (_) { /* silent background poll */ }
+  } catch { /* silent background poll */ }
 }
 
 function getTradeAnalytics(entries) {
@@ -20016,7 +20016,7 @@ function updatePanelCardUI(p) {
 function getPanelOrderType(p) {
   if (!p.breakout) return null;
   const currentPrice = p.candles.length > 0 ? p.candles[p.candles.length - 1].close : null;
-  if (currentPrice == null) return null;
+  if (currentPrice === null || currentPrice === undefined) return null;
   const entryLevel = p.trade ? p.trade.entry : p.breakout.level;
   if (p.breakout.dir === "BULL") {
     return entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
@@ -20331,7 +20331,7 @@ document.addEventListener("DOMContentLoaded", () => {
   try {
     const saved = localStorage.getItem(STREAM_MODE_KEY);
     if (saved !== null) streamMode = JSON.parse(saved) === true;
-  } catch (_) { /* ignore */ }
+  } catch { /* ignore */ }
 
   initKeyboardShortcuts();
 

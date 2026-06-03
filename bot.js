@@ -4018,7 +4018,7 @@ function rememberPayoutThreshold(value) {
   if (!Number.isFinite(value) || value <= 0) return;
 
   const last = payoutThresholdHistory[payoutThresholdHistory.length - 1];
-  if (last != null && Math.abs(last - value) < 0.001) return;
+  if (last !== null && last !== undefined && Math.abs(last - value) < 0.001) return;
 
   payoutThresholdHistory.push(value);
   if (payoutThresholdHistory.length > 60) payoutThresholdHistory.shift();
@@ -4276,7 +4276,7 @@ function dynamicVolatilityMin() {
   const lastFast = emaFastArr.at(-1);
   const lastSlow = emaSlowArr.at(-1);
 
-  if (lastFast != null && lastSlow != null) {
+  if (lastFast !== null && lastFast !== undefined && lastSlow !== null && lastSlow !== undefined) {
     const slope = Math.abs(lastFast - lastSlow) / Math.max(1e-9, Math.abs(lastSlow));
     if (slope > 0.0007) req *= 0.90; // trend permissive
   }
@@ -4344,7 +4344,7 @@ function shouldProbeLowVol(mode, oddRatio, evenRatio, ent, acc, reqVol) {
   const biasMax = Math.max(oddRatio, evenRatio);
   const lastFast = emaFastArr[emaFastArr.length - 1];
   const lastSlow = emaSlowArr[emaSlowArr.length - 1];
-  const emaSlope = (lastFast != null && lastSlow != null)
+  const emaSlope = (lastFast !== null && lastFast !== undefined && lastSlow !== null && lastSlow !== undefined)
     ? Math.abs(lastFast - lastSlow) / Math.max(1e-9, Math.abs(lastSlow))
     : 0;
 
@@ -4740,7 +4740,7 @@ function analyzeSignal() {
     const lastFast2 = emaFastArr[emaFastArr.length - 1];
     const lastSlow2 = emaSlowArr[emaSlowArr.length - 1];
 
-    const emaSlope = (lastFast2 != null && lastSlow2 != null)
+    const emaSlope = (lastFast2 !== null && lastFast2 !== undefined && lastSlow2 !== null && lastSlow2 !== undefined)
       ? Math.abs(lastFast2 - lastSlow2) / Math.max(1e-9, Math.abs(lastSlow2)) : 0;
 
     if (okToProbe) {
