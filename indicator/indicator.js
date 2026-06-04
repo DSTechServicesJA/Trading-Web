@@ -1685,6 +1685,40 @@ const TIKTOK_ZONE_TOLERANCE_ATR   = 0.1;  /* ATR multiplier for zone-touch toler
 const TIKTOK_SL_BUFFER_ATR        = 0.3;  /* ATR buffer beyond swing extreme for SL */
 const TIKTOK_MIN_IMPULSE_ATR      = 1.5;  /* impulse range must be >= this × ATR */
 
+/* ================= STRATEGY 14: CANDLESTICK INTERPRETATION (Market Narrative) ================= */
+/**
+ * Candlestick Interpretation Strategy — reads candles as order-flow narratives
+ * rather than static pattern memorization.
+ *
+ * Core philosophy:
+ *   - Each candle tells a story of buyer vs seller control.
+ *   - Signals only fire at KEY LEVELS with multi-timeframe alignment.
+ *   - Multi-candle sequences are required (not single-candle patterns).
+ *   - Volume confirms institutional participation when available.
+ *
+ * Multi-Timeframe:
+ *   HTF (16× base TF) → directional bias
+ *   MTF (4× base TF)  → active zones / S&R
+ *   LTF (base TF)     → entry via candle story + sequence
+ */
+let candleInterpEnabled     = false;    /* master toggle */
+let candleInterpHistory     = [];       /* alert history */
+let lastCandleInterpIdx     = -999;     /* cooldown tracker */
+let autoTradeCandleInterp   = true;     /* auto-trade sub-toggle */
+
+const CANDLE_INTERP_COOLDOWN      = 5;    /* min candles between signals */
+const CANDLE_INTERP_MAX_HISTORY   = 30;   /* max stored alerts */
+const CANDLE_INTERP_MAX_CANDLES   = 60;   /* monitoring timeout (candles) */
+const CANDLE_INTERP_HTF_MULT      = 16;   /* ×base TF for higher-timeframe bias */
+const CANDLE_INTERP_MTF_MULT      = 4;    /* ×base TF for mid-timeframe zones */
+const CANDLE_INTERP_HTF_LOOKBACK  = 8;    /* synthesised HTF bars for bias */
+const CANDLE_INTERP_MTF_LOOKBACK  = 16;   /* synthesised MTF bars for zone detection */
+const CANDLE_INTERP_SEQ_LOOKBACK  = 5;    /* LTF candles to scan for sequence */
+const CANDLE_INTERP_MIN_RR        = 2.0;  /* minimum acceptable R:R */
+const CANDLE_INTERP_SL_BUFFER_ATR = 0.3;  /* ATR buffer beyond wick for SL */
+const CANDLE_INTERP_LEVEL_TOL_ATR = 0.5;  /* ATR tolerance for "at key level" */
+const CANDLE_INTERP_VOL_SPIKE     = 1.5;  /* volume spike multiplier vs avg */
+
 /* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
 /**
  * Power of 3 (PO3) strategy – Accumulation → Manipulation → Expansion.
@@ -2121,6 +2155,12 @@ function initUI() {
   UI.mtfTopDownAlertList       = document.getElementById("mtfTopDownAlertList");
   UI.mtfTopDownAlertCount      = document.getElementById("mtfTopDownAlertCount");
   UI.autoTradeMtfTopDownToggle = document.getElementById("autoTradeMtfTopDownToggle");
+
+  /* Strategy 14: Candlestick Interpretation */
+  UI.candleInterpToggle          = document.getElementById("candleInterpToggle");
+  UI.candleInterpAlertList       = document.getElementById("candleInterpAlertList");
+  UI.candleInterpAlertCount      = document.getElementById("candleInterpAlertCount");
+  UI.autoTradeCandleInterpToggle = document.getElementById("autoTradeCandleInterpToggle");
 
   /* Strategy 13: TikTok Fibonacci */
   UI.tiktokToggle          = document.getElementById("tiktokToggle");
@@ -3482,6 +3522,7 @@ function buildTelegramCaption() {
   if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
+  if (candleInterpEnabled) filters.push("Candle Interp");
   if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
@@ -4548,6 +4589,8 @@ function saveSettings() {
       teslaScalingPlan,
       mtfTopDownEnabled,
       autoTradeMtfTopDown,
+      candleInterpEnabled,
+      autoTradeCandleInterp,
       /* Feature settings */
       orderblockEnabled,
       autoTradeOrderblock,
@@ -4763,6 +4806,12 @@ function restoreSettings() {
     if (UI.mtfTopDownToggle) UI.mtfTopDownToggle.checked = mtfTopDownEnabled;
     if (s.autoTradeMtfTopDown != null) autoTradeMtfTopDown = s.autoTradeMtfTopDown;
     if (UI.autoTradeMtfTopDownToggle) UI.autoTradeMtfTopDownToggle.checked = autoTradeMtfTopDown;
+
+    /* Strategy 14: Candlestick Interpretation */
+    if (s.candleInterpEnabled != null) candleInterpEnabled = s.candleInterpEnabled;
+    if (UI.candleInterpToggle) UI.candleInterpToggle.checked = candleInterpEnabled;
+    if (s.autoTradeCandleInterp != null) autoTradeCandleInterp = s.autoTradeCandleInterp;
+    if (UI.autoTradeCandleInterpToggle) UI.autoTradeCandleInterpToggle.checked = autoTradeCandleInterp;
 
     /* Strategy 13: TikTok Fibonacci */
     if (s.tiktokEnabled != null) tiktokEnabled = s.tiktokEnabled;
@@ -5067,6 +5116,7 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
     { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" },
     { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" },
+    { id: "stratWR_candleInterp",   history: candleInterpHistory,    label: "🕯 Candle Interp" },
     { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" },
     { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" }
   ];
@@ -5332,6 +5382,7 @@ function getAggregatedStrategyHistory() {
     { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" },
     { history: fvgStratHistory,       label: "🎯 Fair Value Gap" },
     { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
+    { history: candleInterpHistory,   label: "🕯 Candle Interp" },
     { history: orderblockHistory,     label: "🏦 Orderblock" },
     { history: tiktokHistory,         label: "📈 TikTok Fib" }
   ];
@@ -5360,6 +5411,7 @@ function getAggregatedStrategyHistory() {
       { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
       { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" },
       { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" },
+      { history: p.candleInterpHistory   || [], label: "🕯 Candle Interp" },
       { history: p.orderblockHistory     || [], label: "🏦 Orderblock" },
       { history: p.tiktokHistory         || [], label: "📈 TikTok Fib" }
     ];
@@ -8366,6 +8418,7 @@ function revertAllSettings() {
   gridScalperMAPeriod   = 21;
   fvgStratEnabled       = false;
   mtfTopDownEnabled     = false;
+  candleInterpEnabled   = false;
   autoTradeExecutionMode = "deriv";
   mt5SignalApiUrl        = "/api/mt5/signal.php";
   mt5StatusApiUrl        = "/api/mt5/order_status.php";
@@ -8425,6 +8478,7 @@ function revertAllSettings() {
   _updateGridScalperMAPeriodVisibility();
   if (UI.fvgStratToggle)         UI.fvgStratToggle.checked         = fvgStratEnabled;
   if (UI.mtfTopDownToggle)       UI.mtfTopDownToggle.checked       = mtfTopDownEnabled;
+  if (UI.candleInterpToggle)     UI.candleInterpToggle.checked     = candleInterpEnabled;
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
   if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
   if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
@@ -10911,6 +10965,8 @@ function processCustomStrategies() {
   processTiktokStrategy();
   /* Feature 2: Orderblock (Strategy 12) */
   if (orderblockEnabled && candles.length > 0) detectOrderblockStrategy(candles.length - 1);
+  /* Strategy 14: Candlestick Interpretation */
+  processCandleInterpretation();
 }
 
 /**
@@ -10928,6 +10984,8 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorTiktokOutcomes(candle);
   /* Feature 2: Orderblock */
   monitorOrderblockOutcomes(candles.length - 1);
+  /* Strategy 14: Candlestick Interpretation */
+  monitorCandleInterpOutcomes(candle);
   /* Feature 15: Multi-R ladder */
   monitorMultiRLadder(candles.length - 1);
 }
@@ -11269,6 +11327,597 @@ function monitorMtfTopDownOutcomes(candle) {
       }
     }
     renderStrategyAlerts();
+  }
+}
+
+/* ================= STRATEGY 14: CANDLESTICK INTERPRETATION (Market Narrative) ================= */
+
+/**
+ * Classify a single candle's order-flow story.
+ * Returns an object describing who controlled the candle and how.
+ *
+ * @param {Object} c - Candle {open, high, low, close}
+ * @returns {{ control, rejection, conviction, bodyRatio, upperWickRatio, lowerWickRatio, desc }}
+ *   control: "BULL" | "BEAR" | "NEUTRAL"
+ *   rejection: "UPPER" | "LOWER" | "BOTH" | "NONE"
+ *   conviction: "STRONG" | "MODERATE" | "WEAK" | "INDECISION"
+ *   desc: human-readable narrative
+ */
+function classifyCandle(c) {
+  if (!c) return null;
+  const range = c.high - c.low;
+  if (range <= 0) return { control: "NEUTRAL", rejection: "NONE", conviction: "INDECISION", bodyRatio: 0, upperWickRatio: 0, lowerWickRatio: 0, desc: "Zero-range candle — no activity" };
+
+  const body = Math.abs(c.close - c.open);
+  const bodyRatio = body / range;
+  const isBullish = c.close >= c.open;
+
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  const upperWickRatio = upperWick / range;
+  const lowerWickRatio = lowerWick / range;
+
+  /* Body position: how far the body center is from candle midpoint */
+  const bodyCenter = (c.open + c.close) / 2;
+  const candleCenter = (c.high + c.low) / 2;
+
+  let control = "NEUTRAL";
+  let rejection = "NONE";
+  let conviction = "MODERATE";
+  let desc = "";
+
+  /* Institutional Conviction (Marubozu-type): large body, minimal wicks */
+  if (bodyRatio >= 0.85 && upperWickRatio < 0.08 && lowerWickRatio < 0.08) {
+    control = isBullish ? "BULL" : "BEAR";
+    conviction = "STRONG";
+    desc = isBullish
+      ? "Institutional bullish conviction — buyers dominated open to close with no pushback"
+      : "Institutional bearish conviction — sellers dominated open to close with no pushback";
+    return { control, rejection: "NONE", conviction, bodyRatio, upperWickRatio, lowerWickRatio, desc };
+  }
+
+  /* Bullish Control: close near high, strong body, minimal upper wick */
+  if (isBullish && bodyRatio >= 0.6 && upperWickRatio < 0.15) {
+    control = "BULL";
+    conviction = bodyRatio >= 0.75 ? "STRONG" : "MODERATE";
+    desc = "Bullish control — buyers pushed price higher with minimal seller resistance at the top";
+  }
+  /* Bearish Control: close near low, strong body, minimal lower wick */
+  else if (!isBullish && bodyRatio >= 0.6 && lowerWickRatio < 0.15) {
+    control = "BEAR";
+    conviction = bodyRatio >= 0.75 ? "STRONG" : "MODERATE";
+    desc = "Bearish control — sellers pushed price lower with minimal buyer defense at the bottom";
+  }
+  /* Upper Wick Rejection: long upper wick, sellers rejected higher prices */
+  else if (upperWickRatio >= 0.5 && upperWickRatio > lowerWickRatio * 1.5) {
+    control = "BEAR";
+    rejection = "UPPER";
+    conviction = bodyRatio < 0.2 ? "WEAK" : "MODERATE";
+    desc = "Upper wick rejection — sellers aggressively rejected higher prices, potential supply zone";
+  }
+  /* Lower Wick Rejection: long lower wick, buyers defended lower prices */
+  else if (lowerWickRatio >= 0.5 && lowerWickRatio > upperWickRatio * 1.5) {
+    control = "BULL";
+    rejection = "LOWER";
+    conviction = bodyRatio < 0.2 ? "WEAK" : "MODERATE";
+    desc = "Lower wick rejection — buyers defended lower prices, potential demand zone";
+  }
+  /* Indecision: small body, wicks on both sides */
+  else if (bodyRatio < 0.3 && upperWickRatio > 0.25 && lowerWickRatio > 0.25) {
+    control = "NEUTRAL";
+    rejection = "BOTH";
+    conviction = "INDECISION";
+    desc = "Indecision — neither buyers nor sellers established control, equal rejection on both sides";
+  }
+  /* Default moderate classification */
+  else {
+    control = isBullish ? "BULL" : "BEAR";
+    conviction = "WEAK";
+    desc = isBullish
+      ? "Weak bullish — buyers slightly favored but no decisive control"
+      : "Weak bearish — sellers slightly favored but no decisive control";
+  }
+
+  return { control, rejection, conviction, bodyRatio, upperWickRatio, lowerWickRatio, desc };
+}
+
+/**
+ * Detect key levels from the MTF (4× base) synthesised candles.
+ * Returns an array of { price, type: "SUPPORT"|"RESISTANCE"|"BOTH", strength }
+ */
+function detectCandleInterpKeyLevels() {
+  const mtfBars = synthesizeTfCandles(CANDLE_INTERP_MTF_MULT);
+  if (mtfBars.length < CANDLE_INTERP_MTF_LOOKBACK) return [];
+
+  const slice = mtfBars.slice(-CANDLE_INTERP_MTF_LOOKBACK);
+  const levels = [];
+  const tolerance = atrValue > 0 ? atrValue * 0.3 : 0;
+
+  /* Scan for swing highs and swing lows as key levels */
+  for (let i = 2; i < slice.length - 2; i++) {
+    const prev2 = slice[i - 2], prev1 = slice[i - 1], curr = slice[i], next1 = slice[i + 1], next2 = slice[i + 2];
+
+    /* Swing High (resistance) */
+    if (curr.high > prev1.high && curr.high > prev2.high && curr.high > next1.high && curr.high > next2.high) {
+      levels.push({ price: curr.high, type: "RESISTANCE", strength: 1 });
+    }
+    /* Swing Low (support) */
+    if (curr.low < prev1.low && curr.low < prev2.low && curr.low < next1.low && curr.low < next2.low) {
+      levels.push({ price: curr.low, type: "SUPPORT", strength: 1 });
+    }
+  }
+
+  /* Also add session/previous candle highs and lows */
+  const lastMTF = slice[slice.length - 1];
+  if (lastMTF) {
+    levels.push({ price: lastMTF.high, type: "RESISTANCE", strength: 0.5 });
+    levels.push({ price: lastMTF.low, type: "SUPPORT", strength: 0.5 });
+  }
+
+  /* Merge nearby levels */
+  const merged = [];
+  for (const lev of levels.sort((a, b) => a.price - b.price)) {
+    const nearby = merged.find(m => Math.abs(m.price - lev.price) < tolerance);
+    if (nearby) {
+      nearby.strength += lev.strength;
+      if (nearby.type !== lev.type) nearby.type = "BOTH";
+    } else {
+      merged.push({ ...lev });
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Check if price is at a key level (support/resistance/supply/demand).
+ * Returns the matching level or null.
+ */
+function isAtKeyLevel(price) {
+  if (!price || atrValue <= 0) return null;
+  const tolerance = atrValue * CANDLE_INTERP_LEVEL_TOL_ATR;
+  const keyLevels = detectCandleInterpKeyLevels();
+
+  for (const level of keyLevels) {
+    if (Math.abs(price - level.price) <= tolerance) {
+      return level;
+    }
+  }
+
+  /* Also check supply/demand zones from the existing detector */
+  const idx = candles.length - 1;
+  if (idx > 0) {
+    const sdZone = detectSupplyDemandZone(idx);
+    if (sdZone) {
+      return { price, type: sdZone.type === "demand" ? "SUPPORT" : "RESISTANCE", strength: 1.5, sdZone: sdZone.zone };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Compute the HTF directional bias using CANDLE_INTERP_HTF_MULT synthesis.
+ * Reads the candle story on the HTF to determine trend direction.
+ *
+ * @returns {"BULL"|"BEAR"|"NEUTRAL"}
+ */
+function computeCandleInterpHTFBias() {
+  const htfBars = synthesizeTfCandles(CANDLE_INTERP_HTF_MULT);
+  if (htfBars.length < CANDLE_INTERP_HTF_LOOKBACK) return "NEUTRAL";
+
+  const slice = htfBars.slice(-CANDLE_INTERP_HTF_LOOKBACK);
+  let bullCount = 0, bearCount = 0, strongBull = 0, strongBear = 0;
+
+  for (const bar of slice) {
+    const cls = classifyCandle(bar);
+    if (!cls) continue;
+    if (cls.control === "BULL") { bullCount++; if (cls.conviction === "STRONG") strongBull++; }
+    if (cls.control === "BEAR") { bearCount++; if (cls.conviction === "STRONG") strongBear++; }
+  }
+
+  /* Also check structural bias (higher-highs / higher-lows vs lower-highs / lower-lows) */
+  let hhhl = 0, lhll = 0;
+  for (let i = 1; i < slice.length; i++) {
+    if (slice[i].high > slice[i - 1].high && slice[i].low > slice[i - 1].low) hhhl++;
+    if (slice[i].high < slice[i - 1].high && slice[i].low < slice[i - 1].low) lhll++;
+  }
+
+  const bullScore = bullCount + strongBull * 0.5 + hhhl;
+  const bearScore = bearCount + strongBear * 0.5 + lhll;
+
+  if (bullScore > bearScore * 1.3) return "BULL";
+  if (bearScore > bullScore * 1.3) return "BEAR";
+  return "NEUTRAL";
+}
+
+/**
+ * Detect multi-candle sequences that tell a reversal or continuation narrative.
+ * Looks at the last CANDLE_INTERP_SEQ_LOOKBACK candles on the LTF.
+ *
+ * Returns { type, dir, sequence[], desc } or null.
+ *   type: "BULLISH_REVERSAL" | "BEARISH_REVERSAL" | "BULLISH_CONTINUATION" | "BEARISH_CONTINUATION"
+ */
+function detectCandleSequence() {
+  const len = candles.length;
+  if (len < CANDLE_INTERP_SEQ_LOOKBACK) return null;
+
+  const seqCandles = [];
+  for (let i = len - CANDLE_INTERP_SEQ_LOOKBACK; i < len; i++) {
+    seqCandles.push({ idx: i, candle: candles[i], cls: classifyCandle(candles[i]) });
+  }
+
+  /* Remove any null classifications */
+  const valid = seqCandles.filter(s => s.cls != null);
+  if (valid.length < 3) return null;
+
+  const last3 = valid.slice(-3);
+  const [first, second, third] = last3;
+
+  /* Bullish Reversal Sequence:
+     1. Indecision or weak bearish (seller exhaustion)
+     2. Lower wick rejection at support (buyers defend)
+     3. Strong bullish candle (buyers take control) */
+  if ((first.cls.conviction === "INDECISION" || (first.cls.control === "BEAR" && first.cls.conviction === "WEAK"))
+      && second.cls.rejection === "LOWER"
+      && third.cls.control === "BULL" && (third.cls.conviction === "STRONG" || third.cls.conviction === "MODERATE")) {
+    return {
+      type: "BULLISH_REVERSAL",
+      dir: "BULL",
+      sequence: last3.map(s => s.cls),
+      candleIdx: third.idx,
+      desc: "Bullish reversal narrative: seller exhaustion → buyer defense (lower wick rejection) → bullish control candle"
+    };
+  }
+
+  /* Bearish Reversal Sequence:
+     1. Indecision or weak bullish (buyer exhaustion)
+     2. Upper wick rejection at resistance (sellers reject)
+     3. Strong bearish candle (sellers take control) */
+  if ((first.cls.conviction === "INDECISION" || (first.cls.control === "BULL" && first.cls.conviction === "WEAK"))
+      && second.cls.rejection === "UPPER"
+      && third.cls.control === "BEAR" && (third.cls.conviction === "STRONG" || third.cls.conviction === "MODERATE")) {
+    return {
+      type: "BEARISH_REVERSAL",
+      dir: "BEAR",
+      sequence: last3.map(s => s.cls),
+      candleIdx: third.idx,
+      desc: "Bearish reversal narrative: buyer exhaustion → seller rejection (upper wick) → bearish control candle"
+    };
+  }
+
+  /* Bullish Continuation:
+     Consecutive strong bullish candles after a pullback (weak bear or indecision) */
+  if (first.cls.control === "BEAR" && first.cls.conviction === "WEAK"
+      && second.cls.control === "BULL" && (second.cls.conviction === "STRONG" || second.cls.conviction === "MODERATE")
+      && third.cls.control === "BULL" && (third.cls.conviction === "STRONG" || third.cls.conviction === "MODERATE")) {
+    return {
+      type: "BULLISH_CONTINUATION",
+      dir: "BULL",
+      sequence: last3.map(s => s.cls),
+      candleIdx: third.idx,
+      desc: "Bullish continuation: shallow pullback → resumption of buyer control with conviction"
+    };
+  }
+
+  /* Bearish Continuation:
+     Consecutive strong bearish candles after a pullback (weak bull or indecision) */
+  if (first.cls.control === "BULL" && first.cls.conviction === "WEAK"
+      && second.cls.control === "BEAR" && (second.cls.conviction === "STRONG" || second.cls.conviction === "MODERATE")
+      && third.cls.control === "BEAR" && (third.cls.conviction === "STRONG" || third.cls.conviction === "MODERATE")) {
+    return {
+      type: "BEARISH_CONTINUATION",
+      dir: "BEAR",
+      sequence: last3.map(s => s.cls),
+      candleIdx: third.idx,
+      desc: "Bearish continuation: shallow pullback → resumption of seller control with conviction"
+    };
+  }
+
+  /* Extended Bullish Reversal: Absorption pattern
+     Multiple weak/indecision candles at support followed by strong bullish */
+  if (valid.length >= 4) {
+    const last4 = valid.slice(-4);
+    const weakOrIndecision = last4.slice(0, 3).every(s =>
+      s.cls.conviction === "INDECISION" || s.cls.conviction === "WEAK" || s.cls.rejection === "LOWER"
+    );
+    const finalBull = last4[3].cls.control === "BULL" && last4[3].cls.conviction === "STRONG";
+    if (weakOrIndecision && finalBull) {
+      return {
+        type: "BULLISH_REVERSAL",
+        dir: "BULL",
+        sequence: last4.map(s => s.cls),
+        candleIdx: last4[3].idx,
+        desc: "Absorption reversal: multiple candles of selling absorbed at support → explosive bullish breakout"
+      };
+    }
+    /* Extended Bearish Reversal: Absorption pattern */
+    const finalBear = last4[3].cls.control === "BEAR" && last4[3].cls.conviction === "STRONG";
+    const weakOrUpperReject = last4.slice(0, 3).every(s =>
+      s.cls.conviction === "INDECISION" || s.cls.conviction === "WEAK" || s.cls.rejection === "UPPER"
+    );
+    if (weakOrUpperReject && finalBear) {
+      return {
+        type: "BEARISH_REVERSAL",
+        dir: "BEAR",
+        sequence: last4.map(s => s.cls),
+        candleIdx: last4[3].idx,
+        desc: "Absorption reversal: multiple candles of buying absorbed at resistance → explosive bearish breakout"
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Compute volume confirmation score.
+ * Returns 0 (no confirmation) to 2 (strong confirmation).
+ */
+function getCandleInterpVolumeScore(idx) {
+  /* Use candle range as a proxy for volume (Deriv synths have no real volume) */
+  if (idx < 10 || !candles[idx]) return 1;  /* neutral when insufficient data */
+
+  const currentRange = candles[idx].high - candles[idx].low;
+  let avgRange = 0;
+  const lookback = Math.min(20, idx);
+  for (let i = idx - lookback; i < idx; i++) {
+    avgRange += (candles[i].high - candles[i].low);
+  }
+  avgRange /= lookback;
+
+  if (avgRange <= 0) return 1;
+  const ratio = currentRange / avgRange;
+
+  if (ratio >= CANDLE_INTERP_VOL_SPIKE) return 2;  /* high volume = institutional */
+  if (ratio >= 1.0) return 1;  /* normal volume */
+  return 0;  /* weak volume = low conviction */
+}
+
+/**
+ * Compute confidence score (0-100) based on alignment factors.
+ * Factors:
+ *   - HTF bias alignment: 25 pts
+ *   - Key level interaction: 25 pts
+ *   - Sequence quality: 25 pts
+ *   - Volume confirmation: 15 pts
+ *   - EMA alignment: 10 pts
+ */
+function computeCandleInterpConfidence(dir, htfBias, keyLevel, sequence, volScore, idx) {
+  let score = 0;
+
+  /* HTF Bias alignment (25 pts) */
+  if (htfBias === dir) score += 25;
+  else if (htfBias === "NEUTRAL") score += 10;
+  /* If HTF conflicts, score stays 0 for this factor */
+
+  /* Key level interaction (25 pts) */
+  if (keyLevel) {
+    score += 15;
+    if (keyLevel.strength >= 1.5) score += 10;
+    else if (keyLevel.strength >= 1.0) score += 5;
+  }
+
+  /* Sequence quality (25 pts) */
+  if (sequence) {
+    if (sequence.type.includes("REVERSAL")) score += 20;
+    else score += 15;  /* continuation is slightly less weight */
+    /* Bonus for strong conviction on the final candle */
+    const lastCls = sequence.sequence[sequence.sequence.length - 1];
+    if (lastCls && lastCls.conviction === "STRONG") score += 5;
+  }
+
+  /* Volume confirmation (15 pts) */
+  if (volScore >= 2) score += 15;
+  else if (volScore >= 1) score += 8;
+
+  /* EMA alignment (10 pts) — check if price is on correct side of EMA200 */
+  if (idx >= 0 && idx < emaMTF.length && emaMTF[idx] != null && candles[idx]) {
+    const price = candles[idx].close;
+    const ema200 = emaMTF[idx];
+    if ((dir === "BULL" && price > ema200) || (dir === "BEAR" && price < ema200)) {
+      score += 10;
+    } else if ((dir === "BULL" && price > ema200 * 0.998) || (dir === "BEAR" && price < ema200 * 1.002)) {
+      score += 5;  /* near EMA */
+    }
+  }
+
+  return Math.min(100, score);
+}
+
+/**
+ * Main Candlestick Interpretation signal detector.
+ * Requires:
+ *   1. Valid candle sequence (narrative)
+ *   2. At a key level (context)
+ *   3. HTF bias alignment (multi-timeframe)
+ *   4. Minimum confidence threshold
+ *
+ * @returns {Object|null}
+ */
+function detectCandleInterpretation() {
+  if (!candleInterpEnabled) return null;
+  if (!candles || candles.length < 20) return null;
+
+  const idx = candles.length - 1;
+
+  /* Cooldown */
+  if (idx - lastCandleInterpIdx < CANDLE_INTERP_COOLDOWN) return null;
+  /* One pending at a time */
+  if (candleInterpHistory.some(s => s.result === "PENDING")) return null;
+
+  /* Step 1: Detect multi-candle sequence (narrative) */
+  const sequence = detectCandleSequence();
+  if (!sequence) return null;
+
+  const dir = sequence.dir;
+  const c = candles[idx];
+  if (!c) return null;
+
+  /* Step 2: HTF bias — reject if conflicts */
+  const htfBias = computeCandleInterpHTFBias();
+  if (htfBias !== "NEUTRAL" && htfBias !== dir) return null;  /* LTF conflicts with HTF — reject */
+
+  /* Step 3: Context — must be at a key level */
+  const keyLevel = isAtKeyLevel(c.close);
+  if (!keyLevel) return null;  /* Signal in random area — ignore */
+
+  /* Step 4: Volume score */
+  const volScore = getCandleInterpVolumeScore(idx);
+
+  /* Step 5: Confidence score — minimum threshold */
+  const confidence = computeCandleInterpConfidence(dir, htfBias, keyLevel, sequence, volScore, idx);
+  if (confidence < 50) return null;  /* Not enough alignment */
+
+  /* Step 6: Compute entry / SL / TP */
+  const entry = c.close;
+  const slBuffer = atrValue > 0 ? atrValue * CANDLE_INTERP_SL_BUFFER_ATR : (c.high - c.low) * 0.3;
+  const _profParams = getStrategyProfitParams();
+
+  let sl, tp;
+  if (dir === "BULL") {
+    /* SL below the lowest low in the sequence + buffer */
+    const seqLow = Math.min(...candles.slice(Math.max(0, idx - CANDLE_INTERP_SEQ_LOOKBACK), idx + 1).map(x => x.low));
+    sl = seqLow - slBuffer * _profParams.slBufferMult;
+    /* TP at nearest resistance or R:R minimum */
+    const resistance = detectCandleInterpKeyLevels().filter(l => l.type === "RESISTANCE" && l.price > entry);
+    if (resistance.length > 0) {
+      tp = resistance[0].price;
+    } else {
+      tp = entry + Math.abs(entry - sl) * CANDLE_INTERP_MIN_RR;
+    }
+  } else {
+    /* SL above the highest high in the sequence + buffer */
+    const seqHigh = Math.max(...candles.slice(Math.max(0, idx - CANDLE_INTERP_SEQ_LOOKBACK), idx + 1).map(x => x.high));
+    sl = seqHigh + slBuffer * _profParams.slBufferMult;
+    /* TP at nearest support or R:R minimum */
+    const support = detectCandleInterpKeyLevels().filter(l => l.type === "SUPPORT" && l.price < entry);
+    if (support.length > 0) {
+      tp = support[support.length - 1].price;
+    } else {
+      tp = entry - Math.abs(sl - entry) * CANDLE_INTERP_MIN_RR;
+    }
+  }
+
+  const risk = Math.abs(entry - sl);
+  if (risk <= 0) return null;
+
+  /* Guarantee minimum R:R */
+  if (Math.abs(tp - entry) / risk < CANDLE_INTERP_MIN_RR) {
+    tp = dir === "BULL" ? entry + risk * CANDLE_INTERP_MIN_RR : entry - risk * CANDLE_INTERP_MIN_RR;
+  }
+  const rr = Math.abs(tp - entry) / risk;
+
+  /* Classify final candle for output */
+  const candleStory = classifyCandle(c);
+
+  return {
+    dir, entry, sl, tp, rr,
+    htfBias,
+    keyLevel,
+    sequence: { type: sequence.type, desc: sequence.desc },
+    candleStory,
+    confidence,
+    volScore,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "candle_interp"
+  };
+}
+
+/**
+ * Run the Candlestick Interpretation scanner and handle alerting.
+ */
+function processCandleInterpretation() {
+  const signal = detectCandleInterpretation();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Candle Interp REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastCandleInterpIdx = signal.candleIdx;
+
+  /* Compute & store confluence score for UI */
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram = (telegramStrategyAutoSend && !_historicalProcessing);
+  candleInterpHistory.unshift(signal);
+  if (candleInterpHistory.length > CANDLE_INTERP_MAX_HISTORY) candleInterpHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const symbol = getActiveSymbol() || "--";
+  const confLabel = signal.confidence >= 75 ? "HIGH" : signal.confidence >= 60 ? "MED" : "LOW";
+  addLog(`🕯 CANDLE INTERP ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | ${signal.sequence.type} | HTF:${signal.htfBias} | Conf:${signal.confidence}% (${confLabel}) | ${signal.candleStory ? signal.candleStory.desc : ""}`);
+
+  showToast(
+    `Candle Interp ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | ${signal.sequence.type} | Confidence: ${signal.confidence}%`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🕯 ${signal.dir} Candle Interpretation — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\n${signal.sequence.desc}\nHTF: ${signal.htfBias} | Confidence: ${signal.confidence}%`;
+    throttledNotification("IT Guru: Candle Interpretation!", body);
+  }
+
+  /* Telegram alert */
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  /* Auto-trade */
+  if (autoTradeStrategyEnabled && autoTradeCandleInterp && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "candleInterp" });
+  }
+}
+
+/**
+ * Monitor pending candle interpretation signals for SL/TP outcome.
+ */
+function monitorCandleInterpOutcomes(candle) {
+  if (!candleInterpEnabled) return;
+  let changed = false;
+  for (const s of candleInterpHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed < 0 || elapsed >= CANDLE_INTERP_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      addLog(`🕯 Candle Interp EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)}`);
+      changed = true; continue;
+    }
+    if (s.dir === "BULL") {
+      if (_checkProfitExitAlert(s, candle, "Candle Interp")) changed = true;
+      const slHit = candle.low <= s.sl, tpHit = candle.high >= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); changed = true; }
+      else if (slHit) { s.result = "LOSS"; addLog(`🕯 Candle Interp LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (tpHit) { s.result = "WIN"; addLog(`🕯 Candle Interp WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    } else {
+      if (_checkProfitExitAlert(s, candle, "Candle Interp")) changed = true;
+      const slHit = candle.high >= s.sl, tpHit = candle.low <= s.tp;
+      if (slHit && tpHit) { s.result = resolveBothHit(s); changed = true; }
+      else if (slHit) { s.result = "LOSS"; addLog(`🕯 Candle Interp LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
+      else if (tpHit) { s.result = "WIN"; addLog(`🕯 Candle Interp WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of candleInterpHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
   }
 }
 
@@ -18149,6 +18798,7 @@ function drawChart() {
     { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" },
     { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" },
     { history: mtfTopDownHistory,     enabled: mtfTopDownEnabled,     emoji: "⏱", color: "#6366f1" },
+    { history: candleInterpHistory,   enabled: candleInterpEnabled,   emoji: "🕯", color: "#a855f7" },
     { history: tiktokHistory,         enabled: tiktokEnabled,         emoji: "📈", color: "#14b8a6" }
   ];
   for (const strat of customStratHistories) {
@@ -18791,6 +19441,7 @@ function applyStrategyAccess() {
     { id: "fvgStratToggle",        key: "fvg_strat",        fn: () => { fvgStratEnabled       = false; } },
     { id: "liveScalpToggle",       key: "live_scalp",       fn: () => { liveScalpEnabled      = false; } },
     { id: "mtfTopDownToggle",      key: "mtf_top_down",     fn: () => { mtfTopDownEnabled     = false; } },
+    { id: "candleInterpToggle",    key: "candle_interp",    fn: () => { candleInterpEnabled   = false; } },
     { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
   ];
 
@@ -18833,6 +19484,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-gridScalperMA",  toggleId: "gridScalperMAToggle",  enabled: gridScalperMAEnabled  },
     { badgeId: "stratBadge-fvgStrat",       toggleId: "fvgStratToggle",       enabled: fvgStratEnabled       },
     { badgeId: "stratBadge-mtfTopDown",     toggleId: "mtfTopDownToggle",     enabled: mtfTopDownEnabled     },
+    { badgeId: "stratBadge-candleInterp",   toggleId: "candleInterpToggle",   enabled: candleInterpEnabled   },
     { badgeId: "stratBadge-orderblock",     toggleId: "orderblockToggle",     enabled: orderblockEnabled     },
     { badgeId: "stratBadge-tiktok",         toggleId: "tiktokToggle",         enabled: tiktokEnabled         },
   ];
@@ -19143,6 +19795,8 @@ function activatePanel(p) {
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
+  candleInterpHistory   = p.candleInterpHistory   || [];
+  lastCandleInterpIdx   = p.lastCandleInterpIdx   != null ? p.lastCandleInterpIdx   : -999;
   orderblockHistory     = p.orderblockHistory     || [];
   lastOrderblockIdx     = p.lastOrderblockIdx     != null ? p.lastOrderblockIdx     : -999;
   tiktokHistory         = p.tiktokHistory         || [];
@@ -19284,6 +19938,8 @@ function savePanel(p) {
   p.lastFvgStratIdx       = lastFvgStratIdx;
   p.mtfTopDownHistory     = mtfTopDownHistory;
   p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
+  p.candleInterpHistory   = candleInterpHistory;
+  p.lastCandleInterpIdx   = lastCandleInterpIdx;
   p.orderblockHistory     = orderblockHistory;
   p.lastOrderblockIdx     = lastOrderblockIdx;
   p.tiktokHistory         = tiktokHistory;
@@ -19613,6 +20269,8 @@ function connectPanel(p) {
   p.lastFvgStratIdx       = -999;
   p.mtfTopDownHistory     = [];
   p.lastMtfTopDownIdx     = -999;
+  p.candleInterpHistory   = [];
+  p.lastCandleInterpIdx   = -999;
   p.orderblockHistory     = [];
   p.lastOrderblockIdx     = -999;
   p.tiktokHistory         = [];
@@ -21083,6 +21741,27 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       drawChart();
       updateStrategyBadges();
+    });
+  }
+  /* Strategy 14: Candlestick Interpretation listener */
+  if (UI.candleInterpToggle) {
+    UI.candleInterpToggle.addEventListener("change", () => {
+      candleInterpEnabled = UI.candleInterpToggle.checked;
+      saveSettings();
+      if (candleInterpEnabled) {
+        addLog("🕯 Candle Interpretation strategy enabled — reading market narratives via order-flow candle analysis");
+        showToast("Candle Interpretation Enabled", "Scanning for multi-candle narratives at key levels with MTF alignment.", "info", 5000);
+      } else {
+        addLog("🕯 Candle Interpretation strategy disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeCandleInterpToggle) {
+    UI.autoTradeCandleInterpToggle.addEventListener("change", () => {
+      autoTradeCandleInterp = UI.autoTradeCandleInterpToggle.checked;
+      saveSettings();
     });
   }
   if (UI.autoTradeTiktokToggle) {
