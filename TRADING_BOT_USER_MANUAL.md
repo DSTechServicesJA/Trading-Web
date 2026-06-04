@@ -19,6 +19,7 @@
 10. [Frequently Asked Questions (FAQ)](#10-frequently-asked-questions-faq)
 11. [MT5 Bridge Integration](#11-mt5-bridge-integration)
 12. [Indicator V2](#12-indicator-v2)
+13. [XAUUSD Scalping Strategy Guide](#13-xauusd-scalping-strategy-guide)
 
 ---
 
@@ -1191,6 +1192,87 @@ IT Guru offers a second-generation interface, **Indicator V2**, accessible at `t
 3. Your V2 settings are stored independently from your V1 settings
 
 > Contact your administrator if you need V2 access enabled on your account.
+
+---
+
+## 13. XAUUSD SCALPING STRATEGY GUIDE
+
+### Overview
+
+Gold (XAUUSD) is one of the most liquid and volatile instruments available. IT Guru includes **XAUUSD-specific optimizations** — session filtering, 1H timeframe recommendations, London+NY session focus, Fibonacci alignment, and supply/demand zone detection — that make several strategies particularly effective for gold scalping.
+
+This section ranks all 14 strategies by their suitability for **scalping XAUUSD for profits**.
+
+---
+
+### Tier 1 — Best Optimized for XAUUSD Scalping
+
+| # | Strategy | Why It Excels on Gold |
+|---|----------|----------------------|
+| **4** | **Fib Golden Zone Scalp** | Purpose-built scalper. 1-min micro-trend → Golden Zone (0.5–0.618) retracement → entry. 15-candle timeout, 3-candle cooldown. Gold respects Fib levels extremely well during London/NY sessions. |
+| **8** | **Grid Scalper MA** | Fast MA-crossover or BOS scalp with R:R tuned per asset class. Short cooldown (5 candles), confluence-gated. Gold's trending behavior during sessions makes MA crosses reliable. |
+| — | **Live Scalp Scanner** | Multi-confluence scanner (7-factor scoring, min 3 required). Rapid 3-candle cooldown. Designed for real-time scalping — gold's structured moves produce high-quality confluence signals. |
+
+---
+
+### Tier 2 — Strong for XAUUSD (Intraday/Short-Term)
+
+| # | Strategy | Notes |
+|---|----------|-------|
+| **5** | **Power of 3 (ICT)** | Gold loves ICT methodology. Accumulation → Manipulation → Expansion maps perfectly to London open. FVG-based entry, 30-candle timeout. |
+| **1** | **Liquidity Sweep** | Gold has heavy liquidity pools at session highs/lows. 15m → 1m sweep detection with 1.5× ATR SL cap catches whipsaws well. |
+| **2** | **Stop Loss Hunt** | Gold frequently hunts retail stop clusters at key S/R (3+ touches). Short cooldown, good for rapid re-entries. |
+| **9** | **Fair Value Gap (FVG)** | Gold creates large FVGs during London/NY impulse moves. 60-candle lookback, Fib discount filter, engulfing confirmation at demand zones. |
+| **12** | **Orderblock** | Institutional order blocks are powerful on gold. Pending-signal guard prevents spam. |
+
+---
+
+### Tier 3 — Usable but Not Ideal for Pure Scalping
+
+| # | Strategy | Limitation |
+|---|----------|------------|
+| **3** | **Failed Pin Bar** | Works on gold but requires 3 consecutive fear/greed candles — slower setup formation. |
+| **13** | **TikTok Fibonacci** | 4-step sequential process (A → B → C → D) with 80-candle lookback — too slow for pure scalping. Better for swing entries. |
+| **11** | **MTF Top-Down** | Multi-timeframe synthesis (16× and 4× base TF). Excellent directional bias but entry timing too slow for scalping. 60-candle timeout. |
+| **14** | **Candlestick Interpretation** | Multi-TF narrative analysis. High-quality signals but 60-candle timeout and complex setup = infrequent scalp opportunities. |
+| **6/7** | **NY Open Range / Session Ranges** | Only active during specific 5-minute windows (9:30–9:35 EST). One trade per day max — not a scalping strategy, but the single trade on gold is often high-quality. |
+
+---
+
+### Recommended XAUUSD Scalping Stack
+
+For maximum scalping profitability on gold, enable these strategies together:
+
+1. **Fib Golden Zone Scalp** — your core scalp engine
+2. **Grid Scalper MA** — catches MA-cross momentum entries
+3. **Live Scalp Scanner** — confluence-based rapid signals
+4. **Power of 3 (ICT)** — catches London/NY session manipulation moves
+5. **Liquidity Sweep** — catches stop runs at session extremes
+
+---
+
+### Key Settings for Gold Scalping
+
+| Setting | Recommendation |
+|---------|---------------|
+| **Scalping Mode** | ✅ Enable — activates 5-min range, 0.75× ATR trailing, 1:1 R:R, 15-candle auto-timeout |
+| **Session Filter** | ✅ London + NY — gold spreads widen sharply outside peak hours |
+| **Timeframe** | 1H or lower — balances gold's volatility with clean signal formation |
+| **Confluence Gating** | ✅ Enable on Grid Scalper MA and TikTok Fib to reduce noise |
+| **Partial TP** | ✅ Recommended — lock in profits on gold's sharp retracements |
+| **Trailing Stop** | Standard (1.5× ATR) — allows gold's momentum moves to breathe |
+| **Fibonacci** | ✅ Enable — gold's London/NY session swings are highly structured |
+| **Supply/Demand Zones** | ✅ Enable HTF zones — gold respects Daily and 4H zones powerfully |
+
+---
+
+### Gold-Specific Notes
+
+- **Best trading hours:** London session (07:00–12:00 UTC) and NY session (12:00–17:00 UTC) overlap produces the highest gold volatility and tightest spreads.
+- **Avoid Asian session scalping** — gold typically consolidates with wider spreads and false breakouts.
+- **Gold pip value:** Standard lot (100 oz) = ~$1 per $0.01 move. Micro lot (10 oz) = ~$0.10 per $0.01 move.
+- **Typical scalp target:** 50–200 pips ($0.50–$2.00 per move on gold) during active sessions.
+- **Risk management:** Gold's volatility means SL placement is critical. The ATR-based SL caps in Liquidity Sweep (1.5× ATR) and Grid Scalper MA (2.0× ATR) prevent oversized risk on spiky moves.
 
 ---
 
