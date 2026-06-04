@@ -12467,6 +12467,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "tiktok") {
     stratEmoji = "📈";
     stratLabel = "TikTok Fibonacci";
+  } else if (signal.type === "candle_interp") {
+    stratEmoji = "🕯";
+    stratLabel = "Candle Interpretation";
   }
 
   const lines = [];
@@ -12530,6 +12533,8 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`• Dominant impulse identified orderblock and price retested OB zone for entry.`);
   } else if (signal.type === "tiktok") {
     lines.push(`• 4-step Fibonacci retracement (A→B→C→D): price completed all steps and touched the 0.88 level.`);
+  } else if (signal.type === "candle_interp") {
+    lines.push(`• Multi-candle sequence (${signal.sequence ? signal.sequence.type : "unknown"}) detected at key level with HTF alignment.`);
   } else {
     lines.push(`• Strategy-specific confirmation conditions were met for this setup.`);
   }
@@ -12632,6 +12637,31 @@ function buildStrategyTelegramCaption(signal) {
     }
     if (signal.lvl_382 != null) {
       lines.push(`<b>📊 Step C Zone (0–0.382):</b> ≤ ${fmtPrice(signal.lvl_382, symbol)}`);
+    }
+  }
+  if (signal.type === "candle_interp") {
+    lines.push(``);
+    if (signal.sequence) {
+      lines.push(`<b>🕯 Pattern:</b> ${signal.sequence.type}`);
+      if (signal.sequence.desc) lines.push(`<b>📖 Story:</b> ${signal.sequence.desc}`);
+    }
+    if (signal.htfBias) {
+      const biasEmoji = signal.htfBias === "BULL" ? "📈" : signal.htfBias === "BEAR" ? "📉" : "➡️";
+      lines.push(`<b>${biasEmoji} HTF Bias:</b> ${signal.htfBias}`);
+    }
+    if (signal.keyLevel) {
+      const klLabel = typeof signal.keyLevel === "object" ? `${signal.keyLevel.type} @ ${fmtPrice(signal.keyLevel.price || signal.keyLevel.level, symbol)}` : signal.keyLevel;
+      lines.push(`<b>🔑 Key Level:</b> ${klLabel}`);
+    }
+    if (signal.confidence != null) {
+      const confLabel = signal.confidence >= 75 ? "HIGH" : signal.confidence >= 60 ? "MED" : "LOW";
+      lines.push(`<b>📊 Confidence:</b> ${signal.confidence}% (${confLabel})`);
+    }
+    if (signal.volScore != null) {
+      lines.push(`<b>📈 Volume Score:</b> ${fmt(signal.volScore, 1)}`);
+    }
+    if (signal.candleStory && signal.candleStory.desc) {
+      lines.push(`<b>🕯 Final Candle:</b> ${signal.candleStory.desc}`);
     }
   }
   if (accountSize > 0 && riskPercent > 0 && signal.entry != null && signal.sl != null) {
@@ -12752,6 +12782,7 @@ async function sendStrategyOutcomeTelegram(signal) {
   else if (signal.type === "power_of_3") { stratEmoji = "⚡"; stratLabel = "Power of 3"; }
   else if (signal.type === "orderblock") { stratEmoji = "🏦"; stratLabel = "Orderblock"; }
   else if (signal.type === "tiktok") { stratEmoji = "📈"; stratLabel = "TikTok Fibonacci"; }
+  else if (signal.type === "candle_interp") { stratEmoji = "🕯"; stratLabel = "Candle Interpretation"; }
 
   /* ── EXPIRED: distinct short message, no statistics block ── */
   if (result === "EXPIRED") {
