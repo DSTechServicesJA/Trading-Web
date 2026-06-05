@@ -12494,6 +12494,7 @@ function buildStrategyTelegramCaption(signal) {
     stratEmoji = "🔲";
     const modeLabel = signal.mode === "bos" ? "BOS" : signal.mode === "triple_ma" ? "Triple MA" : "Price vs MA";
     stratLabel = `Grid Scalper MA [${modeLabel}]`;
+  } else if (signal.type === "fvg_strat") {
     stratEmoji = "🎯";
     stratLabel = "Fair Value Gap";
   } else if (signal.type === "mtf_top_down") {
@@ -12558,7 +12559,7 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "power_of_3") {
     lines.push(`• EMA bias aligned, liquidity sweep formed, MSS displacement created FVG, and price retraced for entry.`);
   } else if (signal.type === "grid_scalper_ma") {
-    lines.push(`• ${signal.mode === "bos" ? "Break of structure beyond latest swing level." : `Price crossed SMA ${gridScalperMAPeriod} with confirmation.`}`);
+    lines.push(`• ${signal.mode === "bos" ? "Break of structure beyond latest swing level." : signal.mode === "triple_ma" ? "Triple MA cascade: SMA 50 trend, SMA 20 direction, SMA 11 entry crossover." : `Price crossed SMA ${gridScalperMAPeriod} with confirmation.`}`);
   } else if (signal.type === "fvg_strat") {
     lines.push(`• Strong impulse + discount/premium retrace into origin zone with entry confirmation.`);
   } else if (signal.type === "mtf_top_down") {
@@ -12811,7 +12812,7 @@ async function sendStrategyOutcomeTelegram(signal) {
   else if (signal.type === "fib_scalp") { stratEmoji = "📐"; stratLabel = "Fib Golden Zone"; }
   else if (signal.type === "grid_scalper_ma") {
     stratEmoji = "🔲";
-    stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : "Price vs MA"}]`;
+    stratLabel = `Grid Scalper MA [${signal.mode === "bos" ? "BOS" : signal.mode === "triple_ma" ? "Triple MA" : "Price vs MA"}]`;
   }
   else if (signal.type === "fvg_strat") { stratEmoji = "🎯"; stratLabel = "Fair Value Gap"; }
   else if (signal.type === "mtf_top_down") { stratEmoji = "⏱"; stratLabel = "MTF Top-Down"; }
