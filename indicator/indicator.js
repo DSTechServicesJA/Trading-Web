@@ -973,6 +973,10 @@ let lastDataTimestamp = 0;  /* epoch ms of last OHLC message on the main WS */
 let reconnectDebounceTimer = null;
 const RECONNECT_DEBOUNCE_MS = 400;
 
+/* Pending signal state saved across reconnect (used by remapPendingSignalIndices) */
+let _reconnectSavedNyTrade = null;
+let _reconnectSavedSessionTrade = null;
+
 /* Chart redraw optimization */
 let chartRedrawTimer = null;
 const CHART_REDRAW_DEBOUNCE_MS = 16; /* ~60fps */
@@ -7277,6 +7281,115 @@ function stopPanelWatchdog(p) {
   }
 }
 
+/* ================= PENDING SIGNAL RECONNECT PERSISTENCE ================= */
+/**
+ * After a watchdog reconnect, the candles array is rebuilt from scratch (only
+ * the latest ~100 candles).  Any PENDING strategy signals from before the
+ * reconnect still hold candleIdx values referencing the OLD candle array.
+ * When the monitor functions compute `elapsed = (candles.length-1) - s.candleIdx`
+ * those stale indices produce negative or enormous values → the signals get
+ * EXPIRED prematurely and the win/loss outcome (+ Telegram notification) is lost.
+ *
+ * This function re-maps candleIdx on every PENDING signal by matching the
+ * signal's epoch to the closest candle in the NEW array.  Signals whose epoch
+ * is older than all available candles are kept with candleIdx = 0 (oldest) so
+ * the timeout mechanism can still expire them naturally rather than immediately.
+ *
+ * For breakout signals (signalHistory), if a PENDING signal exists we also
+ * restore `trade` and `monitoringTrade` so that monitorTradeOutcome() can
+ * continue tracking SL/TP hit on incoming ticks.
+ */
+function remapPendingSignalIndices() {
+  if (!candles || candles.length === 0) return;
+
+  /* Build epoch→index lookup from the new candle array */
+  const epochToIdx = new Map();
+  for (let i = 0; i < candles.length; i++) {
+    epochToIdx.set(candles[i].epoch, i);
+  }
+
+  /** Find the best matching candleIdx for a given epoch */
+  function findIdx(epoch) {
+    if (epochToIdx.has(epoch)) return epochToIdx.get(epoch);
+    /* Epoch not in new array — find the closest candle by binary search */
+    let lo = 0, hi = candles.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles[mid].epoch < epoch) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /* Remap all strategy history arrays */
+  const allHistories = [
+    liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
+    fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory,
+    nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
+    tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory
+  ];
+  let remapped = 0;
+  for (const hist of allHistories) {
+    if (!hist) continue;
+    for (const s of hist) {
+      if (!s || s.result !== "PENDING") continue;
+      if (s.epoch == null) continue;
+      const newIdx = findIdx(s.epoch);
+      if (newIdx !== s.candleIdx) {
+        s.candleIdx = newIdx;
+        remapped++;
+      }
+    }
+  }
+
+  /* Remap breakout signalHistory PENDING entries and restore trade monitoring.
+     Breakout signals may have `epoch` (numeric) or `time` (ISO string) — handle both. */
+  const pendingBreakout = signalHistory.findLast(s => s && s.result === "PENDING");
+  if (pendingBreakout) {
+    let bkEpoch = pendingBreakout.epoch;
+    if (bkEpoch == null && pendingBreakout.time) {
+      bkEpoch = Math.floor(new Date(pendingBreakout.time).getTime() / 1000);
+    }
+    if (bkEpoch != null) {
+      pendingBreakout.candleIdx = findIdx(bkEpoch);
+    }
+    /* Restore trade state so monitorTradeOutcome() can continue tracking */
+    if (!trade && !monitoringTrade) {
+      trade = {
+        entry: pendingBreakout.entry,
+        sl:    pendingBreakout.sl,
+        tp:    pendingBreakout.tp,
+        dir:   pendingBreakout.dir,
+        symbol: pendingBreakout.symbol,
+        outcomeStartIdx: pendingBreakout.candleIdx || 0
+      };
+      monitoringTrade = true;
+      addLog(`🔄 Restored pending breakout trade monitoring after reconnect (${pendingBreakout.dir} @ ${fmt(pendingBreakout.entry, 4)})`);
+    }
+    remapped++;
+  }
+
+  /* Remap NY Open Range and Session Range pending trades (saved before reconnect) */
+  if (_reconnectSavedNyTrade && _reconnectSavedNyTrade.result === "PENDING" && _reconnectSavedNyTrade.epoch != null) {
+    nyOpenRangeTrade = _reconnectSavedNyTrade;
+    nyOpenRangeTrade.candleIdx = findIdx(nyOpenRangeTrade.epoch);
+    _reconnectSavedNyTrade = null;
+    remapped++;
+    addLog(`🔄 Restored pending NY Open Range trade after reconnect`);
+  }
+  if (_reconnectSavedSessionTrade && _reconnectSavedSessionTrade.result === "PENDING" && _reconnectSavedSessionTrade.epoch != null) {
+    sessionRangeTrade = _reconnectSavedSessionTrade;
+    sessionRangeTrade.candleIdx = findIdx(sessionRangeTrade.epoch);
+    _reconnectSavedSessionTrade = null;
+    remapped++;
+    addLog(`🔄 Restored pending Session Range trade after reconnect`);
+  }
+
+  if (remapped > 0) {
+    addLog(`🔄 Reconnect: remapped ${remapped} pending signal(s) to new candle indices`);
+  }
+}
+
 /* ================= ACCOUNT / AUTH HELPERS ================= */
 
 /** Send a candles subscription request on a WebSocket */
@@ -7315,6 +7428,13 @@ function updateAccountBadge(acct) {
 function connect() {
   if (ws && ws.readyState <= 1) return;
   intentionalClose = false;
+
+  /* Preserve pending signal state across reconnect so win/loss outcomes are not lost.
+     resetIndicator() and processAllCandles() clear trade/monitoringTrade/nyOpenRangeTrade/
+     sessionRangeTrade but we need them to survive so monitoring can resume after candles reload. */
+  _reconnectSavedNyTrade = (nyOpenRangeTrade && nyOpenRangeTrade.result === "PENDING") ? Object.assign({}, nyOpenRangeTrade) : null;
+  _reconnectSavedSessionTrade = (sessionRangeTrade && sessionRangeTrade.result === "PENDING") ? Object.assign({}, sessionRangeTrade) : null;
+
   reconnectAttempts = 0;
   resetIndicator();
 
@@ -7423,6 +7543,9 @@ function connect() {
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
       computeEMAs();
       processAllCandles();
+      /* After reconnect, remap any surviving PENDING signals to the new candle
+         indices so their outcome (WIN/LOSS) can still be tracked and sent via Telegram. */
+      remapPendingSignalIndices();
       drawChart();
       startCandleCountdown();
     }
@@ -20461,6 +20584,7 @@ function connectPanel(p) {
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
       computeEMAs();
       processAllCandles();
+      remapPendingSignalIndices();
     }
 
     /* Streaming OHLC */
