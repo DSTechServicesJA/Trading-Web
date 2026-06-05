@@ -984,16 +984,17 @@
 
               <hr class="param-divider" />
               <p class="param-group-title">🔲 Strategy 8: Grid Scalper MA</p>
-              <p class="hint">Dynamic MA-based signal strategy with two modes: <b>Price vs MA</b> fires when price closes above/below a Simple Moving Average crossover, and <b>BOS</b> fires when price breaks above a confirmed swing high (BUY) or below a confirmed swing low (SELL). SL placed at the nearest swing point + ATR buffer. TP at 2:1 R:R.</p>
+              <p class="hint">Dynamic MA-based signal strategy with three modes: <b>Price vs MA</b> fires when price closes above/below a Simple Moving Average crossover, <b>BOS</b> fires when price breaks above a confirmed swing high (BUY) or below a confirmed swing low (SELL), and <b>Triple MA</b> uses SMA 50 as trend filter, SMA 20 as directional confirmation, and SMA 11 as entry timing via pullback-rejection. SL placed at the nearest swing point + ATR buffer. TP at 2:1 R:R.</p>
 
               <div style="margin-top:4px;margin-bottom:4px;">
                 <label class="hint" for="gridScalperMAStrategySelect" style="margin-right:6px;">Signal Strategy</label>
                 <select id="gridScalperMAStrategySelect" style="width:100%;">
                   <option value="price_vs_ma">Price vs MA (SMA Crossover)</option>
                   <option value="bos">BOS (Break of Structure)</option>
+                  <option value="triple_ma">Triple MA (SMA 50 / 20 / 11)</option>
                 </select>
               </div>
-              <p class="hint">Select signal generation mode. "Price vs MA" uses a Simple Moving Average crossover. "BOS" detects confirmed swing high/low breakouts.</p>
+              <p class="hint">Select signal generation mode. "Price vs MA" uses a Simple Moving Average crossover. "BOS" detects confirmed swing high/low breakouts. "Triple MA" requires price below SMA 50 &amp; SMA 20 for SELL (or above for BUY), then enters on a pullback rejection at SMA 11.</p>
 
               <div id="gridScalperMAPeriodRow" style="margin-top:4px;margin-bottom:4px;">
                 <label class="hint" for="gridScalperMAPeriodInput" style="margin-right:6px;">MA Period</label>

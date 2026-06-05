@@ -3523,7 +3523,7 @@ function buildTelegramCaption() {
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
   if (candleInterpEnabled) filters.push("Candle Interp");
-  if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA"}]`);
+  if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : gridScalperMAStrategy === "triple_ma" ? "Triple MA" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
   if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
@@ -4442,8 +4442,11 @@ const LS_PREFIX = "itguru_indicator_";
 
 /** Show/hide the MA Period input row based on the selected signal strategy. */
 function _updateGridScalperMAPeriodVisibility() {
-  const row = document.getElementById("gridScalperMAPeriodRow");
-  if (row) row.style.display = gridScalperMAStrategy === "price_vs_ma" ? "" : "none";
+  const row  = document.getElementById("gridScalperMAPeriodRow");
+  const hint = document.getElementById("gridScalperMAPeriodHint");
+  const show = gridScalperMAStrategy === "price_vs_ma";
+  if (row)  row.style.display  = show ? "" : "none";
+  if (hint) hint.style.display = show ? "" : "none";
 }
 
 function _normalizePo3EntryMaxAge(value) {
@@ -10368,10 +10371,15 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
 /**
  * Detect a Grid Scalper MA signal.
  *
- * Two modes (controlled by gridScalperMAStrategy):
+ * Three modes (controlled by gridScalperMAStrategy):
  *   "price_vs_ma" – BUY when previous close crosses above the SMA; SELL when crosses below.
  *   "bos"         – BUY when current close breaks above the most recent confirmed swing high;
  *                   SELL when current close breaks below the most recent confirmed swing low.
+ *   "triple_ma"   – Uses three SMAs as a cascade:
+ *                   SMA 50 → trend filter  (price must be above for BUY, below for SELL)
+ *                   SMA 20 → direction     (price must be above for BUY, below for SELL)
+ *                   SMA 11 → entry timing  (pullback rejection: prev candle touched SMA 11,
+ *                                           current candle closes back on the trend side)
  *
  * Returns null or { dir, entry, sl, tp, rr, candleIdx, epoch, symbol, result, mode }
  */
@@ -10382,7 +10390,11 @@ function detectGridScalperMA() {
   if (gridScalperMAHistory.some(s => s.result === "PENDING")) return null;
 
   const len = candles.length;
-  if (len < Math.max(gridScalperMAPeriod + 2, GRID_SCALPER_MA_BOS_LOOKBACK + 2)) return null;
+  /* Triple MA needs at least 52 candles (SMA 50 + 2 look-behind) */
+  const minLen = gridScalperMAStrategy === "triple_ma"
+    ? 52
+    : Math.max(gridScalperMAPeriod + 2, GRID_SCALPER_MA_BOS_LOOKBACK + 2);
+  if (len < minLen) return null;
 
   const idx = len - 1;
   if (idx - lastGridScalperMAIdx < GRID_SCALPER_MA_COOLDOWN) return null;
@@ -10405,6 +10417,33 @@ function detectGridScalperMA() {
       dir = "BULL";
     } else if (prevClose > prevMA && currClose < currMA) {
       dir = "BEAR";
+    }
+  } else if (gridScalperMAStrategy === "triple_ma") {
+    /* ── Triple MA cascade: SMA 50 trend / SMA 20 direction / SMA 11 entry ── */
+    const sma50 = computeSMA(closes, 50);
+    const sma20 = computeSMA(closes, 20);
+    const sma11 = computeSMA(closes, 11);
+
+    const s50   = sma50[idx];
+    const s20   = sma20[idx];
+    const s11   = sma11[idx];
+    const s11p  = sma11[idx - 1]; /* SMA 11 on previous candle */
+    if (s50 == null || s20 == null || s11 == null || s11p == null) return null;
+
+    const currClose = closes[idx];
+    const prevHigh  = candles[idx - 1].high;
+    const prevLow   = candles[idx - 1].low;
+
+    /* SELL: price below SMA 50 (bearish trend) + below SMA 20 (direction confirmed)
+     *       previous candle's HIGH reached up to/above SMA 11 (pullback touched SMA 11)
+     *       current close is back BELOW SMA 11 (rejection → enter sell) */
+    if (currClose < s50 && currClose < s20 && prevHigh >= s11p && currClose < s11) {
+      dir = "BEAR";
+    /* BUY: price above SMA 50 (bullish trend) + above SMA 20 (direction confirmed)
+     *      previous candle's LOW reached down to/below SMA 11 (pullback touched SMA 11)
+     *      current close is back ABOVE SMA 11 (bounce → enter buy) */
+    } else if (currClose > s50 && currClose > s20 && prevLow <= s11p && currClose > s11) {
+      dir = "BULL";
     }
   } else {
     /* ── BOS (Break of Structure) ── */
@@ -10513,7 +10552,7 @@ function processGridScalperMA() {
   playStrategyAlert(signal.dir);
 
   const sym = getActiveSymbol() || "--";
-  const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
+  const modeLabel = signal.mode === "bos" ? "BOS" : signal.mode === "triple_ma" ? "Triple MA" : "Price vs MA";
   const volLabel  = signal.volCategory === "vol1s" ? "Vol1s" : signal.volCategory === "standard" ? "VolStd" : "";
   const rrTag     = volLabel ? ` [${volLabel} ${fmt(signal.rr,1)}R]` : "";
   addLog(`🔲 GRID SCALPER MA [${modeLabel}]${rrTag} ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
@@ -12453,9 +12492,8 @@ function buildStrategyTelegramCaption(signal) {
     stratLabel = "Session Range (London Sweep)";
   } else if (signal.type === "grid_scalper_ma") {
     stratEmoji = "🔲";
-    const modeLabel = signal.mode === "bos" ? "BOS" : "Price vs MA";
+    const modeLabel = signal.mode === "bos" ? "BOS" : signal.mode === "triple_ma" ? "Triple MA" : "Price vs MA";
     stratLabel = `Grid Scalper MA [${modeLabel}]`;
-  } else if (signal.type === "fvg_strat") {
     stratEmoji = "🎯";
     stratLabel = "Fair Value Gap";
   } else if (signal.type === "mtf_top_down") {
