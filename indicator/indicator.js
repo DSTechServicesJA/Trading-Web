@@ -8785,6 +8785,7 @@ function processLiquiditySweep() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
@@ -8861,6 +8862,15 @@ function monitorLiquiditySweepOutcomes(candle) {
     for (const s of liquiditySweepHistory) {
       if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
+      }
+    }
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of liquiditySweepHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
       }
     }
     /* One-at-a-time: allow the next trade after the cooldown period elapses.
@@ -9020,6 +9030,7 @@ function processStopLossHunt() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   /* Check for "stop hunt of stop hunters" — re-entry if previous was stopped out */
   const levelTol = signal.level.level * SLH_LEVEL_TOLERANCE_PCT;
@@ -9098,6 +9109,15 @@ function monitorStopLossHuntOutcomes(candle) {
     for (const s of stopLossHuntHistory) {
       if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
+      }
+    }
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of stopLossHuntHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
       }
     }
   }
@@ -9256,6 +9276,7 @@ function processFailedPinBar() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
@@ -9331,6 +9352,15 @@ function monitorFailedPinBarOutcomes(candle) {
     for (const s of failedPinBarHistory) {
       if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
+      }
+    }
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of failedPinBarHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
       }
     }
   }
@@ -9555,6 +9585,7 @@ function processFibScalp() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
@@ -9649,6 +9680,15 @@ function monitorFibScalpOutcomes(candle) {
     /* Allow next trade after cooldown elapses (not immediately) */
     lastFibScalpIdx = candles.length - 1;
     addLog("📐 Fib Golden Zone signal resolved — scanning for next trade…");
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of fibScalpHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -9823,6 +9863,7 @@ function processTiktokStrategy() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -9901,6 +9942,15 @@ function monitorTiktokOutcomes(candle) {
     }
     lastTiktokIdx = candles.length - 1;
     addLog("📈 TikTok Fib signal resolved — scanning for next trade…");
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of tiktokHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -10200,6 +10250,7 @@ function processPowerOf3() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
@@ -10343,6 +10394,15 @@ function monitorPo3Outcomes(candle) {
     if (resolved) {
       lastPo3Idx = candles.length - 1;
       addLog("⚡ PO3 signal resolved — scanning for next trade…");
+    }
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of po3History) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
     }
   }
 }
@@ -10666,6 +10726,7 @@ function processGridScalperMA() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -10740,6 +10801,15 @@ function monitorGridScalperMAOutcomes(candle) {
     }
     lastGridScalperMAIdx = candles.length - 1;
     addLog("🔲 Grid Scalper MA signal resolved — scanning for next trade…");
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of gridScalperMAHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -11031,6 +11101,7 @@ function processFVGStrat() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -11109,6 +11180,15 @@ function monitorFVGStratOutcomes(candle) {
     }
     lastFvgStratIdx = candles.length - 1;
     addLog("🎯 FVG signal resolved — scanning for next trade…");
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of fvgStratHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -11390,6 +11470,7 @@ function processMtfTopDown() {
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -11489,6 +11570,15 @@ function monitorMtfTopDownOutcomes(candle) {
       }
     }
     renderStrategyAlerts();
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of mtfTopDownHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -12009,6 +12099,7 @@ function processCandleInterpretation() {
 
   /* Compute & store confluence score for UI */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram = (telegramStrategyAutoSend && !_historicalProcessing);
@@ -12080,10 +12171,17 @@ function monitorCandleInterpOutcomes(candle) {
         sendStrategyOutcomeTelegram(s);
       }
     }
+    /* Feature 13: record confluence factor outcomes for adaptive weighting */
+    if (adaptiveConfluenceEnabled) {
+      for (const s of candleInterpHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
-
-/* ================= LIVE SCALP SCANNER ================= */
 /**
  * Scans the latest candles for high-probability scalp setups using multi-
  * indicator confluence.  Runs on every candle update when liveScalpEnabled
@@ -14474,6 +14572,151 @@ function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
   return score;
 }
 
+/* Returns an array of human-readable factor names that are currently active
+   for the given signal.  Mirrors computeConfluenceScore() exactly but collects
+   factor names instead of incrementing a counter.  Used by Feature 13 (adaptive
+   confluence weighting) to record per-factor outcomes. */
+function getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleIdx) {
+  const dir   = overrideDir   !== undefined ? overrideDir   : (breakout ? breakout.dir   : null);
+  const level = overrideLevel !== undefined ? overrideLevel : (breakout ? breakout.level : null);
+  if (!dir) return [];
+  const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && overrideCandleIdx === undefined && !!breakout;
+
+  const factors = [];
+
+  /* Factor 1: EMA alignment */
+  const lastFast = emaFast.length > 0 ? emaFast[emaFast.length - 1] : null;
+  const lastSlow = emaSlow.length > 0 ? emaSlow[emaSlow.length - 1] : null;
+  if (lastFast != null && lastSlow != null) {
+    if ((dir === "BULL" && lastFast > lastSlow) || (dir === "BEAR" && lastFast < lastSlow)) factors.push("EMA Aligned");
+  }
+
+  /* Factor 2: HTF trend alignment */
+  const htf = getHTFTrend();
+  if (htf === dir) factors.push("HTF Trend");
+
+  /* Factor 3: Strong breakout candle (main strategy context only) */
+  if (hasBoCtx && breakout.strong) factors.push("Strong Breakout");
+
+  /* Factor 4: Confirm pattern at retest (main strategy context only) */
+  if (hasBoCtx && retestInfo && retestInfo.candleIdx < candles.length) {
+    const rc = candles[retestInfo.candleIdx];
+    const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
+    if (isPinBar(rc, dir) || (prevRC && isInsideBar(prevRC, rc)) ||
+        (dir === "BULL" && isDragonflyDoji(rc)) ||
+        (dir === "BEAR" && isGravestoneDoji(rc)) ||
+        (prevRC && isTweezers(prevRC, rc)) ||
+        (prevRC && isRailwayTrack(prevRC, rc))) {
+      factors.push("Confirm Pattern");
+    }
+  }
+
+  /* Factor 5: S/R confluence */
+  if (level != null && hasSRConfluence(level)) factors.push("S/R Level");
+
+  /* Factor 5b: Extra confirmation pattern quality (main strategy context only) */
+  if (hasBoCtx && confirmInfo && confirmInfo.pattern) {
+    const p = confirmInfo.pattern;
+    if (p === "piercing line" || p === "dark cloud cover" ||
+        p === "tweezers bottom" || p === "tweezers top" ||
+        p === "dragonfly doji" || p === "gravestone doji" ||
+        p === "railway track (bullish)" || p === "railway track (bearish)") {
+      factors.push("Confirm Quality");
+    }
+  }
+
+  /* Factor 6: RSI favorable */
+  if (rsiValues.length > 0) {
+    const rsi = rsiValues[rsiValues.length - 1];
+    if (rsi != null) {
+      if ((dir === "BULL" && rsi <= RSI_RETEST_BULL_MAX) || (dir === "BEAR" && rsi >= RSI_RETEST_BEAR_MIN)) factors.push("RSI Favors");
+    }
+  }
+
+  /* Factor 7: Volume spike */
+  {
+    const vIdx = hasBoCtx ? breakout.candleIdx : (overrideCandleIdx !== undefined ? overrideCandleIdx : candles.length - 1);
+    if (vIdx >= 0 && vIdx < candles.length && hasVolumeSpikeOnBreakout(vIdx)) factors.push("Volume Spike");
+  }
+
+  /* Factor 8: Within active trading session */
+  if (isWithinActiveSession()) factors.push("Active Session");
+
+  /* Factor 9: Fibonacci confluence at key level */
+  if (level != null && hasFibConfluence(level)) factors.push("Fib Level");
+
+  /* Factor 10: Market-type-specific signal confluence */
+  const mtype = getMarketType();
+  const lastIdx = candles.length - 1;
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") {
+    const spikeRej = detectSpikeRejection(lastIdx);
+    const ibFalse = detectInsideBarFalseBreakout(lastIdx);
+    if ((spikeRej && spikeRej.dir === dir) || (ibFalse && ibFalse.dir === dir)) factors.push("Market Signal");
+  } else if (mtype === "jump") {
+    const sdZone = detectSupplyDemandZone(lastIdx);
+    const impulse = detectMomentumImpulse(lastIdx);
+    if ((sdZone && ((sdZone.type === "demand" && dir === "BULL") || (sdZone.type === "supply" && dir === "BEAR"))) ||
+        (impulse && impulse.dir === dir)) {
+      factors.push("Market Signal");
+    }
+  } else if (mtype === "step") {
+    const tlTouch = detectTrendlineTouch(lastIdx);
+    const maBounce = detectMABounce(lastIdx);
+    if ((tlTouch && tlTouch.dir === dir) || (maBounce && maBounce.dir === dir)) factors.push("Market Signal");
+  } else if (mtype === "dailyreset") {
+    const drPref = getDailyResetPreferredDir();
+    if (drPref && drPref === dir) factors.push("Market Signal");
+  } else if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.regime === dir) factors.push("Market Signal");
+  }
+
+  /* Factor 11: Preferred direction alignment */
+  const tuning = getMarketTuning();
+  if (tuning.preferredDir && tuning.preferredDir === dir) factors.push("Preferred Dir");
+  if (mtype === "dex") {
+    const sym = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+    if ((/UP$/i.test(sym) && dir === "BULL") || (/DN$/i.test(sym) && dir === "BEAR")) factors.push("DEX Direction");
+  }
+  if (mtype === "driftswitch") {
+    const dsRegime = detectDriftSwitchRegime();
+    if (dsRegime && dsRegime.recentSwitch && dsRegime.regime === dir) factors.push("DS Recent Switch");
+  }
+
+  /* Factor 12: Step run momentum or Jump impulse confirmation */
+  if (mtype === "step") {
+    const run = getStepRunLength();
+    if ((dir === "BULL" && run >= STEP_RUN_THRESHOLD) || (dir === "BEAR" && run <= -STEP_RUN_THRESHOLD)) factors.push("Momentum");
+  } else if (mtype === "jump") {
+    const impulse = detectMomentumImpulse(lastIdx);
+    if (impulse && impulse.dir === dir && impulse.strength >= 2) factors.push("Momentum");
+  }
+
+  /* Factor 13: MACD histogram alignment */
+  {
+    const hist = getCurrentMACD();
+    if (hist != null) {
+      if ((dir === "BULL" && hist > 0) || (dir === "BEAR" && hist < 0)) factors.push("MACD Aligned");
+    }
+  }
+
+  /* Factor 14: Bollinger Band squeeze */
+  if (isBBSqueeze()) factors.push("BB Squeeze");
+
+  /* Factor 15: ADX trending confirmation */
+  if (adxValue >= ADX_TRENDING_THRESHOLD) factors.push("ADX Trending");
+
+  /* Factor 16: Stochastic momentum alignment */
+  {
+    const k = getCurrentStoch();
+    if (k != null) {
+      if ((dir === "BULL" && k <= 50) || (dir === "BEAR" && k >= 50)) factors.push("Stoch Aligned");
+    }
+  }
+
+  return factors;
+}
+
 /* ================= STRATEGY LOGIC ================= */
 
 function processAllCandles() {
@@ -15637,6 +15880,7 @@ function recordSignal(confirmPattern) {
   signal.partialTpHit = false;
   signal.trailingSL = null;
   signal.confluenceScore = computeConfluenceScore();
+  signal._confFactors    = getActiveConfluenceFactors();
   signal.srConfluence = breakout ? hasSRConfluence(breakout.level) : false;
   signal.confirmPattern = pattern;
   signal.rsiAtRetest = getCurrentRSI();
@@ -17320,8 +17564,9 @@ function monitorTradeOutcome(candle) {
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
     sendTradeOutcomeTelegram(pending);
     /* Feature 13: record confluence factor outcome for adaptive weighting */
-    if (adaptiveConfluenceEnabled && pending._confFactors) {
+    if (adaptiveConfluenceEnabled && pending._confFactors && !pending._confRecorded) {
       recordConfluenceOutcome(pending._confFactors, pending.result);
+      pending._confRecorded = true;
     }
     if (!_historicalProcessing) rebuildWalkForwardProfilesFromHistory();
   }
@@ -17435,6 +17680,7 @@ function detectOrderblockStrategy(idx) {
       symbol: getActiveSymbol(), epoch: c.epoch,
       type: "orderblock", result: "PENDING", strategyName: "orderblock",
       confluenceScore: computeConfluenceScore(dir, c.close, idx),
+      _confFactors:    getActiveConfluenceFactors(dir, c.close, idx),
       _stratOutcomeSent: false,
       _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing)
     };
@@ -17473,7 +17719,10 @@ function monitorOrderblockOutcomes(idx) {
       if (!_historicalProcessing && telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
-      if (adaptiveConfluenceEnabled) recordConfluenceOutcome(s._confFactors || [], result);
+      if (adaptiveConfluenceEnabled && !s._confRecorded) {
+        recordConfluenceOutcome(s._confFactors || [], result);
+        s._confRecorded = true;
+      }
       updateStatsUI();
     }
   }
@@ -17837,17 +18086,38 @@ function drawEquityCurve() {
   ctx.fillStyle = currentTheme === "light" ? "#f8fafc" : "#0f172a";
   ctx.fillRect(0, 0, W, H);
 
-  const resolved = autoTradeHistory.filter(e => (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number");
-  if (resolved.length < 2) {
-    ctx.fillStyle = currentTheme === "light" ? "#94a3b8" : "#64748b";
-    ctx.font = "11px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText("Not enough trade data yet", W / 2, H / 2);
-    return;
+  /* --- Prefer auto-trade (dollar P/L) entries; fall back to strategy signals (R-multiple) --- */
+  const autoResolved = autoTradeHistory
+    .filter(e => (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number")
+    .slice()
+    .reverse();   /* autoTradeHistory is newest-first; flip to oldest-first for cumulative P/L */
+
+  let entries;    /* array of { profit } in chronological order */
+  let unitLabel;  /* "$" for auto-trade dollar P/L, "R" for strategy R-multiple */
+
+  if (autoResolved.length >= 2) {
+    entries   = autoResolved.map(e => ({ profit: e.profit }));
+    unitLabel = "$";
+  } else {
+    /* Aggregate all resolved strategy signals across all active strategy histories */
+    const stratSignals = getAggregatedStrategyHistory()
+      .filter(s => s.result === "WIN" || s.result === "LOSS")
+      .sort((a, b) => (a.epoch || 0) - (b.epoch || 0));  /* oldest-first */
+    if (stratSignals.length < 2) {
+      ctx.fillStyle = currentTheme === "light" ? "#94a3b8" : "#64748b";
+      ctx.font = "11px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Not enough trade data yet", W / 2, H / 2);
+      return;
+    }
+    /* Use R-multiple P/L: WIN = +(rr || 1), LOSS = -1 */
+    entries   = stratSignals.map(s => ({ profit: s.result === "WIN" ? (s.rr || 1) : -1 }));
+    unitLabel = "R";
   }
+
   const pl = [];
   let cumPL = 0;
-  for (const e of resolved) { cumPL += e.profit; pl.push(cumPL); }
+  for (const e of entries) { cumPL += e.profit; pl.push(cumPL); }
   const maxPL = Math.max(...pl, 0);
   const minPL = Math.min(...pl, 0);
   const range = (maxPL - minPL) || 1;
@@ -17872,23 +18142,33 @@ function drawEquityCurve() {
   if (lastPL >= 0) { grad.addColorStop(0, "rgba(34,197,94,0.22)"); grad.addColorStop(1, "rgba(34,197,94,0.01)"); }
   else             { grad.addColorStop(0, "rgba(239,68,68,0.01)");  grad.addColorStop(1, "rgba(239,68,68,0.18)"); }
   ctx.fillStyle = grad; ctx.fill();
+  /* Cumulative label */
   ctx.font = "bold 10px Arial"; ctx.textAlign = "right";
   ctx.fillStyle = lastPL >= 0 ? "#22c55e" : "#ef4444";
-  ctx.fillText(`$${lastPL >= 0 ? "+" : ""}${fmt(lastPL, 2)}`, W - mR - 2, mT + 12);
+  const plLabel = unitLabel === "$"
+    ? `$${lastPL >= 0 ? "+" : ""}${fmt(lastPL, 2)}`
+    : `${lastPL >= 0 ? "+" : ""}${fmt(lastPL, 2)}${unitLabel}`;
+  ctx.fillText(plLabel, W - mR - 2, mT + 12);
   /* Metrics */
   let peak = 0, maxDD = 0, totalWin = 0, totalLoss = 0, wins = 0, losses = 0;
   for (const v of pl) { if (v > peak) peak = v; const dd = peak - v; if (dd > maxDD) maxDD = dd; }
-  for (const e of resolved) { if (e.profit > 0) { totalWin += e.profit; wins++; } else { totalLoss += Math.abs(e.profit); losses++; } }
+  for (const e of entries) {
+    if (e.profit > 0) { totalWin += e.profit; wins++; } else { totalLoss += Math.abs(e.profit); losses++; }
+  }
   const pf       = totalLoss > 0 ? totalWin / totalLoss : Infinity;
-  const winRate  = resolved.length > 0 ? wins / resolved.length : 0;
+  const winRate  = entries.length > 0 ? wins / entries.length : 0;
   const avgWin   = wins   > 0 ? totalWin  / wins   : 0;
   const avgLoss  = losses > 0 ? totalLoss / losses : 0;
   const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
   ctx.font = "8.5px Arial"; ctx.textAlign = "left";
   ctx.fillStyle = currentTheme === "light" ? "#64748b" : "#94a3b8";
-  ctx.fillText(`DD:$${fmt(maxDD,2)}`, mL,       H - 6);
+  const ddLabel = unitLabel === "$" ? `DD:$${fmt(maxDD,2)}` : `DD:${fmt(maxDD,2)}${unitLabel}`;
+  const expLabel = unitLabel === "$"
+    ? `E:${expectancy >= 0 ? "+" : ""}$${fmt(expectancy,2)}`
+    : `E:${expectancy >= 0 ? "+" : ""}${fmt(expectancy,2)}${unitLabel}`;
+  ctx.fillText(ddLabel, mL,       H - 6);
   ctx.fillText(`PF:${pf === Infinity ? "∞" : fmt(pf,2)}`, mL + 75,  H - 6);
-  ctx.fillText(`E:${expectancy >= 0 ? "+" : ""}$${fmt(expectancy,2)}`, mL + 145, H - 6);
+  ctx.fillText(expLabel, mL + 145, H - 6);
 }
 
 /* ---- Feature 16: P&L Breakdown ---- */
