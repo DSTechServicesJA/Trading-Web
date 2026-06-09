@@ -1871,6 +1871,57 @@ let orderblockHistory  = [];          /* alert history */
 let lastOrderblockIdx  = -999;
 let autoTradeOrderblock = true;
 
+/* ================= STRATEGY 15: 4H POWER OF 3 (HDF PO3) LIQUIDITY PLAY ================= */
+/**
+ * 4H Power of 3 (PO3) Liquidity Play – Intraday Execution.
+ *
+ * Uses the HDF Power 3 indicator concept on synthesised 4H candles:
+ *   1. Identify the opening of each new 4H candle.
+ *   2. Accumulation: price moves sideways near the 4H open (range-bound).
+ *   3. Manipulation: price sweeps below accumulation lows (bullish) or above highs (bearish).
+ *   4. Distribution/CISD: Change in State of Delivery — price shifts structure back in bias direction.
+ *   5. Entry after CISD confirmation.
+ *   6. SL below the manipulation low (bullish) / above manipulation high (bearish).
+ *   7. TP at minimum 2:1 R:R or nearest liquidity.
+ *
+ * Only trades in the direction of higher-timeframe bias (EMA alignment).
+ */
+let po3_4hEnabled = false;           /* master toggle */
+let po3_4hHistory = [];              /* alert history */
+let lastPo3_4hIdx = -999;
+let autoTradePo3_4h = true;
+const PO3_4H_MAX_HISTORY = 30;
+const PO3_4H_COOLDOWN = 5;          /* min candles between alerts */
+const PO3_4H_MAX_CANDLES = 60;      /* trade monitoring timeout */
+const PO3_4H_ACCUM_MIN_CANDLES = 3; /* min candles in accumulation phase */
+const PO3_4H_SWEEP_ATR_MULT = 0.25; /* min sweep distance as ATR fraction */
+
+/* ================= STRATEGY 16: 1H ACCUMULATION BREAKER BLOCK SCALPING ================= */
+/**
+ * 1H Accumulation Break + 1M Breaker Block Scalping.
+ *
+ * Concept:
+ *   1. Identify accumulation candles on synthesised 1H: large body, small wicks.
+ *   2. Mark their high/low as liquidity targets.
+ *   3. On execution timeframe: detect liquidity sweep (break above high or below low).
+ *   4. After sweep, identify breaker block structure:
+ *      Bullish: Low → High → Lower Low → Higher High (after low swept)
+ *      Bearish: High → Low → Higher High → Lower Low (after high swept)
+ *   5. Enter on retest of the breaker block.
+ *   6. SL just beyond the breaker block extreme.
+ *   7. TP at 2:1 R:R.
+ */
+let breakerBlockEnabled = false;     /* master toggle */
+let breakerBlockHistory = [];        /* alert history */
+let lastBreakerBlockIdx = -999;
+let autoTradeBreakerBlock = true;
+const BREAKER_BLOCK_MAX_HISTORY = 30;
+const BREAKER_BLOCK_COOLDOWN = 5;    /* min candles between alerts */
+const BREAKER_BLOCK_MAX_CANDLES = 40; /* trade monitoring timeout */
+const BREAKER_ACCUM_BODY_PCT = 0.65; /* accumulation candle body must be ≥ 65% of range */
+const BREAKER_ACCUM_WICK_PCT = 0.20; /* each wick must be ≤ 20% of range */
+const BREAKER_SWEEP_ATR_MULT = 0.15; /* min sweep distance beyond level */
+
 /* ================= FEATURE: SESSION HEATMAP (17) ================= */
 let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
 
@@ -2171,6 +2222,18 @@ function initUI() {
   UI.tiktokAlertList       = document.getElementById("tiktokAlertList");
   UI.tiktokCount           = document.getElementById("tiktokCount");
   UI.autoTradeTiktokToggle = document.getElementById("autoTradeTiktokToggle");
+
+  /* Strategy 15: 4H PO3 Liquidity Play */
+  UI.po3_4hToggle          = document.getElementById("po3_4hToggle");
+  UI.po3_4hAlertList       = document.getElementById("po3_4hAlertList");
+  UI.po3_4hAlertCount      = document.getElementById("po3_4hAlertCount");
+  UI.autoTradePo3_4hToggle = document.getElementById("autoTradePo3_4hToggle");
+
+  /* Strategy 16: 1H Accumulation Breaker Block */
+  UI.breakerBlockToggle          = document.getElementById("breakerBlockToggle");
+  UI.breakerBlockAlertList       = document.getElementById("breakerBlockAlertList");
+  UI.breakerBlockAlertCount      = document.getElementById("breakerBlockAlertCount");
+  UI.autoTradeBreakerBlockToggle = document.getElementById("autoTradeBreakerBlockToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -3523,6 +3586,8 @@ function buildTelegramCaption() {
   if (failedPinBarEnabled) filters.push("Failed Pin Bar");
   if (fibScalpEnabled) filters.push("Fib Golden Zone");
   if (po3Enabled) filters.push("Power of 3");
+  if (po3_4hEnabled) filters.push("4H PO3");
+  if (breakerBlockEnabled) filters.push("Breaker Block");
   if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
@@ -4598,6 +4663,11 @@ function saveSettings() {
       autoTradeMtfTopDown,
       candleInterpEnabled,
       autoTradeCandleInterp,
+      /* Strategy 15 & 16 */
+      po3_4hEnabled,
+      autoTradePo3_4h,
+      breakerBlockEnabled,
+      autoTradeBreakerBlock,
       /* Feature settings */
       orderblockEnabled,
       autoTradeOrderblock,
@@ -4823,6 +4893,18 @@ function restoreSettings() {
     /* Strategy 13: TikTok Fibonacci */
     if (s.tiktokEnabled != null) tiktokEnabled = s.tiktokEnabled;
     if (UI.tiktokToggle) UI.tiktokToggle.checked = tiktokEnabled;
+
+    /* Strategy 15: 4H PO3 Liquidity Play */
+    if (s.po3_4hEnabled != null) po3_4hEnabled = s.po3_4hEnabled;
+    if (UI.po3_4hToggle) UI.po3_4hToggle.checked = po3_4hEnabled;
+    if (s.autoTradePo3_4h != null) autoTradePo3_4h = s.autoTradePo3_4h;
+    if (UI.autoTradePo3_4hToggle) UI.autoTradePo3_4hToggle.checked = autoTradePo3_4h;
+
+    /* Strategy 16: 1H Accumulation Breaker Block */
+    if (s.breakerBlockEnabled != null) breakerBlockEnabled = s.breakerBlockEnabled;
+    if (UI.breakerBlockToggle) UI.breakerBlockToggle.checked = breakerBlockEnabled;
+    if (s.autoTradeBreakerBlock != null) autoTradeBreakerBlock = s.autoTradeBreakerBlock;
+    if (UI.autoTradeBreakerBlockToggle) UI.autoTradeBreakerBlockToggle.checked = autoTradeBreakerBlock;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -5125,7 +5207,9 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" },
     { id: "stratWR_candleInterp",   history: candleInterpHistory,    label: "🕯 Candle Interp" },
     { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" },
-    { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" }
+    { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" },
+    { id: "stratWR_po3_4h",         history: po3_4hHistory,          label: "🕓 4H PO3" },
+    { id: "stratWR_breakerBlock",   history: breakerBlockHistory,    label: "🧱 Breaker Block" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -10498,12 +10582,16 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.mtfTopDownAlertList, UI.mtfTopDownAlertCount, mtfTopDownHistory, "⏱", "MTF Top-Down");
   /* TikTok Fibonacci */
   _renderAlertList(UI.tiktokAlertList, UI.tiktokCount, tiktokHistory, "📈", "TikTok Fib");
+  /* 4H PO3 Liquidity Play */
+  _renderAlertList(UI.po3_4hAlertList, UI.po3_4hAlertCount, po3_4hHistory, "🕓", "4H PO3");
+  /* Breaker Block Scalping */
+  _renderAlertList(UI.breakerBlockAlertList, UI.breakerBlockAlertCount, breakerBlockHistory, "🧱", "Breaker Block");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
     + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
-    + tiktokHistory.length;
+    + tiktokHistory.length + po3_4hHistory.length + breakerBlockHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -10547,6 +10635,734 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
                  + resultBadge
                  + ` <small style="opacity:0.5;">${ts}</small>`;
     listEl.appendChild(li);
+  }
+}
+
+/* ================= STRATEGY 15: 4H POWER OF 3 (HDF PO3) LIQUIDITY PLAY ================= */
+/**
+ * Detect a 4H Power of 3 (PO3) Liquidity Play setup.
+ *
+ * Steps:
+ *   1. Synthesise 4H candles from the current candle stream.
+ *   2. Determine HTF bias using EMA alignment (EMA 8 > EMA 21 = BULL).
+ *   3. Identify the current 4H candle open price.
+ *   4. Accumulation: price trades sideways near the 4H open.
+ *   5. Manipulation: price sweeps below accumulation lows (bullish) or above highs (bearish).
+ *   6. CISD (Change in State of Delivery): structure shifts back in bias direction.
+ *   7. Entry after CISD confirmation.
+ *   8. SL below manipulation low / above manipulation high.
+ *   9. TP at min 2:1 R:R or nearest liquidity (4H candle high/low).
+ *
+ * Returns null or signal object.
+ */
+function detectPo3_4h() {
+  if (!po3_4hEnabled) return null;
+
+  /* One-at-a-time: skip detection while any signal is still PENDING */
+  if (po3_4hHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < 30) return null;
+
+  const idx = len - 1;
+  if (idx - lastPo3_4hIdx < PO3_4H_COOLDOWN) return null;
+
+  const c = candles[idx];
+
+  /* Require sufficient indicator data */
+  if (emaFast.length <= idx || emaSlow.length <= idx) return null;
+  if (atrValue <= 0) return null;
+
+  /* --- Step 1: Determine HTF bias from EMA 8/21 alignment --- */
+  const emaF = emaFast[idx];
+  const emaS = emaSlow[idx];
+  const emaH = emaHTF.length > idx ? emaHTF[idx] : null;
+  let htfBias = null;
+
+  if (emaF > emaS) htfBias = "BULL";
+  else if (emaF < emaS) htfBias = "BEAR";
+
+  /* Strengthen bias with EMA 100 — if disagreement, skip */
+  if (emaH != null) {
+    if (htfBias === "BULL" && c.close < emaH) return null;
+    if (htfBias === "BEAR" && c.close > emaH) return null;
+  }
+
+  if (!htfBias) return null;
+
+  /* --- Step 2: Compute the 4-hour candle open price --- */
+  const currentEpoch = c.epoch;
+  const fourHourSec = 14400; /* 4 hours in seconds */
+  const fourHStart = currentEpoch - (currentEpoch % fourHourSec);
+
+  let fourHOpenPrice = null;
+  let fourHHighPrice = -Infinity;
+  let fourHLowPrice  = Infinity;
+  let fourHOpenIdx   = -1;
+
+  for (let i = 0; i < len; i++) {
+    if (candles[i].epoch >= fourHStart) {
+      fourHOpenPrice = candles[i].open;
+      fourHOpenIdx = i;
+      break;
+    }
+  }
+  if (fourHOpenPrice == null) return null;
+
+  /* Compute the 4H candle high and low */
+  for (let i = fourHOpenIdx; i < len; i++) {
+    if (candles[i].high > fourHHighPrice) fourHHighPrice = candles[i].high;
+    if (candles[i].low < fourHLowPrice)   fourHLowPrice = candles[i].low;
+  }
+
+  /* Need enough candles within this 4H block */
+  if (idx - fourHOpenIdx < PO3_4H_ACCUM_MIN_CANDLES + 2) return null;
+
+  /* --- Step 3: Identify Accumulation Phase --- */
+  /* Accumulation = sideways price action near the 4H open.
+     Look for a cluster of candles where price stays within a tight range
+     around the 4H open (within 0.5× ATR). */
+  let accumHigh = -Infinity;
+  let accumLow  = Infinity;
+  let accumEnd  = -1;
+  const accumRange = atrValue * 0.7;
+
+  for (let i = fourHOpenIdx; i <= Math.min(fourHOpenIdx + 15, idx - 2); i++) {
+    const hi = candles[i].high;
+    const lo = candles[i].low;
+    if (hi > fourHOpenPrice + accumRange || lo < fourHOpenPrice - accumRange) {
+      /* Price exited accumulation zone */
+      if (i - fourHOpenIdx >= PO3_4H_ACCUM_MIN_CANDLES) {
+        accumEnd = i - 1;
+      }
+      break;
+    }
+    if (hi > accumHigh) accumHigh = hi;
+    if (lo < accumLow)  accumLow = lo;
+    accumEnd = i;
+  }
+
+  if (accumEnd < 0 || accumEnd - fourHOpenIdx < PO3_4H_ACCUM_MIN_CANDLES - 1) return null;
+
+  /* --- Step 4: Manipulation Phase — liquidity sweep beyond accumulation --- */
+  let sweepCandle = null;
+  let sweepIdx = -1;
+  let sweepPrice = null;
+  const sweepStart = accumEnd + 1;
+
+  if (htfBias === "BULL") {
+    /* Sell-side sweep: price breaks below accumulation lows */
+    for (let i = sweepStart; i < idx; i++) {
+      if (candles[i].low < accumLow - atrValue * PO3_4H_SWEEP_ATR_MULT) {
+        if (!sweepCandle || candles[i].low < sweepCandle.low) {
+          sweepCandle = candles[i];
+          sweepIdx = i;
+          sweepPrice = candles[i].low;
+        }
+      }
+    }
+  } else {
+    /* Buy-side sweep: price breaks above accumulation highs */
+    for (let i = sweepStart; i < idx; i++) {
+      if (candles[i].high > accumHigh + atrValue * PO3_4H_SWEEP_ATR_MULT) {
+        if (!sweepCandle || candles[i].high > sweepCandle.high) {
+          sweepCandle = candles[i];
+          sweepIdx = i;
+          sweepPrice = candles[i].high;
+        }
+      }
+    }
+  }
+
+  if (!sweepCandle) return null;
+
+  /* --- Step 5: CISD — Change in State of Delivery (structure shift) --- */
+  /* After the manipulation sweep, look for a candle that shifts price back
+     in the bias direction: a strong body candle that reclaims the accumulation
+     zone, indicating distribution has begun. */
+  let cisdCandle = null;
+  let cisdIdx = -1;
+
+  for (let i = sweepIdx + 1; i <= idx; i++) {
+    const mc = candles[i];
+    const body = Math.abs(mc.close - mc.open);
+    const range = mc.high - mc.low;
+
+    /* Require displacement: body ≥ 55% of range, range ≥ 0.4× ATR */
+    if (range < atrValue * 0.4) continue;
+    if (body < range * 0.55) continue;
+
+    if (htfBias === "BULL") {
+      /* Bullish CISD: strong bullish candle closes above accumulation high */
+      if (mc.close <= mc.open) continue;
+      if (mc.close <= accumHigh) continue;
+      cisdCandle = mc;
+      cisdIdx = i;
+      break;
+    } else {
+      /* Bearish CISD: strong bearish candle closes below accumulation low */
+      if (mc.close >= mc.open) continue;
+      if (mc.close >= accumLow) continue;
+      cisdCandle = mc;
+      cisdIdx = i;
+      break;
+    }
+  }
+
+  if (!cisdCandle) return null;
+
+  /* Only signal if CISD is recent (within last 2 candles) */
+  if (idx - cisdIdx > 2) return null;
+
+  /* --- Step 6: Compute entry / SL / TP --- */
+  const entry = cisdCandle.close;
+  let sl, tp;
+
+  if (htfBias === "BULL") {
+    sl = sweepPrice - atrValue * 0.15;
+    /* TP at 4H high or 2:1 R:R minimum */
+    const risk = Math.abs(entry - sl);
+    tp = fourHHighPrice > entry + risk * 2 ? fourHHighPrice : entry + risk * 2;
+  } else {
+    sl = sweepPrice + atrValue * 0.15;
+    const risk = Math.abs(sl - entry);
+    tp = fourHLowPrice < entry - risk * 2 ? fourHLowPrice : entry - risk * 2;
+  }
+
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  const rr = risk > 0 ? reward / risk : 0;
+
+  if (rr < 1.5) return null;
+
+  return {
+    dir: htfBias,
+    entry, sl, tp, rr,
+    _origSl: sl,
+    partialTpHit: false,
+    fourHOpen: fourHOpenPrice,
+    accumHigh, accumLow,
+    sweepPrice,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "po3_4h"
+  };
+}
+
+/**
+ * Run the 4H PO3 scanner and handle alerting.
+ */
+function processPo3_4h() {
+  const signal = detectPo3_4h();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ 4H PO3 REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastPo3_4hIdx = signal.candleIdx;
+
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  po3_4hHistory.unshift(signal);
+  if (po3_4hHistory.length > PO3_4H_MAX_HISTORY) po3_4hHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const symbol = getActiveSymbol() || "--";
+  addLog(`🕓 4H PO3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | 4H Open ${fmtPrice(signal.fourHOpen, symbol)} | Accum [${fmtPrice(signal.accumLow, symbol)}–${fmtPrice(signal.accumHigh, symbol)}] | Sweep ${fmtPrice(signal.sweepPrice, symbol)} | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `4H PO3 ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | 4H Open: ${fmtPrice(signal.fourHOpen, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🕓 ${signal.dir} 4H PO3 — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\n4H Open: ${fmtPrice(signal.fourHOpen, symbol)} | Sweep: ${fmtPrice(signal.sweepPrice, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
+    throttledNotification("IT Guru: 4H PO3 Signal!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradePo3_4h && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "po3_4h" });
+  }
+}
+
+/**
+ * Monitor pending 4H PO3 signals for SL/TP outcome.
+ */
+function monitorPo3_4hOutcomes(candle) {
+  if (!po3_4hEnabled) return;
+  let changed = false;
+  for (const s of po3_4hHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    if (elapsed < 0 || elapsed >= PO3_4H_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true; continue;
+    }
+
+    /* Partial TP at 1R */
+    if (partialTpEnabled && !s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s._reached1R = true;
+        s.sl = s.entry;
+        addLog(`🕓 4H PO3 Partial TP hit (1R) — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)}`);
+        changed = true;
+        continue;
+      }
+    }
+
+    /* Check SL hit */
+    if (s.dir === "BULL" && candle.low <= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "BREAKEVEN" : "LOSS";
+      if (s.result === "BREAKEVEN") s.result = "WIN";
+      changed = true;
+    } else if (s.dir === "BEAR" && candle.high >= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "BREAKEVEN" : "LOSS";
+      if (s.result === "BREAKEVEN") s.result = "WIN";
+      changed = true;
+    }
+    /* Check TP hit */
+    else if (s.dir === "BULL" && candle.high >= s.tp) {
+      s.result = "WIN"; changed = true;
+    } else if (s.dir === "BEAR" && candle.low <= s.tp) {
+      s.result = "WIN"; changed = true;
+    }
+
+    /* Profit exit alert */
+    if (s.result === "PENDING" && telegramProfitExitAlertEnabled) {
+      _checkProfitExitAlert(s, candle, "4H PO3");
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of po3_4hHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    if (adaptiveConfluenceEnabled) {
+      for (const s of po3_4hHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
+  }
+}
+
+/* ================= STRATEGY 16: 1H ACCUMULATION BREAKER BLOCK SCALPING ================= */
+/**
+ * Detect a 1H Accumulation Break + Breaker Block Scalping setup.
+ *
+ * Steps:
+ *   1. Synthesise 1H candles and find accumulation candles (large body, small wicks).
+ *   2. Mark their high/low as liquidity targets.
+ *   3. Detect liquidity sweep on the execution timeframe (break above/below levels).
+ *   4. After sweep, identify breaker block structure:
+ *      Bullish breaker: Low → High → Lower Low → Higher High (after low swept).
+ *      Bearish breaker: High → Low → Higher High → Lower Low (after high swept).
+ *   5. Enter on retest of the breaker block.
+ *   6. SL just beyond the breaker block extreme.
+ *   7. TP at 2:1 R:R.
+ *
+ * Returns null or signal object.
+ */
+function detectBreakerBlock() {
+  if (!breakerBlockEnabled) return null;
+
+  /* One-at-a-time */
+  if (breakerBlockHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < 40) return null;
+
+  const idx = len - 1;
+  if (idx - lastBreakerBlockIdx < BREAKER_BLOCK_COOLDOWN) return null;
+
+  const c = candles[idx];
+  if (atrValue <= 0) return null;
+
+  /* --- Step 1: Find 1H accumulation candle --- */
+  /* Synthesise 1H candle boundaries using epoch */
+  const currentEpoch = c.epoch;
+  const oneHourSec = 3600;
+  /* Look back up to 3 completed 1H candles for accumulation */
+  let accumCandle = null;
+  let accumHigh = null;
+  let accumLow = null;
+
+  for (let hourBack = 1; hourBack <= 3; hourBack++) {
+    const hStart = currentEpoch - (currentEpoch % oneHourSec) - (hourBack * oneHourSec);
+    const hEnd   = hStart + oneHourSec;
+
+    /* Synthesise this 1H candle from underlying candles */
+    let hOpen = null, hHigh = -Infinity, hLow = Infinity, hClose = null;
+    let candleCount = 0;
+
+    for (let i = 0; i < len; i++) {
+      if (candles[i].epoch >= hStart && candles[i].epoch < hEnd) {
+        if (hOpen == null) hOpen = candles[i].open;
+        if (candles[i].high > hHigh) hHigh = candles[i].high;
+        if (candles[i].low < hLow) hLow = candles[i].low;
+        hClose = candles[i].close;
+        candleCount++;
+      }
+    }
+
+    if (hOpen == null || candleCount < 2) continue;
+
+    /* Check if it's an accumulation candle: large body, small wicks */
+    const range = hHigh - hLow;
+    if (range <= 0) continue;
+    const body = Math.abs(hClose - hOpen);
+    const upperWick = hHigh - Math.max(hOpen, hClose);
+    const lowerWick = Math.min(hOpen, hClose) - hLow;
+
+    if (body >= range * BREAKER_ACCUM_BODY_PCT &&
+        upperWick <= range * BREAKER_ACCUM_WICK_PCT &&
+        lowerWick <= range * BREAKER_ACCUM_WICK_PCT &&
+        range >= atrValue * 0.5) {
+      accumCandle = { open: hOpen, high: hHigh, low: hLow, close: hClose, epochStart: hStart };
+      accumHigh = hHigh;
+      accumLow = hLow;
+      break;
+    }
+  }
+
+  if (!accumCandle) return null;
+
+  /* --- Step 2: Detect liquidity sweep on execution TF --- */
+  /* Look for recent candles that broke above accumHigh or below accumLow */
+  let sweepDir = null; /* "ABOVE" or "BELOW" */
+  let sweepIdx = -1;
+  const sweepLookback = Math.min(30, idx);
+
+  for (let i = idx - sweepLookback; i <= idx; i++) {
+    if (i < 0) continue;
+    if (candles[i].high > accumHigh + atrValue * BREAKER_SWEEP_ATR_MULT) {
+      sweepDir = "ABOVE";
+      sweepIdx = i;
+    }
+    if (candles[i].low < accumLow - atrValue * BREAKER_SWEEP_ATR_MULT) {
+      /* Prefer most recent sweep */
+      if (sweepDir !== "BELOW" || i > sweepIdx) {
+        sweepDir = "BELOW";
+        sweepIdx = i;
+      }
+    }
+  }
+
+  if (!sweepDir || sweepIdx < 0) return null;
+
+  /* --- Step 3: Identify Breaker Block Formation after sweep --- */
+  /* Bullish Breaker (after low swept): Low → High → Lower Low → Higher High
+     Bearish Breaker (after high swept): High → Low → Higher High → Lower Low */
+  let breakerHigh = null;
+  let breakerLow = null;
+  let breakerIdx = -1;
+
+  const searchStart = sweepIdx;
+  const searchEnd = idx;
+
+  if (sweepDir === "BELOW") {
+    /* Looking for bullish breaker: Low → High → Lower Low → Higher High */
+    /* Find swing points after the sweep */
+    let point1Low = null, point1Idx = -1;     /* initial low */
+    let point2High = null, point2Idx = -1;    /* high after low */
+    let point3Low = null, point3Idx = -1;     /* lower low */
+    let point4High = null, point4Idx = -1;    /* higher high */
+
+    for (let i = searchStart; i <= searchEnd - 3; i++) {
+      /* Find a low point */
+      if (candles[i].low <= (point1Low || Infinity)) {
+        point1Low = candles[i].low;
+        point1Idx = i;
+        point2High = null; point3Low = null; point4High = null;
+      }
+      if (point1Low == null) continue;
+
+      /* Find high after point1 */
+      for (let j = point1Idx + 1; j <= Math.min(point1Idx + 10, searchEnd); j++) {
+        if (candles[j].high > (point2High || -Infinity)) {
+          point2High = candles[j].high;
+          point2Idx = j;
+        }
+      }
+      if (point2High == null) continue;
+
+      /* Find lower low after point2 */
+      for (let j = point2Idx + 1; j <= Math.min(point2Idx + 10, searchEnd); j++) {
+        if (candles[j].low < point1Low) {
+          point3Low = candles[j].low;
+          point3Idx = j;
+          break;
+        }
+      }
+      if (point3Low == null) continue;
+
+      /* Find higher high after point3 */
+      for (let j = point3Idx + 1; j <= Math.min(point3Idx + 10, searchEnd); j++) {
+        if (candles[j].high > point2High) {
+          point4High = candles[j].high;
+          point4Idx = j;
+          break;
+        }
+      }
+      if (point4High == null) continue;
+
+      /* Bullish breaker block = the zone between point2 candle's low and high */
+      breakerHigh = point2High;
+      breakerLow = candles[point2Idx].low;
+      breakerIdx = point4Idx;
+      break;
+    }
+  } else {
+    /* Looking for bearish breaker: High → Low → Higher High → Lower Low */
+    let point1High = null, point1Idx = -1;
+    let point2Low = null, point2Idx = -1;
+    let point3High = null, point3Idx = -1;
+    let point4Low = null, point4Idx = -1;
+
+    for (let i = searchStart; i <= searchEnd - 3; i++) {
+      if (candles[i].high >= (point1High || -Infinity)) {
+        point1High = candles[i].high;
+        point1Idx = i;
+        point2Low = null; point3High = null; point4Low = null;
+      }
+      if (point1High == null) continue;
+
+      for (let j = point1Idx + 1; j <= Math.min(point1Idx + 10, searchEnd); j++) {
+        if (candles[j].low < (point2Low || Infinity)) {
+          point2Low = candles[j].low;
+          point2Idx = j;
+        }
+      }
+      if (point2Low == null) continue;
+
+      for (let j = point2Idx + 1; j <= Math.min(point2Idx + 10, searchEnd); j++) {
+        if (candles[j].high > point1High) {
+          point3High = candles[j].high;
+          point3Idx = j;
+          break;
+        }
+      }
+      if (point3High == null) continue;
+
+      for (let j = point3Idx + 1; j <= Math.min(point3Idx + 10, searchEnd); j++) {
+        if (candles[j].low < point2Low) {
+          point4Low = candles[j].low;
+          point4Idx = j;
+          break;
+        }
+      }
+      if (point4Low == null) continue;
+
+      /* Bearish breaker block = the zone between point2 candle's low and high */
+      breakerHigh = candles[point2Idx].high;
+      breakerLow = point2Low;
+      breakerIdx = point4Idx;
+      break;
+    }
+  }
+
+  if (breakerHigh == null || breakerLow == null || breakerIdx < 0) return null;
+
+  /* --- Step 4: Wait for retest of breaker block --- */
+  /* Price must return to the breaker block zone after it was established */
+  let retestIdx = -1;
+  for (let i = breakerIdx + 1; i <= idx; i++) {
+    if (candles[i].low <= breakerHigh && candles[i].high >= breakerLow) {
+      retestIdx = i;
+    }
+  }
+
+  if (retestIdx < 0) return null;
+  /* Retest must be recent */
+  if (idx - retestIdx > 2) return null;
+
+  /* --- Step 5: Compute entry / SL / TP --- */
+  const dir = sweepDir === "BELOW" ? "BULL" : "BEAR";
+  const breakerMid = (breakerHigh + breakerLow) / 2;
+  const retestCandle = candles[retestIdx];
+  const entry = (retestCandle.close >= breakerLow && retestCandle.close <= breakerHigh)
+    ? retestCandle.close
+    : breakerMid;
+
+  let sl, tp;
+  if (dir === "BULL") {
+    sl = breakerLow - atrValue * 0.1;
+    const risk = Math.abs(entry - sl);
+    tp = entry + risk * 2;
+  } else {
+    sl = breakerHigh + atrValue * 0.1;
+    const risk = Math.abs(sl - entry);
+    tp = entry - risk * 2;
+  }
+
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  const rr = risk > 0 ? reward / risk : 0;
+
+  if (rr < 1.5) return null;
+
+  return {
+    dir,
+    entry, sl, tp, rr,
+    _origSl: sl,
+    partialTpHit: false,
+    accumHigh, accumLow,
+    breakerHigh, breakerLow,
+    sweepDir,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "breaker_block"
+  };
+}
+
+/**
+ * Run the Breaker Block scanner and handle alerting.
+ */
+function processBreakerBlock() {
+  const signal = detectBreakerBlock();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ Breaker Block REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastBreakerBlockIdx = signal.candleIdx;
+
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  breakerBlockHistory.unshift(signal);
+  if (breakerBlockHistory.length > BREAKER_BLOCK_MAX_HISTORY) breakerBlockHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const symbol = getActiveSymbol() || "--";
+  addLog(`🧱 Breaker Block ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Accum [${fmtPrice(signal.accumLow, symbol)}–${fmtPrice(signal.accumHigh, symbol)}] | Breaker [${fmtPrice(signal.breakerLow, symbol)}–${fmtPrice(signal.breakerHigh, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `Breaker Block ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
+    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | Breaker: [${fmtPrice(signal.breakerLow, symbol)}–${fmtPrice(signal.breakerHigh, symbol)}] | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🧱 ${signal.dir} Breaker Block — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nBreaker: [${fmtPrice(signal.breakerLow, symbol)}–${fmtPrice(signal.breakerHigh, symbol)}]\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
+    throttledNotification("IT Guru: Breaker Block Signal!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeBreakerBlock && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "breaker_block" });
+  }
+}
+
+/**
+ * Monitor pending Breaker Block signals for SL/TP outcome.
+ */
+function monitorBreakerBlockOutcomes(candle) {
+  if (!breakerBlockEnabled) return;
+  let changed = false;
+  for (const s of breakerBlockHistory) {
+    if (s.result !== "PENDING") continue;
+    const elapsed = (candles.length - 1) - s.candleIdx;
+
+    if (elapsed < 0 || elapsed >= BREAKER_BLOCK_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true; continue;
+    }
+
+    /* Partial TP at 1R */
+    if (partialTpEnabled && !s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s._reached1R = true;
+        s.sl = s.entry;
+        addLog(`🧱 Breaker Block Partial TP hit (1R) — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)}`);
+        changed = true;
+        continue;
+      }
+    }
+
+    /* Check SL hit */
+    if (s.dir === "BULL" && candle.low <= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    } else if (s.dir === "BEAR" && candle.high >= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    }
+    /* Check TP hit */
+    else if (s.dir === "BULL" && candle.high >= s.tp) {
+      s.result = "WIN"; changed = true;
+    } else if (s.dir === "BEAR" && candle.low <= s.tp) {
+      s.result = "WIN"; changed = true;
+    }
+
+    /* Profit exit alert */
+    if (s.result === "PENDING" && telegramProfitExitAlertEnabled) {
+      _checkProfitExitAlert(s, candle, "Breaker Block");
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of breakerBlockHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    if (adaptiveConfluenceEnabled) {
+      for (const s of breakerBlockHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
   }
 }
 
@@ -11209,6 +12025,10 @@ function processCustomStrategies() {
   if (orderblockEnabled && candles.length > 0) detectOrderblockStrategy(candles.length - 1);
   /* Strategy 14: Candlestick Interpretation */
   processCandleInterpretation();
+  /* Strategy 15: 4H PO3 Liquidity Play */
+  processPo3_4h();
+  /* Strategy 16: 1H Accumulation Breaker Block */
+  processBreakerBlock();
 }
 
 /**
@@ -11228,6 +12048,10 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorOrderblockOutcomes(candles.length - 1);
   /* Strategy 14: Candlestick Interpretation */
   monitorCandleInterpOutcomes(candle);
+  /* Strategy 15: 4H PO3 Liquidity Play */
+  monitorPo3_4hOutcomes(candle);
+  /* Strategy 16: Breaker Block Scalping */
+  monitorBreakerBlockOutcomes(candle);
   /* Feature 15: Multi-R ladder */
   monitorMultiRLadder(candles.length - 1);
 }
@@ -19917,6 +20741,8 @@ function applyStrategyAccess() {
     { id: "candleInterpToggle",    key: "candle_interp",    fn: () => { candleInterpEnabled   = false; } },
     { id: "orderblockToggle",      key: "orderblock",       fn: () => { orderblockEnabled     = false; } },
     { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
+    { id: "po3_4hToggle",          key: "po3_4h",           fn: () => { po3_4hEnabled         = false; } },
+    { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -19961,6 +20787,8 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-candleInterp",   toggleId: "candleInterpToggle",   enabled: candleInterpEnabled   },
     { badgeId: "stratBadge-orderblock",     toggleId: "orderblockToggle",     enabled: orderblockEnabled     },
     { badgeId: "stratBadge-tiktok",         toggleId: "tiktokToggle",         enabled: tiktokEnabled         },
+    { badgeId: "stratBadge-po3_4h",         toggleId: "po3_4hToggle",         enabled: po3_4hEnabled         },
+    { badgeId: "stratBadge-breakerBlock",   toggleId: "breakerBlockToggle",   enabled: breakerBlockEnabled   },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -22242,6 +23070,48 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeTiktokToggle) {
     UI.autoTradeTiktokToggle.addEventListener("change", () => {
       autoTradeTiktok = UI.autoTradeTiktokToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 15: 4H PO3 Liquidity Play listener */
+  if (UI.po3_4hToggle) {
+    UI.po3_4hToggle.addEventListener("change", () => {
+      po3_4hEnabled = UI.po3_4hToggle.checked;
+      saveSettings();
+      if (po3_4hEnabled) {
+        addLog("🕓 4H PO3 Liquidity Play enabled — scanning for 4H accumulation → manipulation → CISD setups");
+        showToast("4H PO3 Enabled", "Scanning for 4H Power of 3 setups with accumulation, manipulation, and CISD confirmation.", "info", 5000);
+      } else {
+        addLog("🕓 4H PO3 Liquidity Play disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradePo3_4hToggle) {
+    UI.autoTradePo3_4hToggle.addEventListener("change", () => {
+      autoTradePo3_4h = UI.autoTradePo3_4hToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 16: 1H Accumulation Breaker Block listener */
+  if (UI.breakerBlockToggle) {
+    UI.breakerBlockToggle.addEventListener("change", () => {
+      breakerBlockEnabled = UI.breakerBlockToggle.checked;
+      saveSettings();
+      if (breakerBlockEnabled) {
+        addLog("🧱 Breaker Block Scalping enabled — scanning for 1H accumulation + liquidity sweep + breaker block retests");
+        showToast("Breaker Block Enabled", "Scanning for 1H accumulation candle sweeps with breaker block retest entries.", "info", 5000);
+      } else {
+        addLog("🧱 Breaker Block Scalping disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeBreakerBlockToggle) {
+    UI.autoTradeBreakerBlockToggle.addEventListener("change", () => {
+      autoTradeBreakerBlock = UI.autoTradeBreakerBlockToggle.checked;
       saveSettings();
     });
   }

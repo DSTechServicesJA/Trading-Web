@@ -16683,6 +16683,7 @@ function applyStrategyAccess() {
     { id: "fvgStratToggle",        key: "fvg_strat",        fn: () => { fvgStratEnabled       = false; } },
     { id: "liveScalpToggle",       key: "live_scalp",       fn: () => { liveScalpEnabled      = false; } },
     { id: "mtfTopDownToggle",      key: "mtf_top_down",     fn: () => { mtfTopDownEnabled     = false; } },
+    { id: "orderblockToggle",      key: "orderblock",       fn: () => { orderblockEnabled     = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {

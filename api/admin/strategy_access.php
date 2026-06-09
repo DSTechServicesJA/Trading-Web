@@ -41,7 +41,7 @@ $validKeys = [
     'liquidity_sweep', 'stop_loss_hunt', 'failed_pin_bar', 'fib_scalp',
     'po3', 'ny_open_range', 'session_ranges', 'grid_scalper_ma',
     'fvg_strat', 'live_scalp', 'mtf_top_down', 'indicator_v2', 'tiktok',
-    'candle_interp', 'orderblock',
+    'candle_interp', 'orderblock', 'po3_4h', 'breaker_block',
 ];
 if (!in_array($stratKey, $validKeys, true)) {
     jsonResponse(['error' => 'Unknown strategy_key'], 400);
