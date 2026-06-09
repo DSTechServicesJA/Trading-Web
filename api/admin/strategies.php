@@ -40,5 +40,6 @@ jsonResponse([
         ['key' => 'orderblock',       'label' => 'Orderblock'],
         ['key' => 'po3_4h',          'label' => 'Power of 3 – 4H'],
         ['key' => 'breaker_block',   'label' => 'Breaker Block'],
+        ['key' => 'ote_golden_pocket','label' => 'OTE Golden Pocket'],
     ],
 ]);

@@ -1922,6 +1922,26 @@ const BREAKER_ACCUM_BODY_PCT = 0.65; /* accumulation candle body must be ≥ 65%
 const BREAKER_ACCUM_WICK_PCT = 0.20; /* each wick must be ≤ 20% of range */
 const BREAKER_SWEEP_ATR_MULT = 0.15; /* min sweep distance beyond level */
 
+/* ================= STRATEGY 17: OTE GOLDEN POCKET ================= */
+/**
+ * OTE (Optimal Trade Entry) — Golden Pocket Strategy
+ * Enters at the Fibonacci 0.705 retracement level within the Golden Pocket
+ * zone (0.705–0.786) after a clear expansion leg with confluence confirmation.
+ */
+let oteGoldenPocketEnabled = false;   /* master toggle */
+let oteGoldenPocketHistory = [];      /* alert history */
+let lastOteGoldenPocketIdx = -999;
+let autoTradeOteGoldenPocket = true;
+const OTE_MAX_HISTORY = 30;
+const OTE_COOLDOWN = 8;              /* min candles between alerts */
+const OTE_MAX_CANDLES = 60;          /* trade monitoring timeout */
+const OTE_FIB_LEVELS = [0, 0.5, 0.705, 0.786, 1.0];
+const OTE_ENTRY_LEVEL = 0.705;
+const OTE_GOLDEN_LOW = 0.705;
+const OTE_GOLDEN_HIGH = 0.786;
+const OTE_MIN_EXPANSION_ATR = 2.0;   /* min expansion leg in ATR multiples */
+const OTE_MIN_RR = 3.0;             /* minimum R:R ratio */
+
 /* ================= FEATURE: SESSION HEATMAP (17) ================= */
 let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
 
@@ -2234,6 +2254,12 @@ function initUI() {
   UI.breakerBlockAlertList       = document.getElementById("breakerBlockAlertList");
   UI.breakerBlockAlertCount      = document.getElementById("breakerBlockAlertCount");
   UI.autoTradeBreakerBlockToggle = document.getElementById("autoTradeBreakerBlockToggle");
+
+  /* Strategy 17: OTE Golden Pocket */
+  UI.oteGoldenPocketToggle       = document.getElementById("oteGoldenPocketToggle");
+  UI.oteGoldenPocketAlertList    = document.getElementById("oteGoldenPocketAlertList");
+  UI.oteGoldenPocketAlertCount   = document.getElementById("oteGoldenPocketAlertCount");
+  UI.autoTradeOteGoldenPocketToggle = document.getElementById("autoTradeOteGoldenPocketToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -3588,6 +3614,7 @@ function buildTelegramCaption() {
   if (po3Enabled) filters.push("Power of 3");
   if (po3_4hEnabled) filters.push("4H PO3");
   if (breakerBlockEnabled) filters.push("Breaker Block");
+  if (oteGoldenPocketEnabled) filters.push("OTE Golden Pocket");
   if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
@@ -4668,6 +4695,9 @@ function saveSettings() {
       autoTradePo3_4h,
       breakerBlockEnabled,
       autoTradeBreakerBlock,
+      /* Strategy 17: OTE Golden Pocket */
+      oteGoldenPocketEnabled,
+      autoTradeOteGoldenPocket,
       /* Feature settings */
       orderblockEnabled,
       autoTradeOrderblock,
@@ -4905,6 +4935,12 @@ function restoreSettings() {
     if (UI.breakerBlockToggle) UI.breakerBlockToggle.checked = breakerBlockEnabled;
     if (s.autoTradeBreakerBlock != null) autoTradeBreakerBlock = s.autoTradeBreakerBlock;
     if (UI.autoTradeBreakerBlockToggle) UI.autoTradeBreakerBlockToggle.checked = autoTradeBreakerBlock;
+
+    /* Strategy 17: OTE Golden Pocket */
+    if (s.oteGoldenPocketEnabled != null) oteGoldenPocketEnabled = s.oteGoldenPocketEnabled;
+    if (UI.oteGoldenPocketToggle) UI.oteGoldenPocketToggle.checked = oteGoldenPocketEnabled;
+    if (s.autoTradeOteGoldenPocket != null) autoTradeOteGoldenPocket = s.autoTradeOteGoldenPocket;
+    if (UI.autoTradeOteGoldenPocketToggle) UI.autoTradeOteGoldenPocketToggle.checked = autoTradeOteGoldenPocket;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -5209,7 +5245,8 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" },
     { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" },
     { id: "stratWR_po3_4h",         history: po3_4hHistory,          label: "🕓 4H PO3" },
-    { id: "stratWR_breakerBlock",   history: breakerBlockHistory,    label: "🧱 Breaker Block" }
+    { id: "stratWR_breakerBlock",   history: breakerBlockHistory,    label: "🧱 Breaker Block" },
+    { id: "stratWR_oteGoldenPocket", history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -5475,7 +5512,8 @@ function getAggregatedStrategyHistory() {
     { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
     { history: candleInterpHistory,   label: "🕯 Candle Interp" },
     { history: orderblockHistory,     label: "🏦 Orderblock" },
-    { history: tiktokHistory,         label: "📈 TikTok Fib" }
+    { history: tiktokHistory,         label: "📈 TikTok Fib" },
+    { history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" }
   ];
 
   if (multiPanels.size === 0) {
@@ -5504,7 +5542,8 @@ function getAggregatedStrategyHistory() {
       { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" },
       { history: p.candleInterpHistory   || [], label: "🕯 Candle Interp" },
       { history: p.orderblockHistory     || [], label: "🏦 Orderblock" },
-      { history: p.tiktokHistory         || [], label: "📈 TikTok Fib" }
+      { history: p.tiktokHistory         || [], label: "📈 TikTok Fib" },
+      { history: p.oteGoldenPocketHistory || [], label: "🎯 OTE Golden Pocket" }
     ];
     for (const { history, label } of panelHistories) {
       for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
@@ -7410,7 +7449,8 @@ function remapPendingSignalIndices() {
     liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
     fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory,
     nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
-    tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory
+    tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory,
+    oteGoldenPocketHistory
   ];
   let remapped = 0;
   for (const hist of allHistories) {
@@ -10586,12 +10626,15 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.po3_4hAlertList, UI.po3_4hAlertCount, po3_4hHistory, "🕓", "4H PO3");
   /* Breaker Block Scalping */
   _renderAlertList(UI.breakerBlockAlertList, UI.breakerBlockAlertCount, breakerBlockHistory, "🧱", "Breaker Block");
+  /* OTE Golden Pocket */
+  _renderAlertList(UI.oteGoldenPocketAlertList, UI.oteGoldenPocketAlertCount, oteGoldenPocketHistory, "🎯", "OTE Golden Pocket");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
     + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
-    + tiktokHistory.length + po3_4hHistory.length + breakerBlockHistory.length;
+    + tiktokHistory.length + po3_4hHistory.length + breakerBlockHistory.length
+    + oteGoldenPocketHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -11366,6 +11409,323 @@ function monitorBreakerBlockOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 17: OTE GOLDEN POCKET ================= */
+/**
+ * Detect an OTE (Optimal Trade Entry) Golden Pocket signal.
+ *
+ * Logic:
+ *   1. Find a clear expansion leg (high → low for SHORT, low → high for LONG).
+ *   2. Draw Fibonacci retracement on the expansion leg.
+ *   3. Wait for price to retrace to the 0.705 level (Golden Pocket zone: 0.705–0.786).
+ *   4. Confirm with at least ONE confluence factor (FVG, rejection wick, structure shift).
+ *   5. Enter at 0.705 level.
+ *   6. SL between 0.786 and 1.0 level.
+ *   7. TP at 0 level (full cycle completion) with minimum 1:3 R:R.
+ *
+ * Returns null or signal object.
+ */
+function detectOteGoldenPocket() {
+  if (!oteGoldenPocketEnabled) return null;
+
+  /* One-at-a-time */
+  if (oteGoldenPocketHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < 30) return null;
+
+  const idx = len - 1;
+  if (idx - lastOteGoldenPocketIdx < OTE_COOLDOWN) return null;
+
+  const c = candles[idx];
+  if (atrValue <= 0) return null;
+
+  /* --- Step 1: Identify expansion legs --- */
+  /* Look back for significant swing high and swing low to define expansion leg */
+  const lookback = Math.min(50, len - 1);
+  let swingHigh = -Infinity, swingHighIdx = -1;
+  let swingLow = Infinity, swingLowIdx = -1;
+
+  for (let i = idx - lookback; i <= idx - 3; i++) {
+    if (i < 0) continue;
+    if (candles[i].high > swingHigh) { swingHigh = candles[i].high; swingHighIdx = i; }
+    if (candles[i].low < swingLow)   { swingLow = candles[i].low;   swingLowIdx = i; }
+  }
+
+  const expansion = swingHigh - swingLow;
+  if (expansion < atrValue * OTE_MIN_EXPANSION_ATR) return null;
+
+  /* Determine direction based on which extreme came first */
+  let dir = null;
+  let fibHigh, fibLow;
+
+  if (swingLowIdx < swingHighIdx) {
+    /* Low came first → upward expansion → looking for LONG on retracement */
+    dir = "BULL";
+    fibLow = swingLow;
+    fibHigh = swingHigh;
+  } else if (swingHighIdx < swingLowIdx) {
+    /* High came first → downward expansion → looking for SHORT on retracement */
+    dir = "BEAR";
+    fibHigh = swingHigh;
+    fibLow = swingLow;
+  } else {
+    return null;
+  }
+
+  /* --- Step 2: Calculate Fibonacci levels --- */
+  const range = fibHigh - fibLow;
+  let fib0705, fib0786, fib0, fib1;
+
+  if (dir === "BULL") {
+    /* For bullish: fib drawn from LOW to HIGH, retracement goes down */
+    fib0 = fibHigh;    /* target (extension beyond high) */
+    fib1 = fibLow;     /* full retracement */
+    fib0705 = fibHigh - range * OTE_ENTRY_LEVEL;
+    fib0786 = fibHigh - range * OTE_GOLDEN_HIGH;
+  } else {
+    /* For bearish: fib drawn from HIGH to LOW, retracement goes up */
+    fib0 = fibLow;     /* target (extension beyond low) */
+    fib1 = fibHigh;    /* full retracement */
+    fib0705 = fibLow + range * OTE_ENTRY_LEVEL;
+    fib0786 = fibLow + range * OTE_GOLDEN_HIGH;
+  }
+
+  /* --- Step 3: Check if current price is in Golden Pocket zone (0.705–0.786) --- */
+  let inGoldenPocket = false;
+  if (dir === "BULL") {
+    /* Price should be between fib0786 (lower) and fib0705 (higher) for bullish retracement */
+    inGoldenPocket = c.low <= fib0705 && c.close >= fib0786 && c.close <= fib0705;
+  } else {
+    /* Price should be between fib0705 (lower) and fib0786 (higher) for bearish retracement */
+    inGoldenPocket = c.high >= fib0705 && c.close <= fib0786 && c.close >= fib0705;
+  }
+
+  if (!inGoldenPocket) return null;
+
+  /* --- Step 4: Confluence confirmation --- */
+  const confluenceFactors = [];
+
+  /* Check for rejection wick */
+  const bodySize = Math.abs(c.close - c.open);
+  const totalRange = c.high - c.low;
+  if (totalRange > 0) {
+    if (dir === "BULL") {
+      const lowerWick = Math.min(c.open, c.close) - c.low;
+      if (lowerWick > bodySize * 1.5 && lowerWick > totalRange * 0.4) {
+        confluenceFactors.push("Rejection Wick");
+      }
+    } else {
+      const upperWick = c.high - Math.max(c.open, c.close);
+      if (upperWick > bodySize * 1.5 && upperWick > totalRange * 0.4) {
+        confluenceFactors.push("Rejection Wick");
+      }
+    }
+  }
+
+  /* Check for FVG (Fair Value Gap) in recent candles */
+  if (idx >= 2) {
+    const c1 = candles[idx - 2];
+    const c2 = candles[idx - 1];
+    if (dir === "BULL") {
+      /* Bullish FVG: gap between c1 high and current low */
+      if (c1.high < c.low) confluenceFactors.push("FVG");
+    } else {
+      /* Bearish FVG: gap between c1 low and current high */
+      if (c1.low > c.high) confluenceFactors.push("FVG");
+    }
+  }
+
+  /* Check for market structure shift (BOS/CHOCH in last 5 candles) */
+  if (idx >= 5) {
+    let structureShift = false;
+    for (let i = idx - 4; i <= idx; i++) {
+      if (dir === "BULL" && candles[i].close > candles[i - 1].high && candles[i - 1].close < candles[i - 2].low) {
+        structureShift = true; break;
+      }
+      if (dir === "BEAR" && candles[i].close < candles[i - 1].low && candles[i - 1].close > candles[i - 2].high) {
+        structureShift = true; break;
+      }
+    }
+    if (structureShift) confluenceFactors.push("Structure Shift");
+  }
+
+  /* Check for standard deviation level (Bollinger band touch) */
+  /* Simplified: price near the boundary of recent range */
+  if (idx >= 20) {
+    let sumClose = 0;
+    for (let i = idx - 19; i <= idx; i++) sumClose += candles[i].close;
+    const mean = sumClose / 20;
+    let sumSqDiff = 0;
+    for (let i = idx - 19; i <= idx; i++) sumSqDiff += Math.pow(candles[i].close - mean, 2);
+    const stdDev = Math.sqrt(sumSqDiff / 20);
+    if (dir === "BULL" && c.low <= mean - stdDev * 1.5) confluenceFactors.push("Std Dev Level");
+    if (dir === "BEAR" && c.high >= mean + stdDev * 1.5) confluenceFactors.push("Std Dev Level");
+  }
+
+  /* Must have at least ONE confluence factor */
+  if (confluenceFactors.length === 0) return null;
+
+  /* --- Step 5: Calculate entry, SL, TP --- */
+  const entry = fib0705;
+  /* SL between 0.786 and 1.0: place at midpoint for safety */
+  const sl = dir === "BULL"
+    ? fib0786 - (fib0786 - fib1) * 0.5
+    : fib0786 + (fib1 - fib0786) * 0.5;
+  /* TP at the 0 level (full cycle target) */
+  const tp = fib0;
+
+  const risk = Math.abs(entry - sl);
+  const reward = Math.abs(tp - entry);
+  if (risk <= 0) return null;
+  const rr = reward / risk;
+
+  /* Enforce minimum R:R */
+  if (rr < OTE_MIN_RR) return null;
+
+  return {
+    dir,
+    entry,
+    sl,
+    tp,
+    rr,
+    fibHigh,
+    fibLow,
+    fib0705,
+    fib0786,
+    fib0,
+    fib1,
+    confluence: confluenceFactors,
+    candleIdx: idx,
+    epoch: c.epoch,
+    symbol: getActiveSymbol(),
+    result: "PENDING",
+    type: "ote_golden_pocket",
+    _origSl: sl
+  };
+}
+
+/**
+ * Run the OTE Golden Pocket scanner and handle alerting.
+ */
+function processOteGoldenPocket() {
+  const signal = detectOteGoldenPocket();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ OTE Golden Pocket REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastOteGoldenPocketIdx = signal.candleIdx;
+
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  oteGoldenPocketHistory.unshift(signal);
+  if (oteGoldenPocketHistory.length > OTE_MAX_HISTORY) oteGoldenPocketHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  const biasLabel = signal.dir === "BULL" ? "Bullish OTE Active" : "Bearish OTE Active";
+  addLog(`🎯 OTE Golden Pocket ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | ${biasLabel} | Fib [${fmtPrice(signal.fibLow, sym)}–${fmtPrice(signal.fibHigh, sym)}] | Golden Pocket [${fmtPrice(signal.fib0705, sym)}–${fmtPrice(signal.fib0786, sym)}] | SL ${fmtPrice(signal.sl, sym)} | TP ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)} | Confluence: ${signal.confluence.join(", ")}`);
+
+  showToast(
+    `OTE ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${biasLabel}`,
+    `${sym} @ ${fmtPrice(signal.entry, sym)} | Golden Pocket [${fmtPrice(signal.fib0705, sym)}–${fmtPrice(signal.fib0786, sym)}] | SL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}\nConfluence: ${signal.confluence.join(", ")}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🎯 OTE Entry Triggered — ${signal.dir === "BULL" ? "LONG" : "SHORT"} ${sym} @ ${fmtPrice(signal.entry, sym)}\nGolden Pocket: [${fmtPrice(signal.fib0705, sym)}–${fmtPrice(signal.fib0786, sym)}]\nSL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}\nConfluence: ${signal.confluence.join(", ")}`;
+    throttledNotification("IT Guru: OTE Entry Triggered!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeOteGoldenPocket && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "ote_golden_pocket" });
+  }
+}
+
+/**
+ * Monitor pending OTE Golden Pocket signals for SL/TP outcome.
+ */
+function monitorOteGoldenPocketOutcomes(candle) {
+  if (!oteGoldenPocketEnabled) return;
+  let changed = false;
+  for (const s of oteGoldenPocketHistory) {
+    if (s.result !== "PENDING") continue;
+
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed < 0 || elapsed >= OTE_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true; continue;
+    }
+
+    /* Partial TP at 1R */
+    if (partialTpEnabled && !s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s._reached1R = true;
+        s.sl = s.entry;
+        addLog(`🎯 OTE Golden Pocket Partial TP hit (1R) — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)}`);
+        changed = true;
+        continue;
+      }
+    }
+
+    /* Check SL hit */
+    if (s.dir === "BULL" && candle.low <= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    } else if (s.dir === "BEAR" && candle.high >= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    }
+    /* Check TP hit */
+    else if (s.dir === "BULL" && candle.high >= s.tp) {
+      s.result = "WIN"; changed = true;
+    } else if (s.dir === "BEAR" && candle.low <= s.tp) {
+      s.result = "WIN"; changed = true;
+    }
+
+    /* Profit exit alert */
+    if (s.result === "PENDING" && telegramProfitExitAlertEnabled) {
+      _checkProfitExitAlert(s, candle, "OTE Golden Pocket");
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of oteGoldenPocketHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    if (adaptiveConfluenceEnabled) {
+      for (const s of oteGoldenPocketHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
+  }
+}
+
 /* ================= STRATEGY 8: GRID SCALPER MA ================= */
 /**
  * Detect a Grid Scalper MA signal.
@@ -12029,6 +12389,8 @@ function processCustomStrategies() {
   processPo3_4h();
   /* Strategy 16: 1H Accumulation Breaker Block */
   processBreakerBlock();
+  /* Strategy 17: OTE Golden Pocket */
+  processOteGoldenPocket();
 }
 
 /**
@@ -12052,6 +12414,8 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorPo3_4hOutcomes(candle);
   /* Strategy 16: Breaker Block Scalping */
   monitorBreakerBlockOutcomes(candle);
+  /* Strategy 17: OTE Golden Pocket */
+  monitorOteGoldenPocketOutcomes(candle);
   /* Feature 15: Multi-R ladder */
   monitorMultiRLadder(candles.length - 1);
 }
@@ -19864,6 +20228,91 @@ function drawChart() {
   }
 
   /* ---- Selected signal overlay from LIVE SIGNALS card click (display-only) ---- */
+  /* ---- OTE Golden Pocket chart overlay ---- */
+  if (oteGoldenPocketEnabled) {
+    const pendingOte = oteGoldenPocketHistory.find(s => s.result === "PENDING" && s.symbol === getActiveSymbol());
+    if (pendingOte) {
+      const sym = getActiveSymbol();
+      const range = pendingOte.fibHigh - pendingOte.fibLow;
+
+      /* Golden Pocket zone shading (0.705–0.786) */
+      const gpTopY = yOf(pendingOte.dir === "BULL" ? pendingOte.fib0705 : pendingOte.fib0786);
+      const gpBotY = yOf(pendingOte.dir === "BULL" ? pendingOte.fib0786 : pendingOte.fib0705);
+      ctx.fillStyle = "rgba(251,191,36,0.15)";
+      ctx.fillRect(marginLeft, Math.min(gpTopY, gpBotY), chartW, Math.abs(gpBotY - gpTopY));
+
+      /* Fibonacci level lines */
+      const fibLevels = [
+        { level: 0,     price: pendingOte.fib0, label: "Fib 0 (Target)" },
+        { level: 0.5,   price: pendingOte.dir === "BULL" ? pendingOte.fibHigh - range * 0.5 : pendingOte.fibLow + range * 0.5, label: "Fib 0.5" },
+        { level: 0.705, price: pendingOte.fib0705, label: "Fib 0.705 ✅ OTE Entry" },
+        { level: 0.786, price: pendingOte.fib0786, label: "Fib 0.786" },
+        { level: 1.0,   price: pendingOte.fib1, label: "Fib 1.0" }
+      ];
+
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      for (const fl of fibLevels) {
+        const y = yOf(fl.price);
+        const color = fl.level === 0.705 ? "rgba(251,191,36,0.9)" : "rgba(148,163,184,0.5)";
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(marginLeft, y);
+        ctx.lineTo(W - marginRight, y);
+        ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.font = fl.level === 0.705 ? "bold 10px Arial" : "10px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(`${fl.label} — ${fmtPrice(fl.price, sym)}`, marginLeft + 4, y - 4);
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      /* Entry marker */
+      drawHLine(ctx, yOf(pendingOte.entry), marginLeft, W - marginRight, "rgba(251,191,36,0.85)", "OTE Entry " + fmtPrice(pendingOte.entry, sym), W, marginRight);
+
+      /* SL marker */
+      drawHLine(ctx, yOf(pendingOte.sl), marginLeft, W - marginRight, "rgba(239,68,68,0.75)", "SL " + fmtPrice(pendingOte.sl, sym), W, marginRight);
+
+      /* TP marker */
+      drawHLine(ctx, yOf(pendingOte.tp), marginLeft, W - marginRight, "rgba(34,197,94,0.75)", "TP " + fmtPrice(pendingOte.tp, sym), W, marginRight);
+
+      /* Bias label */
+      const biasText = pendingOte.dir === "BULL" ? "Bullish OTE Active" : "Bearish OTE Active";
+      ctx.save();
+      ctx.font = "bold 12px Arial";
+      ctx.fillStyle = pendingOte.dir === "BULL" ? "#22c55e" : "#ef4444";
+      ctx.textAlign = "right";
+      ctx.fillText(biasText, W - marginRight - 8, yOf(pendingOte.entry) - 16);
+      ctx.restore();
+
+      /* Trade Info Box */
+      ctx.save();
+      const boxX = marginLeft + 10;
+      const boxY = 60;
+      const boxW = 200;
+      const boxH = 100;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.strokeStyle = "rgba(251,191,36,0.6)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText("🎯 OTE Strategy", boxX + 8, boxY + 14);
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "10px Arial";
+      ctx.fillText(`Direction: ${pendingOte.dir === "BULL" ? "LONG" : "SHORT"}`, boxX + 8, boxY + 30);
+      ctx.fillText(`Entry: ${fmtPrice(pendingOte.entry, sym)}`, boxX + 8, boxY + 44);
+      ctx.fillText(`Stop Loss: ${fmtPrice(pendingOte.sl, sym)}`, boxX + 8, boxY + 58);
+      ctx.fillText(`Target: ${fmtPrice(pendingOte.tp, sym)}`, boxX + 8, boxY + 72);
+      ctx.fillText(`R:R 1:${fmt(pendingOte.rr, 1)}`, boxX + 8, boxY + 86);
+      ctx.restore();
+    }
+  }
+
   if (selectedSignalOverlay && selectedSignalOverlay.symbol === getActiveSymbol()) {
     const sameAsActiveTrade = trade && areTradeLevelsEqual(selectedSignalOverlay, trade);
     if (!sameAsActiveTrade) {
@@ -20743,6 +21192,7 @@ function applyStrategyAccess() {
     { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
     { id: "po3_4hToggle",          key: "po3_4h",           fn: () => { po3_4hEnabled         = false; } },
     { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
+    { id: "oteGoldenPocketToggle", key: "ote_golden_pocket", fn: () => { oteGoldenPocketEnabled = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -20789,6 +21239,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-tiktok",         toggleId: "tiktokToggle",         enabled: tiktokEnabled         },
     { badgeId: "stratBadge-po3_4h",         toggleId: "po3_4hToggle",         enabled: po3_4hEnabled         },
     { badgeId: "stratBadge-breakerBlock",   toggleId: "breakerBlockToggle",   enabled: breakerBlockEnabled   },
+    { badgeId: "stratBadge-oteGoldenPocket", toggleId: "oteGoldenPocketToggle", enabled: oteGoldenPocketEnabled },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -23112,6 +23563,27 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeBreakerBlockToggle) {
     UI.autoTradeBreakerBlockToggle.addEventListener("change", () => {
       autoTradeBreakerBlock = UI.autoTradeBreakerBlockToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 17: OTE Golden Pocket listener */
+  if (UI.oteGoldenPocketToggle) {
+    UI.oteGoldenPocketToggle.addEventListener("change", () => {
+      oteGoldenPocketEnabled = UI.oteGoldenPocketToggle.checked;
+      saveSettings();
+      if (oteGoldenPocketEnabled) {
+        addLog("🎯 OTE Golden Pocket enabled — scanning for Fibonacci 0.705 retracement entries in expansion legs");
+        showToast("OTE Golden Pocket Enabled", "Scanning for Optimal Trade Entry setups at the 0.705 Fibonacci retracement level.", "info", 5000);
+      } else {
+        addLog("🎯 OTE Golden Pocket disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeOteGoldenPocketToggle) {
+    UI.autoTradeOteGoldenPocketToggle.addEventListener("change", () => {
+      autoTradeOteGoldenPocket = UI.autoTradeOteGoldenPocketToggle.checked;
       saveSettings();
     });
   }
