@@ -20741,6 +20741,8 @@ function applyStrategyAccess() {
     { id: "candleInterpToggle",    key: "candle_interp",    fn: () => { candleInterpEnabled   = false; } },
     { id: "orderblockToggle",      key: "orderblock",       fn: () => { orderblockEnabled     = false; } },
     { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
+    { id: "po3_4hToggle",          key: "po3_4h",           fn: () => { po3_4hEnabled         = false; } },
+    { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {

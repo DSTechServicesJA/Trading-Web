@@ -38,5 +38,7 @@ jsonResponse([
         ['key' => 'tiktok',           'label' => 'TikTok Fibonacci'],
         ['key' => 'candle_interp',    'label' => 'Candle Interpretation'],
         ['key' => 'orderblock',       'label' => 'Orderblock'],
+        ['key' => 'po3_4h',          'label' => 'Power of 3 – 4H'],
+        ['key' => 'breaker_block',   'label' => 'Breaker Block'],
     ],
 ]);
