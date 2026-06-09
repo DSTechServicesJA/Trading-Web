@@ -557,6 +557,8 @@
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeMtfTopDownToggle" checked /> ⏱ MTF Top-Down</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeCandleInterpToggle" checked /> 🕯 Candle Interp</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeOrderblockToggle" checked /> 🏦 Orderblock</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradePo3_4hToggle" checked /> 🕓 4H PO3</label>
+            <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeBreakerBlockToggle" checked /> 🧱 Breaker Block</label>
             <label class="toggle-row toggle-row-sub"><input type="checkbox" id="autoTradeStrategyOppositeToggle" /> 🔄 Opposite Mode (Strategy)</label>
             <p class="hint" style="margin-bottom:10px;">Reverse the strategy signal direction — if signal says BUY, place SELL and vice versa.</p>
 
@@ -760,6 +762,20 @@
                   <span class="strat-enable-icon">📈</span>
                   <span class="strat-enable-name">TikTok Fib (S13)</span>
                   <span class="strat-enable-badge off" id="stratBadge-tiktok">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="po3_4hToggle" />
+                  <span class="strat-enable-icon">🕓</span>
+                  <span class="strat-enable-name">4H PO3 (S15)</span>
+                  <span class="strat-enable-badge off" id="stratBadge-po3_4h">OFF</span>
+                </label>
+
+                <label class="strat-enable-row">
+                  <input type="checkbox" id="breakerBlockToggle" />
+                  <span class="strat-enable-icon">🧱</span>
+                  <span class="strat-enable-name">Breaker Block (S16)</span>
+                  <span class="strat-enable-badge off" id="stratBadge-breakerBlock">OFF</span>
                 </label>
 
               </div>
@@ -1006,6 +1022,14 @@
               <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
               <p class="hint">ICT-style supply &amp; demand strategy using Fair Value Gaps as confluence. Detects a "big push" (3+ consecutive strong candles) that leaves FVG imbalances, then marks the origin candle (the demand/supply zone <em>before</em> the push). Waits for price to retrace back into that zone at a Fibonacci discount (&lt;50% retracement), confirms with a bullish/bearish engulfing pattern, and enters in the direction of the original push. SL below the demand zone (or above supply). TP at the recent swing high/low. Requires EMA trend alignment. Works on any timeframe.</p>
 
+              <hr class="param-divider" />
+              <p class="param-group-title">🕓 Strategy 15: 4H Power of 3 (HDF PO3) Liquidity Play</p>
+              <p class="hint">Uses the HDF Power 3 indicator concept on 4H candle structure. Identifies the 4H candle open, detects accumulation (sideways), manipulation (liquidity sweep below/above accumulation), and distribution via CISD (Change in State of Delivery) — a displacement candle that shifts structure back in the HTF bias direction. Entry after CISD confirmation. SL below the manipulation low (bullish) / above manipulation high (bearish). TP at minimum 2:1 R:R or nearest liquidity (4H candle high/low). Only trades in the direction of higher-timeframe EMA bias.</p>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🧱 Strategy 16: 1H Accumulation Break + Breaker Block Scalping</p>
+              <p class="hint">Identifies 1H accumulation candles (large body, small wicks) and marks their high/low as liquidity targets. On the execution timeframe, waits for a liquidity sweep (break above high or below low), then identifies a breaker block structure: Bullish breaker = Low → High → Lower Low → Higher High (after low swept); Bearish breaker = High → Low → Higher High → Lower Low (after high swept). Enters on retest of the breaker block zone. SL just beyond breaker extreme. TP at 2:1 R:R. Designed for fast scalping execution.</p>
+
             </div>
           </section>
 
@@ -1071,6 +1095,16 @@
               <p class="param-group-title">📈 TikTok Fib Alerts</p>
               <ul id="tiktokAlertList" class="scalp-alert-list"></ul>
               <span id="tiktokCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🕓 4H PO3 Liquidity Play Alerts</p>
+              <ul id="po3_4hAlertList" class="scalp-alert-list"></ul>
+              <span id="po3_4hAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">🧱 Breaker Block Alerts</p>
+              <ul id="breakerBlockAlertList" class="scalp-alert-list"></ul>
+              <span id="breakerBlockAlertCount" style="display:none;">0</span>
 
               <p class="hint" style="margin-top:6px;">Recent signals from all custom strategies. Each shows direction, entry, SL/TP, and outcome status.</p>
             </div>
@@ -1623,6 +1657,8 @@
               <div id="stratWR_mtfTopDown" class="strat-wr-row" data-label="⏱ MTF Top-Down"></div>
               <div id="stratWR_orderblock" class="strat-wr-row" data-label="🏦 Orderblock"></div>
               <div id="stratWR_tiktok" class="strat-wr-row" data-label="📈 TikTok Fib"></div>
+              <div id="stratWR_po3_4h" class="strat-wr-row" data-label="🕓 4H PO3"></div>
+              <div id="stratWR_breakerBlock" class="strat-wr-row" data-label="🧱 Breaker Block"></div>
             </div>
           </section>
 
