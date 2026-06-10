@@ -5512,7 +5512,9 @@ function getAggregatedStrategyHistory() {
     { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
     { history: candleInterpHistory,   label: "🕯 Candle Interp" },
     { history: orderblockHistory,     label: "🏦 Orderblock" },
-    { history: tiktokHistory,         label: "📈 TikTok Fib" },
+    { history: tiktokHistory,          label: "📈 TikTok Fib" },
+    { history: po3_4hHistory,          label: "🕓 4H PO3" },
+    { history: breakerBlockHistory,    label: "🧱 Breaker Block" },
     { history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" }
   ];
 
@@ -5530,19 +5532,21 @@ function getAggregatedStrategyHistory() {
   const all = [];
   for (const p of multiPanels.values()) {
     const panelHistories = [
-      { history: p.liquiditySweepHistory || [], label: "🌊 Liquidity Sweep" },
-      { history: p.stopLossHuntHistory   || [], label: "🎯 Stop Loss Hunt" },
-      { history: p.failedPinBarHistory   || [], label: "📌 Failed Pin Bar" },
-      { history: p.fibScalpHistory       || [], label: "📐 Fib Golden Zone" },
-      { history: p.po3History            || [], label: "⚡ Power of 3" },
-      { history: p.nyOpenRangeHistory    || [], label: "🕤 NY Open Range" },
-      { history: p.sessionRangeHistory   || [], label: "🌍 Session Range" },
-      { history: p.gridScalperMAHistory  || [], label: "🔲 Grid Scalper MA" },
-      { history: p.fvgStratHistory       || [], label: "🎯 Fair Value Gap" },
-      { history: p.mtfTopDownHistory     || [], label: "⏱ MTF Top-Down" },
-      { history: p.candleInterpHistory   || [], label: "🕯 Candle Interp" },
-      { history: p.orderblockHistory     || [], label: "🏦 Orderblock" },
-      { history: p.tiktokHistory         || [], label: "📈 TikTok Fib" },
+      { history: p.liquiditySweepHistory  || [], label: "🌊 Liquidity Sweep" },
+      { history: p.stopLossHuntHistory    || [], label: "🎯 Stop Loss Hunt" },
+      { history: p.failedPinBarHistory    || [], label: "📌 Failed Pin Bar" },
+      { history: p.fibScalpHistory        || [], label: "📐 Fib Golden Zone" },
+      { history: p.po3History             || [], label: "⚡ Power of 3" },
+      { history: p.nyOpenRangeHistory     || [], label: "🕤 NY Open Range" },
+      { history: p.sessionRangeHistory    || [], label: "🌍 Session Range" },
+      { history: p.gridScalperMAHistory   || [], label: "🔲 Grid Scalper MA" },
+      { history: p.fvgStratHistory        || [], label: "🎯 Fair Value Gap" },
+      { history: p.mtfTopDownHistory      || [], label: "⏱ MTF Top-Down" },
+      { history: p.candleInterpHistory    || [], label: "🕯 Candle Interp" },
+      { history: p.orderblockHistory      || [], label: "🏦 Orderblock" },
+      { history: p.tiktokHistory          || [], label: "📈 TikTok Fib" },
+      { history: p.po3_4hHistory          || [], label: "🕓 4H PO3" },
+      { history: p.breakerBlockHistory    || [], label: "🧱 Breaker Block" },
       { history: p.oteGoldenPocketHistory || [], label: "🎯 OTE Golden Pocket" }
     ];
     for (const { history, label } of panelHistories) {
@@ -7450,7 +7454,7 @@ function remapPendingSignalIndices() {
     fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory,
     nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
     tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory,
-    oteGoldenPocketHistory
+    po3_4hHistory, breakerBlockHistory, oteGoldenPocketHistory
   ];
   let remapped = 0;
   for (const hist of allHistories) {
@@ -14320,7 +14324,8 @@ async function sendStrategyOutcomeTelegram(signal) {
     const allStratHistories = [
       liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
       po3History, fibScalpHistory, gridScalperMAHistory,
-      nyOpenRangeHistory, sessionRangeHistory, fvgStratHistory, tiktokHistory
+      nyOpenRangeHistory, sessionRangeHistory, fvgStratHistory, tiktokHistory,
+      po3_4hHistory, breakerBlockHistory, oteGoldenPocketHistory
     ];
     /* Per-strategy breakdown for this specific strategy.
        Note: this function is only called for secondary strategies — the main breakout
@@ -14336,7 +14341,10 @@ async function sendStrategyOutcomeTelegram(signal) {
       : signal.type === "session_range" ? sessionRangeHistory
       : signal.type === "power_of_3" ? po3History
       : signal.type === "fvg_strat" ? fvgStratHistory
-      : signal.type === "tiktok" ? tiktokHistory : null;
+      : signal.type === "tiktok" ? tiktokHistory
+      : signal.type === "po3_4h" ? po3_4hHistory
+      : signal.type === "breaker_block" ? breakerBlockHistory
+      : signal.type === "ote_golden_pocket" ? oteGoldenPocketHistory : null;
     for (const h of allStratHistories) {
       const isThis = h === thisHistory;
       for (const s of h) {
@@ -21554,6 +21562,13 @@ function activatePanel(p) {
   lastOrderblockIdx     = p.lastOrderblockIdx     != null ? p.lastOrderblockIdx     : -999;
   tiktokHistory         = p.tiktokHistory         || [];
   lastTiktokIdx         = p.lastTiktokIdx         != null ? p.lastTiktokIdx         : -999;
+  /* Strategy 15/16/17 per-panel isolation */
+  po3_4hHistory         = p.po3_4hHistory         || [];
+  lastPo3_4hIdx         = p.lastPo3_4hIdx         != null ? p.lastPo3_4hIdx         : -999;
+  breakerBlockHistory   = p.breakerBlockHistory   || [];
+  lastBreakerBlockIdx   = p.lastBreakerBlockIdx   != null ? p.lastBreakerBlockIdx   : -999;
+  oteGoldenPocketHistory = p.oteGoldenPocketHistory || [];
+  lastOteGoldenPocketIdx = p.lastOteGoldenPocketIdx != null ? p.lastOteGoldenPocketIdx : -999;
   sessionRangeAsian   = p.sessionRangeAsian  || null;
   sessionRangeLondon  = p.sessionRangeLondon || null;
   sessionRangeNY      = p.sessionRangeNY     || null;
@@ -21697,6 +21712,13 @@ function savePanel(p) {
   p.lastOrderblockIdx     = lastOrderblockIdx;
   p.tiktokHistory         = tiktokHistory;
   p.lastTiktokIdx         = lastTiktokIdx;
+  /* Strategy 15/16/17 per-panel isolation */
+  p.po3_4hHistory         = po3_4hHistory;
+  p.lastPo3_4hIdx         = lastPo3_4hIdx;
+  p.breakerBlockHistory   = breakerBlockHistory;
+  p.lastBreakerBlockIdx   = lastBreakerBlockIdx;
+  p.oteGoldenPocketHistory = oteGoldenPocketHistory;
+  p.lastOteGoldenPocketIdx = lastOteGoldenPocketIdx;
   p.sessionRangeAsian   = sessionRangeAsian;
   p.sessionRangeLondon  = sessionRangeLondon;
   p.sessionRangeNY      = sessionRangeNY;
@@ -22028,6 +22050,13 @@ function connectPanel(p) {
   p.lastOrderblockIdx     = -999;
   p.tiktokHistory         = [];
   p.lastTiktokIdx         = -999;
+  /* Strategy 15/16/17 per-panel isolation */
+  p.po3_4hHistory         = [];
+  p.lastPo3_4hIdx         = -999;
+  p.breakerBlockHistory   = [];
+  p.lastBreakerBlockIdx   = -999;
+  p.oteGoldenPocketHistory = [];
+  p.lastOteGoldenPocketIdx = -999;
   p.sessionRangeHistory   = [];
   p.connected = false;
 
