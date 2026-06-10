@@ -1275,7 +1275,88 @@ For maximum scalping profitability on gold, enable these strategies together:
 - **Risk management:** Gold's volatility means SL placement is critical. The ATR-based SL caps in Liquidity Sweep (1.5× ATR) and Grid Scalper MA (2.0× ATR) prevent oversized risk on spiky moves.
 
 ---
+Best Strategies for Index Symbols & Profit Settings
+Based on the IT Guru indicator documentation, here's your comprehensive strategy guide:
 
+Best Strategies for Index Trading (Volatility, Boom, Crash, Jump, Step Indices)
+Tier 1 — Top Performers for Indices:
+
+Live Scalp Scanner ⭐ (Best for speed)
+
+Multi-confluence rapid scanner (7 factors, min 3 required)
+Best on: 1m charts and Volatility (1s) indices
+Rapid 3-candle cooldown for frequent entries
+Minimum Confluence: 8/16+
+Fib Golden Zone Scalp ⭐ (Most consistent)
+
+Purpose-built for micro-trends and Fibonacci retracements (0.5-0.618)
+Best on: 1m charts, Volatility indices
+15-candle timeout, 3-candle cooldown
+Minimum Confluence: 9/16
+Power of 3 (ICT) ⭐ (High-conviction)
+
+FVG-based entries with hourly anchoring
+Best Timeframe: 1m (highest frequency), 5m (balanced)
+Recommended Minimum Confluence: 11/16
+Entry Freshness Mode: SAFE (default) for 1-5m charts
+Grid Scalper MA
+
+MA-crossover or Break-of-Structure entries
+Short 5-candle cooldown, confluence-gated
+Best Timeframe: 1m-5m
+Minimum Confluence: 8/16
+Best Settings for Profit Optimization
+Recommended Core Filters (All Indices):
+
+✅ EMA 8/21 Trend Filter — ON
+✅ HTF Trend Filter (EMA 100) — ON
+✅ Partial TP (1:1) — ON (locks in profits, moves SL to breakeven)
+✅ Trailing Stop — Standard (1.5× ATR)
+✅ False Breakout Filter — ON
+✅ Min R:R Gate — 2.0 minimum
+✅ ADX Filter — ON for scalps (trending markets only)
+✅ Volume Spike Filter — ON
+✅ ATR-Based Tolerance — ON (more accurate on volatile markets)
+Scalping Mode (For Volatility Indices):
+
+✅ Scalping Mode — Enable
+5-min range, 0.75× ATR trailing, 1:1 R:R, 15-candle auto-timeout
+Timeframe Strategy:
+
+Timeframe	Use Case	Confluence Score
+1m	Highest signal frequency; freshest entries	9/16+
+5m	Good balance of frequency & quality	9/16+
+15m	Fewer setups; use STRICT entry freshness	10/16+
+Profit Management (Tesla 3-6-9 Scaling Model)
+Conservative Plan (Lower Risk):
+
+T1 (3R): Take 50% profit, move SL to breakeven
+T2 (6R): Take 30% profit, continue running
+T3 (9R): Take 20% profit or trail final portion
+Aggressive Plan (Higher Reward):
+
+T1 (3R): Take 25% profit, move SL to breakeven
+T2 (6R): Take 35% profit, continue running
+T3 (9R): Take 20% and trail the final portion
+Recommended Strategy Stack for Index Symbols
+For maximum profitability, enable these together:
+
+Live Scalp Scanner — Your rapid entry engine
+Fib Golden Zone Scalp — Core scalp setup
+Power of 3 (ICT) — High-confluence swing entries
+Grid Scalper MA — Trend-following momentum
+Liquidity Sweep — Catches stop runs (optional)
+Key Success Factors
+✅ Confluence Score: Prioritize signals with 8/16 or above
+✅ HTF Alignment: Confirm with EMA 100 trend before entry
+✅ Partial TP: Always lock profits at 1:1 to de-risk
+✅ Session Timing: Best on Volatility (1s) indices 24/7, especially during active market hours
+✅ Stop Loss: Use ATR-based calculations to prevent oversized risk
+✅ Cool-Down Windows: Respect strategy timeouts (3-15 candles) to avoid spam signals
+
+Start with: Demo account → Fib Golden Zone Scalp + Live Scalp Scanner → Add Power of 3 as you improve
+
+---
 *Trade smart. Manage your risk. Stay consistent.*
 
 ---
