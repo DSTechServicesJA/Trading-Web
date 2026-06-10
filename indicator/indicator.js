@@ -1942,6 +1942,36 @@ const OTE_GOLDEN_HIGH = 0.786;
 const OTE_MIN_EXPANSION_ATR = 2.0;   /* min expansion leg in ATR multiples */
 const OTE_MIN_RR = 3.0;             /* minimum R:R ratio */
 
+/* ================= STRATEGY 18: OPENING RANGE BREAKOUT (ORB) ================= */
+/**
+ * ORB — Opening Range Breakout Strategy
+ * Marks the high/low of the first 15 minutes of the session.
+ * Detects breakouts, retests, failed breakouts, and re-entries.
+ * Multi-timeframe: executed on 1m, manageable on 5m+.
+ */
+let orbEnabled = false;               /* master toggle */
+let orbHistory = [];                  /* alert history */
+let lastOrbIdx = -999;
+let autoTradeOrb = true;
+const ORB_MAX_HISTORY = 30;
+const ORB_COOLDOWN = 5;               /* min candles between alerts */
+const ORB_MAX_CANDLES = 120;          /* trade monitoring timeout */
+const ORB_SESSION_MINUTES = 15;       /* opening range duration */
+const ORB_MIN_RANGE_ATR = 0.5;        /* min ORB range in ATR multiples */
+const ORB_MAX_RANGE_ATR = 4.0;        /* max ORB range (filter out spikes) */
+const ORB_RETEST_TOLERANCE_ATR = 0.15; /* retest proximity threshold */
+let orbCandleConfirmation = true;     /* require candle close confirmation */
+
+/* ORB state tracked per session */
+let _orbSessionHigh = null;
+let _orbSessionLow  = null;
+let _orbSessionEstablished = false;
+let _orbBreakHigh = false;            /* price broke above ORB High */
+let _orbBreakLow  = false;            /* price broke below ORB Low */
+let _orbRetestHigh = false;           /* retest of ORB High after breakout above */
+let _orbRetestLow  = false;           /* retest of ORB Low after breakout below */
+let _orbSessionStartEpoch = null;     /* epoch of session start */
+
 /* ================= FEATURE: SESSION HEATMAP (17) ================= */
 let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
 
@@ -2260,6 +2290,13 @@ function initUI() {
   UI.oteGoldenPocketAlertList    = document.getElementById("oteGoldenPocketAlertList");
   UI.oteGoldenPocketAlertCount   = document.getElementById("oteGoldenPocketAlertCount");
   UI.autoTradeOteGoldenPocketToggle = document.getElementById("autoTradeOteGoldenPocketToggle");
+
+  /* Strategy 18: ORB */
+  UI.orbToggle               = document.getElementById("orbToggle");
+  UI.orbAlertList            = document.getElementById("orbAlertList");
+  UI.orbAlertCount           = document.getElementById("orbAlertCount");
+  UI.autoTradeOrbToggle      = document.getElementById("autoTradeOrbToggle");
+  UI.orbCandleConfirmToggle  = document.getElementById("orbCandleConfirmToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -3615,6 +3652,7 @@ function buildTelegramCaption() {
   if (po3_4hEnabled) filters.push("4H PO3");
   if (breakerBlockEnabled) filters.push("Breaker Block");
   if (oteGoldenPocketEnabled) filters.push("OTE Golden Pocket");
+  if (orbEnabled) filters.push("ORB");
   if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
@@ -4698,6 +4736,10 @@ function saveSettings() {
       /* Strategy 17: OTE Golden Pocket */
       oteGoldenPocketEnabled,
       autoTradeOteGoldenPocket,
+      /* Strategy 18: ORB */
+      orbEnabled,
+      autoTradeOrb,
+      orbCandleConfirmation,
       /* Feature settings */
       orderblockEnabled,
       autoTradeOrderblock,
@@ -4941,6 +4983,14 @@ function restoreSettings() {
     if (UI.oteGoldenPocketToggle) UI.oteGoldenPocketToggle.checked = oteGoldenPocketEnabled;
     if (s.autoTradeOteGoldenPocket != null) autoTradeOteGoldenPocket = s.autoTradeOteGoldenPocket;
     if (UI.autoTradeOteGoldenPocketToggle) UI.autoTradeOteGoldenPocketToggle.checked = autoTradeOteGoldenPocket;
+
+    /* Strategy 18: ORB */
+    if (s.orbEnabled != null) orbEnabled = s.orbEnabled;
+    if (UI.orbToggle) UI.orbToggle.checked = orbEnabled;
+    if (s.autoTradeOrb != null) autoTradeOrb = s.autoTradeOrb;
+    if (UI.autoTradeOrbToggle) UI.autoTradeOrbToggle.checked = autoTradeOrb;
+    if (s.orbCandleConfirmation != null) orbCandleConfirmation = s.orbCandleConfirmation;
+    if (UI.orbCandleConfirmToggle) UI.orbCandleConfirmToggle.checked = orbCandleConfirmation;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -11730,6 +11780,370 @@ function monitorOteGoldenPocketOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 18: OPENING RANGE BREAKOUT (ORB) ================= */
+
+/**
+ * Determine the session start epoch for the current trading day.
+ * Uses 09:30 EST (14:30 UTC) as default session open for equities/forex.
+ */
+function _orbGetSessionStartEpoch(refEpoch) {
+  const d = new Date((refEpoch || Date.now() / 1000) * 1000);
+  const utcDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 14, 30, 0));
+  let sessionStart = Math.floor(utcDay.getTime() / 1000);
+  /* If reference is before today's session open, use previous day's */
+  if (refEpoch < sessionStart) sessionStart -= 86400;
+  return sessionStart;
+}
+
+/**
+ * Establish the Opening Range (High/Low) for the first ORB_SESSION_MINUTES of the session.
+ * Maintains state across calls so the range is computed incrementally.
+ */
+function _orbEstablishRange() {
+  if (candles.length < 2) return false;
+  const latest = candles[candles.length - 1];
+  const sessionStart = _orbGetSessionStartEpoch(latest.epoch);
+
+  /* Reset if new session detected */
+  if (_orbSessionStartEpoch !== sessionStart) {
+    _orbSessionStartEpoch = sessionStart;
+    _orbSessionHigh = null;
+    _orbSessionLow  = null;
+    _orbSessionEstablished = false;
+    _orbBreakHigh = false;
+    _orbBreakLow  = false;
+    _orbRetestHigh = false;
+    _orbRetestLow  = false;
+  }
+
+  if (_orbSessionEstablished) return true;
+
+  const sessionEndEpoch = sessionStart + ORB_SESSION_MINUTES * 60;
+
+  /* Find candles within the opening range window */
+  let high = -Infinity, low = Infinity;
+  let foundAny = false;
+  for (let i = Math.max(0, candles.length - 200); i < candles.length; i++) {
+    const c = candles[i];
+    if (c.epoch >= sessionStart && c.epoch < sessionEndEpoch) {
+      if (c.high > high) high = c.high;
+      if (c.low < low)   low = c.low;
+      foundAny = true;
+    }
+  }
+
+  if (!foundAny) return false;
+  _orbSessionHigh = high;
+  _orbSessionLow  = low;
+
+  /* Mark as established once we have a candle at or beyond the end of the range window */
+  if (latest.epoch >= sessionEndEpoch) {
+    _orbSessionEstablished = true;
+  }
+
+  return _orbSessionEstablished;
+}
+
+/**
+ * Detect an ORB breakout + retest trade signal.
+ *
+ * Bullish: Break above ORB High → retest ORB High (hold above) → LONG
+ * Bearish: Break below ORB Low → retest ORB Low (hold below) → SHORT
+ * Failed breakout: break above/below, then re-enter range → trade opposite direction
+ */
+function detectOrbStrategy() {
+  if (!orbEnabled) return null;
+
+  /* One-at-a-time: no new signal while one is pending */
+  if (orbHistory.some(s => s.result === "PENDING")) return null;
+
+  if (!_orbEstablishRange()) return null;
+
+  const len = candles.length;
+  if (len < 5) return null;
+
+  const idx = len - 1;
+  if (idx - lastOrbIdx < ORB_COOLDOWN) return null;
+
+  const c = candles[idx];
+  const prev = candles[idx - 1];
+  if (atrValue <= 0) return null;
+
+  const orbRange = _orbSessionHigh - _orbSessionLow;
+  if (orbRange <= 0) return null;
+  if (orbRange < atrValue * ORB_MIN_RANGE_ATR) return null;
+  if (orbRange > atrValue * ORB_MAX_RANGE_ATR) return null;
+
+  const retestTol = atrValue * ORB_RETEST_TOLERANCE_ATR;
+  let signal = null;
+
+  /* Track breakout events */
+  if (!_orbBreakHigh && c.close > _orbSessionHigh) {
+    _orbBreakHigh = true;
+  }
+  if (!_orbBreakLow && c.close < _orbSessionLow) {
+    _orbBreakLow = true;
+  }
+
+  /* ===== BULLISH: Break above ORB High + Retest + Hold ===== */
+  if (_orbBreakHigh && !_orbRetestHigh) {
+    /* Wait for price to come back to ORB High (retest) */
+    if (prev.low <= _orbSessionHigh + retestTol && prev.low >= _orbSessionHigh - retestTol) {
+      _orbRetestHigh = true;
+    }
+  }
+  if (_orbRetestHigh && !signal) {
+    /* Bullish entry: price retested ORB High and now holds above with candle confirmation */
+    const confirmBull = orbCandleConfirmation
+      ? (c.close > _orbSessionHigh && c.close > c.open)
+      : (c.close > _orbSessionHigh);
+    if (confirmBull) {
+      const entry = c.close;
+      const sl = _orbSessionLow - retestTol;
+      const tp = entry + (entry - sl) * 2;  /* 2R target */
+      const risk = Math.abs(entry - sl);
+      const reward = Math.abs(tp - entry);
+      if (risk > 0) {
+        signal = {
+          dir: "BULL",
+          entry, sl, tp,
+          rr: reward / risk,
+          orbHigh: _orbSessionHigh,
+          orbLow: _orbSessionLow,
+          triggerType: "breakout_retest",
+          candleIdx: idx,
+          epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "orb",
+          _origSl: sl
+        };
+      }
+    }
+  }
+
+  /* ===== BEARISH: Break below ORB Low + Retest + Hold ===== */
+  if (_orbBreakLow && !_orbRetestLow && !signal) {
+    if (prev.high >= _orbSessionLow - retestTol && prev.high <= _orbSessionLow + retestTol) {
+      _orbRetestLow = true;
+    }
+  }
+  if (_orbRetestLow && !signal) {
+    const confirmBear = orbCandleConfirmation
+      ? (c.close < _orbSessionLow && c.close < c.open)
+      : (c.close < _orbSessionLow);
+    if (confirmBear) {
+      const entry = c.close;
+      const sl = _orbSessionHigh + retestTol;
+      const tp = entry - (sl - entry) * 2;  /* 2R target */
+      const risk = Math.abs(sl - entry);
+      const reward = Math.abs(entry - tp);
+      if (risk > 0) {
+        signal = {
+          dir: "BEAR",
+          entry, sl, tp,
+          rr: reward / risk,
+          orbHigh: _orbSessionHigh,
+          orbLow: _orbSessionLow,
+          triggerType: "breakout_retest",
+          candleIdx: idx,
+          epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "orb",
+          _origSl: sl
+        };
+      }
+    }
+  }
+
+  /* ===== FAILED BREAKOUT (Re-entry into ORB range) ===== */
+  if (!signal && _orbBreakHigh && c.close < _orbSessionHigh && c.close > _orbSessionLow) {
+    /* Price broke above but failed — now back inside range → short bias toward ORB Low */
+    const confirmFail = orbCandleConfirmation
+      ? (c.close < c.open && c.close < _orbSessionHigh)
+      : (c.close < _orbSessionHigh);
+    if (confirmFail && prev.close > _orbSessionHigh) {
+      const entry = c.close;
+      const sl = _orbSessionHigh + retestTol;
+      const tp = _orbSessionLow;
+      const risk = Math.abs(sl - entry);
+      const reward = Math.abs(entry - tp);
+      if (risk > 0 && reward / risk >= 1.0) {
+        signal = {
+          dir: "BEAR",
+          entry, sl, tp,
+          rr: reward / risk,
+          orbHigh: _orbSessionHigh,
+          orbLow: _orbSessionLow,
+          triggerType: "failed_breakout_high",
+          candleIdx: idx,
+          epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "orb",
+          _origSl: sl
+        };
+      }
+    }
+  }
+  if (!signal && _orbBreakLow && c.close > _orbSessionLow && c.close < _orbSessionHigh) {
+    /* Price broke below but failed — now back inside range → long bias toward ORB High */
+    const confirmFail = orbCandleConfirmation
+      ? (c.close > c.open && c.close > _orbSessionLow)
+      : (c.close > _orbSessionLow);
+    if (confirmFail && prev.close < _orbSessionLow) {
+      const entry = c.close;
+      const sl = _orbSessionLow - retestTol;
+      const tp = _orbSessionHigh;
+      const risk = Math.abs(entry - sl);
+      const reward = Math.abs(tp - entry);
+      if (risk > 0 && reward / risk >= 1.0) {
+        signal = {
+          dir: "BULL",
+          entry, sl, tp,
+          rr: reward / risk,
+          orbHigh: _orbSessionHigh,
+          orbLow: _orbSessionLow,
+          triggerType: "failed_breakout_low",
+          candleIdx: idx,
+          epoch: c.epoch,
+          symbol: getActiveSymbol(),
+          result: "PENDING",
+          type: "orb",
+          _origSl: sl
+        };
+      }
+    }
+  }
+
+  return signal;
+}
+
+/**
+ * Run the ORB scanner and handle alerting.
+ */
+function processOrb() {
+  const signal = detectOrbStrategy();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ ORB REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastOrbIdx = signal.candleIdx;
+
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  orbHistory.unshift(signal);
+  if (orbHistory.length > ORB_MAX_HISTORY) orbHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  const trigLabel = signal.triggerType === "breakout_retest" ? "Breakout + Retest"
+    : signal.triggerType === "failed_breakout_high" ? "Failed Breakout High → Short"
+    : "Failed Breakout Low → Long";
+  addLog(`📊 ORB ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | ${trigLabel} | ORB [${fmtPrice(signal.orbLow, sym)}–${fmtPrice(signal.orbHigh, sym)}] | SL ${fmtPrice(signal.sl, sym)} | TP ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `ORB ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${trigLabel}`,
+    `${sym} @ ${fmtPrice(signal.entry, sym)} | ORB [${fmtPrice(signal.orbLow, sym)}–${fmtPrice(signal.orbHigh, sym)}] | SL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `📊 ORB ${signal.dir === "BULL" ? "LONG" : "SHORT"} — ${sym} @ ${fmtPrice(signal.entry, sym)}\n${trigLabel}\nORB: [${fmtPrice(signal.orbLow, sym)}–${fmtPrice(signal.orbHigh, sym)}]\nSL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`;
+    throttledNotification("IT Guru: ORB Signal!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeOrb && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "orb" });
+  }
+}
+
+/**
+ * Monitor pending ORB signals for SL/TP outcome.
+ */
+function monitorOrbOutcomes(candle) {
+  if (!orbEnabled) return;
+  let changed = false;
+  for (const s of orbHistory) {
+    if (s.result !== "PENDING") continue;
+
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed < 0 || elapsed >= ORB_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true; continue;
+    }
+
+    /* Partial TP at 1R */
+    if (partialTpEnabled && !s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s._reached1R = true;
+        s.sl = s.entry;
+        addLog(`📊 ORB Partial TP hit (1R) — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)}`);
+        changed = true;
+        continue;
+      }
+    }
+
+    /* Check SL hit */
+    if (s.dir === "BULL" && candle.low <= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    } else if (s.dir === "BEAR" && candle.high >= s.sl) {
+      s.result = (s.partialTpHit && Math.abs(s.sl - s.entry) < Math.abs(s.entry - s._origSl) * 0.1) ? "WIN" : "LOSS";
+      changed = true;
+    }
+    /* Check TP hit */
+    else if (s.dir === "BULL" && candle.high >= s.tp) {
+      s.result = "WIN"; changed = true;
+    } else if (s.dir === "BEAR" && candle.low <= s.tp) {
+      s.result = "WIN"; changed = true;
+    }
+
+    /* Profit exit alert */
+    if (s.result === "PENDING" && telegramProfitExitAlertEnabled) {
+      _checkProfitExitAlert(s, candle, "ORB");
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of orbHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    if (adaptiveConfluenceEnabled) {
+      for (const s of orbHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
+  }
+}
+
 /* ================= STRATEGY 8: GRID SCALPER MA ================= */
 /**
  * Detect a Grid Scalper MA signal.
@@ -12395,6 +12809,8 @@ function processCustomStrategies() {
   processBreakerBlock();
   /* Strategy 17: OTE Golden Pocket */
   processOteGoldenPocket();
+  /* Strategy 18: Opening Range Breakout */
+  processOrb();
 }
 
 /**
@@ -12420,6 +12836,8 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorBreakerBlockOutcomes(candle);
   /* Strategy 17: OTE Golden Pocket */
   monitorOteGoldenPocketOutcomes(candle);
+  /* Strategy 18: ORB */
+  monitorOrbOutcomes(candle);
   /* Feature 15: Multi-R ladder */
   monitorMultiRLadder(candles.length - 1);
 }
@@ -13922,6 +14340,9 @@ function buildStrategyTelegramCaption(signal) {
   } else if (signal.type === "candle_interp") {
     stratEmoji = "🕯";
     stratLabel = "Candle Interpretation";
+  } else if (signal.type === "orb") {
+    stratEmoji = "📊";
+    stratLabel = "Opening Range Breakout";
   }
 
   const lines = [];
@@ -13987,6 +14408,11 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`• 4-step Fibonacci retracement (A→B→C→D): price completed all steps and touched the 0.88 level.`);
   } else if (signal.type === "candle_interp") {
     lines.push(`• Multi-candle sequence (${signal.sequence ? signal.sequence.type : "unknown"}) detected at key level with HTF alignment.`);
+  } else if (signal.type === "orb") {
+    const trigDesc = signal.triggerType === "breakout_retest" ? "Price broke and retested the opening range level with confirmation."
+      : signal.triggerType === "failed_breakout_high" ? "Failed breakout above ORB High — price re-entered range, targeting ORB Low."
+      : "Failed breakout below ORB Low — price re-entered range, targeting ORB High.";
+    lines.push(`• ${trigDesc}`);
   } else {
     lines.push(`• Strategy-specific confirmation conditions were met for this setup.`);
   }
@@ -20321,6 +20747,111 @@ function drawChart() {
     }
   }
 
+  /* ---- ORB chart overlay (Opening Range High/Low levels) ---- */
+  if (orbEnabled && _orbSessionHigh != null && _orbSessionLow != null) {
+    const sym = getActiveSymbol();
+    const orbHighY = yOf(_orbSessionHigh);
+    const orbLowY  = yOf(_orbSessionLow);
+
+    /* ORB range shading */
+    ctx.fillStyle = "rgba(99,102,241,0.08)";
+    ctx.fillRect(marginLeft, Math.min(orbHighY, orbLowY), chartW, Math.abs(orbLowY - orbHighY));
+
+    /* ORB High line */
+    ctx.save();
+    ctx.setLineDash([6, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(99,102,241,0.8)";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, orbHighY);
+    ctx.lineTo(W - marginRight, orbHighY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(99,102,241,0.9)";
+    ctx.font = "bold 10px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText(`ORB High — ${fmtPrice(_orbSessionHigh, sym)}`, marginLeft + 4, orbHighY - 4);
+
+    /* ORB Low line */
+    ctx.strokeStyle = "rgba(244,114,182,0.8)";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, orbLowY);
+    ctx.lineTo(W - marginRight, orbLowY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(244,114,182,0.9)";
+    ctx.fillText(`ORB Low — ${fmtPrice(_orbSessionLow, sym)}`, marginLeft + 4, orbLowY + 12);
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    /* Pending ORB signal markers */
+    const pendingOrb = orbHistory.find(s => s.result === "PENDING" && s.symbol === sym);
+    if (pendingOrb) {
+      drawHLine(ctx, yOf(pendingOrb.entry), marginLeft, W - marginRight, "rgba(99,102,241,0.85)", "ORB Entry " + fmtPrice(pendingOrb.entry, sym), W, marginRight);
+      drawHLine(ctx, yOf(pendingOrb.sl), marginLeft, W - marginRight, "rgba(239,68,68,0.75)", "SL " + fmtPrice(pendingOrb.sl, sym), W, marginRight);
+      drawHLine(ctx, yOf(pendingOrb.tp), marginLeft, W - marginRight, "rgba(34,197,94,0.75)", "TP " + fmtPrice(pendingOrb.tp, sym), W, marginRight);
+
+      /* ORB strategy info box */
+      ctx.save();
+      const trigLabel = pendingOrb.triggerType === "breakout_retest" ? "Breakout + Retest"
+        : pendingOrb.triggerType === "failed_breakout_high" ? "Failed Break High"
+        : "Failed Break Low";
+      const oBoxX = marginLeft + 10;
+      const oBoxY = oteGoldenPocketEnabled ? 170 : 60;
+      const oBoxW = 200;
+      const oBoxH = 90;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(oBoxX, oBoxY, oBoxW, oBoxH);
+      ctx.strokeStyle = "rgba(99,102,241,0.6)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(oBoxX, oBoxY, oBoxW, oBoxH);
+      ctx.fillStyle = "#6366f1";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText("📊 ORB Strategy", oBoxX + 8, oBoxY + 14);
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "10px Arial";
+      ctx.fillText(`Direction: ${pendingOrb.dir === "BULL" ? "LONG" : "SHORT"}`, oBoxX + 8, oBoxY + 30);
+      ctx.fillText(`Trigger: ${trigLabel}`, oBoxX + 8, oBoxY + 44);
+      ctx.fillText(`Entry: ${fmtPrice(pendingOrb.entry, sym)}`, oBoxX + 8, oBoxY + 58);
+      ctx.fillText(`SL: ${fmtPrice(pendingOrb.sl, sym)} | TP: ${fmtPrice(pendingOrb.tp, sym)}`, oBoxX + 8, oBoxY + 72);
+      ctx.fillText(`R:R 1:${fmt(pendingOrb.rr, 1)}`, oBoxX + 8, oBoxY + 86);
+      ctx.restore();
+    }
+
+    /* Visual signals: breakout / retest markers */
+    if (_orbBreakHigh && !_orbRetestHigh) {
+      ctx.save();
+      ctx.fillStyle = "rgba(34,197,94,0.7)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("▲ BREAK", W - marginRight - 8, orbHighY - 6);
+      ctx.restore();
+    }
+    if (_orbBreakLow && !_orbRetestLow) {
+      ctx.save();
+      ctx.fillStyle = "rgba(239,68,68,0.7)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("▼ BREAK", W - marginRight - 8, orbLowY + 14);
+      ctx.restore();
+    }
+    if (_orbRetestHigh) {
+      ctx.save();
+      ctx.fillStyle = "rgba(251,191,36,0.8)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("⟳ RETEST", W - marginRight - 8, orbHighY - 6);
+      ctx.restore();
+    }
+    if (_orbRetestLow) {
+      ctx.save();
+      ctx.fillStyle = "rgba(251,191,36,0.8)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("⟳ RETEST", W - marginRight - 8, orbLowY + 14);
+      ctx.restore();
+    }
+  }
+
   if (selectedSignalOverlay && selectedSignalOverlay.symbol === getActiveSymbol()) {
     const sameAsActiveTrade = trade && areTradeLevelsEqual(selectedSignalOverlay, trade);
     if (!sameAsActiveTrade) {
@@ -21201,6 +21732,7 @@ function applyStrategyAccess() {
     { id: "po3_4hToggle",          key: "po3_4h",           fn: () => { po3_4hEnabled         = false; } },
     { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
     { id: "oteGoldenPocketToggle", key: "ote_golden_pocket", fn: () => { oteGoldenPocketEnabled = false; } },
+    { id: "orbToggle",            key: "orb",               fn: () => { orbEnabled = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -21248,6 +21780,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-po3_4h",         toggleId: "po3_4hToggle",         enabled: po3_4hEnabled         },
     { badgeId: "stratBadge-breakerBlock",   toggleId: "breakerBlockToggle",   enabled: breakerBlockEnabled   },
     { badgeId: "stratBadge-oteGoldenPocket", toggleId: "oteGoldenPocketToggle", enabled: oteGoldenPocketEnabled },
+    { badgeId: "stratBadge-orb",            toggleId: "orbToggle",            enabled: orbEnabled },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -23613,6 +24146,33 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeOteGoldenPocketToggle) {
     UI.autoTradeOteGoldenPocketToggle.addEventListener("change", () => {
       autoTradeOteGoldenPocket = UI.autoTradeOteGoldenPocketToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 18: ORB listeners */
+  if (UI.orbToggle) {
+    UI.orbToggle.addEventListener("change", () => {
+      orbEnabled = UI.orbToggle.checked;
+      saveSettings();
+      if (orbEnabled) {
+        addLog("📊 ORB Strategy enabled — scanning for Opening Range Breakout setups (first 15 min)");
+        showToast("ORB Strategy Enabled", "Scanning for Opening Range Breakout signals: breakouts, retests, and failed breakouts.", "info", 5000);
+      } else {
+        addLog("📊 ORB Strategy disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeOrbToggle) {
+    UI.autoTradeOrbToggle.addEventListener("change", () => {
+      autoTradeOrb = UI.autoTradeOrbToggle.checked;
+      saveSettings();
+    });
+  }
+  if (UI.orbCandleConfirmToggle) {
+    UI.orbCandleConfirmToggle.addEventListener("change", () => {
+      orbCandleConfirmation = UI.orbCandleConfirmToggle.checked;
       saveSettings();
     });
   }
