@@ -432,7 +432,7 @@ const SL_ATR_BUF_DEFAULT        = 0.3;   /* SL ATR buffer for higher TFs (origin
 const STRUCTURAL_SL_MIN_RISK_ATR = 0.9;  /* if zone-based SL risk is tighter than this, fall back to swing anchor */
 
 /* Telegram */
-const CHART_RENDER_DELAY_MS       = 500;   /* wait for canvas redraw before screenshot */
+const CHART_RENDER_DELAY_MS       = 100;   /* wait for canvas redraw before screenshot */
 const TELEGRAM_SCREENSHOT_TIMEOUT_MS = 1200; /* fall back to text quickly if screenshot is slow */
 const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side proxy to bypass CORS */
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */

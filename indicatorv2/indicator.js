@@ -9036,6 +9036,21 @@ function detectPowerOf3() {
   /* Reject if R:R is below 1.0 */
   if (rr < 1.0) return null;
 
+  /* --- Guard: reject if risk is negligible (SL ≈ entry) --- */
+  if (risk < atrValue * 0.05) return null;
+
+  /* --- Guard: reject stale signals where price already reached 1R or TP --- *
+   * If the current candle has already moved past the 1:1 profit level,
+   * the signal is too late — sending a notification at this point would
+   * arrive alongside a win/partial-TP notification on the very same tick. */
+  if (dailyBias === "BULL") {
+    const oneRLevel = entry + risk;
+    if (c.high >= oneRLevel || c.high >= tp) return null;
+  } else {
+    const oneRLevel = entry - risk;
+    if (c.low <= oneRLevel || c.low <= tp) return null;
+  }
+
   return {
     dir: dailyBias,
     entry, sl, tp, rr,
