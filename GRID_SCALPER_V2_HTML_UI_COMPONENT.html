@@ -1,0 +1,530 @@
+<!-- 
+  GRID SCALPER V2 STRATEGY - HTML UI COMPONENT
+  Add this to your index.html in the strategy controls section
+  
+  This provides:
+  - Master toggle to enable/disable strategy
+  - Auto-trade toggle
+  - Alert counter and list display
+  - Status indicators
+  - Signal logging
+-->
+
+<!-- ===== STRATEGY 19: GRID SCALPER V2 ===== -->
+<div class="strategy-box" id="gridScalperV2Box">
+  <div class="strategy-header">
+    <h3 style="margin: 0; display: inline-flex; align-items: center; gap: 8px;">
+      <span>💹</span>
+      <span>Grid Scalper V2 (M5)</span>
+      <span id="gridScalperV2Status" class="status-badge" style="font-size: 0.75em; background: #999; color: white; padding: 2px 6px; border-radius: 3px; display: none;">ACTIVE</span>
+    </h3>
+  </div>
+
+  <!-- Main Toggle -->
+  <div class="strategy-control-row">
+    <label class="toggle-label">
+      <input 
+        type="checkbox" 
+        id="gridScalperV2Toggle"
+        class="strategy-toggle"
+      />
+      <span class="toggle-switch"></span>
+      <span>Enable Grid Scalper V2</span>
+    </label>
+    <span id="gridScalperV2Count" class="alert-count" style="font-size: 0.85em; color: #888; margin-left: 10px;">0 signals</span>
+  </div>
+
+  <!-- Auto-Trade Toggle -->
+  <div class="strategy-control-row" style="margin-top: 8px;">
+    <label class="toggle-label" style="margin-left: 20px;">
+      <input 
+        type="checkbox" 
+        id="autoTradeGridScalperV2Toggle"
+        class="auto-trade-toggle"
+      />
+      <span class="toggle-switch"></span>
+      <span>Auto-Trade</span>
+    </label>
+    <span style="font-size: 0.75em; color: #888; margin-left: 10px;">(auto-execute signals)</span>
+  </div>
+
+  <!-- Strategy Parameters Display (Collapsible) -->
+  <details style="margin-top: 10px; font-size: 0.85em; cursor: pointer;">
+    <summary style="color: #0066cc; text-decoration: underline;">⚙ Parameters</summary>
+    <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px; font-family: monospace; font-size: 0.8em;">
+      <div>Max Trades: <strong>4</strong> (hard limit)</div>
+      <div>Lot Size: <strong>0.15</strong> (base per trade)</div>
+      <div>Grid Spacing: <strong>ATR × 1.4</strong></div>
+      <div>Basket TP: <strong>2.0%</strong></div>
+      <div>Kill Switch: <strong>4.5%</strong> account loss</div>
+      <div>Range Threshold: <strong>ATR &lt; 1.1</strong></div>
+      <div style="margin-top: 6px; color: #666; font-style: italic;">Edit constants in indicator.js lines 1757-1777 to customize</div>
+    </div>
+  </details>
+
+  <!-- Alert List -->
+  <div id="gridScalperV2AlertList" class="alert-list" style="
+    margin-top: 10px;
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fafafa;
+    padding: 0;
+    display: none;
+  ">
+    <div style="padding: 10px; color: #999; text-align: center; font-size: 0.9em;">
+      No signals yet — waiting for ranging setup with exhaustion pattern
+    </div>
+  </div>
+
+  <!-- Quick Stats (Collapsible) -->
+  <details style="margin-top: 10px; font-size: 0.85em; cursor: pointer;">
+    <summary style="color: #0066cc; text-decoration: underline;">📊 Session Stats</summary>
+    <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: monospace; font-size: 0.8em;">
+        <div>
+          <div style="color: #666;">Total Signals</div>
+          <div id="gridScalperV2TotalSignals" style="font-weight: bold; font-size: 1.1em;">0</div>
+        </div>
+        <div>
+          <div style="color: #666;">Win Rate</div>
+          <div id="gridScalperV2WinRate" style="font-weight: bold; font-size: 1.1em; color: #28a745;">0%</div>
+        </div>
+        <div>
+          <div style="color: #666;">Wins</div>
+          <div id="gridScalperV2Wins" style="font-weight: bold; color: #28a745;">0</div>
+        </div>
+        <div>
+          <div style="color: #666;">Losses</div>
+          <div id="gridScalperV2Losses" style="font-weight: bold; color: #dc3545;">0</div>
+        </div>
+        <div>
+          <div style="color: #666;">Total Profit</div>
+          <div id="gridScalperV2TotalProfit" style="font-weight: bold; font-size: 1.1em;">$0.00</div>
+        </div>
+        <div>
+          <div style="color: #666;">Expired</div>
+          <div id="gridScalperV2Expired" style="font-weight: bold; color: #ffc107;">0</div>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Help Section (Collapsible) -->
+  <details style="margin-top: 10px; font-size: 0.85em; cursor: pointer;">
+    <summary style="color: #0066cc; text-decoration: underline;">❓ How It Works</summary>
+    <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 0.8em; line-height: 1.5;">
+      <strong>Entry Rules (ALL required):</strong>
+      <ul style="margin: 6px 0; padding-left: 20px;">
+        <li>Market is RANGING (ATR &lt; 1.1)</li>
+        <li>Exhaustion detected (price spike, now reverting)</li>
+        <li>RSI confirmation (BUY: &lt;40, SELL: &gt;60)</li>
+        <li>No strong trend (distance from EMA)</li>
+      </ul>
+      <strong>Risk Controls:</strong>
+      <ul style="margin: 6px 0; padding-left: 20px;">
+        <li>Max 4 trades per grid (hard limit)</li>
+        <li>Kill switch at 4.5% account loss</li>
+        <li>Closes all at 2% basket profit</li>
+        <li>Partial closes at 0.8% per trade</li>
+      </ul>
+      <strong>Best For:</strong> Step Index (M5), Forex Majors (M5), High Liquidity Hours
+    </div>
+  </details>
+</div>
+
+<!-- ===== CSS STYLING ===== -->
+<style>
+  /* Strategy Box Container */
+  .strategy-box {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 10px 0;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .strategy-header {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #f0f0f0;
+  }
+
+  .strategy-header h3 {
+    color: #333;
+    font-size: 1.1em;
+  }
+
+  /* Control Rows */
+  .strategy-control-row {
+    display: flex;
+    align-items: center;
+    margin: 8px 0;
+    padding: 4px 0;
+  }
+
+  /* Toggle Switch Styling */
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    gap: 8px;
+  }
+
+  .toggle-label input[type="checkbox"] {
+    display: none;
+  }
+
+  .toggle-switch {
+    display: inline-block;
+    width: 24px;
+    height: 14px;
+    background: #ccc;
+    border-radius: 7px;
+    position: relative;
+    transition: background 0.3s ease;
+  }
+
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 6px;
+    top: 1px;
+    left: 1px;
+    transition: left 0.3s ease;
+  }
+
+  .toggle-label input[type="checkbox"]:checked + .toggle-switch {
+    background: #28a745;
+  }
+
+  .toggle-label input[type="checkbox"]:checked + .toggle-switch::after {
+    left: 11px;
+  }
+
+  .toggle-label span {
+    color: #333;
+    font-weight: 500;
+  }
+
+  /* Alert Count */
+  .alert-count {
+    padding: 2px 6px;
+    background: #f0f0f0;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+
+  /* Alert List */
+  .alert-list {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fafafa;
+    max-height: 250px;
+    overflow-y: auto;
+  }
+
+  .alert-list::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .alert-list::-webkit-scrollbar-track {
+    background: #f0f0f0;
+  }
+
+  .alert-list::-webkit-scrollbar-thumb {
+    background: #ddd;
+    border-radius: 3px;
+  }
+
+  .alert-list::-webkit-scrollbar-thumb:hover {
+    background: #bbb;
+  }
+
+  .alert-item {
+    padding: 8px 10px;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 0.85em;
+    line-height: 1.4;
+  }
+
+  .alert-item:last-child {
+    border-bottom: none;
+  }
+
+  .alert-item.win {
+    background: #d4edda;
+    color: #155724;
+    border-left: 3px solid #28a745;
+  }
+
+  .alert-item.loss {
+    background: #f8d7da;
+    color: #721c24;
+    border-left: 3px solid #dc3545;
+  }
+
+  .alert-item.expired {
+    background: #fff3cd;
+    color: #856404;
+    border-left: 3px solid #ffc107;
+  }
+
+  .alert-item.pending {
+    background: #d1ecf1;
+    color: #0c5460;
+    border-left: 3px solid #17a2b8;
+  }
+
+  .alert-item-time {
+    font-size: 0.75em;
+    color: #999;
+    margin-top: 2px;
+  }
+
+  /* Status Badge */
+  .status-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.75em;
+    font-weight: bold;
+  }
+
+  .status-badge.active {
+    background: #28a745;
+    color: white;
+  }
+
+  .status-badge.inactive {
+    background: #999;
+    color: white;
+  }
+
+  /* Details/Summary Styling */
+  details summary {
+    outline: none;
+    user-select: none;
+    padding: 4px 0;
+  }
+
+  details summary:hover {
+    opacity: 0.8;
+  }
+
+  details[open] > summary {
+    margin-bottom: 6px;
+  }
+
+  /* Dark Theme Support */
+  @media (prefers-color-scheme: dark) {
+    .strategy-box {
+      background: #2d2d2d;
+      border-color: #444;
+      color: #e0e0e0;
+    }
+
+    .strategy-header {
+      border-bottom-color: #444;
+    }
+
+    .strategy-header h3 {
+      color: #e0e0e0;
+    }
+
+    .toggle-label span {
+      color: #e0e0e0;
+    }
+
+    .alert-count {
+      background: #444;
+      color: #e0e0e0;
+    }
+
+    .alert-list {
+      background: #1e1e1e;
+      border-color: #444;
+    }
+
+    .alert-item {
+      border-bottom-color: #444;
+    }
+
+    .alert-item.win {
+      background: #1e4620;
+      color: #90ee90;
+    }
+
+    .alert-item.loss {
+      background: #4a1f1f;
+      color: #ff6b6b;
+    }
+
+    .alert-item.expired {
+      background: #4a4220;
+      color: #ffcc00;
+    }
+
+    .alert-item.pending {
+      background: #1f4a4a;
+      color: #00bfff;
+    }
+
+    details > div {
+      background: #333 !important;
+      color: #e0e0e0 !important;
+    }
+  }
+</style>
+
+<!-- ===== JAVASCRIPT EVENT HANDLERS ===== -->
+<script>
+  // These handlers are ALREADY in indicator.js (lines 24434-24456)
+  // But they reference these HTML elements, so make sure they exist:
+  
+  // Handler for main toggle (indicator.js handles this)
+  const gridScalperV2Toggle = document.getElementById("gridScalperV2Toggle");
+  if (gridScalperV2Toggle) {
+    gridScalperV2Toggle.addEventListener("change", function() {
+      // Event handler is in indicator.js lines 24408-24427
+      // This just ensures the element exists and is wired up
+    });
+  }
+
+  // Handler for auto-trade toggle (indicator.js handles this)
+  const autoTradeGridScalperV2Toggle = document.getElementById("autoTradeGridScalperV2Toggle");
+  if (autoTradeGridScalperV2Toggle) {
+    autoTradeGridScalperV2Toggle.addEventListener("change", function() {
+      // Event handler is in indicator.js lines 24434-24438
+      // This just ensures the element exists and is wired up
+    });
+  }
+
+  // Update UI when signals change (called from processGridScalperV2)
+  function updateGridScalperV2UI() {
+    if (typeof gridScalperV2History === 'undefined') return;
+
+    const total = gridScalperV2History.length;
+    const wins = gridScalperV2History.filter(s => s.result === "WIN").length;
+    const losses = gridScalperV2History.filter(s => s.result === "LOSS").length;
+    const expired = gridScalperV2History.filter(s => s.result === "EXPIRED").length;
+    const pending = gridScalperV2History.filter(s => s.result === "PENDING").length;
+
+    // Update counters
+    const countEl = document.getElementById("gridScalperV2Count");
+    if (countEl) {
+      countEl.textContent = `${total} signal${total !== 1 ? 's' : ''}${pending > 0 ? ` (${pending} pending)` : ''}`;
+    }
+
+    // Update status badge
+    const statusEl = document.getElementById("gridScalperV2Status");
+    if (statusEl) {
+      if (typeof gridScalperV2State !== 'undefined' && gridScalperV2State) {
+        statusEl.textContent = "ACTIVE GRID";
+        statusEl.style.display = "inline-block";
+        statusEl.className = "status-badge active";
+      } else {
+        statusEl.style.display = "none";
+      }
+    }
+
+    // Update stats
+    const totalProfit = gridScalperV2History.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+    const winRate = total > 0 ? ((wins / (wins + losses + expired)) * 100).toFixed(1) : "0";
+
+    const statsMap = {
+      "gridScalperV2TotalSignals": total,
+      "gridScalperV2Wins": wins,
+      "gridScalperV2Losses": losses,
+      "gridScalperV2Expired": expired,
+      "gridScalperV2WinRate": `${winRate}%`,
+      "gridScalperV2TotalProfit": `$${totalProfit.toFixed(2)}`
+    };
+
+    for (const [id, value] of Object.entries(statsMap)) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    // Update alert list
+    updateGridScalperV2AlertList();
+  }
+
+  function updateGridScalperV2AlertList() {
+    if (typeof gridScalperV2History === 'undefined') return;
+
+    const listEl = document.getElementById("gridScalperV2AlertList");
+    if (!listEl) return;
+
+    if (gridScalperV2History.length === 0) {
+      listEl.innerHTML = `
+        <div style="padding: 10px; color: #999; text-align: center; font-size: 0.9em;">
+          No signals yet — waiting for ranging setup with exhaustion pattern
+        </div>
+      `;
+      listEl.style.display = "block";
+      return;
+    }
+
+    listEl.style.display = "block";
+    let html = "";
+
+    // Show most recent signals (newest first, limit to 10)
+    for (let i = 0; i < Math.min(gridScalperV2History.length, 10); i++) {
+      const s = gridScalperV2History[i];
+      const resultClass = s.result.toLowerCase();
+      const resultEmoji = {
+        "WIN": "✅",
+        "LOSS": "❌",
+        "EXPIRED": "⏱",
+        "PENDING": "⏳"
+      }[s.result] || "❓";
+
+      const symbol = s.symbol || "--";
+      const price = (s.entry || 0).toFixed(4);
+      const profit = (s.totalProfit || 0).toFixed(2);
+
+      const time = s.timestamp 
+        ? new Date(s.timestamp).toLocaleTimeString()
+        : "N/A";
+
+      html += `
+        <div class="alert-item ${resultClass}">
+          <div><strong>${resultEmoji} ${s.dir} @ ${price}</strong> (${symbol})</div>
+          <div>Result: ${s.result} | Profit: $${profit}</div>
+          <div class="alert-item-time">${time}</div>
+        </div>
+      `;
+    }
+
+    listEl.innerHTML = html;
+  }
+
+  // Call update function periodically (synced with main loop)
+  setInterval(updateGridScalperV2UI, 1000);
+
+  // Initial update
+  updateGridScalperV2UI();
+</script>
+
+<!-- ===== INTEGRATION NOTES =====
+
+Place this HTML block in your index.html in the strategy controls section,
+preferably after the other strategy controls (like TikTok Fib, Power of 3, etc).
+
+The CSS is included inline and supports both light and dark themes.
+
+The JavaScript event handlers reference the elements by ID, and indicator.js
+will automatically wire up the toggle functionality (lines 24408-24456).
+
+Expected location: Near line 2300+ in index.html where other strategy controls are defined.
+
+No additional dependencies required - uses vanilla JavaScript and CSS.
+
+===== END GRID SCALPER V2 UI COMPONENT ===== -->
