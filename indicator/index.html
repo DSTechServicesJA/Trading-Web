@@ -772,6 +772,7 @@
                   <span class="strat-enable-name">Grid Scalper V2 (S19)</span>
                   <span class="strat-enable-badge off" id="stratBadge-gridScalperV2">OFF</span>
                 </label>
+                <button id="gridScalperV2AnalysisBtn" class="analysis-btn" title="Debug analysis for Grid Scalper V2 signals">🔍 Analyze Signals</button>
 
                 <label class="strat-enable-row">
                   <input type="checkbox" id="po3_4hToggle" />
@@ -1945,6 +1946,36 @@
         </div>
       </section>
 
+    </div>
+  </div>
+
+  <!-- Grid Scalper V2 Analysis Modal -->
+  <div id="gridScalperV2Modal" class="modal" style="display:none;">
+    <div class="modal-content analysis-modal">
+      <div class="modal-header">
+        <h2>💹 Grid Scalper V2 — Multi-Step Analysis</h2>
+        <button class="modal-close" id="gridScalperV2CloseBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="analysis-container">
+          <!-- Panel selector for multi-panel view -->
+          <div id="panelSelector" style="margin-bottom: 15px; display: none;">
+            <label style="font-weight: bold; margin-right: 10px;">Select Panel:</label>
+            <select id="gridScalperV2PanelSelect" style="padding: 6px; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--bg-base); color: var(--text-primary);">
+            </select>
+          </div>
+          
+          <!-- Analysis steps -->
+          <div class="analysis-steps">
+            <div class="analysis-step step-1" id="step1"></div>
+            <div class="analysis-step step-2" id="step2"></div>
+            <div class="analysis-step step-3" id="step3"></div>
+            <div class="analysis-step step-4" id="step4"></div>
+            <div class="analysis-step step-5" id="step5"></div>
+            <div class="analysis-step step-6 step-final" id="step6"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

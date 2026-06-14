@@ -10494,6 +10494,254 @@ function monitorGridScalperV2Outcomes(candle) {
   }
 }
 
+/**
+ * DEBUG: Multi-step analysis with indexes for Grid Scalper V2 (M5)
+ * Shows each condition step-by-step with actual values
+ */
+function debugGridScalperV2MultiAnalysis() {
+  if (candles.length < 20) {
+    console.warn("❌ Not enough candles (need 20+, have " + candles.length + ")");
+    return;
+  }
+  
+  const analysis = {
+    timestamp: new Date().toLocaleString(),
+    timeframe: "M5",
+    candle_count: candles.length,
+    steps: []
+  };
+  
+  // STEP 1: Current Candle Data
+  const idx = candles.length - 1;
+  const currentCandle = candles[idx];
+  analysis.steps.push({
+    step: 1,
+    title: "Current M5 Candle",
+    index: idx,
+    data: {
+      open: currentCandle.open,
+      high: currentCandle.high,
+      low: currentCandle.low,
+      close: currentCandle.close,
+      range: (currentCandle.high - currentCandle.low).toFixed(4)
+    }
+  });
+  
+  // STEP 2: ATR & Ranging Check
+  const atr = gridV2_calculateATR();
+  const isRanging = gridV2_isRanging();
+  analysis.steps.push({
+    step: 2,
+    title: "ATR & Ranging Detection",
+    atr: atr.toFixed(4),
+    atr_threshold: GRID_SCALPER_V2_RANGE_THRESHOLD_ATR,
+    is_ranging: isRanging,
+    passing: isRanging ? "✅ YES (ATR <= " + GRID_SCALPER_V2_RANGE_THRESHOLD_ATR + ")" : "❌ NO (trending)"
+  });
+  
+  // STEP 3: EMA & Trend Strength Check
+  const ema = gridV2_calculateEMA();
+  const isTrending = gridV2_isTrending();
+  const distFromEMA = Math.abs(currentCandle.close - ema);
+  const trendThreshold = GRID_SCALPER_V2_TREND_STRENGTH_ATR * atr;
+  analysis.steps.push({
+    step: 3,
+    title: "EMA & Trend Strength",
+    ema: ema.toFixed(4),
+    current_price: currentCandle.close.toFixed(4),
+    distance_from_ema: distFromEMA.toFixed(4),
+    trend_threshold: trendThreshold.toFixed(4),
+    is_trending: isTrending,
+    passing: !isTrending ? "✅ YES (not trending)" : "❌ NO (strong trend)"
+  });
+  
+  // STEP 4: RSI & Exhaustion Check
+  const rsi = gridV2_calculateRSI();
+  const exhaustion = gridV2_detectExhaustion();
+  analysis.steps.push({
+    step: 4,
+    title: "RSI & Exhaustion Pattern",
+    rsi: rsi.toFixed(2),
+    exhaustion_signal: exhaustion || "NONE",
+    rsi_confirmation: exhaustion === "BUY" 
+      ? (rsi >= 40 ? "❌ FAIL (RSI >= 40)" : "✅ PASS (RSI < 40)")
+      : exhaustion === "SELL"
+      ? (rsi <= 60 ? "❌ FAIL (RSI <= 60)" : "✅ PASS (RSI > 60)")
+      : "⚠️ No exhaustion"
+  });
+  
+  // STEP 5: Cooldown & State Check
+  const timeSinceLastSignal = idx - lastGridScalperV2Idx;
+  const inCooldown = timeSinceLastSignal < GRID_SCALPER_V2_COOLDOWN;
+  const stateActive = gridScalperV2State && gridScalperV2State.status === "ACTIVE";
+  analysis.steps.push({
+    step: 5,
+    title: "Cooldown & State",
+    last_signal_index: lastGridScalperV2Idx,
+    candles_since_signal: timeSinceLastSignal,
+    cooldown_period: GRID_SCALPER_V2_COOLDOWN,
+    in_cooldown: inCooldown,
+    state_active: stateActive,
+    passing: (!inCooldown && !stateActive) ? "✅ READY" : "❌ Blocked"
+  });
+  
+  // STEP 6: Overall Decision
+  const enabledCheck = gridScalperV2Enabled;
+  const shouldFire = enabledCheck && isRanging && !isTrending && exhaustion && 
+                     ((exhaustion === "BUY" && rsi < 40) || (exhaustion === "SELL" && rsi > 60)) &&
+                     !inCooldown && !stateActive;
+  
+  analysis.steps.push({
+    step: 6,
+    title: "OVERALL SIGNAL DECISION",
+    enabled: enabledCheck,
+    all_conditions_met: shouldFire,
+    result: shouldFire ? "🟢 SIGNAL SHOULD FIRE" : "🔴 SIGNAL BLOCKED",
+    blocking_reasons: (() => {
+      const reasons = [];
+      if (!enabledCheck) reasons.push("Strategy disabled");
+      if (!isRanging) reasons.push("Market is trending");
+      if (isTrending) reasons.push("Strong trend detected");
+      if (!exhaustion) reasons.push("No exhaustion pattern");
+      if (exhaustion === "BUY" && rsi >= 40) reasons.push("BUY exhaustion but RSI >= 40");
+      if (exhaustion === "SELL" && rsi <= 60) reasons.push("SELL exhaustion but RSI <= 60");
+      if (inCooldown) reasons.push("In cooldown period");
+      if (stateActive) reasons.push("Trade already active");
+      return reasons.length > 0 ? reasons : ["None"];
+    })()
+  });
+  
+  console.group("📊 GRID SCALPER V2 — MULTI-ANALYSIS (M5)");
+  console.table(analysis);
+  console.log("%c=== DETAILED STEPS ===", "font-weight:bold;font-size:13px;");
+  analysis.steps.forEach(s => {
+    console.group(`Step ${s.step}: ${s.title}`);
+    console.table(s);
+    console.groupEnd();
+  });
+  console.groupEnd();
+  
+  return analysis;
+}
+
+/**
+ * Open Grid Scalper V2 Analysis Modal with multi-panel support
+ */
+function openGridScalperV2AnalysisModal() {
+  const modal = document.getElementById("gridScalperV2Modal");
+  const panelSelector = document.getElementById("panelSelector");
+  const panelSelect = document.getElementById("gridScalperV2PanelSelect");
+  
+  // Populate panel selector if multi-panel is active
+  const panels = Array.from(multiPanels.keys());
+  if (panels.length > 1) {
+    panelSelector.style.display = "block";
+    panelSelect.innerHTML = "";
+    panels.forEach(panel => {
+      const option = document.createElement("option");
+      option.value = panel;
+      option.textContent = panel;
+      panelSelect.appendChild(option);
+    });
+    panelSelect.addEventListener("change", () => {
+      displayGridScalperV2Analysis(panelSelect.value);
+    });
+  } else {
+    panelSelector.style.display = "none";
+  }
+  
+  // Display analysis for current panel
+  const currentSymbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
+  displayGridScalperV2Analysis(currentSymbol);
+  
+  modal.style.display = "flex";
+}
+
+/**
+ * Display Grid Scalper V2 analysis in modal for a specific panel
+ */
+function displayGridScalperV2Analysis(symbol) {
+  const analysis = debugGridScalperV2MultiAnalysis();
+  
+  // Helper to create step HTML
+  const createStepHTML = (step) => {
+    const title = step.title || "Step " + step.step;
+    const data = step;
+    
+    let content = `<h3><span class="step-num">${step.step}</span>${title}</h3><div class="analysis-step-content">`;
+    
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "step" || key === "title" || key === "steps" || key === "blocking_reasons") continue;
+      
+      let displayValue = value;
+      if (typeof value === "number") {
+        displayValue = typeof value === "number" && value.toFixed ? value.toFixed(4) : value;
+      } else if (typeof value === "boolean") {
+        displayValue = value ? "✅ YES" : "❌ NO";
+      } else if (Array.isArray(value)) {
+        displayValue = value.join(", ");
+      }
+      
+      content += `
+        <div class="analysis-step-item">
+          <span class="analysis-step-label">${key.replace(/_/g, " ")}</span>
+          <span class="analysis-step-value">${displayValue}</span>
+        </div>
+      `;
+    }
+    
+    content += `</div>`;
+    return content;
+  };
+  
+  // Populate each step
+  for (let i = 1; i <= 6; i++) {
+    const stepEl = document.getElementById("step" + i);
+    if (stepEl && analysis.steps[i - 1]) {
+      stepEl.innerHTML = createStepHTML(analysis.steps[i - 1]);
+    }
+  }
+  
+  // Populate final decision
+  const finalStep = analysis.steps[5];
+  const step6El = document.getElementById("step6");
+  if (step6El && finalStep) {
+    let finalHTML = `<h3><span class="step-num">6</span>${finalStep.title}</h3><div class="analysis-step-content">`;
+    
+    finalHTML += `
+      <div class="analysis-step-item">
+        <span class="analysis-step-label">Strategy Enabled</span>
+        <span class="analysis-step-value">${finalStep.enabled ? "✅ YES" : "❌ NO"}</span>
+      </div>
+      <div class="analysis-step-item">
+        <span class="analysis-step-label">All Conditions Met</span>
+        <span class="analysis-step-value">${finalStep.all_conditions_met ? "✅ YES" : "❌ NO"}</span>
+      </div>
+    `;
+    
+    finalHTML += `</div>`;
+    
+    // Add signal result
+    const resultClass = finalStep.all_conditions_met ? "signal-result fire" : "signal-result blocked";
+    const resultText = finalStep.all_conditions_met ? "🟢 SIGNAL SHOULD FIRE" : "🔴 SIGNAL BLOCKED";
+    finalHTML += `<div class="${resultClass}">${resultText}</div>`;
+    
+    // Add blocking reasons if signal is blocked
+    if (!finalStep.all_conditions_met && finalStep.blocking_reasons && finalStep.blocking_reasons.length > 0) {
+      finalHTML += `
+        <div class="blocking-reasons">
+          <h4>⚠️ Blocking Reasons:</h4>
+          <ul>
+            ${finalStep.blocking_reasons.map(reason => `<li>${reason}</li>`).join("")}
+          </ul>
+        </div>
+      `;
+    }
+    
+    step6El.innerHTML = finalHTML;
+  }
+}
+
 /* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
 /**
  * Detect a Power of 3 (ICT) setup.
@@ -24466,6 +24714,31 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       drawChart();
       updateStrategyBadges();
+    });
+  }
+  
+  /* Grid Scalper V2 Analysis Button */
+  const gridScalperV2AnalysisBtn = document.getElementById("gridScalperV2AnalysisBtn");
+  const gridScalperV2Modal = document.getElementById("gridScalperV2Modal");
+  const gridScalperV2CloseBtn = document.getElementById("gridScalperV2CloseBtn");
+  
+  if (gridScalperV2AnalysisBtn) {
+    gridScalperV2AnalysisBtn.addEventListener("click", () => {
+      openGridScalperV2AnalysisModal();
+    });
+  }
+  
+  if (gridScalperV2CloseBtn) {
+    gridScalperV2CloseBtn.addEventListener("click", () => {
+      gridScalperV2Modal.style.display = "none";
+    });
+  }
+  
+  if (gridScalperV2Modal) {
+    gridScalperV2Modal.addEventListener("click", (e) => {
+      if (e.target === gridScalperV2Modal) {
+        gridScalperV2Modal.style.display = "none";
+      }
     });
   }
   if (UI.autoTradeGridScalperV2Toggle) {
