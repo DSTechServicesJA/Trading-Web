@@ -12980,7 +12980,23 @@ function processGridScalperMA() {
   renderStrategyAlerts();
 
   if (autoTradeStrategyEnabled && autoTradeGridScalperMA && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA" });
+    /* Grid Scalper MA opposite mode: recalculate SL/TP for the reversed direction
+       rather than relying on the naive SL↔TP swap which produces poor R:R on
+       Step Index (SL becomes old TP distance = too tight). */
+    if (autoTradeStrategyOpposite) {
+      const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+      const risk = Math.abs(signal.entry - signal.sl);
+      const oppSl = oppDir === "BULL"
+        ? signal.entry - risk
+        : signal.entry + risk;
+      const oppTp = oppDir === "BULL"
+        ? signal.entry + risk * signal.rr
+        : signal.entry - risk * signal.rr;
+      addLog(`🔄 Grid Scalper MA opposite: ${signal.dir} → ${oppDir} (SL/TP recalculated for ${oppDir})`);
+      executeAutoTrade({ dir: oppDir, entry: signal.entry, sl: oppSl, tp: oppTp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA", _oppositePreApplied: true });
+    } else {
+      executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA" });
+    }
   }
 }
 
