@@ -10414,21 +10414,38 @@ function processGridScalperV2() {
     renderStrategyAlerts();
     
     if (autoTradeStrategyEnabled && autoTradeGridScalperV2 && !_historicalProcessing) {
-      const sl = signal.dir === "BUY" 
+      /* Determine effective direction: if opposite mode is ON, flip the signal.
+         Grid Scalper V2 uses BUY/SELL internally, but executeAutoTrade expects
+         BULL/BEAR for contract type mapping. */
+      const effectiveGridDir = autoTradeStrategyOpposite
+        ? (signal.dir === "BUY" ? "SELL" : "BUY")
+        : signal.dir;
+      /* Normalize to BULL/BEAR for the auto-trade execution pipeline */
+      const normalizedDir = effectiveGridDir === "BUY" ? "BULL" : "BEAR";
+
+      if (autoTradeStrategyOpposite) {
+        addLog(`🔄 Grid Scalper V2 opposite: ${signal.dir} → ${effectiveGridDir} (SL/TP recalculated for ${effectiveGridDir})`);
+      }
+
+      /* Compute SL/TP based on the effective (post-opposite) direction.
+         This avoids the naive SL↔TP swap which produces a too-tight SL on
+         Step Index when direction is reversed. */
+      const sl = effectiveGridDir === "BUY"
         ? signal.entry - (signal.atr * 2.0)
         : signal.entry + (signal.atr * 2.0);
-      const tp = signal.dir === "BUY"
+      const tp = effectiveGridDir === "BUY"
         ? signal.entry + (signal.gridSpacing * GRID_SCALPER_V2_INITIAL_OFFSET)
         : signal.entry - (signal.gridSpacing * GRID_SCALPER_V2_INITIAL_OFFSET);
-      
+
       executeAutoTrade({
-        dir: signal.dir,
+        dir: normalizedDir,
         entry: signal.entry,
         sl: sl,
         tp: tp,
         symbol: sym,
         source: "strategy",
-        strategyName: "gridScalperV2"
+        strategyName: "gridScalperV2",
+        _oppositePreApplied: true  /* flag: SL/TP already computed for effective dir */
       });
     }
   }
@@ -18834,7 +18851,9 @@ function executeAutoTrade(signal, _capturedWs) {
 
   /* Apply opposite mode: reverse direction for scalp / strategy if enabled */
   let effectiveDir = signal.dir;
-  if (signal.source === "scalp" && autoTradeScalpOpposite) {
+  if (signal._oppositePreApplied) {
+    /* SL/TP and direction already computed for the effective direction by the caller */
+  } else if (signal.source === "scalp" && autoTradeScalpOpposite) {
     effectiveDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     addLog(`🔄 Opposite mode (Scalp): reversed ${signal.dir} → ${effectiveDir}`);
   } else if (signal.source === "strategy" && autoTradeStrategyOpposite) {
@@ -18855,10 +18874,11 @@ function executeAutoTrade(signal, _capturedWs) {
   }
 
   /* When opposite mode flips direction, swap SL and TP so they are on the
-     correct side of the entry for the reversed trade direction. */
+     correct side of the entry for the reversed trade direction.
+     Skip if caller already computed correct SL/TP (_oppositePreApplied). */
   let tradeSl = signal.sl;
   let tradeTp = signal.tp;
-  if (effectiveDir !== signal.dir && tradeSl != null && tradeTp != null) {
+  if (!signal._oppositePreApplied && effectiveDir !== signal.dir && tradeSl != null && tradeTp != null) {
     tradeSl = signal.tp;
     tradeTp = signal.sl;
   }
