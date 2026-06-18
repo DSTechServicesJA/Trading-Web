@@ -2055,6 +2055,8 @@ const CRT_TBS_HTF_RATIO = 4;         /* HTF candle = 4× LTF candles (e.g. 1H vs
 const CRT_TBS_SWING_LOOKBACK = 5;    /* bars to confirm swing high/low */
 const CRT_TBS_MIN_CRT_BODY_ATR = 0.8; /* min CRT body in ATR multiples for A+ grade */
 const CRT_TBS_DISPLACEMENT_MULT = 1.2; /* displacement body > avgBody × mult */
+const CRT_TBS_MIN_BODY_RANGE_RATIO = 0.4; /* min body/range for A+ CRT candle */
+const CRT_TBS_MODEL1_TIMEOUT = 10;   /* max candles to wait for Model #1 after TBS */
 
 /* CRT+TBS working state */
 let _crtState = 0;                    /* state machine position */
@@ -12886,7 +12888,7 @@ function _crtIsAPlusCandle(htfCandle, atr) {
   const body = Math.abs(htfCandle.close - htfCandle.open);
   const range = htfCandle.high - htfCandle.low;
   /* Body must be significant portion of range and large relative to ATR */
-  return body >= atr * CRT_TBS_MIN_CRT_BODY_ATR && body >= range * 0.4;
+  return body >= atr * CRT_TBS_MIN_CRT_BODY_ATR && body >= range * CRT_TBS_MIN_BODY_RANGE_RATIO;
 }
 
 /**
@@ -13089,7 +13091,7 @@ function detectCrtTbsStrategy() {
         }
       } else {
         /* Model #1 not yet confirmed — stay in state 6 but timeout after too many candles */
-        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > 10) {
+        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > CRT_TBS_MODEL1_TIMEOUT) {
           _crtTbsReset();
         }
         return null;
@@ -13128,7 +13130,7 @@ function detectCrtTbsStrategy() {
           return signal;
         }
       } else {
-        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > 10) {
+        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > CRT_TBS_MODEL1_TIMEOUT) {
           _crtTbsReset();
         }
         return null;
