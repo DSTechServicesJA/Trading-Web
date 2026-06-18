@@ -42,5 +42,6 @@ jsonResponse([
         ['key' => 'breaker_block',   'label' => 'Breaker Block'],
         ['key' => 'ote_golden_pocket','label' => 'OTE Golden Pocket'],
         ['key' => 'orb',             'label' => 'Opening Range Breakout (ORB)'],
+        ['key' => 'crt_tbs',         'label' => 'CRT + TBS (Turtle Body Soup)'],
     ],
 ]);

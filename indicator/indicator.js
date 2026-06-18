@@ -2027,6 +2027,50 @@ let _orbRetestHigh = false;           /* retest of ORB High after breakout above
 let _orbRetestLow  = false;           /* retest of ORB Low after breakout below */
 let _orbSessionStartEpoch = null;     /* epoch of session start */
 
+/* ================= STRATEGY 20: CRT + TBS (TURTLE BODY SOUP) ================= */
+/**
+ * CRT (Candle Range Theory) + TBS Strategy
+ * Uses HTF A+ CRT candles to establish directional bias, then drops to LTF
+ * to find Turtle Body Soup (TBS) entries confirmed by Model #1 displacement.
+ *
+ * State Machine:
+ *   0: Find A+ HTF CRT candle
+ *   1: Plot CRT levels (CRTH, CRTL, CRT50)
+ *   2: Wait for HTF CRT manipulation
+ *   3: Validate manipulation (close inside CRT range)
+ *   4: Activate LTF entry mode
+ *   5: Detect LTF swing structure (old high/low)
+ *   6: Detect TBS candle
+ *   7: Detect Model #1 confirmation
+ *   8: Print entry signal
+ */
+let crtTbsEnabled = false;            /* master toggle */
+let crtTbsHistory = [];               /* alert history */
+let lastCrtTbsIdx = -999;
+let autoTradeCrtTbs = true;
+const CRT_TBS_MAX_HISTORY = 30;
+const CRT_TBS_COOLDOWN = 8;           /* min candles between alerts */
+const CRT_TBS_MAX_CANDLES = 80;       /* trade monitoring timeout */
+const CRT_TBS_HTF_RATIO = 4;         /* HTF candle = 4× LTF candles (e.g. 1H vs 15m) */
+const CRT_TBS_SWING_LOOKBACK = 5;    /* bars to confirm swing high/low */
+const CRT_TBS_MIN_CRT_BODY_ATR = 0.8; /* min CRT body in ATR multiples for A+ grade */
+const CRT_TBS_DISPLACEMENT_MULT = 1.2; /* displacement body > avgBody × mult */
+const CRT_TBS_MIN_BODY_RANGE_RATIO = 0.4; /* min body/range for A+ CRT candle */
+const CRT_TBS_MODEL1_TIMEOUT = 10;   /* max candles to wait for Model #1 after TBS */
+
+/* CRT+TBS working state */
+let _crtState = 0;                    /* state machine position */
+let _crtHigh = null;                  /* CRT High level */
+let _crtLow = null;                   /* CRT Low level */
+let _crt50 = null;                    /* CRT 50% level */
+let _crtBias = null;                  /* 'sell' or 'buy' after manipulation */
+let _crtManipCandle = null;           /* the HTF manipulation candle index */
+let _crtLtfOldHigh = null;            /* LTF old high (swing high) for sell bias */
+let _crtLtfOldLow = null;             /* LTF old low (swing low) for buy bias */
+let _crtTbsDetected = false;          /* TBS candle found */
+let _crtTbsCandleIdx = null;          /* index of TBS candle */
+let _crtStrictTbs = true;             /* require body close (not just wick) */
+
 /* ================= FEATURE: SESSION HEATMAP (17) ================= */
 let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
 
@@ -2358,6 +2402,13 @@ function initUI() {
   UI.orbAlertCount           = document.getElementById("orbAlertCount");
   UI.autoTradeOrbToggle      = document.getElementById("autoTradeOrbToggle");
   UI.orbCandleConfirmToggle  = document.getElementById("orbCandleConfirmToggle");
+
+  /* Strategy 20: CRT + TBS */
+  UI.crtTbsToggle            = document.getElementById("crtTbsToggle");
+  UI.crtTbsAlertList         = document.getElementById("crtTbsAlertList");
+  UI.crtTbsAlertCount        = document.getElementById("crtTbsAlertCount");
+  UI.autoTradeCrtTbsToggle   = document.getElementById("autoTradeCrtTbsToggle");
+  UI.crtTbsStrictToggle      = document.getElementById("crtTbsStrictToggle");
 
   /* NY Open Range alerts */
   UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
@@ -3714,6 +3765,7 @@ function buildTelegramCaption() {
   if (breakerBlockEnabled) filters.push("Breaker Block");
   if (oteGoldenPocketEnabled) filters.push("OTE Golden Pocket");
   if (orbEnabled) filters.push("ORB");
+  if (crtTbsEnabled) filters.push("CRT+TBS");
   if (tiktokEnabled) filters.push("TikTok Fib");
   if (fvgStratEnabled) filters.push("Fair Value Gap");
   if (mtfTopDownEnabled) filters.push("MTF Top-Down");
@@ -4804,6 +4856,10 @@ function saveSettings() {
       orbEnabled,
       autoTradeOrb,
       orbCandleConfirmation,
+      /* Strategy 20: CRT + TBS */
+      crtTbsEnabled,
+      autoTradeCrtTbs,
+      _crtStrictTbs,
       /* Feature settings */
       orderblockEnabled,
       autoTradeOrderblock,
@@ -5061,6 +5117,14 @@ function restoreSettings() {
     if (UI.autoTradeOrbToggle) UI.autoTradeOrbToggle.checked = autoTradeOrb;
     if (s.orbCandleConfirmation != null) orbCandleConfirmation = s.orbCandleConfirmation;
     if (UI.orbCandleConfirmToggle) UI.orbCandleConfirmToggle.checked = orbCandleConfirmation;
+
+    /* Strategy 20: CRT + TBS */
+    if (s.crtTbsEnabled != null) crtTbsEnabled = s.crtTbsEnabled;
+    if (UI.crtTbsToggle) UI.crtTbsToggle.checked = crtTbsEnabled;
+    if (s.autoTradeCrtTbs != null) autoTradeCrtTbs = s.autoTradeCrtTbs;
+    if (UI.autoTradeCrtTbsToggle) UI.autoTradeCrtTbsToggle.checked = autoTradeCrtTbs;
+    if (s._crtStrictTbs != null) _crtStrictTbs = s._crtStrictTbs;
+    if (UI.crtTbsStrictToggle) UI.crtTbsStrictToggle.checked = _crtStrictTbs;
 
     /* Auto-apply recommended */
     if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
@@ -5366,7 +5430,8 @@ function updateStrategyWinRatesUI() {
     { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" },
     { id: "stratWR_po3_4h",         history: po3_4hHistory,          label: "🕓 4H PO3" },
     { id: "stratWR_breakerBlock",   history: breakerBlockHistory,    label: "🧱 Breaker Block" },
-    { id: "stratWR_oteGoldenPocket", history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" }
+    { id: "stratWR_oteGoldenPocket", history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" },
+    { id: "stratWR_crtTbs",          history: crtTbsHistory,           label: "🐢 CRT+TBS" }
   ];
   for (const r of rows) {
     const el = document.getElementById(r.id);
@@ -11309,13 +11374,15 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.breakerBlockAlertList, UI.breakerBlockAlertCount, breakerBlockHistory, "🧱", "Breaker Block");
   /* OTE Golden Pocket */
   _renderAlertList(UI.oteGoldenPocketAlertList, UI.oteGoldenPocketAlertCount, oteGoldenPocketHistory, "🎯", "OTE Golden Pocket");
+  /* CRT + TBS */
+  _renderAlertList(UI.crtTbsAlertList, UI.crtTbsAlertCount, crtTbsHistory, "🐢", "CRT+TBS");
   /* Update the header badge with the total count across all strategies */
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
     + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
     + tiktokHistory.length + po3_4hHistory.length + breakerBlockHistory.length
-    + oteGoldenPocketHistory.length;
+    + oteGoldenPocketHistory.length + crtTbsHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
   /* Update the strategies ticker banner */
   renderStrategyTickerBanner();
@@ -12771,6 +12838,427 @@ function monitorOrbOutcomes(candle) {
   }
 }
 
+/* ================= STRATEGY 20: CRT + TBS (TURTLE BODY SOUP) ================= */
+
+/**
+ * Reset CRT+TBS state machine to initial state.
+ */
+function _crtTbsReset() {
+  _crtState = 0;
+  _crtHigh = null;
+  _crtLow = null;
+  _crt50 = null;
+  _crtBias = null;
+  _crtManipCandle = null;
+  _crtLtfOldHigh = null;
+  _crtLtfOldLow = null;
+  _crtTbsDetected = false;
+  _crtTbsCandleIdx = null;
+}
+
+/**
+ * Synthesise HTF candles from LTF candles by grouping CRT_TBS_HTF_RATIO consecutive bars.
+ * Returns array of { open, high, low, close, epoch } objects.
+ */
+function _crtGetHtfCandles() {
+  const ratio = CRT_TBS_HTF_RATIO;
+  if (candles.length < ratio * 3) return [];
+  const htf = [];
+  const startIdx = candles.length - (Math.floor(candles.length / ratio) * ratio);
+  for (let i = startIdx; i + ratio <= candles.length; i += ratio) {
+    let h = -Infinity, l = Infinity;
+    const o = candles[i].open;
+    const c = candles[i + ratio - 1].close;
+    const ep = candles[i + ratio - 1].epoch;
+    for (let j = i; j < i + ratio; j++) {
+      if (candles[j].high > h) h = candles[j].high;
+      if (candles[j].low < l) l = candles[j].low;
+    }
+    htf.push({ open: o, high: h, low: l, close: c, epoch: ep, startIdx: i, endIdx: i + ratio - 1 });
+  }
+  return htf;
+}
+
+/**
+ * Determine if an HTF candle is an A+ CRT candle.
+ * A+ CRT: large body relative to ATR, clear range.
+ */
+function _crtIsAPlusCandle(htfCandle, atr) {
+  if (!htfCandle || atr <= 0) return false;
+  const body = Math.abs(htfCandle.close - htfCandle.open);
+  const range = htfCandle.high - htfCandle.low;
+  /* Body must be significant portion of range and large relative to ATR */
+  return body >= atr * CRT_TBS_MIN_CRT_BODY_ATR && body >= range * CRT_TBS_MIN_BODY_RANGE_RATIO;
+}
+
+/**
+ * Detect LTF swing highs using pivot logic.
+ * swingHigh at index [i-2] confirmed when high[i-2] > high[i-3] and high[i-2] > high[i-1]
+ */
+function _crtFindLtfSwingHigh(fromIdx) {
+  for (let i = candles.length - 1; i >= fromIdx + 3; i--) {
+    const pivot = i - 2;
+    if (pivot < fromIdx) break;
+    if (candles[pivot].high > candles[pivot - 1].high && candles[pivot].high > candles[pivot + 1].high) {
+      /* Additional confirmation: also check one more bar on each side if available */
+      if (pivot - 2 >= 0 && pivot + 2 < candles.length) {
+        if (candles[pivot].high > candles[pivot - 2].high && candles[pivot].high > candles[pivot + 2].high) {
+          return candles[pivot].high;
+        }
+      }
+      return candles[pivot].high;
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect LTF swing lows using pivot logic.
+ */
+function _crtFindLtfSwingLow(fromIdx) {
+  for (let i = candles.length - 1; i >= fromIdx + 3; i--) {
+    const pivot = i - 2;
+    if (pivot < fromIdx) break;
+    if (candles[pivot].low < candles[pivot - 1].low && candles[pivot].low < candles[pivot + 1].low) {
+      if (pivot - 2 >= 0 && pivot + 2 < candles.length) {
+        if (candles[pivot].low < candles[pivot - 2].low && candles[pivot].low < candles[pivot + 2].low) {
+          return candles[pivot].low;
+        }
+      }
+      return candles[pivot].low;
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect CRT + TBS strategy signal.
+ * Implements the full state machine from the strategy specification.
+ */
+function detectCrtTbsStrategy() {
+  if (!crtTbsEnabled) return null;
+
+  /* One-at-a-time: no new signal while one is pending */
+  if (crtTbsHistory.some(s => s.result === "PENDING")) return null;
+
+  const len = candles.length;
+  if (len < CRT_TBS_HTF_RATIO * 5) return null;
+
+  const idx = len - 1;
+  if (idx - lastCrtTbsIdx < CRT_TBS_COOLDOWN) return null;
+  if (atrValue <= 0) return null;
+
+  const c = candles[idx];
+
+  /* ===== STATE 0–1: Find A+ HTF CRT candle and plot levels ===== */
+  if (_crtState === 0 || _crtState === 1) {
+    const htfCandles = _crtGetHtfCandles();
+    if (htfCandles.length < 3) return null;
+
+    /* Look at the most recently completed HTF candle */
+    const htfC = htfCandles[htfCandles.length - 2]; /* second-to-last = last completed */
+    if (!_crtIsAPlusCandle(htfC, atrValue)) {
+      _crtTbsReset();
+      return null;
+    }
+
+    /* Establish CRT levels */
+    _crtHigh = htfC.high;
+    _crtLow = htfC.low;
+    _crt50 = (_crtHigh + _crtLow) / 2;
+    _crtState = 2;
+    _crtManipCandle = null;
+  }
+
+  /* ===== STATE 2–3: Wait for HTF CRT manipulation ===== */
+  if (_crtState === 2) {
+    /* Check if current candle manipulates CRT high (sell bias) */
+    if (c.high > _crtHigh && c.close < _crtHigh && c.close > _crtLow) {
+      _crtBias = "sell";
+      _crtManipCandle = idx;
+      _crtState = 4;
+    }
+    /* Check if current candle manipulates CRT low (buy bias) */
+    else if (c.low < _crtLow && c.close > _crtLow && c.close < _crtHigh) {
+      _crtBias = "buy";
+      _crtManipCandle = idx;
+      _crtState = 4;
+    }
+    /* Invalid manipulation: close outside CRT range */
+    else if (c.high > _crtHigh && c.close > _crtHigh) {
+      _crtTbsReset();
+      return null;
+    }
+    else if (c.low < _crtLow && c.close < _crtLow) {
+      _crtTbsReset();
+      return null;
+    }
+    else {
+      return null;
+    }
+  }
+
+  /* ===== STATE 4–5: LTF entry mode — find old high/low ===== */
+  if (_crtState === 4) {
+    const searchFrom = Math.max(0, (_crtManipCandle || 0) - CRT_TBS_SWING_LOOKBACK * 3);
+    if (_crtBias === "sell") {
+      _crtLtfOldHigh = _crtFindLtfSwingHigh(searchFrom);
+      if (_crtLtfOldHigh != null) {
+        _crtState = 5;
+      } else {
+        return null;
+      }
+    } else {
+      _crtLtfOldLow = _crtFindLtfSwingLow(searchFrom);
+      if (_crtLtfOldLow != null) {
+        _crtState = 5;
+      } else {
+        return null;
+      }
+    }
+  }
+
+  /* ===== STATE 5–6: Detect TBS candle ===== */
+  if (_crtState === 5) {
+    if (_crtBias === "sell") {
+      /* Bearish TBS: candle sweeps old high and body-closes below it */
+      const bearishTBS = c.high > _crtLtfOldHigh && c.close < _crtLtfOldHigh;
+      const strictCheck = _crtStrictTbs ? (c.close < c.open) : true;
+      if (bearishTBS && strictCheck) {
+        _crtTbsDetected = true;
+        _crtTbsCandleIdx = idx;
+        _crtState = 6;
+      } else {
+        return null;
+      }
+    } else {
+      /* Bullish TBS: candle sweeps old low and body-closes above it */
+      const bullishTBS = c.low < _crtLtfOldLow && c.close > _crtLtfOldLow;
+      const strictCheck = _crtStrictTbs ? (c.close > c.open) : true;
+      if (bullishTBS && strictCheck) {
+        _crtTbsDetected = true;
+        _crtTbsCandleIdx = idx;
+        _crtState = 6;
+      } else {
+        return null;
+      }
+    }
+  }
+
+  /* ===== STATE 6–7: Detect Model #1 confirmation ===== */
+  if (_crtState === 6) {
+    const body = Math.abs(c.close - c.open);
+    /* Compute average body over last 10 candles */
+    let sumBody = 0;
+    const lookback = Math.min(10, len - 1);
+    for (let i = idx - lookback; i < idx; i++) {
+      if (i >= 0) sumBody += Math.abs(candles[i].close - candles[i].open);
+    }
+    const avgBody = lookback > 0 ? (sumBody / lookback) * CRT_TBS_DISPLACEMENT_MULT : body;
+
+    if (_crtBias === "sell") {
+      /* Bearish Model #1: bullish order block (prev candle bullish) + bearish displacement */
+      const prevBullish = idx > 0 && candles[idx - 1].close > candles[idx - 1].open;
+      const bearishDisplacement = c.close < candles[idx - 1].low && body > avgBody;
+      if (prevBullish && bearishDisplacement) {
+        /* Signal confirmed! */
+        const entry = c.close;
+        const sl = _crtHigh + atrValue * 0.2;
+        const tp = entry - (sl - entry) * 2;
+        const risk = Math.abs(sl - entry);
+        const reward = Math.abs(entry - tp);
+        if (risk > 0) {
+          _crtState = 8;
+          const signal = {
+            dir: "BEAR",
+            entry, sl, tp,
+            rr: reward / risk,
+            crtHigh: _crtHigh,
+            crtLow: _crtLow,
+            crt50: _crt50,
+            oldHigh: _crtLtfOldHigh,
+            bias: _crtBias,
+            tbsIdx: _crtTbsCandleIdx,
+            candleIdx: idx,
+            epoch: c.epoch,
+            symbol: getActiveSymbol(),
+            result: "PENDING",
+            type: "crt_tbs",
+            _origSl: sl
+          };
+          _crtTbsReset();
+          return signal;
+        }
+      } else {
+        /* Model #1 not yet confirmed — stay in state 6 but timeout after too many candles */
+        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > CRT_TBS_MODEL1_TIMEOUT) {
+          _crtTbsReset();
+        }
+        return null;
+      }
+    } else {
+      /* Bullish Model #1: bearish order block (prev candle bearish) + bullish displacement */
+      const prevBearish = idx > 0 && candles[idx - 1].close < candles[idx - 1].open;
+      const bullishDisplacement = c.close > candles[idx - 1].high && body > avgBody;
+      if (prevBearish && bullishDisplacement) {
+        /* Signal confirmed! */
+        const entry = c.close;
+        const sl = _crtLow - atrValue * 0.2;
+        const tp = entry + (entry - sl) * 2;
+        const risk = Math.abs(entry - sl);
+        const reward = Math.abs(tp - entry);
+        if (risk > 0) {
+          _crtState = 8;
+          const signal = {
+            dir: "BULL",
+            entry, sl, tp,
+            rr: reward / risk,
+            crtHigh: _crtHigh,
+            crtLow: _crtLow,
+            crt50: _crt50,
+            oldLow: _crtLtfOldLow,
+            bias: _crtBias,
+            tbsIdx: _crtTbsCandleIdx,
+            candleIdx: idx,
+            epoch: c.epoch,
+            symbol: getActiveSymbol(),
+            result: "PENDING",
+            type: "crt_tbs",
+            _origSl: sl
+          };
+          _crtTbsReset();
+          return signal;
+        }
+      } else {
+        if (_crtTbsCandleIdx && idx - _crtTbsCandleIdx > CRT_TBS_MODEL1_TIMEOUT) {
+          _crtTbsReset();
+        }
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Run the CRT+TBS scanner and handle alerting.
+ */
+function processCrtTbs() {
+  const signal = detectCrtTbsStrategy();
+  if (!signal) return;
+
+  /* Min Confluence Gate */
+  if (minConfluenceEnabled) {
+    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+    if (confScore < minConfluenceValue) {
+      addLog(`⚠ CRT+TBS REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      return;
+    }
+  }
+
+  lastCrtTbsIdx = signal.candleIdx;
+
+  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
+  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  signal._stratOutcomeSent = false;
+  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  crtTbsHistory.unshift(signal);
+  if (crtTbsHistory.length > CRT_TBS_MAX_HISTORY) crtTbsHistory.pop();
+
+  playStrategyAlert(signal.dir);
+
+  const sym = getActiveSymbol() || "--";
+  const biasLabel = signal.bias === "sell" ? "CRT High Manip → Sell" : "CRT Low Manip → Buy";
+  addLog(`🐢 CRT+TBS ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | ${biasLabel} | CRT [${fmtPrice(signal.crtLow, sym)}–${fmtPrice(signal.crtHigh, sym)}] | SL ${fmtPrice(signal.sl, sym)} | TP ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`);
+
+  showToast(
+    `CRT+TBS ${signal.dir === "BULL" ? "▲ LONG" : "▼ SHORT"} — ${biasLabel}`,
+    `${sym} @ ${fmtPrice(signal.entry, sym)} | CRT [${fmtPrice(signal.crtLow, sym)}–${fmtPrice(signal.crtHigh, sym)}] | SL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`,
+    "trade", 10000
+  );
+
+  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+    const body = `🐢 CRT+TBS ${signal.dir === "BULL" ? "LONG" : "SHORT"} — ${sym} @ ${fmtPrice(signal.entry, sym)}\n${biasLabel}\nCRT: [${fmtPrice(signal.crtLow, sym)}–${fmtPrice(signal.crtHigh, sym)}]\nSL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`;
+    throttledNotification("IT Guru: CRT+TBS Signal!", body);
+  }
+
+  if (telegramStrategyAutoSend) {
+    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
+  }
+
+  renderStrategyAlerts();
+
+  if (autoTradeStrategyEnabled && autoTradeCrtTbs && !_historicalProcessing) {
+    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "crt_tbs" });
+  }
+}
+
+/**
+ * Monitor pending CRT+TBS signals for SL/TP outcome.
+ */
+function monitorCrtTbsOutcomes(candle) {
+  if (!crtTbsEnabled) return;
+  let changed = false;
+  for (const s of crtTbsHistory) {
+    if (s.result !== "PENDING") continue;
+
+    const elapsed = (candles.length - 1) - s.candleIdx;
+    if (elapsed < 0 || elapsed >= CRT_TBS_MAX_CANDLES) {
+      s.result = "EXPIRED";
+      changed = true; continue;
+    }
+
+    /* Partial TP at 1R */
+    if (partialTpEnabled && !s.partialTpHit) {
+      const origSl = s._origSl;
+      const risk = Math.abs(s.entry - origSl);
+      const partialLevel = s.dir === "BULL" ? s.entry + risk : s.entry - risk;
+      const partialHit   = s.dir === "BULL" ? candle.high >= partialLevel : candle.low <= partialLevel;
+      if (partialHit) {
+        s.partialTpHit = true;
+        s._reached1R = true;
+        s.sl = s.entry;
+        addLog(`🐢 CRT+TBS Partial TP hit (1R) — SL → breakeven @ ${fmtPrice(s.entry, s.symbol)}`);
+      }
+    }
+
+    /* SL hit */
+    const slHit = s.dir === "BULL" ? candle.low <= s.sl : candle.high >= s.sl;
+    if (slHit) {
+      s.result = s._reached1R ? "WIN" : "LOSS";
+      changed = true; continue;
+    }
+
+    /* TP hit */
+    const tpHit = s.dir === "BULL" ? candle.high >= s.tp : candle.low <= s.tp;
+    if (tpHit) {
+      s.result = "WIN"; changed = true;
+    }
+
+    /* Profit exit alert */
+    if (s.result === "PENDING" && telegramProfitExitAlertEnabled) {
+      _checkProfitExitAlert(s, candle, "CRT+TBS");
+    }
+  }
+  if (changed) {
+    renderStrategyAlerts();
+    for (const s of crtTbsHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+        sendStrategyOutcomeTelegram(s);
+      }
+    }
+    if (adaptiveConfluenceEnabled) {
+      for (const s of crtTbsHistory) {
+        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
+          recordConfluenceOutcome(s._confFactors || [], s.result);
+          s._confRecorded = true;
+        }
+      }
+    }
+  }
+}
+
 /* ================= STRATEGY 8: GRID SCALPER MA ================= */
 /**
  * Detect a Grid Scalper MA signal.
@@ -13456,6 +13944,8 @@ function processCustomStrategies() {
   processOteGoldenPocket();
   /* Strategy 18: Opening Range Breakout */
   processOrb();
+  /* Strategy 20: CRT + TBS */
+  processCrtTbs();
 }
 
 /**
@@ -13485,6 +13975,8 @@ function monitorCustomStrategyOutcomes(candle) {
   monitorOteGoldenPocketOutcomes(candle);
   /* Strategy 18: ORB */
   monitorOrbOutcomes(candle);
+  /* Strategy 20: CRT + TBS */
+  monitorCrtTbsOutcomes(candle);
   /* Feature 15: Multi-R ladder */
   monitorMultiRLadder(candles.length - 1);
 }
@@ -21059,6 +21551,126 @@ function drawChart() {
     ctx.fillText("CONFIRM", cx1, cy1 - 3);
   }
 
+  /* ---- Strategy 20: CRT+TBS chart overlay (CRT High/Low/50% levels) ---- */
+  if (crtTbsEnabled && _crtHigh != null && _crtLow != null) {
+    const sym = getActiveSymbol();
+    const crtHighY = yOf(_crtHigh);
+    const crtLowY  = yOf(_crtLow);
+    const crt50Y   = _crt50 != null ? yOf(_crt50) : null;
+
+    /* CRT range shading */
+    ctx.fillStyle = "rgba(168,85,247,0.06)";
+    ctx.fillRect(marginLeft, Math.min(crtHighY, crtLowY), chartW, Math.abs(crtLowY - crtHighY));
+
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.5;
+
+    /* CRT High line */
+    ctx.strokeStyle = "rgba(239,68,68,0.8)";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, crtHighY);
+    ctx.lineTo(W - marginRight, crtHighY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(239,68,68,0.9)";
+    ctx.font = "bold 10px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText(`CRT High — ${fmtPrice(_crtHigh, sym)}`, marginLeft + 4, crtHighY - 4);
+
+    /* CRT Low line */
+    ctx.strokeStyle = "rgba(34,197,94,0.8)";
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, crtLowY);
+    ctx.lineTo(W - marginRight, crtLowY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(34,197,94,0.9)";
+    ctx.fillText(`CRT Low — ${fmtPrice(_crtLow, sym)}`, marginLeft + 4, crtLowY + 12);
+
+    /* CRT 50% line */
+    if (crt50Y != null) {
+      ctx.strokeStyle = "rgba(168,85,247,0.7)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, crt50Y);
+      ctx.lineTo(W - marginRight, crt50Y);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(168,85,247,0.85)";
+      ctx.fillText(`CRT 50% — ${fmtPrice(_crt50, sym)}`, marginLeft + 4, crt50Y - 4);
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    /* LTF Old High / Old Low markers */
+    if (_crtBias === "sell" && _crtLtfOldHigh != null) {
+      const ohY = yOf(_crtLtfOldHigh);
+      ctx.save();
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = "rgba(251,146,60,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, ohY);
+      ctx.lineTo(W - marginRight, ohY);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(251,146,60,0.85)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(`LTF Old High — ${fmtPrice(_crtLtfOldHigh, sym)}`, marginLeft + 4, ohY - 3);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    if (_crtBias === "buy" && _crtLtfOldLow != null) {
+      const olY = yOf(_crtLtfOldLow);
+      ctx.save();
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = "rgba(96,165,250,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, olY);
+      ctx.lineTo(W - marginRight, olY);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(96,165,250,0.85)";
+      ctx.font = "bold 9px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(`LTF Old Low — ${fmtPrice(_crtLtfOldLow, sym)}`, marginLeft + 4, olY + 10);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    /* Pending CRT+TBS signal markers */
+    const pendingCrt = crtTbsHistory.find(s => s.result === "PENDING" && s.symbol === sym);
+    if (pendingCrt) {
+      drawHLine(ctx, yOf(pendingCrt.entry), marginLeft, W - marginRight, "rgba(168,85,247,0.85)", "CRT Entry " + fmtPrice(pendingCrt.entry, sym), W, marginRight);
+      drawHLine(ctx, yOf(pendingCrt.sl), marginLeft, W - marginRight, "rgba(239,68,68,0.75)", "SL " + fmtPrice(pendingCrt.sl, sym), W, marginRight);
+      drawHLine(ctx, yOf(pendingCrt.tp), marginLeft, W - marginRight, "rgba(34,197,94,0.75)", "TP " + fmtPrice(pendingCrt.tp, sym), W, marginRight);
+
+      /* CRT+TBS strategy info box */
+      ctx.save();
+      const biasLabel = pendingCrt.bias === "sell" ? "Sell Bias (CRT High Manip)" : "Buy Bias (CRT Low Manip)";
+      const cBoxX = marginLeft + 10;
+      const cBoxY = (oteGoldenPocketEnabled ? 170 : 60) + (orbEnabled ? 100 : 0);
+      const cBoxW = 220;
+      const cBoxH = 100;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(cBoxX, cBoxY, cBoxW, cBoxH);
+      ctx.strokeStyle = "rgba(168,85,247,0.6)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cBoxX, cBoxY, cBoxW, cBoxH);
+      ctx.fillStyle = "#a855f7";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText("🐢 CRT + TBS Strategy", cBoxX + 8, cBoxY + 14);
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "10px Arial";
+      ctx.fillText(`Bias: ${biasLabel}`, cBoxX + 8, cBoxY + 30);
+      ctx.fillText(`Entry: ${fmtPrice(pendingCrt.entry, sym)}`, cBoxX + 8, cBoxY + 44);
+      ctx.fillText(`SL: ${fmtPrice(pendingCrt.sl, sym)} | TP: ${fmtPrice(pendingCrt.tp, sym)}`, cBoxX + 8, cBoxY + 58);
+      ctx.fillText(`R:R 1:${fmt(pendingCrt.rr, 1)}`, cBoxX + 8, cBoxY + 72);
+      ctx.fillText(`CRT: [${fmtPrice(pendingCrt.crtLow, sym)} – ${fmtPrice(pendingCrt.crtHigh, sym)}]`, cBoxX + 8, cBoxY + 86);
+      ctx.restore();
+    }
+  }
+
   /* ---- Feature 17: Session Heatmap — coloured bands on chart timeline ---- */
   if (sessionHeatmapEnabled && candles.length > 0) {
     const sessions = [
@@ -22383,6 +22995,7 @@ function applyStrategyAccess() {
     { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
     { id: "oteGoldenPocketToggle", key: "ote_golden_pocket", fn: () => { oteGoldenPocketEnabled = false; } },
     { id: "orbToggle",            key: "orb",               fn: () => { orbEnabled = false; } },
+    { id: "crtTbsToggle",          key: "crt_tbs",           fn: () => { crtTbsEnabled = false; } },
   ];
 
   for (const { id, key, fn } of strategyMap) {
@@ -22431,6 +23044,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-breakerBlock",   toggleId: "breakerBlockToggle",   enabled: breakerBlockEnabled   },
     { badgeId: "stratBadge-oteGoldenPocket", toggleId: "oteGoldenPocketToggle", enabled: oteGoldenPocketEnabled },
     { badgeId: "stratBadge-orb",            toggleId: "orbToggle",            enabled: orbEnabled },
+    { badgeId: "stratBadge-crtTbs",         toggleId: "crtTbsToggle",         enabled: crtTbsEnabled },
   ];
   for (const { badgeId, toggleId, enabled } of entries) {
     const badge  = document.getElementById(badgeId);
@@ -24870,6 +25484,35 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.orbCandleConfirmToggle) {
     UI.orbCandleConfirmToggle.addEventListener("change", () => {
       orbCandleConfirmation = UI.orbCandleConfirmToggle.checked;
+      saveSettings();
+    });
+  }
+  /* Strategy 20: CRT + TBS listeners */
+  if (UI.crtTbsToggle) {
+    UI.crtTbsToggle.addEventListener("change", () => {
+      crtTbsEnabled = UI.crtTbsToggle.checked;
+      saveSettings();
+      if (crtTbsEnabled) {
+        _crtTbsReset();
+        addLog("🐢 CRT+TBS Strategy enabled — scanning for CRT manipulation + Turtle Body Soup entries");
+        showToast("CRT+TBS Strategy Enabled", "Scanning for A+ CRT candles, manipulation, and TBS entry signals with Model #1 confirmation.", "info", 5000);
+      } else {
+        _crtTbsReset();
+        addLog("🐢 CRT+TBS Strategy disabled");
+      }
+      drawChart();
+      updateStrategyBadges();
+    });
+  }
+  if (UI.autoTradeCrtTbsToggle) {
+    UI.autoTradeCrtTbsToggle.addEventListener("change", () => {
+      autoTradeCrtTbs = UI.autoTradeCrtTbsToggle.checked;
+      saveSettings();
+    });
+  }
+  if (UI.crtTbsStrictToggle) {
+    UI.crtTbsStrictToggle.addEventListener("change", () => {
+      _crtStrictTbs = UI.crtTbsStrictToggle.checked;
       saveSettings();
     });
   }
