@@ -1054,6 +1054,28 @@
               </div>
               <p class="hint" id="gridScalperMAPeriodHint">Period for the Simple Moving Average (default: 21). Shorter = more signals, longer = stronger trends only.</p>
 
+              <!-- Grid Scalper MA: Opposite Mode & Adaptive System -->
+              <div style="margin-top:8px; padding:8px; background:rgba(255,107,107,0.08); border-radius:5px; border-left:3px solid #ff6b6b;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-bottom:4px;">
+                  <input type="checkbox" id="gridScalperMAOppositeToggle" />
+                  <span style="font-weight:600; color:#ff6b6b; font-size:0.85em;">🔄 Opposite Mode</span>
+                  <span class="hint" style="font-size:0.75em;">(Flip all Grid Scalper MA signals)</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-bottom:4px;">
+                  <input type="checkbox" id="gridScalperAdaptiveToggle" />
+                  <span style="font-weight:600; color:#4ecdc4; font-size:0.85em;">🧠 Adaptive Confluence</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                  <span class="hint" style="font-size:0.75em;">Mode:</span>
+                  <select id="gridScalperAdaptiveMode" style="font-size:0.78em; padding:1px 4px; border-radius:3px; border:1px solid var(--border-color,#333);">
+                    <option value="Off">Off</option>
+                    <option value="ObservationOnly">Observation Only</option>
+                    <option value="Active">Active</option>
+                  </select>
+                </label>
+                <div id="gridScalperMAOppositeStats" class="hint" style="font-size:0.72em; margin-top:4px; opacity:0.8;">Loading stats...</div>
+              </div>
+
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
               <p class="hint">ICT-style supply &amp; demand strategy using Fair Value Gaps as confluence. Detects a "big push" (3+ consecutive strong candles) that leaves FVG imbalances, then marks the origin candle (the demand/supply zone <em>before</em> the push). Waits for price to retrace back into that zone at a Fibonacci discount (&lt;50% retracement), confirms with a bullish/bearish engulfing pattern, and enters in the direction of the original push. SL below the demand zone (or above supply). TP at the recent swing high/low. Requires EMA trend alignment. Works on any timeframe.</p>
@@ -2093,6 +2115,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
 <script src="../auth.js"></script>
+<script src="../grid-scalper-ma-opposite.js"></script>
 <script src="indicator.js"></script>
 <script>
   /* Mobile panel toggle */
