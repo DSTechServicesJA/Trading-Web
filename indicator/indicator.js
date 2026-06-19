@@ -13427,6 +13427,23 @@ function processGridScalperMA() {
     const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
     if (confScore < minConfluenceValue) {
       addLog(`⚠ Grid Scalper MA REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+      /* Log skipped signal if opposite mode logging is available */
+      if (typeof logTradeDecision === "function" && typeof GRID_SCALPER_CONFIG !== "undefined" && GRID_SCALPER_CONFIG.IncludeSkippedSignalsInLog) {
+        logTradeDecision({
+          id: typeof generateSignalId === "function" ? generateSignalId() : Date.now().toString(),
+          symbol: signal.symbol || getActiveSymbol() || "--",
+          timeframe: UI.granSelect ? UI.granSelect.value : "--",
+          mode: signal.mode,
+          original: { dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr },
+          opposite: null,
+          oppositeModeEnabled: typeof gridScalperMAOppositeEnabled !== "undefined" ? gridScalperMAOppositeEnabled : false,
+          executedDirection: null,
+          executedSignal: null,
+          confluenceScore: confScore,
+          confluenceFactors: [],
+          spread: typeof currentSpread !== "undefined" ? currentSpread : null
+        }, "SKIPPED", `Confluence ${confScore}/${minConfluenceValue} below minimum`);
+      }
       return;
     }
   }
@@ -13449,6 +13466,15 @@ function processGridScalperMA() {
   const volLabel  = signal.volCategory === "vol1s" ? "Vol1s" : signal.volCategory === "standard" ? "VolStd" : "";
   const rrTag     = volLabel ? ` [${volLabel} ${fmt(signal.rr,1)}R]` : "";
   addLog(`🔲 GRID SCALPER MA [${modeLabel}]${rrTag} ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+
+  /* Log opposite mode details if enabled */
+  if (typeof gridScalperMAOppositeEnabled !== "undefined" && gridScalperMAOppositeEnabled) {
+    const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    const risk = Math.abs(signal.entry - signal.sl);
+    const oppSl = oppDir === "BULL" ? signal.entry - risk : signal.entry + risk;
+    const oppTp = oppDir === "BULL" ? signal.entry + risk * signal.rr : signal.entry - risk * signal.rr;
+    addLog(`  🔄 Opposite: ${oppDir === "BULL" ? "▲ BUY" : "▼ SELL"} — SL ${fmt(oppSl, 4)} | TP ${fmt(oppTp, 4)}`);
+  }
 
   showToast(
     `Grid Scalper MA ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} [${modeLabel}]`,
@@ -13481,8 +13507,45 @@ function processGridScalperMA() {
         ? signal.entry + risk * signal.rr
         : signal.entry - risk * signal.rr;
       addLog(`🔄 Grid Scalper MA opposite: ${signal.dir} → ${oppDir} (SL/TP recalculated for ${oppDir})`);
+
+      /* Log the opposite trade decision for detailed tracking */
+      if (typeof logTradeDecision === "function") {
+        logTradeDecision({
+          id: typeof generateSignalId === "function" ? generateSignalId() : Date.now().toString(),
+          symbol: signal.symbol || sym,
+          timeframe: UI.granSelect ? UI.granSelect.value : "--",
+          mode: signal.mode,
+          original: { dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr },
+          opposite: { dir: oppDir, entry: signal.entry, sl: oppSl, tp: oppTp, rr: signal.rr },
+          oppositeModeEnabled: true,
+          executedDirection: "opposite",
+          executedSignal: { dir: oppDir, entry: signal.entry, sl: oppSl, tp: oppTp, rr: signal.rr },
+          confluenceScore: signal.confluenceScore,
+          confluenceFactors: signal._confFactors || [],
+          spread: typeof currentSpread !== "undefined" ? currentSpread : null
+        }, "EXECUTED", "Opposite mode active — signal reversed");
+      }
+
       executeAutoTrade({ dir: oppDir, entry: signal.entry, sl: oppSl, tp: oppTp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA", _oppositePreApplied: true });
     } else {
+      /* Log the original trade decision for detailed tracking */
+      if (typeof logTradeDecision === "function") {
+        logTradeDecision({
+          id: typeof generateSignalId === "function" ? generateSignalId() : Date.now().toString(),
+          symbol: signal.symbol || sym,
+          timeframe: UI.granSelect ? UI.granSelect.value : "--",
+          mode: signal.mode,
+          original: { dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr },
+          opposite: null,
+          oppositeModeEnabled: false,
+          executedDirection: "original",
+          executedSignal: { dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr },
+          confluenceScore: signal.confluenceScore,
+          confluenceFactors: signal._confFactors || [],
+          spread: typeof currentSpread !== "undefined" ? currentSpread : null
+        }, "EXECUTED", "Normal mode — original signal used");
+      }
+
       executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || sym, source: "strategy", strategyName: "gridScalperMA" });
     }
   }
@@ -13532,6 +13595,21 @@ function monitorGridScalperMAOutcomes(candle) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
           recordConfluenceOutcome(s._confFactors || [], s.result);
           s._confRecorded = true;
+        }
+      }
+    }
+    /* Update opposite mode trade log and performance tracking */
+    for (const s of gridScalperMAHistory) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._oppOutcomeRecorded) {
+        s._oppOutcomeRecorded = true;
+        if (typeof updateGridScalperMAFlipOutcome === "function") {
+          let pnl = 0;
+          if (s.result === "WIN") {
+            pnl = s.dir === "BULL" ? (s.tp - s.entry) : (s.entry - s.tp);
+          } else if (s.result === "LOSS") {
+            pnl = s.dir === "BULL" ? (s.sl - s.entry) : (s.entry - s.sl);
+          }
+          updateGridScalperMAFlipOutcome(s, s.result, pnl);
         }
       }
     }
@@ -15496,15 +15574,42 @@ function buildStrategyTelegramCaption(signal) {
     const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     const oppLabel = oppDir === "BULL" ? "BUY" : "SELL";
     const oppEmoji = oppDir === "BULL" ? "🟢" : "🔴";
-    lines.push(`<b>🔄 Opposite Mode:</b> Signal ${signal.dir} → Trading ${oppEmoji} ${oppDir} (${oppLabel})`);
+    lines.push(`<b>🔄 Opposite Mode:</b> ✅ ENABLED`);
+    lines.push(`<b>Signal:</b> ${signal.dir} → <b>Trading:</b> ${oppEmoji} ${oppDir} (${oppLabel})`);
+  } else {
+    lines.push(`<b>🔄 Opposite Mode:</b> ❌ Disabled`);
   }
 
   lines.push(``);
+  lines.push(`<b>━━━ Original Signal ━━━</b>`);
   lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
   lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(signal.sl, symbol)}</code>`);
   lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  }
+
+  /* Show opposite signal details when opposite mode is active */
+  if (autoTradeStrategyOpposite && signal.type === "grid_scalper_ma") {
+    const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    const risk = Math.abs(signal.entry - signal.sl);
+    const oppSl = oppDir === "BULL" ? signal.entry - risk : signal.entry + risk;
+    const oppTp = oppDir === "BULL" ? signal.entry + risk * (signal.rr || 2) : signal.entry - risk * (signal.rr || 2);
+    const oppDirLabel = oppDir === "BULL" ? "🟢 BUY" : "🔴 SELL";
+    lines.push(``);
+    lines.push(`<b>━━━ Opposite Signal ━━━</b>`);
+    lines.push(`<b>Direction:</b> ${oppDirLabel}`);
+    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(oppSl, symbol)}</code>`);
+    lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(oppTp, symbol)}</code>`);
+    lines.push(`<b>R:R:</b> 1:${fmt(signal.rr || 2, 1)}`);
+    lines.push(``);
+    lines.push(`<b>━━━ Execution Used ━━━</b>`);
+    lines.push(`<b>Final Direction:</b> ${oppDirLabel}`);
+    lines.push(`<b>Final Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
+    lines.push(`<b>Final SL:</b> <code>${fmtPrice(oppSl, symbol)}</code>`);
+    lines.push(`<b>Final TP:</b> <code>${fmtPrice(oppTp, symbol)}</code>`);
+    lines.push(`<b>Reason:</b> Opposite mode active — signal reversed with recalculated SL/TP`);
   }
   let strategyConfluence = Number.isFinite(signal.confluenceScore) ? signal.confluenceScore : null;
   if (strategyConfluence == null &&
@@ -24564,6 +24669,11 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreSignalLog();
   restoreSignalHistory();
   initTheme();
+
+  /* Initialize Grid Scalper MA Opposite Mode & Adaptive System */
+  if (typeof initGridScalperMAOpposite === "function") {
+    initGridScalperMAOpposite();
+  }
 
   /* Restore stream mode from localStorage before wiring UI */
   try {
