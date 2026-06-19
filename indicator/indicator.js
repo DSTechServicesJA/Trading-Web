@@ -13603,7 +13603,12 @@ function monitorGridScalperMAOutcomes(candle) {
       if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._oppOutcomeRecorded) {
         s._oppOutcomeRecorded = true;
         if (typeof updateGridScalperMAFlipOutcome === "function") {
-          const pnl = s.result === "WIN" ? Math.abs(s.tp - s.entry) : s.result === "LOSS" ? -Math.abs(s.sl - s.entry) : 0;
+          let pnl = 0;
+          if (s.result === "WIN") {
+            pnl = s.dir === "BULL" ? (s.tp - s.entry) : (s.entry - s.tp);
+          } else if (s.result === "LOSS") {
+            pnl = s.dir === "BULL" ? (s.sl - s.entry) : (s.entry - s.sl);
+          }
           updateGridScalperMAFlipOutcome(s, s.result, pnl);
         }
       }

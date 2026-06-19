@@ -434,7 +434,7 @@ function buildSkippedTradeTelegramMessage(signalRecord, reason) {
  * Generate unique signal ID
  */
 function generateSignalId() {
-  return `GS_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  return `GS_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
@@ -561,13 +561,16 @@ function exportTradeLogCSV() {
   if (gridScalperTradeLog.length === 0) return "";
 
   const headers = Object.keys(gridScalperTradeLog[0]).filter(k => k !== "confluenceFactors");
+  const escapeCsvField = (val) => {
+    if (val == null) return "";
+    const str = typeof val === "object" ? JSON.stringify(val) : String(val);
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  };
   const rows = gridScalperTradeLog.map(entry => {
-    return headers.map(h => {
-      const val = entry[h];
-      if (val == null) return "";
-      if (typeof val === "object") return JSON.stringify(val);
-      return String(val).replace(/,/g, ";");
-    }).join(",");
+    return headers.map(h => escapeCsvField(entry[h])).join(",");
   });
 
   const csv = [headers.join(","), ...rows].join("\n");
@@ -1039,7 +1042,7 @@ function loadGridScalperState() {
     // Merge config (preserve user overrides)
     if (state.config) {
       Object.keys(state.config).forEach(k => {
-        if (GRID_SCALPER_CONFIG.hasOwnProperty(k)) {
+        if (Object.prototype.hasOwnProperty.call(GRID_SCALPER_CONFIG, k)) {
           GRID_SCALPER_CONFIG[k] = state.config[k];
         }
       });
@@ -1264,7 +1267,7 @@ function checkTradingSafety() {
  * Update configuration parameter with validation.
  */
 function updateGridScalperConfig(key, value) {
-  if (!GRID_SCALPER_CONFIG.hasOwnProperty(key)) {
+  if (!Object.prototype.hasOwnProperty.call(GRID_SCALPER_CONFIG, key)) {
     console.warn(`⚠️ Unknown config key: ${key}`);
     return false;
   }
