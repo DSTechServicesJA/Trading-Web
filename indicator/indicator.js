@@ -1265,6 +1265,9 @@ const symbolTradeTimestamps = new Map();    /* symbol -> [ms timestamps] */
 const strategyTradeTimestamps = new Map();  /* strategy -> [ms timestamps] */
 const symbolCooldownUntil = new Map();      /* symbol -> epoch ms */
 const strategyRegimeStats = {};             /* key(strat|regime) -> {wins,losses,totalWin,totalLoss,samples} */
+
+/** Invert a trade result for shadow-outcome tracking (WIN↔LOSS; other values pass through unchanged). */
+function invertResult(r) { return r === "WIN" ? "LOSS" : r === "LOSS" ? "WIN" : r; }
 const strategyRegimePausedUntil = {};       /* key(strat|regime) -> epoch ms */
 let walkForwardProfiles = {};               /* key(symbol|gran|regime) -> profile */
 
@@ -1517,6 +1520,7 @@ let telegramSessionRangeAutoSend = false;  /* auto-send session range signals (t
 let telegramSessionRangeOutcomeSend = false; /* auto-send WIN/LOSS outcome for session range trades to Telegram */
 let telegramStrategyAutoSend     = false;  /* auto-send custom strategy alerts (Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar) to Telegram */
 let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for custom strategies to Telegram */
+let telegramShadowOutcomeSend    = false;  /* auto-send shadow (counterfactual) outcome — what opposite direction would have done */
 let telegramProfitExitAlertEnabled = false;  /* auto-send alert when trade that reached 1:1 profit reverses back to entry */
 let telegramDeliveryHudEl = null;
 let telegramDeliveryStats = { queued: 0, sent: 0, failed: 0 };
@@ -2528,6 +2532,7 @@ function initUI() {
   UI.telegramSessionRangeOutcomeSendToggle = document.getElementById("telegramSessionRangeOutcomeSendToggle");
   UI.telegramStrategyAutoSendToggle    = document.getElementById("telegramStrategyAutoSendToggle");
   UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
+  UI.telegramShadowOutcomeSendToggle   = document.getElementById("telegramShadowOutcomeSendToggle");
   UI.telegramProfitExitAlertToggle     = document.getElementById("telegramProfitExitAlertToggle");
   UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
   UI.telegramSendScalpNowBtn    = document.getElementById("telegramSendScalpNowBtn");
@@ -4259,6 +4264,23 @@ async function sendTradeOutcomeTelegram(signal) {
       }
     }
 
+    /* Shadow outcome — what the opposite direction would have done on this trade */
+    if (telegramShadowOutcomeSend) {
+      const shadowResult = invertResult(result);
+      const oppDirLabel  = signal.dir === "BULL" ? "📉 SELL" : "📈 BUY";
+      const shadowIcon   = shadowResult === "WIN" ? "✅" : shadowResult === "LOSS" ? "❌" : "⏱";
+      lines.push("");
+      lines.push(`🔮 <b>Shadow (${oppDirLabel} would've):</b> ${shadowIcon} ${shadowResult}`);
+
+      /* Cumulative shadow stats from auto-trade history */
+      const shadowResolved = autoTradeHistory.filter(e => e.shadowResult === "WIN" || e.shadowResult === "LOSS");
+      if (shadowResolved.length > 0) {
+        const sw  = shadowResolved.filter(e => e.shadowResult === "WIN").length;
+        const swr = (sw / shadowResolved.length * 100).toFixed(1);
+        lines.push(`   (Shadow record: ${sw}W / ${shadowResolved.length - sw}L — ${swr}%)`);
+      }
+    }
+
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -4797,6 +4819,7 @@ function saveSettings() {
       telegramSessionRangeOutcomeSend,
       telegramStrategyAutoSend,
       telegramStrategyOutcomeSend,
+      telegramShadowOutcomeSend,
       telegramProfitExitAlertEnabled,
       accountSize,
       riskPercent,
@@ -5160,6 +5183,7 @@ function restoreSettings() {
     if (s.telegramSessionRangeOutcomeSend != null) telegramSessionRangeOutcomeSend = s.telegramSessionRangeOutcomeSend;
     if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
     if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
+    if (s.telegramShadowOutcomeSend != null) telegramShadowOutcomeSend = s.telegramShadowOutcomeSend;
     if (s.telegramProfitExitAlertEnabled != null) telegramProfitExitAlertEnabled = s.telegramProfitExitAlertEnabled;
     /* #13: bot token UI is populated inside the async _decryptCred().then() above */
     if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
@@ -5171,6 +5195,7 @@ function restoreSettings() {
     if (UI.telegramSessionRangeOutcomeSendToggle) UI.telegramSessionRangeOutcomeSendToggle.checked = telegramSessionRangeOutcomeSend;
     if (UI.telegramStrategyAutoSendToggle) UI.telegramStrategyAutoSendToggle.checked = telegramStrategyAutoSend;
     if (UI.telegramStrategyOutcomeSendToggle) UI.telegramStrategyOutcomeSendToggle.checked = telegramStrategyOutcomeSend;
+    if (UI.telegramShadowOutcomeSendToggle) UI.telegramShadowOutcomeSendToggle.checked = telegramShadowOutcomeSend;
     if (UI.telegramProfitExitAlertToggle) UI.telegramProfitExitAlertToggle.checked = telegramProfitExitAlertEnabled;
 
     /* Account sizing */
@@ -16173,6 +16198,25 @@ async function sendStrategyOutcomeTelegram(signal) {
       }
     }
 
+    /* Shadow outcome — what the opposite direction would have done on this signal.
+       For Grid Scalper MA with opposite mode active, signal.result reflects the
+       original direction, so shadowResult = what the actual opposite trade did. */
+    if (telegramShadowOutcomeSend) {
+      const shadowResult = invertResult(result);
+      const oppDirLabel  = signal.dir === "BULL" ? "📉 SELL" : "📈 BUY";
+      const shadowIcon   = shadowResult === "WIN" ? "✅" : shadowResult === "LOSS" ? "❌" : "⏱";
+      lines.push("");
+      lines.push(`🔮 <b>Shadow (${oppDirLabel} would've):</b> ${shadowIcon} ${shadowResult}`);
+
+      /* Cumulative shadow stats from auto-trade history */
+      const shadowResolved = autoTradeHistory.filter(e => e.shadowResult === "WIN" || e.shadowResult === "LOSS");
+      if (shadowResolved.length > 0) {
+        const sw  = shadowResolved.filter(e => e.shadowResult === "WIN").length;
+        const swr = (sw / shadowResolved.length * 100).toFixed(1);
+        lines.push(`   (Shadow record: ${sw}W / ${shadowResolved.length - sw}L — ${swr}%)`);
+      }
+    }
+
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
@@ -19961,6 +20005,7 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
   if (!pending) return;  /* nothing to resolve */
   pending.profit = profit;
   pending.result = result;
+  pending.shadowResult = invertResult(result); /* what the opposite direction would have done */
   pending.resolvedAt = Date.now();
   /* Recompute P/L from all entries (prevents incremental drift) */
   recalcAutoTradePL();
@@ -20144,6 +20189,18 @@ function renderOppositeModeSummary() {
   if (oppTrades.length > 0) {
     html += `<div class="opposite-row"><span class="opp-label">🔄 Opposite:</span> <span>${oppWins}W / ${oppLosses}L</span> <span class="opp-wr">${oppWR}%</span> <span class="${oppPL >= 0 ? 'opp-profit' : 'opp-loss'}">${oppPL >= 0 ? '+' : ''}$${fmt(oppPL, 2)}</span></div>`;
   }
+
+  /* Shadow row — what the other direction would have done, per resolved trades that have shadowResult set */
+  const shadowTrades = autoTradeHistory.filter(e => e.shadowResult === "WIN" || e.shadowResult === "LOSS");
+  if (shadowTrades.length > 0) {
+    const shadowWins   = shadowTrades.filter(e => e.shadowResult === "WIN").length;
+    const shadowLosses = shadowTrades.filter(e => e.shadowResult === "LOSS").length;
+    const shadowWR     = (shadowWins / shadowTrades.length * 100).toFixed(1);
+    /* Shadow P/L is the inverse of actual P/L for the same trades */
+    const shadowPL     = shadowTrades.reduce((sum, e) => sum - (e.profit || 0), 0);
+    html += `<div class="opposite-row"><span class="opp-label">🔮 Shadow:</span> <span>${shadowWins}W / ${shadowLosses}L</span> <span class="opp-wr">${shadowWR}%</span> <span class="${shadowPL >= 0 ? 'opp-profit' : 'opp-loss'}" title="What the other direction would've returned">${shadowPL >= 0 ? '+' : ''}$${fmt(shadowPL, 2)}</span></div>`;
+  }
+
   html += `</div>`;
   container.innerHTML = html;
 }
@@ -25774,6 +25831,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.telegramStrategyOutcomeSendToggle) {
     UI.telegramStrategyOutcomeSendToggle.addEventListener("change", () => { telegramStrategyOutcomeSend = UI.telegramStrategyOutcomeSendToggle.checked; saveSettings(); });
+  }
+  if (UI.telegramShadowOutcomeSendToggle) {
+    UI.telegramShadowOutcomeSendToggle.addEventListener("change", () => { telegramShadowOutcomeSend = UI.telegramShadowOutcomeSendToggle.checked; saveSettings(); });
   }
   if (UI.telegramProfitExitAlertToggle) {
     UI.telegramProfitExitAlertToggle.addEventListener("change", () => { telegramProfitExitAlertEnabled = UI.telegramProfitExitAlertToggle.checked; saveSettings(); });
