@@ -3805,3 +3805,62 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Grid Scalper MA: TP Probability Bars ---- */
+.gs-prob-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.gs-prob-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.gs-prob-label {
+  min-width: 72px;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+.gs-prob-track {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.gs-prob-fill-orig {
+  height: 100%;
+  border-radius: 3px;
+  background: #22c55e;
+  transition: width 0.35s ease;
+}
+.gs-prob-fill-opp {
+  height: 100%;
+  border-radius: 3px;
+  background: #ef4444;
+  transition: width 0.35s ease;
+}
+.gs-prob-pct {
+  min-width: 30px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+.gs-prob-recommend {
+  font-size: 0.75em;
+  margin-top: 1px;
+}
+.gs-prob-insufficient {
+  font-size: 0.72em;
+  opacity: 0.5;
+  font-style: italic;
+  margin-top: 3px;
+}
