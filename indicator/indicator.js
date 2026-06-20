@@ -1861,6 +1861,14 @@ const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
 const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
 const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 
+/* ── Grid Scalper MA: Opposite Mode & Adaptive Confluence state ── */
+let gridScalperMAOppositeEnabled = false; /* flip all GS-MA signals */
+let gridScalperAdaptiveEnabled   = false; /* adaptive confluence learning */
+let gridScalperAdaptiveModeValue = "Off"; /* "Off" | "ObservationOnly" | "Active" */
+const TP_PROB_MIN_SAMPLE         = 5;     /* minimum resolved trades for TP probability */
+const GS_FLIP_MIN_STATS          = 10;    /* minimum resolved trades before hiding "need more data" */
+let _signalIdCounter = 0;
+
 /* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
  *  Volatility 1s (1HZ*) — fast tick action, tighter TP for rapid captures.
  *  Volatility Standard (R_*) — slower structure, wider TP for bigger moves.
@@ -5344,6 +5352,8 @@ function restoreSettings() {
     restoreAutoTradeHistory();
     updateAutoTradeBalanceVisibility();
     updateStrategyBadges();
+    /* Refresh Grid Scalper MA Opposite Mode stats after restoring history */
+    renderGridScalperMAOppositeStats();
   } catch (e) { /* storage not available */ }
 }
 
@@ -13755,6 +13765,182 @@ function monitorGridScalperMAOutcomes(candle) {
       }
     }
   }
+}
+
+/* ── Grid Scalper MA: Opposite Mode & Adaptive Confluence helpers ── */
+
+/**
+ * Generate a unique signal ID for trade decision logging.
+ */
+function generateSignalId() {
+  return `gs-${Date.now()}-${++_signalIdCounter}`;
+}
+
+/**
+ * Log a trade decision for the Grid Scalper MA strategy.
+ * Reserved for future detailed trade-decision logging; currently a no-op.
+ */
+function logTradeDecision(decision, status, reason) { /* reserved */ }
+
+/**
+ * Compute directional TP-hit probability from resolved gridScalperMAHistory signals.
+ * Returns origProb / oppProb as fractions [0,1], or null if insufficient data.
+ * @param {string} dir - "BULL" or "BEAR" (direction of the new signal)
+ * @returns {{ origProb: number|null, oppProb: number|null, probHighDir: string|null, sampleSize: number }}
+ */
+function computeDirectionalTPProbability(dir) {
+  const resolved = gridScalperMAHistory.filter(s => s.result === "WIN" || s.result === "LOSS");
+  const sampleSize = resolved.length;
+  if (sampleSize < TP_PROB_MIN_SAMPLE) {
+    return { origProb: null, oppProb: null, probHighDir: null, sampleSize };
+  }
+  const oppDir    = dir === "BULL" ? "BEAR" : "BULL";
+  const origSigs  = resolved.filter(s => s.dir === dir);
+  const oppSigs   = resolved.filter(s => s.dir === oppDir);
+  const origProb  = origSigs.length > 0
+    ? origSigs.filter(s => s.result === "WIN").length / origSigs.length
+    : null;
+  const oppProb   = oppSigs.length  > 0
+    ? oppSigs.filter(s => s.result === "WIN").length  / oppSigs.length
+    : null;
+  let probHighDir = null;
+  if (origProb != null && oppProb != null) {
+    if      (origProb > oppProb + 0.05) probHighDir = "original";
+    else if (oppProb  > origProb + 0.05) probHighDir = "opposite";
+    else                                 probHighDir = "equal";
+  } else if (origProb != null) {
+    probHighDir = "original";
+  } else if (oppProb != null) {
+    probHighDir = "opposite";
+  }
+  return { origProb, oppProb, probHighDir, sampleSize };
+}
+
+/**
+ * Called when a Grid Scalper MA signal resolves (WIN/LOSS/EXPIRED).
+ * Re-renders the Opposite Mode stats panel.
+ */
+function updateGridScalperMAFlipOutcome(signal, result, pnl) {
+  renderGridScalperMAOppositeStats();
+}
+
+/**
+ * Render the Grid Scalper MA Opposite Mode & Adaptive Confluence stats panel.
+ */
+function renderGridScalperMAOppositeStats() {
+  const el = document.getElementById("gridScalperMAOppositeStats");
+  if (!el) return;
+
+  const resolved   = gridScalperMAHistory.filter(s => s.result === "WIN" || s.result === "LOSS");
+  const origWins   = resolved.filter(s => s.result === "WIN").length;
+  const origLosses = resolved.filter(s => s.result === "LOSS").length;
+  const origTotal  = origWins + origLosses;
+
+  /* Opposite direction inverts outcomes */
+  const oppWins   = origLosses;
+  const oppLosses = origWins;
+  const oppTotal  = origTotal;
+
+  const origWR = origTotal > 0 ? `${(origWins / origTotal * 100).toFixed(0)}%` : "N/A%";
+  const oppWR  = oppTotal  > 0 ? `${(oppWins  / oppTotal  * 100).toFixed(0)}%` : "N/A%";
+
+  const modeStr = gridScalperAdaptiveEnabled
+    ? (gridScalperAdaptiveModeValue || "Off")
+    : "Off";
+
+  let html = `<div style="line-height:1.7;">`;
+  html += `<span style="color:#4ecdc4;">Mode: <b>${modeStr}</b></span><br>`;
+  html += `Original: ${origWins}W/${origLosses}L (${origWR}) | `
+        + `Opposite: ${oppWins}W/${oppLosses}L (${oppWR}) | Total: ${origTotal}<br>`;
+
+  if (origTotal < GS_FLIP_MIN_STATS) {
+    html += `<span style="color:#f59e0b;">⚠️ Need more data `
+          + `(Original: ${origTotal}/${GS_FLIP_MIN_STATS}, `
+          + `Opposite: ${origTotal}/${GS_FLIP_MIN_STATS})</span><br>`;
+  }
+
+  /* TP probability (split by signal direction) */
+  if (resolved.length >= TP_PROB_MIN_SAMPLE) {
+    const bullResolved = resolved.filter(s => s.dir === "BULL");
+    const bearResolved = resolved.filter(s => s.dir === "BEAR");
+    const bullPct = bullResolved.length > 0
+      ? `${(bullResolved.filter(s => s.result === "WIN").length / bullResolved.length * 100).toFixed(0)}%`
+      : "N/A";
+    const bearPct = bearResolved.length > 0
+      ? `${(bearResolved.filter(s => s.result === "WIN").length / bearResolved.length * 100).toFixed(0)}%`
+      : "N/A";
+    html += `<span style="color:#60a5fa;">📊 TP prob: BULL ${bullPct} / BEAR ${bearPct}</span>`;
+  } else {
+    html += `<span style="color:#94a3b8;">📊 TP prob: N/A (need ${TP_PROB_MIN_SAMPLE}+ resolved trades)</span>`;
+  }
+
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+/** Persist Grid Scalper MA Opposite Mode settings to localStorage. */
+function _saveGSOppSettings() {
+  try {
+    localStorage.setItem(LS_PREFIX + "gsOppSettings", JSON.stringify({
+      gridScalperMAOppositeEnabled,
+      gridScalperAdaptiveEnabled,
+      gridScalperAdaptiveModeValue
+    }));
+  } catch (e) { /* storage not available */ }
+}
+
+/**
+ * Initialize the Grid Scalper MA Opposite Mode & Adaptive Confluence system.
+ * Wires up UI toggles, restores persisted state, and renders initial stats.
+ * Called once at startup from DOMContentLoaded.
+ */
+function initGridScalperMAOpposite() {
+  /* Restore persisted state */
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + "gsOppSettings");
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s.gridScalperMAOppositeEnabled != null) gridScalperMAOppositeEnabled = !!s.gridScalperMAOppositeEnabled;
+      if (s.gridScalperAdaptiveEnabled   != null) gridScalperAdaptiveEnabled   = !!s.gridScalperAdaptiveEnabled;
+      if (s.gridScalperAdaptiveModeValue != null) gridScalperAdaptiveModeValue = s.gridScalperAdaptiveModeValue;
+    }
+  } catch (e) { /* storage not available */ }
+
+  /* Wire Opposite Mode toggle */
+  const oppToggle = document.getElementById("gridScalperMAOppositeToggle");
+  if (oppToggle) {
+    oppToggle.checked = gridScalperMAOppositeEnabled;
+    oppToggle.addEventListener("change", () => {
+      gridScalperMAOppositeEnabled = oppToggle.checked;
+      _saveGSOppSettings();
+      renderGridScalperMAOppositeStats();
+    });
+  }
+
+  /* Wire Adaptive Confluence toggle */
+  const adaptToggle = document.getElementById("gridScalperAdaptiveToggle");
+  if (adaptToggle) {
+    adaptToggle.checked = gridScalperAdaptiveEnabled;
+    adaptToggle.addEventListener("change", () => {
+      gridScalperAdaptiveEnabled = adaptToggle.checked;
+      _saveGSOppSettings();
+      renderGridScalperMAOppositeStats();
+    });
+  }
+
+  /* Wire Adaptive Confluence mode select */
+  const adaptModeSelect = document.getElementById("gridScalperAdaptiveMode");
+  if (adaptModeSelect) {
+    adaptModeSelect.value = gridScalperAdaptiveModeValue;
+    adaptModeSelect.addEventListener("change", () => {
+      gridScalperAdaptiveModeValue = adaptModeSelect.value;
+      _saveGSOppSettings();
+      renderGridScalperMAOppositeStats();
+    });
+  }
+
+  /* Initial stats render */
+  renderGridScalperMAOppositeStats();
 }
 
 /**
