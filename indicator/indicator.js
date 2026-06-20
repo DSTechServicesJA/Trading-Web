@@ -1266,8 +1266,27 @@ const strategyTradeTimestamps = new Map();  /* strategy -> [ms timestamps] */
 const symbolCooldownUntil = new Map();      /* symbol -> epoch ms */
 const strategyRegimeStats = {};             /* key(strat|regime) -> {wins,losses,totalWin,totalLoss,samples} */
 
-/** Invert a trade result for shadow-outcome tracking (WIN↔LOSS; other values pass through unchanged). */
+/**
+ * Invert a trade result for shadow-outcome tracking.
+ * @param {string} r - The trade result ("WIN", "LOSS", or any other string).
+ * @returns {string} "LOSS" if r is "WIN", "WIN" if r is "LOSS", or r unchanged otherwise.
+ */
 function invertResult(r) { return r === "WIN" ? "LOSS" : r === "LOSS" ? "WIN" : r; }
+
+/**
+ * Return the label for the opposite trading direction.
+ * @param {string} dir - "BULL" or "BEAR".
+ * @returns {string} Emoji-prefixed opposite direction label.
+ */
+function getOppositeDirLabel(dir) { return dir === "BULL" ? "📉 SELL" : "📈 BUY"; }
+
+/**
+ * Return an emoji icon for a trade result.
+ * @param {string} result - "WIN", "LOSS", or other.
+ * @returns {string} Emoji icon.
+ */
+function getResultIcon(result) { return result === "WIN" ? "✅" : result === "LOSS" ? "❌" : "⏱"; }
+
 const strategyRegimePausedUntil = {};       /* key(strat|regime) -> epoch ms */
 let walkForwardProfiles = {};               /* key(symbol|gran|regime) -> profile */
 
@@ -4267,8 +4286,8 @@ async function sendTradeOutcomeTelegram(signal) {
     /* Shadow outcome — what the opposite direction would have done on this trade */
     if (telegramShadowOutcomeSend) {
       const shadowResult = invertResult(result);
-      const oppDirLabel  = signal.dir === "BULL" ? "📉 SELL" : "📈 BUY";
-      const shadowIcon   = shadowResult === "WIN" ? "✅" : shadowResult === "LOSS" ? "❌" : "⏱";
+      const oppDirLabel  = getOppositeDirLabel(signal.dir);
+      const shadowIcon   = getResultIcon(shadowResult);
       lines.push("");
       lines.push(`🔮 <b>Shadow (${oppDirLabel} would've):</b> ${shadowIcon} ${shadowResult}`);
 
@@ -16203,8 +16222,8 @@ async function sendStrategyOutcomeTelegram(signal) {
        original direction, so shadowResult = what the actual opposite trade did. */
     if (telegramShadowOutcomeSend) {
       const shadowResult = invertResult(result);
-      const oppDirLabel  = signal.dir === "BULL" ? "📉 SELL" : "📈 BUY";
-      const shadowIcon   = shadowResult === "WIN" ? "✅" : shadowResult === "LOSS" ? "❌" : "⏱";
+      const oppDirLabel  = getOppositeDirLabel(signal.dir);
+      const shadowIcon   = getResultIcon(shadowResult);
       lines.push("");
       lines.push(`🔮 <b>Shadow (${oppDirLabel} would've):</b> ${shadowIcon} ${shadowResult}`);
 
