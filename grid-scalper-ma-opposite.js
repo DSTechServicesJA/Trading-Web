@@ -394,6 +394,27 @@ function buildOppositeModeTelegramMessage(signal, signalRecord) {
     lines.push(`<b>Spread:</b> ${Number(signalRecord.spread).toFixed(1)} pips`);
   }
 
+  // TP Probability block — sourced from origTPProb/oppTPProb on the executed signal
+  const execSignal = signal || {};
+  if (Number.isFinite(execSignal.origTPProb) && Number.isFinite(execSignal.oppTPProb)) {
+    const origPct = Math.round(execSignal.origTPProb * 100);
+    const oppPct  = Math.round(execSignal.oppTPProb  * 100);
+    const recLabel = execSignal.probHighDir === "original"
+      ? `✅ Trade ORIGINAL (${dirLabel(signalRecord.original ? signalRecord.original.dir : execSignal._originalDir || execSignal.dir)})`
+      : execSignal.probHighDir === "opposite"
+      ? `✅ Trade OPPOSITE (${dirLabel(signalRecord.opposite ? signalRecord.opposite.dir : (execSignal._originalDir ? flipGridScalperMADirection(execSignal._originalDir) : execSignal.dir))})`
+      : "⚪ Equal probability — no clear edge";
+    const sampleNote = Number.isFinite(execSignal.probSampleSize) ? ` (${execSignal.probSampleSize} trades)` : "";
+    lines.push(``);
+    lines.push(`<b>━━━ TP Probability ━━━</b>`);
+    lines.push(`<b>Original ${dirLabel(signalRecord.original ? signalRecord.original.dir : execSignal.dir)}:</b> ${origPct}%`);
+    lines.push(`<b>Opposite ${dirLabel(signalRecord.opposite ? signalRecord.opposite.dir : flipGridScalperMADirection(signalRecord.original ? signalRecord.original.dir : execSignal.dir))}:</b> ${oppPct}%`);
+    lines.push(`<b>Recommendation:</b> ${recLabel}${sampleNote}`);
+  } else {
+    lines.push(``);
+    lines.push(`<b>📊 TP Probability:</b> N/A (need 5+ resolved trades)`);
+  }
+
   // Mode info
   lines.push(``);
   lines.push(`<b>Strategy Mode:</b> ${signalRecord.mode || "--"}`);
@@ -960,6 +981,127 @@ function getPerformanceComparison() {
 }
 
 /**
+ * Compute TP-hit probability for both the original and opposite signal directions.
+ *
+ * Uses decay-weighted win rates from the last LOOKBACK resolved signals, filtered
+ * by symbol + mode when enough data exists, then adjusts for 3 live market factors:
+ *   1. EMA bias   (price vs EMA 100)   → ±5%
+ *   2. RSI momentum (RSI vs 55/45)     → ±5%
+ *   3. Confluence strength             → +1–3% per factor above baseline
+ * Total context adjustment is capped at ±15%.
+ *
+ * @param {string} dir            - Original signal direction ("BULL" | "BEAR")
+ * @param {string} symbol         - Instrument symbol
+ * @param {string} mode           - Strategy mode ("price_vs_ma" | "bos" | "triple_ma")
+ * @param {number} confluenceScore - Confluence score from computeConfluenceScore()
+ * @param {Array}  confFactors    - Active confluence factor names
+ * @returns {{ origProb: number|null, oppProb: number|null, probHighDir: string|null,
+ *             sampleSize: number, method: string }}
+ */
+function computeDirectionalTPProbability(dir, symbol, mode, confluenceScore, confFactors) {
+  const LOOKBACK = 30;
+  const MIN_FILTER_SIZE = 10;
+  const MIN_SAMPLE_SIZE = 5;
+
+  /* Opposite direction */
+  const oppDir = (dir === "BULL" || dir === "BUY") ? "BEAR"
+               : (dir === "BEAR" || dir === "SELL") ? "BULL"
+               : dir;
+
+  /* Pull resolved signals from the shared gridScalperMAHistory (indicator.js global) */
+  const history = (typeof gridScalperMAHistory !== "undefined") ? gridScalperMAHistory : [];
+  const allResolved = history
+    .filter(s => s.result === "WIN" || s.result === "LOSS")
+    .slice(0, LOOKBACK);
+
+  /* Try symbol+mode filtered pool first; fall back to full pool */
+  let pool = allResolved;
+  if (symbol && mode) {
+    const filtered = allResolved.filter(s => s.symbol === symbol && s.mode === mode);
+    if (filtered.length >= MIN_FILTER_SIZE) pool = filtered;
+  }
+
+  if (pool.length < MIN_SAMPLE_SIZE) {
+    return { origProb: null, oppProb: null, probHighDir: null,
+             sampleSize: pool.length, method: "insufficient" };
+  }
+
+  /* ── Step 1: Historical decay-weighted win rates ── */
+  const origTrades = pool
+    .filter(s => s.dir === dir || s.dir === (dir === "BULL" ? "BUY" : "SELL"))
+    .map(s => ({ result: s.result }));
+  const oppTrades  = pool
+    .filter(s => s.dir === oppDir || s.dir === (oppDir === "BULL" ? "BUY" : "SELL"))
+    .map(s => ({ result: s.result }));
+
+  let pOrig = origTrades.length >= 2 ? (calculateDecayWeightedWinRate(origTrades) ?? 0.5)
+            : origTrades.length === 1 ? (origTrades[0].result === "WIN" ? 0.65 : 0.35)
+            : 0.5;
+
+  let pOpp  = oppTrades.length >= 2 ? (calculateDecayWeightedWinRate(oppTrades) ?? 0.5)
+            : oppTrades.length === 1 ? (oppTrades[0].result === "WIN" ? 0.65 : 0.35)
+            : 0.5;
+
+  /* Normalise to a 0–1 probability pair that sums to 1 */
+  const histTotal = pOrig + pOpp;
+  let probOrig = histTotal > 0 ? pOrig / histTotal : 0.5;
+  let probOpp  = histTotal > 0 ? pOpp  / histTotal : 0.5;
+
+  /* ── Step 2: Market context bias adjustments ── */
+  let origAdj = 0;
+  let oppAdj  = 0;
+  const isBull = (dir === "BULL" || dir === "BUY");
+
+  /* EMA bias — use global emaHTF (EMA 100) if available */
+  const idx = (typeof candles !== "undefined" && candles.length > 0) ? candles.length - 1 : -1;
+  if (idx >= 0) {
+    const emaVal = (typeof emaHTF !== "undefined" && emaHTF.length > idx) ? emaHTF[idx] : null;
+    if (emaVal != null) {
+      const price = candles[idx].close;
+      if (price > emaVal) { if (isBull) origAdj += 0.05; else oppAdj += 0.05; }
+      else if (price < emaVal) { if (!isBull) origAdj += 0.05; else oppAdj += 0.05; }
+    }
+
+    /* RSI momentum — use global rsiValues if available */
+    const rsi = (typeof rsiValues !== "undefined" && rsiValues.length > idx) ? rsiValues[idx] : null;
+    if (rsi != null) {
+      if (rsi > 55)      { if (isBull) origAdj += 0.05; else oppAdj += 0.05; }
+      else if (rsi < 45) { if (!isBull) origAdj += 0.05; else oppAdj += 0.05; }
+    }
+  }
+
+  /* Confluence strength — each extra factor above 4 adds a small boost to original */
+  if (Number.isFinite(confluenceScore) && confluenceScore > 4) {
+    const confBoost = Math.min(0.09, (confluenceScore - 4) * 0.01);
+    origAdj += confBoost;
+  }
+
+  /* Cap total context adjustment at ±15% */
+  const MAX_ADJ = 0.15;
+  origAdj = Math.min(MAX_ADJ, origAdj);
+  oppAdj  = Math.min(MAX_ADJ, oppAdj);
+
+  /* Apply context adjustments and clamp result */
+  probOrig = Math.min(0.95, Math.max(0.05, probOrig + origAdj - oppAdj));
+  probOpp  = Math.min(0.95, Math.max(0.05, 1.0 - probOrig));
+
+  /* ── Step 3: Determine recommendation ── */
+  const MARGIN = 0.02;
+  let probHighDir;
+  if (probOrig > probOpp + MARGIN)      probHighDir = "original";
+  else if (probOpp > probOrig + MARGIN) probHighDir = "opposite";
+  else                                  probHighDir = "equal";
+
+  return {
+    origProb: probOrig,
+    oppProb:  probOpp,
+    probHighDir,
+    sampleSize: pool.length,
+    method: "calculated"
+  };
+}
+
+/**
  * Get performance broken down by symbol.
  */
 function getPerformanceBySymbol() {
@@ -1131,7 +1273,22 @@ function updateGridScalperMAOppositeStats() {
   const oppStr = `Opposite: ${comp.opposite.wins}W/${comp.opposite.losses}L (${comp.opposite.winRate}%)`;
   const total = gridScalperMAFlippedHistory.length;
 
-  statsEl.innerHTML = `${origStr} | ${oppStr} | Total: ${total}<br/><small>${comp.recommendation}</small>`;
+  /* Show latest signal's TP probability when available */
+  const latestSignal = (typeof gridScalperMAHistory !== "undefined" && gridScalperMAHistory.length > 0)
+    ? gridScalperMAHistory[0] : null;
+  let probHtml = "";
+  if (latestSignal && Number.isFinite(latestSignal.origTPProb) && Number.isFinite(latestSignal.oppTPProb)) {
+    const origPct = Math.round(latestSignal.origTPProb * 100);
+    const oppPct  = Math.round(latestSignal.oppTPProb  * 100);
+    const recIcon = latestSignal.probHighDir === "original" ? "✅ Orig"
+                  : latestSignal.probHighDir === "opposite" ? "✅ Opp"
+                  : "⚪ Equal";
+    probHtml = `<br/><small>📊 Last signal TP prob → Orig: <b>${origPct}%</b> | Opp: <b>${oppPct}%</b> ${recIcon}</small>`;
+  } else if (latestSignal) {
+    probHtml = `<br/><small>📊 TP prob: N/A (need ${5}+ resolved trades)</small>`;
+  }
+
+  statsEl.innerHTML = `${origStr} | ${oppStr} | Total: ${total}<br/><small>${comp.recommendation}</small>${probHtml}`;
 }
 
 // =============================================

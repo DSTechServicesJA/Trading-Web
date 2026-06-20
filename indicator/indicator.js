@@ -11360,8 +11360,8 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.nyOpenRangeAlertList, UI.nyOpenRangeAlertCount, nyOpenRangeHistory, "🕤", "NY Open Range");
   /* Session Range (London Sweep) */
   _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
-  /* Grid Scalper MA */
-  _renderAlertList(UI.gridScalperMAAlertList, UI.gridScalperMAAlertCount, gridScalperMAHistory, "🔲", "Grid Scalper MA");
+  /* Grid Scalper MA — custom renderer with TP probability bars */
+  _renderGridScalperMAAlerts();
   /* Fair Value Gap (FVG) */
   _renderAlertList(UI.fvgStratAlertList, UI.fvgStratAlertCount, fvgStratHistory, "🎯", "Fair Value Gap");
   /* MTF Top-Down */
@@ -11425,6 +11425,87 @@ function _renderAlertList(listEl, countEl, history, emoji, label) {
                  + confBadge
                  + resultBadge
                  + ` <small style="opacity:0.5;">${ts}</small>`;
+    listEl.appendChild(li);
+  }
+}
+
+/**
+ * Render Grid Scalper MA alert list with TP probability bars.
+ * Extends _renderAlertList with an extra probability row per signal.
+ */
+function _renderGridScalperMAAlerts() {
+  const listEl  = UI.gridScalperMAAlertList;
+  const countEl = UI.gridScalperMAAlertCount;
+  const history = gridScalperMAHistory;
+  if (!listEl) return;
+  if (countEl) countEl.textContent = history.length;
+
+  /* Digest includes probability so the cache busts if prob is computed late */
+  const digest = history.map(s =>
+    `${s.epoch ?? ""}|${s.dir ?? ""}|${s.result ?? ""}|${s.origTPProb != null ? Math.round(s.origTPProb * 100) : ""}`
+  ).join(",");
+  if (listEl._alertDigest === digest) return;
+  listEl._alertDigest = digest;
+
+  listEl.innerHTML = "";
+
+  for (const s of history) {
+    const li = document.createElement("li");
+    li.className = "scalp-alert-item";
+    const dirIcon  = s.dir === "BULL" ? "▲" : "▼";
+    const dirColor = s.dir === "BULL" ? "#22c55e" : "#ef4444";
+    const oppDir   = s.dir === "BULL" ? "BEAR" : "BULL";
+    const oppIcon  = s.dir === "BULL" ? "▼" : "▲";
+    const oppColor = s.dir === "BULL" ? "#ef4444" : "#22c55e";
+    const resultBadge = s.result === "WIN"     ? ' <span style="color:#22c55e;">WIN ✓</span>'
+                      : s.result === "LOSS"    ? ' <span style="color:#ef4444;">LOSS ✗</span>'
+                      : s.result === "EXPIRED" ? ' <span style="color:#f59e0b;">EXPIRED ⏱</span>'
+                      :                          ' <span style="color:#94a3b8;">PENDING…</span>';
+    const ts = new Date(s.epoch * 1000).toLocaleTimeString();
+    const confBadge = Number.isFinite(s.confluenceScore)
+      ? ` <span style="color:#60a5fa;font-size:0.85em;" title="Confluence Score">C:${s.confluenceScore}/16</span>`
+      : "";
+
+    /* ── Probability bar row ── */
+    let probHtml = "";
+    if (Number.isFinite(s.origTPProb) && Number.isFinite(s.oppTPProb)) {
+      const origPct = Math.round(s.origTPProb * 100);
+      const oppPct  = Math.round(s.oppTPProb  * 100);
+      const recStyle = s.probHighDir === "original"
+        ? `color:${dirColor};font-weight:700;`
+        : s.probHighDir === "opposite"
+        ? `color:${oppColor};font-weight:700;`
+        : "color:#94a3b8;";
+      const recText = s.probHighDir === "original"
+        ? `← ${dirIcon} ${s.dir}`
+        : s.probHighDir === "opposite"
+        ? `← ${oppIcon} ${oppDir}`
+        : "⚪ equal";
+      probHtml = `<div class="gs-prob-row">`
+        + `<div class="gs-prob-bar-wrap">`
+        +   `<span class="gs-prob-label" style="color:${dirColor};">${dirIcon} ${s.dir}</span>`
+        +   `<div class="gs-prob-track"><div class="gs-prob-fill-orig" style="width:${origPct}%;"></div></div>`
+        +   `<span class="gs-prob-pct">${origPct}%</span>`
+        + `</div>`
+        + `<div class="gs-prob-bar-wrap">`
+        +   `<span class="gs-prob-label" style="color:${oppColor};">${oppIcon} ${oppDir}</span>`
+        +   `<div class="gs-prob-track"><div class="gs-prob-fill-opp" style="width:${oppPct}%;"></div></div>`
+        +   `<span class="gs-prob-pct">${oppPct}%</span>`
+        + `</div>`
+        + `<span class="gs-prob-recommend" style="${recStyle}">📊 Trade ${recText}</span>`
+        + `</div>`;
+    } else {
+      probHtml = `<div class="gs-prob-insufficient">📊 TP prob: N/A (need 5+ resolved trades)</div>`;
+    }
+
+    li.innerHTML = `<span style="color:${dirColor};font-weight:700;">🔲 ${dirIcon} ${s.dir}</span> `
+                 + `<span style="opacity:0.7;">${s.symbol || "--"}</span> `
+                 + `@ <b>${fmt(s.entry, 4)}</b> `
+                 + `| SL ${fmt(s.sl, 4)} | TP ${fmt(s.tp, 4)}`
+                 + confBadge
+                 + resultBadge
+                 + ` <small style="opacity:0.5;">${ts}</small>`
+                 + probHtml;
     listEl.appendChild(li);
   }
 }
@@ -13454,6 +13535,16 @@ function processGridScalperMA() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
+  /* Compute TP-hit probability for original and opposite directions */
+  if (typeof computeDirectionalTPProbability === "function") {
+    const _tpProb = computeDirectionalTPProbability(
+      signal.dir, signal.symbol, signal.mode, signal.confluenceScore, signal._confFactors);
+    signal.origTPProb     = _tpProb.origProb;
+    signal.oppTPProb      = _tpProb.oppProb;
+    signal.probHighDir    = _tpProb.probHighDir;
+    signal.probSampleSize = _tpProb.sampleSize;
+  }
+
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   gridScalperMAHistory.unshift(signal);
@@ -13465,7 +13556,10 @@ function processGridScalperMA() {
   const modeLabel = signal.mode === "bos" ? "BOS" : signal.mode === "triple_ma" ? "Triple MA" : "Price vs MA";
   const volLabel  = signal.volCategory === "vol1s" ? "Vol1s" : signal.volCategory === "standard" ? "VolStd" : "";
   const rrTag     = volLabel ? ` [${volLabel} ${fmt(signal.rr,1)}R]` : "";
-  addLog(`🔲 GRID SCALPER MA [${modeLabel}]${rrTag} ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}`);
+  const _gsProbTag = Number.isFinite(signal.origTPProb) && Number.isFinite(signal.oppTPProb)
+    ? ` 📊 Orig:${Math.round(signal.origTPProb * 100)}% Opp:${Math.round(signal.oppTPProb * 100)}% ← trade ${signal.probHighDir === "original" ? "ORIGINAL" : signal.probHighDir === "opposite" ? "OPPOSITE" : "EQUAL"}`
+    : "";
+  addLog(`🔲 GRID SCALPER MA [${modeLabel}]${rrTag} ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmt(signal.entry, 4)} | SL ${fmt(signal.sl, 4)} | TP ${fmt(signal.tp, 4)}${_gsProbTag}`);
 
   /* Log opposite mode details if enabled */
   if (typeof gridScalperMAOppositeEnabled !== "undefined" && gridScalperMAOppositeEnabled) {
@@ -13476,9 +13570,12 @@ function processGridScalperMA() {
     addLog(`  🔄 Opposite: ${oppDir === "BULL" ? "▲ BUY" : "▼ SELL"} — SL ${fmt(oppSl, 4)} | TP ${fmt(oppTp, 4)}`);
   }
 
+  const _gsProbToastTag = Number.isFinite(signal.origTPProb)
+    ? ` | Orig ${Math.round(signal.origTPProb * 100)}% / Opp ${Math.round(signal.oppTPProb * 100)}%`
+    : "";
   showToast(
     `Grid Scalper MA ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} [${modeLabel}]`,
-    `${sym} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}`,
+    `${sym} @ ${fmt(signal.entry, 4)} | SL: ${fmt(signal.sl, 4)} | TP: ${fmt(signal.tp, 4)}${_gsProbToastTag}`,
     "trade", 10000
   );
 
@@ -15685,6 +15782,26 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`<b>Mode:</b> ${modeLabel}`);
     if (signal.mode === "bos" && signal.breakLevel != null) {
       lines.push(`<b>Break Level:</b> ${fmt(signal.breakLevel, 4)}`);
+    }
+    /* TP Probability block */
+    lines.push(``);
+    lines.push(`<b>━━━ TP Probability ━━━</b>`);
+    if (Number.isFinite(signal.origTPProb) && Number.isFinite(signal.oppTPProb)) {
+      const origPct    = Math.round(signal.origTPProb * 100);
+      const oppPct     = Math.round(signal.oppTPProb  * 100);
+      const oppDirStr  = signal.dir === "BULL" ? "BEAR 🔴" : "BULL 🟢";
+      const origDirStr = signal.dir === "BULL" ? "BULL 🟢" : "BEAR 🔴";
+      const recLabel   = signal.probHighDir === "original"
+        ? `✅ Trade ORIGINAL (${origDirStr})`
+        : signal.probHighDir === "opposite"
+        ? `✅ Trade OPPOSITE (${oppDirStr})`
+        : "⚪ Equal — no clear edge";
+      const sampleStr  = Number.isFinite(signal.probSampleSize) ? ` · ${signal.probSampleSize} trades` : "";
+      lines.push(`<b>Original (${origDirStr}):</b> ${origPct}%`);
+      lines.push(`<b>Opposite (${oppDirStr}):</b> ${oppPct}%`);
+      lines.push(`<b>Recommendation:</b> ${recLabel}${sampleStr}`);
+    } else {
+      lines.push(`N/A — need 5+ resolved trades`);
     }
   }
   if (signal.type === "fvg_strat") {
