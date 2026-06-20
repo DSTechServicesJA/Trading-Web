@@ -11495,7 +11495,7 @@ function _renderGridScalperMAAlerts() {
         + `<span class="gs-prob-recommend" style="${recStyle}">📊 Trade ${recText}</span>`
         + `</div>`;
     } else {
-      probHtml = `<div class="gs-prob-insufficient">📊 TP prob: N/A (need 5+ resolved trades)</div>`;
+      probHtml = `<div class="gs-prob-insufficient">📊 TP prob: N/A (need ${typeof TP_PROB_MIN_SAMPLE !== "undefined" ? TP_PROB_MIN_SAMPLE : 5}+ resolved trades)</div>`;
     }
 
     li.innerHTML = `<span style="color:${dirColor};font-weight:700;">🔲 ${dirIcon} ${s.dir}</span> `
@@ -15801,7 +15801,7 @@ function buildStrategyTelegramCaption(signal) {
       lines.push(`<b>Opposite (${oppDirStr}):</b> ${oppPct}%`);
       lines.push(`<b>Recommendation:</b> ${recLabel}${sampleStr}`);
     } else {
-      lines.push(`N/A — need 5+ resolved trades`);
+      lines.push(`N/A — need ${typeof TP_PROB_MIN_SAMPLE !== "undefined" ? TP_PROB_MIN_SAMPLE : 5}+ resolved trades`);
     }
   }
   if (signal.type === "fvg_strat") {

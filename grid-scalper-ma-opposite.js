@@ -94,6 +94,9 @@ let performanceByMode = {
 // -- Trade frequency limiter --
 let tradeTimestamps = [];
 
+/** Minimum resolved trades required before TP-hit probability is calculated (shared constant). */
+const TP_PROB_MIN_SAMPLE = 5;
+
 // =============================================
 // SECTION 3: OPPOSITE MODE LOGIC
 // =============================================
@@ -414,7 +417,7 @@ function buildOppositeModeTelegramMessage(signal, signalRecord) {
     lines.push(`<b>Recommendation:</b> ${recLabel}${sampleNote}`);
   } else {
     lines.push(``);
-    lines.push(`<b>📊 TP Probability:</b> N/A (need 5+ resolved trades)`);
+    lines.push(`<b>📊 TP Probability:</b> N/A (need ${TP_PROB_MIN_SAMPLE}+ resolved trades)`);
   }
 
   // Mode info
@@ -1003,9 +1006,13 @@ function getPerformanceComparison() {
 function computeDirectionalTPProbability(dir, symbol, mode, confluenceScore, confFactors) {
   const LOOKBACK          = 30;
   const MIN_FILTER_SIZE   = 10;
-  /* Minimum resolved trades before returning a probability estimate */
-  const TP_PROB_MIN_SAMPLE = 5;
-  /* When only 1 resolved trade exists for a direction, assume these win rates */
+  /* TP_PROB_MIN_SAMPLE is defined at module level above */
+  /*
+   * SINGLE_WIN_PROB / SINGLE_LOSS_PROB: used when only one resolved trade exists for a
+   * direction (not enough for a decay-weighted rate). 65/35 provides a mild prior that
+   * a winning trade is slightly more reliable evidence than a single loss, without
+   * over-committing to an extreme probability on sparse data.
+   */
   const SINGLE_WIN_PROB   = 0.65;
   const SINGLE_LOSS_PROB  = 0.35;
   /* Confluence: score must exceed this baseline before boosting original probability */
@@ -1310,8 +1317,7 @@ function updateGridScalperMAOppositeStats() {
     else                                              recIcon = "⚪ Equal";
     probHtml = `<br/><small>📊 Last signal TP prob → Orig: <b>${origPct}%</b> | Opp: <b>${oppPct}%</b> ${recIcon}</small>`;
   } else if (latestSignal) {
-    /* TP_PROB_MIN_SAMPLE is defined inside computeDirectionalTPProbability; keep in sync */
-    probHtml = `<br/><small>📊 TP prob: N/A (need 5+ resolved trades)</small>`;
+    probHtml = `<br/><small>📊 TP prob: N/A (need ${TP_PROB_MIN_SAMPLE}+ resolved trades)</small>`;
   }
 
   statsEl.innerHTML = `${origStr} | ${oppStr} | Total: ${total}<br/><small>${comp.recommendation}</small>${probHtml}`;
