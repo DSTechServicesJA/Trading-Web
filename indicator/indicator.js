@@ -1865,8 +1865,9 @@ const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 let gridScalperMAOppositeEnabled = false; /* flip all GS-MA signals */
 let gridScalperAdaptiveEnabled   = false; /* adaptive confluence learning */
 let gridScalperAdaptiveModeValue = "Off"; /* "Off" | "ObservationOnly" | "Active" */
-const TP_PROB_MIN_SAMPLE         = 5;     /* minimum resolved trades for TP probability */
-const GS_FLIP_MIN_STATS          = 10;    /* minimum resolved trades before hiding "need more data" */
+const TP_PROB_MIN_SAMPLE                = 5;    /* minimum resolved trades for TP probability */
+const GS_FLIP_MIN_STATS                 = 10;   /* minimum resolved trades before hiding "need more data" */
+const TP_PROB_SIGNIFICANCE_THRESHOLD    = 0.05; /* min difference to declare one direction better */
 let _signalIdCounter = 0;
 
 /* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
@@ -13805,9 +13806,9 @@ function computeDirectionalTPProbability(dir) {
     : null;
   let probHighDir = null;
   if (origProb != null && oppProb != null) {
-    if      (origProb > oppProb + 0.05) probHighDir = "original";
-    else if (oppProb  > origProb + 0.05) probHighDir = "opposite";
-    else                                 probHighDir = "equal";
+    if      (origProb > oppProb + TP_PROB_SIGNIFICANCE_THRESHOLD) probHighDir = "original";
+    else if (oppProb  > origProb + TP_PROB_SIGNIFICANCE_THRESHOLD) probHighDir = "opposite";
+    else                                                            probHighDir = "equal";
   } else if (origProb != null) {
     probHighDir = "original";
   } else if (oppProb != null) {
@@ -13844,8 +13845,9 @@ function renderGridScalperMAOppositeStats() {
   const origWR = origTotal > 0 ? `${(origWins / origTotal * 100).toFixed(0)}%` : "N/A%";
   const oppWR  = oppTotal  > 0 ? `${(oppWins  / oppTotal  * 100).toFixed(0)}%` : "N/A%";
 
-  const modeStr = gridScalperAdaptiveEnabled
-    ? (gridScalperAdaptiveModeValue || "Off")
+  const _allowedModes = new Set(["Off", "ObservationOnly", "Active"]);
+  const modeStr = gridScalperAdaptiveEnabled && _allowedModes.has(gridScalperAdaptiveModeValue)
+    ? gridScalperAdaptiveModeValue
     : "Off";
 
   let html = `<div style="line-height:1.7;">`;
