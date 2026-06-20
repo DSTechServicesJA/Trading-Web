@@ -104,7 +104,11 @@ const ITGuruAuth = (() => {
           return false;
         }
       }
-    } catch { /* ignore malformed tokens */ }
+    } catch {
+      /* Catches DOMException from atob() on invalid base64 and SyntaxError from
+         JSON.parse on malformed payloads — treat all such tokens as present but
+         undecoded (the server verify() call will catch true invalidity). */
+    }
 
     return true;
   }
