@@ -55,13 +55,13 @@ try {
     $stmtS->execute([$user['id']]);
     $strategies = $stmtS->fetchAll(PDO::FETCH_COLUMN);
 
-    /* ── Issue JWT (1-hour expiry) ── */
+    /* ── Issue JWT (8-hour expiry) ── */
     $token = jwtEncode([
         'sub'      => $user['id'],
         'username' => $user['username'],
         'role'     => $user['role'] ?? 'user',
         'iat'      => time(),
-        'exp'      => time() + 3600,
+        'exp'      => time() + 28800,
     ]);
 
     jsonResponse([

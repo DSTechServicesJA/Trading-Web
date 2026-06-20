@@ -86,9 +86,31 @@ const ITGuruAuth = (() => {
 
   /* -------- Public API -------- */
 
-  /** Check if the user has a valid session */
+  /** Check if the user has a valid (non-expired) session */
   function isLoggedIn() {
-    return !!sessionStorage.getItem(SESSION_KEY);
+    const token = sessionStorage.getItem(SESSION_KEY);
+    if (!token) return false;
+
+    /* Quick client-side expiry check — avoids treating an expired JWT as valid */
+    try {
+      const parts   = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+          /* Token is expired — clear the stale session so the login overlay appears */
+          sessionStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem(USER_KEY);
+          sessionStorage.removeItem(STRATEGIES_KEY);
+          return false;
+        }
+      }
+    } catch {
+      /* Catches DOMException from atob() on invalid base64 and SyntaxError from
+         JSON.parse on malformed payloads — treat all such tokens as present but
+         undecoded (the server verify() call will catch true invalidity). */
+    }
+
+    return true;
   }
 
   /** Get stored auth token */

@@ -23437,9 +23437,18 @@ function initLoginGate() {
       });
     }
 
-    /* If already logged in, apply strategy access after restoring settings */
+    /* If already logged in, verify the token is still valid server-side.
+       If it has been revoked or expired, clear the session so the login
+       overlay reappears instead of leaving the user stuck behind a hidden form. */
     if (ITGuruAuth.isLoggedIn()) {
-      ITGuruAuth.verify().then(() => applyStrategyAccess());
+      ITGuruAuth.verify().then((valid) => {
+        if (valid) {
+          applyStrategyAccess();
+        } else {
+          ITGuruAuth.logout();
+          location.reload();
+        }
+      });
     }
     return;
   }
