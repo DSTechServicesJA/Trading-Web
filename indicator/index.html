@@ -25,94 +25,94 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<main class="container">
+<!-- Login Gate Overlay — outside .container so position:fixed covers full viewport -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card">
 
-  <!-- Login Gate Overlay -->
-   <div id="loginOverlay" class="login-overlay">
-    <div class="login-card">
-
-      <!-- ── Left: sign-in panel ── -->
-      <div class="login-panel">
-        <div class="login-brand">
-          <span class="login-logo-icon">🤖</span>
-          <span class="login-logo-text">IT Guru</span>
-        </div>
-        <h2>Welcome back</h2>
-        <p>Sign in to access IT Guru Indicator.</p>
-        <div id="loginFormSection">
-          <div class="login-field-wrap">
-            <label class="login-field-label" for="loginUsername">Username</label>
-            <input type="text" id="loginUsername" class="login-input" placeholder="Enter your username" autocomplete="username" />
-          </div>
-          <div class="login-field-wrap">
-            <label class="login-field-label" for="loginPassword">Password</label>
-            <input type="password" id="loginPassword" class="login-input" placeholder="Enter your password" autocomplete="current-password" />
-          </div>
-          <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
-          <button id="loginBtn" type="button" class="login-action-btn">Sign In</button>
-          <div id="loginError" class="login-error"></div>
-        </div>
+    <!-- ── Left: sign-in panel ── -->
+    <div class="login-panel">
+      <div class="login-brand">
+        <span class="login-logo-icon">🤖</span>
+        <span class="login-logo-text">IT Guru</span>
       </div>
-
-      <!-- ── Right: subscription plans ── -->
-      <div class="login-plans-panel">
-        <p class="login-plans-eyebrow">Subscription Plans</p>
-        <h3 class="login-plans-title">Unlock Full Access</h3>
-        <p class="login-plans-subtitle">Choose a plan that works for you</p>
-
-        <div class="login-plans-grid">
-
-          <div class="login-plan-card">
-            <div class="login-plan-header">
-              <span class="login-plan-badge">Trial</span>
-              <div class="login-plan-price">
-                <span class="login-plan-amount">Free</span>
-              </div>
-            </div>
-            <ul class="login-plan-features">
-              <li>Limited strategy access</li>
-              <li>Demo trading only</li>
-              <li>Basic signals</li>
-            </ul>
-          </div>
-
-          <div class="login-plan-card">
-            <div class="login-plan-header">
-              <span class="login-plan-badge">Weekly</span>
-              <div class="login-plan-price">
-                <span class="login-plan-amount">$9.99</span>
-                <span class="login-plan-period">/ 7 days</span>
-              </div>
-            </div>
-            <ul class="login-plan-features">
-              <li>All strategies unlocked</li>
-              <li>Live &amp; demo trading</li>
-              <li>Telegram alerts</li>
-            </ul>
-          </div>
-
-          <div class="login-plan-card login-plan-card-featured">
-            <div class="login-plan-header">
-              <span class="login-plan-badge login-plan-badge-featured">⭐ Monthly</span>
-              <div class="login-plan-price">
-                <span class="login-plan-amount">$29.99</span>
-                <span class="login-plan-period">/ 30 days</span>
-              </div>
-            </div>
-            <ul class="login-plan-features">
-              <li>All strategies unlocked</li>
-              <li>Live &amp; demo trading</li>
-              <li>Telegram alerts</li>
-              <li>Priority support</li>
-            </ul>
-          </div>
-
+      <h2>Welcome back</h2>
+      <p>Sign in to access IT Guru Indicator.</p>
+      <div id="loginFormSection">
+        <div class="login-field-wrap">
+          <label class="login-field-label" for="loginUsername">Username</label>
+          <input type="text" id="loginUsername" class="login-input" placeholder="Enter your username" autocomplete="username" />
         </div>
-        <p class="login-plans-note">Contact your admin to activate a plan</p>
+        <div class="login-field-wrap">
+          <label class="login-field-label" for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" class="login-input" placeholder="Enter your password" autocomplete="current-password" />
+        </div>
+        <label class="remember-me-row"><input type="checkbox" id="loginRememberMe" /> Remember me</label>
+        <button id="loginBtn" type="button" class="login-action-btn">Sign In</button>
+        <div id="loginError" class="login-error"></div>
       </div>
-
     </div>
+
+    <!-- ── Right: subscription plans ── -->
+    <div class="login-plans-panel">
+      <p class="login-plans-eyebrow">Subscription Plans</p>
+      <h3 class="login-plans-title">Unlock Full Access</h3>
+      <p class="login-plans-subtitle">Choose a plan that works for you</p>
+
+      <div class="login-plans-grid">
+
+        <div class="login-plan-card">
+          <div class="login-plan-header">
+            <span class="login-plan-badge">Trial</span>
+            <div class="login-plan-price">
+              <span class="login-plan-amount">Free</span>
+            </div>
+          </div>
+          <ul class="login-plan-features">
+            <li>Limited strategy access</li>
+            <li>Demo trading only</li>
+            <li>Basic signals</li>
+          </ul>
+        </div>
+
+        <div class="login-plan-card">
+          <div class="login-plan-header">
+            <span class="login-plan-badge">Weekly</span>
+            <div class="login-plan-price">
+              <span class="login-plan-amount">$9.99</span>
+              <span class="login-plan-period">/ 7 days</span>
+            </div>
+          </div>
+          <ul class="login-plan-features">
+            <li>All strategies unlocked</li>
+            <li>Live &amp; demo trading</li>
+            <li>Telegram alerts</li>
+          </ul>
+        </div>
+
+        <div class="login-plan-card login-plan-card-featured">
+          <div class="login-plan-header">
+            <span class="login-plan-badge login-plan-badge-featured">⭐ Monthly</span>
+            <div class="login-plan-price">
+              <span class="login-plan-amount">$29.99</span>
+              <span class="login-plan-period">/ 30 days</span>
+            </div>
+          </div>
+          <ul class="login-plan-features">
+            <li>All strategies unlocked</li>
+            <li>Live &amp; demo trading</li>
+            <li>Telegram alerts</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+
+      </div>
+      <p class="login-plans-note">Contact your admin to activate a plan</p>
+    </div>
+
   </div>
+</div>
+
+<main class="container">
 
   <!-- ===== STICKY STATUS BAR ===== -->
   <header class="status-bar">
