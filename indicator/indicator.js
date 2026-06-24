@@ -23437,18 +23437,11 @@ function initLoginGate() {
       });
     }
 
-    /* If already logged in, verify the token is still valid server-side.
-       If it has been revoked or expired, clear the session so the login
-       overlay reappears instead of leaving the user stuck behind a hidden form. */
+    /* If already logged in, refresh user data (role + strategies) from server.
+       Client-side JWT expiry is already checked in isLoggedIn(), so we don't
+       force a logout here — a transient server error should not kick the user out. */
     if (ITGuruAuth.isLoggedIn()) {
-      ITGuruAuth.verify().then((valid) => {
-        if (valid) {
-          applyStrategyAccess();
-        } else {
-          ITGuruAuth.logout();
-          location.reload();
-        }
-      });
+      ITGuruAuth.verify().then(() => applyStrategyAccess());
     }
     return;
   }
