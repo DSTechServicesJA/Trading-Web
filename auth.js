@@ -45,6 +45,9 @@ const ITGuruAuth = (() => {
   const STRATEGIES_KEY   = withNamespace("itguru_auth_strategies");
   const REMEMBER_ME_KEY  = withNamespace("itguru_remember_login");
   const SAVED_USER_KEY   = withNamespace("itguru_saved_user");
+  const PERSIST_TOKEN_KEY = withNamespace("itguru_auth_token_persist");
+  const PERSIST_USER_KEY  = withNamespace("itguru_auth_user_persist");
+  const PERSIST_STRAT_KEY = withNamespace("itguru_auth_strategies_persist");
 
   /* -------- Helpers -------- */
 
@@ -88,7 +91,21 @@ const ITGuruAuth = (() => {
 
   /** Check if the user has a valid (non-expired) session */
   function isLoggedIn() {
-    const token = sessionStorage.getItem(SESSION_KEY);
+    let token = sessionStorage.getItem(SESSION_KEY);
+
+    /* Restore persisted session from localStorage (Remember Me) if sessionStorage is empty */
+    if (!token && localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+      const persisted = localStorage.getItem(PERSIST_TOKEN_KEY);
+      if (persisted) {
+        token = persisted;
+        sessionStorage.setItem(SESSION_KEY, persisted);
+        const pUser = localStorage.getItem(PERSIST_USER_KEY);
+        if (pUser) sessionStorage.setItem(USER_KEY, pUser);
+        const pStrat = localStorage.getItem(PERSIST_STRAT_KEY);
+        if (pStrat) sessionStorage.setItem(STRATEGIES_KEY, pStrat);
+      }
+    }
+
     if (!token) return false;
 
     /* Quick client-side expiry check — avoids treating an expired JWT as valid */
@@ -101,6 +118,9 @@ const ITGuruAuth = (() => {
           sessionStorage.removeItem(SESSION_KEY);
           sessionStorage.removeItem(USER_KEY);
           sessionStorage.removeItem(STRATEGIES_KEY);
+          localStorage.removeItem(PERSIST_TOKEN_KEY);
+          localStorage.removeItem(PERSIST_USER_KEY);
+          localStorage.removeItem(PERSIST_STRAT_KEY);
           return false;
         }
       }
@@ -167,12 +187,14 @@ const ITGuruAuth = (() => {
       sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
     }
 
-    /* Persist "remember me" if requested */
-    if (data.token) {
-      const remembered = localStorage.getItem(REMEMBER_ME_KEY);
-      if (remembered === "1") {
-        localStorage.setItem(SAVED_USER_KEY, username);
+    /* Persist session to localStorage if "remember me" is active */
+    if (localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+      localStorage.setItem(PERSIST_TOKEN_KEY, data.token);
+      if (data.user) localStorage.setItem(PERSIST_USER_KEY, JSON.stringify(data.user));
+      if (Array.isArray(data.user?.strategies)) {
+        localStorage.setItem(PERSIST_STRAT_KEY, JSON.stringify(data.user.strategies));
       }
+      localStorage.setItem(SAVED_USER_KEY, username);
     }
 
     return data;
@@ -243,6 +265,15 @@ const ITGuruAuth = (() => {
         }
         if (Array.isArray(data.user?.strategies)) {
           sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
+        }
+        /* Keep persisted localStorage in sync when Remember Me is active */
+        if (localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+          const currentToken = getToken();
+          if (currentToken) localStorage.setItem(PERSIST_TOKEN_KEY, currentToken);
+          if (data.user) localStorage.setItem(PERSIST_USER_KEY, JSON.stringify(data.user));
+          if (Array.isArray(data.user?.strategies)) {
+            localStorage.setItem(PERSIST_STRAT_KEY, JSON.stringify(data.user.strategies));
+          }
         }
         updateNavUI();
         return true;
@@ -325,6 +356,9 @@ const ITGuruAuth = (() => {
     sessionStorage.removeItem(STRATEGIES_KEY);
     localStorage.removeItem(SAVED_USER_KEY);
     localStorage.removeItem(REMEMBER_ME_KEY);
+    localStorage.removeItem(PERSIST_TOKEN_KEY);
+    localStorage.removeItem(PERSIST_USER_KEY);
+    localStorage.removeItem(PERSIST_STRAT_KEY);
   }
 
   /**
@@ -389,6 +423,9 @@ const ITGuruAuth = (() => {
           } else {
             localStorage.removeItem(REMEMBER_ME_KEY);
             localStorage.removeItem(SAVED_USER_KEY);
+            localStorage.removeItem(PERSIST_TOKEN_KEY);
+            localStorage.removeItem(PERSIST_USER_KEY);
+            localStorage.removeItem(PERSIST_STRAT_KEY);
           }
         }
 
