@@ -1862,10 +1862,13 @@ const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in
 const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
 
 /* ── Grid Scalper MA: Opposite Mode & Adaptive Confluence state ── */
-let gridScalperMAOppositeEnabled = false; /* flip all GS-MA signals */
+/* gridScalperMAOppositeEnabled is declared in grid-scalper-ma-opposite.js,
+   which is always loaded before this file. Re-declaring it here with `let`
+   would collide in the shared global lexical scope and throw a SyntaxError
+   that aborts this entire script. */
 let gridScalperAdaptiveEnabled   = false; /* adaptive confluence learning */
 let gridScalperAdaptiveModeValue = "Off"; /* "Off" | "ObservationOnly" | "Active" */
-const TP_PROB_MIN_SAMPLE                = 5;    /* minimum resolved trades for TP probability */
+/* TP_PROB_MIN_SAMPLE is also declared in grid-scalper-ma-opposite.js (shared constant). */
 const GS_FLIP_MIN_STATS                 = 10;   /* minimum resolved trades before hiding "need more data" */
 const TP_PROB_SIGNIFICANCE_THRESHOLD    = 0.05; /* min difference to declare one direction better */
 let _signalIdCounter = 0;
