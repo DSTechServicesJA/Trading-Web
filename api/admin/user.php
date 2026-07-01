@@ -13,6 +13,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
 require_once __DIR__ . '/../telegram/helpers.php';
+require_once __DIR__ . '/../lib/subscription_email.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -33,9 +34,26 @@ if ($targetId <= 0) {
 if ($method === 'PATCH') {
     $body = getJsonBody();
 
-    $allowed = ['status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role', 'password', 'telegram_username'];
+    $allowed = ['email', 'status', 'subscription_status', 'subscription_plan', 'subscription_expires_at', 'role', 'password', 'telegram_username'];
     $set     = [];
     $params  = [];
+
+    /* ── Email: validate format now; uniqueness is checked against the DB below ── */
+    $emailProvided = array_key_exists('email', $body);
+    $newEmail      = null;
+    if ($emailProvided) {
+        $rawEmail = $body['email'];
+        if ($rawEmail === null || trim((string) $rawEmail) === '') {
+            $newEmail = null; // clearing the address is allowed
+        } else {
+            $newEmail = trim((string) $rawEmail);
+            if (strlen($newEmail) > 255 || !filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
+                jsonResponse(['error' => 'Invalid email address'], 400);
+            }
+        }
+        $set[]    = 'email = ?';
+        $params[] = $newEmail;
+    }
 
     if (isset($body['status'])) {
         if (!in_array($body['status'], ['active', 'locked'], true)) {
@@ -146,11 +164,24 @@ if ($method === 'PATCH') {
         $pdo = getDB();
 
         /* Verify the user exists before updating */
-        $check = $pdo->prepare('SELECT id, subscription_plan FROM users WHERE id = ?');
+        $check = $pdo->prepare(
+            'SELECT id, username, display_name, email,
+                    subscription_status, subscription_plan, subscription_expires_at
+             FROM users WHERE id = ?'
+        );
         $check->execute([$targetId]);
         $existing = $check->fetch();
         if (!$existing) {
             jsonResponse(['error' => 'User not found'], 404);
+        }
+
+        /* Email uniqueness: reject if another user already owns this address */
+        if ($emailProvided && $newEmail !== null) {
+            $dup = $pdo->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
+            $dup->execute([$newEmail, $targetId]);
+            if ($dup->fetch()) {
+                jsonResponse(['error' => 'Email already registered to another user'], 409);
+            }
         }
 
         /* Resolve deferred auto-expiry when plan comes from the DB */
@@ -185,6 +216,26 @@ if ($method === 'PATCH') {
                 error_log('Admin PATCH /user Telegram sync error: ' . $tgEx->getMessage());
                 /* Non-fatal — the user update already succeeded */
             }
+        }
+
+        /* ── Send transactional email when the subscription changed ── */
+        try {
+            $after = $pdo->prepare(
+                'SELECT id, username, display_name, email,
+                        subscription_status, subscription_plan, subscription_expires_at
+                 FROM users WHERE id = ?'
+            );
+            $after->execute([$targetId]);
+            $updated = $after->fetch();
+            if ($updated) {
+                $change = classifySubscriptionChange($existing, $updated);
+                if ($change !== null) {
+                    sendSubscriptionChangeEmail($targetId, $change, $updated);
+                }
+            }
+        } catch (\Throwable $mailEx) {
+            error_log('Admin PATCH /user email notify error: ' . $mailEx->getMessage());
+            /* Non-fatal — the user update already succeeded */
         }
 
         jsonResponse(['message' => 'User updated']);

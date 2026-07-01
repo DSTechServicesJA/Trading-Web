@@ -132,6 +132,52 @@ CREATE TABLE IF NOT EXISTS user_profile_assignments (
 -- (The CREATE TABLE IF NOT EXISTS statements above are safe to re-run.)
 
 -- ──────────────────────────────────────────────
+-- Email delivery log
+-- Records every transactional email attempt for auditing,
+-- delivery-failure diagnosis, and bounce/retry handling.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS email_log (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id       INT UNSIGNED    DEFAULT NULL,
+    recipient     VARCHAR(255)    NOT NULL,
+    subject       VARCHAR(255)    NOT NULL,
+    email_type    VARCHAR(60)     NOT NULL DEFAULT 'generic',
+    status        ENUM('sent','failed','skipped') NOT NULL DEFAULT 'sent',
+    error         TEXT            DEFAULT NULL,
+    transport     VARCHAR(20)     NOT NULL DEFAULT 'smtp',
+    created_at    TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_el_user   (user_id),
+    INDEX idx_el_type   (email_type),
+    INDEX idx_el_status (status),
+    INDEX idx_el_created (created_at),
+
+    CONSTRAINT fk_el_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Subscription reminder ledger
+-- One row per (user, subscription cycle, days-before) reminder that has
+-- been sent.  Guarantees reminders are idempotent — a given reminder is
+-- never sent twice for the same expiry date.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS subscription_reminders (
+    id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id      INT UNSIGNED    NOT NULL,
+    expires_at   DATETIME        NOT NULL,
+    days_before  SMALLINT        NOT NULL,
+    reminder_type VARCHAR(30)    NOT NULL DEFAULT 'expiry',
+    sent_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_sr_cycle (user_id, expires_at, days_before, reminder_type),
+    INDEX idx_sr_user (user_id),
+
+    CONSTRAINT fk_sr_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
 -- One-time Telegram link tokens
 -- Each token ties a logged-in web session to a Telegram /start command.
 -- Tokens expire in 15 minutes and are single-use.

@@ -1,0 +1,5 @@
+# ──────────────────────────────────────────────
+# Deny all direct web access to the scheduled-job scripts.
+# These run only from the command line via cron.
+# ──────────────────────────────────────────────
+Require all denied

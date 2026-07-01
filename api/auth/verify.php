@@ -30,7 +30,7 @@ try {
     /* ── Fetch fresh user data from DB ── */
     $pdo  = getDB();
     $stmt = $pdo->prepare(
-        'SELECT id, username, display_name, role, status,
+        'SELECT id, username, display_name, email, role, status,
                 subscription_status, subscription_plan, subscription_expires_at,
                 telegram_user_id, telegram_username, telegram_linked_at
          FROM users WHERE id = ?'
@@ -60,6 +60,10 @@ try {
             /* Kick from Telegram group if linked */
             require_once __DIR__ . '/../telegram/helpers.php';
             telegramKickIfLinked($pdo, (int) $user['id']);
+
+            /* Notify the user by email (best-effort, non-fatal) */
+            require_once __DIR__ . '/../lib/subscription_email.php';
+            sendExpiredEmail($user);
         } catch (\Throwable $ex) {
             error_log('Auto-expiry update error: ' . $ex->getMessage());
         }
