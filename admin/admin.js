@@ -595,6 +595,8 @@ function openEditModal(userId) {
 
   /* Populate modal */
   document.getElementById("editModalTitle").textContent = u.username;
+  const emailInput = el("editEmail");
+  if (emailInput) emailInput.value = u.email || "";
   setSelectValue("editStatus",    u.status || "active");
   setSelectValue("editRole",      u.role   || "user");
   setSelectValue("editSubStatus", u.subscription_status || "inactive");
@@ -734,6 +736,7 @@ async function saveEdit() {
   const sub      = el("editSubStatus").value;
   const plan     = el("editSubPlan").value || null;
   const expiry   = el("editSubExpiry").value || null;
+  const email    = (el("editEmail")?.value || "").trim();
   const telegramUsername = (el("editTelegramUsername")?.value || "").trim().replace(/^@/, "") || null;
   const newStrats = getCheckedStrategies("editStrategyChecks");
 
@@ -741,7 +744,7 @@ async function saveEdit() {
     /* Update user fields */
     const resp = await apiRequest("/admin/user?id=" + editingUserId, {
       method: "PATCH",
-      body: JSON.stringify({ status, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, telegram_username: telegramUsername }),
+      body: JSON.stringify({ email, status, role, subscription_status: sub, subscription_plan: plan, subscription_expires_at: expiry, telegram_username: telegramUsername }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));

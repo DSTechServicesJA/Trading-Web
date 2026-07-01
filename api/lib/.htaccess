@@ -1,0 +1,5 @@
+# ──────────────────────────────────────────────
+# Deny all direct web access to server-side libraries.
+# These files are only ever included by API endpoints.
+# ──────────────────────────────────────────────
+Require all denied
