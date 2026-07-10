@@ -246,6 +246,15 @@ const NEWS_PAUSE_DEFAULT_MIN = 5;
 
 /* Feature 13: Adaptive confluence weighting */
 const CONF_WEIGHT_MIN_SAMPLES = 10;
+/* Adaptive confluence quality gate (Grid Scalper MA Adaptive Mode):
+   a signal passes when it carries at least one "proven" factor (learned win
+   rate ≥ CONF_ADAPTIVE_STRONG_WEIGHT on ≥ CONF_WEIGHT_MIN_SAMPLES trades)
+   or the average learned win rate of its rated factors is ≥ CONF_ADAPTIVE_AVG_MIN.
+   The gate only activates once at least CONF_ADAPTIVE_MIN_RATED factors on the
+   signal have enough sample data, so early trading is never blocked. */
+const CONF_ADAPTIVE_STRONG_WEIGHT = 0.60;   /* "green" factor threshold */
+const CONF_ADAPTIVE_AVG_MIN       = 0.55;   /* min avg learned win rate */
+const CONF_ADAPTIVE_MIN_RATED     = 3;      /* min rated factors before gating */
 
 /* Auto-trade: minimum stake for Deriv contracts */
 const MIN_AUTO_TRADE_STAKE = 0.37;
@@ -13593,6 +13602,41 @@ function processGridScalperMA() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
+  /* ── Adaptive confluence quality gate (uses learned per-factor win rates) ──
+     Active: reject signals whose factors have historically lost (no "green"
+     factor such as Strong Breakout / Confirm Quality / Confirm Pattern /
+     Market Signal, and low average learned win rate).
+     ObservationOnly: log the verdict but let the signal through. */
+  if (gridScalperAdaptiveEnabled && gridScalperAdaptiveModeValue !== "Off") {
+    const quality = evaluateAdaptiveConfluenceQuality(signal._confFactors);
+    signal.adaptiveQuality = quality;
+    if (!quality.pass) {
+      if (gridScalperAdaptiveModeValue === "Active") {
+        addLog(`⚠ Grid Scalper MA REJECTED — adaptive confluence: ${quality.reason}`);
+        if (typeof logTradeDecision === "function" && typeof GRID_SCALPER_CONFIG !== "undefined" && GRID_SCALPER_CONFIG.IncludeSkippedSignalsInLog) {
+          logTradeDecision({
+            id: typeof generateSignalId === "function" ? generateSignalId() : Date.now().toString(),
+            symbol: signal.symbol || getActiveSymbol() || "--",
+            timeframe: UI.granSelect ? UI.granSelect.value : "--",
+            mode: signal.mode,
+            original: { dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, rr: signal.rr },
+            opposite: null,
+            oppositeModeEnabled: typeof gridScalperMAOppositeEnabled !== "undefined" ? gridScalperMAOppositeEnabled : false,
+            executedDirection: null,
+            executedSignal: null,
+            confluenceScore: signal.confluenceScore,
+            confluenceFactors: signal._confFactors || [],
+            spread: typeof currentSpread !== "undefined" ? currentSpread : null
+          }, "SKIPPED", `Adaptive confluence: ${quality.reason}`);
+        }
+        return;
+      }
+      addLog(`👁 Grid Scalper MA adaptive (observation) — would reject: ${quality.reason}`);
+    } else if (quality.ratedCount >= CONF_ADAPTIVE_MIN_RATED) {
+      addLog(`✅ Grid Scalper MA adaptive confluence OK — ${quality.reason}`);
+    }
+  }
+
   /* Compute TP-hit probability for original and opposite directions */
   if (typeof computeDirectionalTPProbability === "function") {
     const _tpProb = computeDirectionalTPProbability(
@@ -21491,6 +21535,38 @@ function getConfluenceFactorWeight(factor) {
   const total = stats.wins + stats.losses;
   if (total < CONF_WEIGHT_MIN_SAMPLES) return 0.5;
   return stats.wins / total;
+}
+/**
+ * Evaluate signal quality from learned per-factor win rates (Feature 13 stats).
+ * Only factors with ≥ CONF_WEIGHT_MIN_SAMPLES resolved trades are "rated";
+ * factors without enough data are ignored so the gate never blocks on noise.
+ *
+ * @param {string[]} factors - active confluence factor names for the signal
+ * @returns {{ pass: boolean, ratedCount: number, avgWeight: number|null,
+ *             strongFactors: string[], reason: string }}
+ */
+function evaluateAdaptiveConfluenceQuality(factors) {
+  const rated = [];
+  for (const f of (factors || [])) {
+    const stats = confluenceFactorStats[f];
+    if (!stats) continue;
+    const total = stats.wins + stats.losses;
+    if (total < CONF_WEIGHT_MIN_SAMPLES) continue;
+    rated.push({ name: f, weight: stats.wins / total });
+  }
+  if (rated.length < CONF_ADAPTIVE_MIN_RATED) {
+    return { pass: true, ratedCount: rated.length, avgWeight: null, strongFactors: [],
+             reason: `insufficient data (${rated.length}/${CONF_ADAPTIVE_MIN_RATED} rated factors)` };
+  }
+  const avgWeight = rated.reduce((sum, r) => sum + r.weight, 0) / rated.length;
+  const strongFactors = rated.filter(r => r.weight >= CONF_ADAPTIVE_STRONG_WEIGHT).map(r => r.name);
+  const pass = strongFactors.length > 0 || avgWeight >= CONF_ADAPTIVE_AVG_MIN;
+  const reason = pass
+    ? (strongFactors.length > 0
+        ? `proven factor${strongFactors.length > 1 ? "s" : ""}: ${strongFactors.join(", ")}`
+        : `avg win rate ${(avgWeight * 100).toFixed(0)}% ≥ ${(CONF_ADAPTIVE_AVG_MIN * 100).toFixed(0)}%`)
+    : `no proven factor (≥${(CONF_ADAPTIVE_STRONG_WEIGHT * 100).toFixed(0)}%) and avg win rate ${(avgWeight * 100).toFixed(0)}% < ${(CONF_ADAPTIVE_AVG_MIN * 100).toFixed(0)}%`;
+  return { pass, ratedCount: rated.length, avgWeight, strongFactors, reason };
 }
 function renderAdaptiveConfluenceTable() {
   const container = document.getElementById("adaptiveConfluenceTable");
