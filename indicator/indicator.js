@@ -1907,6 +1907,10 @@ let gridScalperAdaptiveModeValue = "Off"; /* "Off" | "ObservationOnly" | "Active
 const GS_FLIP_MIN_STATS                 = 10;   /* minimum resolved trades before hiding "need more data" */
 const TP_PROB_SIGNIFICANCE_THRESHOLD    = 0.05; /* min difference to declare one direction better */
 let _signalIdCounter = 0;
+/* Cumulative Grid Scalper MA resolved-outcome tracking (persisted to localStorage
+   so stats survive page reloads and panel/symbol switches, unlike the in-memory
+   gridScalperMAHistory which resets). */
+let gsFlipStats = { wins: 0, losses: 0, bullWins: 0, bullLosses: 0, bearWins: 0, bearLosses: 0 };
 
 /* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
  *  Volatility 1s (1HZ*) — fast tick action, tighter TP for rapid captures.
@@ -13869,20 +13873,17 @@ function logTradeDecision(decision, status, reason) { /* reserved */ }
  * @returns {{ origProb: number|null, oppProb: number|null, probHighDir: string|null, sampleSize: number }}
  */
 function computeDirectionalTPProbability(dir) {
-  const resolved = gridScalperMAHistory.filter(s => s.result === "WIN" || s.result === "LOSS");
-  const sampleSize = resolved.length;
+  /* Use persisted cumulative stats so probability survives page reloads. */
+  const sampleSize = gsFlipStats.wins + gsFlipStats.losses;
   if (sampleSize < TP_PROB_MIN_SAMPLE) {
     return { origProb: null, oppProb: null, probHighDir: null, sampleSize };
   }
-  const oppDir    = dir === "BULL" ? "BEAR" : "BULL";
-  const origSigs  = resolved.filter(s => s.dir === dir);
-  const oppSigs   = resolved.filter(s => s.dir === oppDir);
-  const origProb  = origSigs.length > 0
-    ? origSigs.filter(s => s.result === "WIN").length / origSigs.length
-    : null;
-  const oppProb   = oppSigs.length  > 0
-    ? oppSigs.filter(s => s.result === "WIN").length  / oppSigs.length
-    : null;
+  const bullTotal = gsFlipStats.bullWins + gsFlipStats.bullLosses;
+  const bearTotal = gsFlipStats.bearWins + gsFlipStats.bearLosses;
+  const bullProb  = bullTotal > 0 ? gsFlipStats.bullWins / bullTotal : null;
+  const bearProb  = bearTotal > 0 ? gsFlipStats.bearWins / bearTotal : null;
+  const origProb  = dir === "BULL" ? bullProb : bearProb;
+  const oppProb   = dir === "BULL" ? bearProb : bullProb;
   let probHighDir = null;
   if (origProb != null && oppProb != null) {
     if      (origProb > oppProb + TP_PROB_SIGNIFICANCE_THRESHOLD) probHighDir = "original";
@@ -13898,10 +13899,48 @@ function computeDirectionalTPProbability(dir) {
 
 /**
  * Called when a Grid Scalper MA signal resolves (WIN/LOSS/EXPIRED).
- * Re-renders the Opposite Mode stats panel.
+ * Records the outcome in the persistent tracking stats and re-renders
+ * the Opposite Mode stats panel.
  */
 function updateGridScalperMAFlipOutcome(signal, result, pnl) {
+  if (result === "WIN" || result === "LOSS") {
+    if (result === "WIN") {
+      gsFlipStats.wins++;
+      if (signal && signal.dir === "BEAR") gsFlipStats.bearWins++;
+      else gsFlipStats.bullWins++;
+    } else {
+      gsFlipStats.losses++;
+      if (signal && signal.dir === "BEAR") gsFlipStats.bearLosses++;
+      else gsFlipStats.bullLosses++;
+    }
+    _saveGSFlipStats();
+  }
   renderGridScalperMAOppositeStats();
+}
+
+/** Persist the cumulative Grid Scalper MA flip-tracking stats to localStorage. */
+function _saveGSFlipStats() {
+  try {
+    localStorage.setItem(LS_PREFIX + "gsFlipStats", JSON.stringify(gsFlipStats));
+  } catch (e) { /* storage not available */ }
+}
+
+/** Restore the cumulative Grid Scalper MA flip-tracking stats from localStorage. */
+function _loadGSFlipStats() {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + "gsFlipStats");
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && typeof s === "object") {
+        gsFlipStats.wins       = Number(s.wins)       || 0;
+        gsFlipStats.losses     = Number(s.losses)     || 0;
+        gsFlipStats.bullWins   = Number(s.bullWins)   || 0;
+        gsFlipStats.bullLosses = Number(s.bullLosses) || 0;
+        gsFlipStats.bearWins   = Number(s.bearWins)   || 0;
+        gsFlipStats.bearLosses = Number(s.bearLosses) || 0;
+      }
+    }
+  } catch (e) { /* storage not available */ }
 }
 
 /**
@@ -13911,9 +13950,9 @@ function renderGridScalperMAOppositeStats() {
   const el = document.getElementById("gridScalperMAOppositeStats");
   if (!el) return;
 
-  const resolved   = gridScalperMAHistory.filter(s => s.result === "WIN" || s.result === "LOSS");
-  const origWins   = resolved.filter(s => s.result === "WIN").length;
-  const origLosses = resolved.filter(s => s.result === "LOSS").length;
+  /* Cumulative persisted stats (survive reloads and panel/symbol switches) */
+  const origWins   = gsFlipStats.wins;
+  const origLosses = gsFlipStats.losses;
   const origTotal  = origWins + origLosses;
 
   /* Opposite direction inverts outcomes */
@@ -13941,14 +13980,14 @@ function renderGridScalperMAOppositeStats() {
   }
 
   /* TP probability (split by signal direction) */
-  if (resolved.length >= TP_PROB_MIN_SAMPLE) {
-    const bullResolved = resolved.filter(s => s.dir === "BULL");
-    const bearResolved = resolved.filter(s => s.dir === "BEAR");
-    const bullPct = bullResolved.length > 0
-      ? `${(bullResolved.filter(s => s.result === "WIN").length / bullResolved.length * 100).toFixed(0)}%`
+  if (origTotal >= TP_PROB_MIN_SAMPLE) {
+    const bullTotal = gsFlipStats.bullWins + gsFlipStats.bullLosses;
+    const bearTotal = gsFlipStats.bearWins + gsFlipStats.bearLosses;
+    const bullPct = bullTotal > 0
+      ? `${(gsFlipStats.bullWins / bullTotal * 100).toFixed(0)}%`
       : "N/A";
-    const bearPct = bearResolved.length > 0
-      ? `${(bearResolved.filter(s => s.result === "WIN").length / bearResolved.length * 100).toFixed(0)}%`
+    const bearPct = bearTotal > 0
+      ? `${(gsFlipStats.bearWins / bearTotal * 100).toFixed(0)}%`
       : "N/A";
     html += `<span style="color:#60a5fa;">📊 TP prob: BULL ${bullPct} / BEAR ${bearPct}</span>`;
   } else {
@@ -13977,6 +14016,7 @@ function _saveGSOppSettings() {
  */
 function initGridScalperMAOpposite() {
   /* Restore persisted state */
+  _loadGSFlipStats();
   try {
     const raw = localStorage.getItem(LS_PREFIX + "gsOppSettings");
     if (raw) {
