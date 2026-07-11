@@ -19744,7 +19744,7 @@ function maybeFlagShadowBuckets() {
   for (const b of getShadowOutperformingBuckets()) {
     if (_shadowFlaggedBuckets.has(b.key)) continue;
     _shadowFlaggedBuckets.add(b.key);
-    addLog(`🔮 Shadow edge detected — ${b.key.replace("|", " / ")}: shadow WR ${(b.shadowWinRate * 100).toFixed(0)}% vs actual ${(b.winRate * 100).toFixed(0)}% over ${b.samples} trades. Consider inverting or disabling this bucket.`);
+    addLog(`🔮 Shadow edge detected — ${b.key.replace(/\|/g, " / ")}: shadow WR ${(b.shadowWinRate * 100).toFixed(0)}% vs actual ${(b.winRate * 100).toFixed(0)}% over ${b.samples} trades. Consider inverting or disabling this bucket.`);
   }
 }
 
@@ -20756,7 +20756,7 @@ function renderOppositeModeSummary() {
 
   /* Buckets where the shadow direction consistently outperforms */
   for (const b of getShadowOutperformingBuckets().slice(0, 3)) {
-    html += `<div class="opposite-row"><span class="opp-label">⚠️ ${b.key.replace("|", " / ")}:</span> <span title="Shadow outperforms — consider inverting or disabling">shadow ${(b.shadowWinRate * 100).toFixed(0)}% vs ${(b.winRate * 100).toFixed(0)}% (${b.samples})</span></div>`;
+    html += `<div class="opposite-row"><span class="opp-label">⚠️ ${b.key.replace(/\|/g, " / ")}:</span> <span title="Shadow outperforms — consider inverting or disabling">shadow ${(b.shadowWinRate * 100).toFixed(0)}% vs ${(b.winRate * 100).toFixed(0)}% (${b.samples})</span></div>`;
   }
 
   html += `</div>`;
