@@ -7734,8 +7734,8 @@ function remapPendingSignalIndices() {
   /* Remap all strategy history arrays */
   const allHistories = [
     liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
-    fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory,
-    nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
+    fibScalpHistory, po3History, gridScalperMAHistory, gridScalperV2History,
+    liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
     tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory,
     po3_4hHistory, breakerBlockHistory, oteGoldenPocketHistory
   ];
@@ -7799,6 +7799,29 @@ function remapPendingSignalIndices() {
   if (remapped > 0) {
     addLog(`🔄 Reconnect: remapped ${remapped} pending signal(s) to new candle indices`);
   }
+
+  /* Clamp per-strategy cooldown trackers that still reference the OLD (longer)
+     candle array.  Left unclamped, `idx - last*Idx` goes negative and blocks
+     new signals until the new array grows past the stale index; clamping to
+     the latest candle keeps the normal cooldown behaviour after a reconnect
+     (and prevents an instant duplicate re-fire of the just-preserved signal). */
+  const _maxIdx = candles.length - 1;
+  if (lastScalpCandleIdx      > _maxIdx) lastScalpCandleIdx      = _maxIdx;
+  if (lastLiquiditySweepIdx   > _maxIdx) lastLiquiditySweepIdx   = _maxIdx;
+  if (lastStopLossHuntIdx     > _maxIdx) lastStopLossHuntIdx     = _maxIdx;
+  if (lastFailedPinBarIdx     > _maxIdx) lastFailedPinBarIdx     = _maxIdx;
+  if (lastFibScalpIdx         > _maxIdx) lastFibScalpIdx         = _maxIdx;
+  if (lastPo3Idx              > _maxIdx) lastPo3Idx              = _maxIdx;
+  if (lastGridScalperMAIdx    > _maxIdx) lastGridScalperMAIdx    = _maxIdx;
+  if (lastGridScalperV2Idx    > _maxIdx) lastGridScalperV2Idx    = _maxIdx;
+  if (lastFvgStratIdx         > _maxIdx) lastFvgStratIdx         = _maxIdx;
+  if (lastMtfTopDownIdx       > _maxIdx) lastMtfTopDownIdx       = _maxIdx;
+  if (lastCandleInterpIdx     > _maxIdx) lastCandleInterpIdx     = _maxIdx;
+  if (lastOrderblockIdx       > _maxIdx) lastOrderblockIdx       = _maxIdx;
+  if (lastTiktokIdx           > _maxIdx) lastTiktokIdx           = _maxIdx;
+  if (lastPo3_4hIdx           > _maxIdx) lastPo3_4hIdx           = _maxIdx;
+  if (lastBreakerBlockIdx     > _maxIdx) lastBreakerBlockIdx     = _maxIdx;
+  if (lastOteGoldenPocketIdx  > _maxIdx) lastOteGoldenPocketIdx  = _maxIdx;
 }
 
 /* ================= ACCOUNT / AUTH HELPERS ================= */
@@ -10515,6 +10538,7 @@ function detectGridScalperV2Strategy(idx) {
     entry: currentPrice,
     atr: atr,
     candleIdx: idx,
+    epoch: candles[idx].epoch,
     timestamp: new Date().getTime(),
     maxTrades: GRID_SCALPER_V2_MAX_TRADES,
     gridSpacing: atr * GRID_SCALPER_V2_GRID_MULTIPLIER,
@@ -24737,39 +24761,44 @@ function connectPanel(p) {
   p.teslaT3Hit = false;
   p.teslaBEHit = false;
   p.confluenceScore = 0;
-  p.liveScalpHistory = [];
-  p.lastScalpCandleIdx = -999;
+  /* Preserve alert/signal histories across reconnects (e.g. watchdog-forced)
+     so PENDING strategy signals — Grid Scalper included — survive and are not
+     re-fired after the candle array is rebuilt.  remapPendingSignalIndices()
+     re-maps their candleIdx (and clamps the cooldown trackers) once the new
+     historical batch loads.  Fresh panels simply start with empty histories. */
+  p.liveScalpHistory = p.liveScalpHistory || [];
+  p.lastScalpCandleIdx = p.lastScalpCandleIdx != null ? p.lastScalpCandleIdx : -999;
   /* Custom strategy histories (per-panel isolation) */
-  p.liquiditySweepHistory = [];
-  p.lastLiquiditySweepIdx = -999;
-  p.stopLossHuntHistory   = [];
-  p.lastStopLossHuntIdx   = -999;
-  p.failedPinBarHistory   = [];
-  p.lastFailedPinBarIdx   = -999;
-  p.fibScalpHistory       = [];
-  p.lastFibScalpIdx       = -999;
-  p.po3History            = [];
-  p.lastPo3Idx            = -999;
-  p.gridScalperMAHistory  = [];
-  p.lastGridScalperMAIdx  = -999;
-  p.fvgStratHistory       = [];
-  p.lastFvgStratIdx       = -999;
-  p.mtfTopDownHistory     = [];
-  p.lastMtfTopDownIdx     = -999;
-  p.candleInterpHistory   = [];
-  p.lastCandleInterpIdx   = -999;
-  p.orderblockHistory     = [];
-  p.lastOrderblockIdx     = -999;
-  p.tiktokHistory         = [];
-  p.lastTiktokIdx         = -999;
+  p.liquiditySweepHistory = p.liquiditySweepHistory || [];
+  p.lastLiquiditySweepIdx = p.lastLiquiditySweepIdx != null ? p.lastLiquiditySweepIdx : -999;
+  p.stopLossHuntHistory   = p.stopLossHuntHistory   || [];
+  p.lastStopLossHuntIdx   = p.lastStopLossHuntIdx   != null ? p.lastStopLossHuntIdx   : -999;
+  p.failedPinBarHistory   = p.failedPinBarHistory   || [];
+  p.lastFailedPinBarIdx   = p.lastFailedPinBarIdx   != null ? p.lastFailedPinBarIdx   : -999;
+  p.fibScalpHistory       = p.fibScalpHistory       || [];
+  p.lastFibScalpIdx       = p.lastFibScalpIdx       != null ? p.lastFibScalpIdx       : -999;
+  p.po3History            = p.po3History            || [];
+  p.lastPo3Idx            = p.lastPo3Idx            != null ? p.lastPo3Idx            : -999;
+  p.gridScalperMAHistory  = p.gridScalperMAHistory  || [];
+  p.lastGridScalperMAIdx  = p.lastGridScalperMAIdx  != null ? p.lastGridScalperMAIdx  : -999;
+  p.fvgStratHistory       = p.fvgStratHistory       || [];
+  p.lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
+  p.mtfTopDownHistory     = p.mtfTopDownHistory     || [];
+  p.lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
+  p.candleInterpHistory   = p.candleInterpHistory   || [];
+  p.lastCandleInterpIdx   = p.lastCandleInterpIdx   != null ? p.lastCandleInterpIdx   : -999;
+  p.orderblockHistory     = p.orderblockHistory     || [];
+  p.lastOrderblockIdx     = p.lastOrderblockIdx     != null ? p.lastOrderblockIdx     : -999;
+  p.tiktokHistory         = p.tiktokHistory         || [];
+  p.lastTiktokIdx         = p.lastTiktokIdx         != null ? p.lastTiktokIdx         : -999;
   /* Strategy 15/16/17 per-panel isolation */
-  p.po3_4hHistory         = [];
-  p.lastPo3_4hIdx         = -999;
-  p.breakerBlockHistory   = [];
-  p.lastBreakerBlockIdx   = -999;
-  p.oteGoldenPocketHistory = [];
-  p.lastOteGoldenPocketIdx = -999;
-  p.sessionRangeHistory   = [];
+  p.po3_4hHistory         = p.po3_4hHistory         || [];
+  p.lastPo3_4hIdx         = p.lastPo3_4hIdx         != null ? p.lastPo3_4hIdx         : -999;
+  p.breakerBlockHistory   = p.breakerBlockHistory   || [];
+  p.lastBreakerBlockIdx   = p.lastBreakerBlockIdx   != null ? p.lastBreakerBlockIdx   : -999;
+  p.oteGoldenPocketHistory = p.oteGoldenPocketHistory || [];
+  p.lastOteGoldenPocketIdx = p.lastOteGoldenPocketIdx != null ? p.lastOteGoldenPocketIdx : -999;
+  p.sessionRangeHistory   = p.sessionRangeHistory   || [];
   p.connected = false;
 
   const panelWs = new WebSocket(WS_URL);
