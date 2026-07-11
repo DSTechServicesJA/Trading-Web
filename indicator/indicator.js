@@ -13904,14 +13904,15 @@ function computeDirectionalTPProbability(dir) {
  */
 function updateGridScalperMAFlipOutcome(signal, result, pnl) {
   if (result === "WIN" || result === "LOSS") {
+    const _dir = signal ? signal.dir : null;
     if (result === "WIN") {
       gsFlipStats.wins++;
-      if (signal && signal.dir === "BEAR") gsFlipStats.bearWins++;
-      else gsFlipStats.bullWins++;
+      if (_dir === "BULL") gsFlipStats.bullWins++;
+      else if (_dir === "BEAR") gsFlipStats.bearWins++;
     } else {
       gsFlipStats.losses++;
-      if (signal && signal.dir === "BEAR") gsFlipStats.bearLosses++;
-      else gsFlipStats.bullLosses++;
+      if (_dir === "BULL") gsFlipStats.bullLosses++;
+      else if (_dir === "BEAR") gsFlipStats.bearLosses++;
     }
     _saveGSFlipStats();
   }
