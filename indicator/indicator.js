@@ -261,7 +261,32 @@ const MIN_AUTO_TRADE_STAKE = 0.37;
 const MIN_LIMIT_ORDER_AMOUNT = 0.37;  /* Deriv minimum for SL/TP limit order values */
 const AUTO_TRADE_MAX_CONSECUTIVE_ERRORS = 3; /* pause auto-trading after this many consecutive errors */
 const DEFAULT_AUTO_TRADE_MULTIPLIER = 100;
-const MAX_AUTO_TRADE_HISTORY = 100;
+const MAX_AUTO_TRADE_HISTORY = 500;
+
+/* ── Profit-driven improvements ── */
+/* Expectancy-weighted stake allocation (per strategy / symbol / session) */
+const EXPECTANCY_WEIGHT_MIN_SAMPLES = 10;   /* resolved trades needed before a bucket scales stake */
+const EXPECTANCY_WEIGHT_FULL_PF     = 1.5;  /* PF ≥ this → full stake for the bucket */
+const EXPECTANCY_WEIGHT_REDUCED     = 0.6;  /* stake multiplier for PF 1.0–1.5 buckets */
+const EXPECTANCY_WEIGHT_POOR        = 0.3;  /* stake multiplier for PF < 1.0 buckets (symbol/session) */
+const EXPECTANCY_WEIGHT_FLOOR       = 0.25; /* combined multiplier never drops below this */
+/* Weighted confluence tiers (learned per-factor win rates → stake sizing) */
+const CONF_TIER_A_MIN = 0.60;   /* weighted score ≥ this → A-setup (1.0× stake) */
+const CONF_TIER_B_MIN = 0.45;   /* weighted score ≥ this → B-setup (0.5× stake); below → C-setup (skip) */
+const CONF_TIER_B_SIZE = 0.5;   /* stake multiplier for B-setups */
+/* Daily profit lock (give-back protection) */
+const AUTO_TRADE_PROFIT_LOCK_TRIGGER_PCT = 2;   /* daily gain % that arms give-back protection */
+const AUTO_TRADE_PROFIT_LOCK_GIVEBACK    = 0.5; /* halt once this fraction of the peak gain is given back */
+/* Correlated currency exposure cap (fiat pairs only) */
+const MAX_CORRELATED_CURRENCY_EXPOSURE = 2;     /* max net same-direction exposure per currency across open trades */
+/* Stats-calibrated time stop for open multiplier contracts */
+const ADAPTIVE_TIME_STOP_MIN_WINNERS = 8;       /* winners needed before the time stop calibrates */
+const ADAPTIVE_TIME_STOP_MULT        = 2;       /* cut trades older than median winner duration × this */
+const ADAPTIVE_TIME_STOP_MIN_MS      = 5 * 60 * 1000;       /* never cut trades younger than 5 min */
+const ADAPTIVE_TIME_STOP_MAX_MS      = 4 * 60 * 60 * 1000;  /* time stop never exceeds 4 h */
+/* Shadow-result bucket flagging */
+const SHADOW_BUCKET_MIN_SAMPLES = 10;    /* resolved trades per strategy|session bucket */
+const SHADOW_BUCKET_EDGE        = 0.20;  /* shadow WR must beat actual WR by this margin */
 const DEFAULT_MAX_CONCURRENT_TRADES = 1;  /* default: 1 trade at a time per symbol */
 const MAX_CONCURRENT_TRADES_LIMIT = 10;   /* hard cap to prevent runaway trades */
 /* #15: Max drawdown circuit breaker — halt stake compounding when balance drops by this % from session start */
@@ -1266,6 +1291,7 @@ let autoTradeHistory         = [];     /* trade history: { time, source, type, s
 let autoTradePL              = 0;      /* cumulative P/L for auto-trades */
 let autoTradeBalance         = null;   /* latest Deriv account balance */
 let autoTradeDailyStartBalance = null; /* daily baseline balance for daily-loss cap */
+let autoTradeDailyPeakBalance  = null; /* daily peak balance for profit-lock give-back protection */
 let autoTradeDailyDateKey      = null; /* YYYY-MM-DD UTC key for daily-loss baseline */
 const AUTO_TRADE_PENDING_TIMEOUT_MS = 3600000; /* 1 hour max for a pending multiplier trade */
 const AUTO_TRADE_QUERY_TIMEOUT_MS   = 15000;   /* 15s grace period for one-shot status query */
@@ -7125,6 +7151,7 @@ function resetSession() {
   sessionStartBalance = autoTradeBalance;
   autoTradeDailyDateKey = getUtcDateKey();
   autoTradeDailyStartBalance = autoTradeBalance;
+  autoTradeDailyPeakBalance  = autoTradeBalance;
   renderAutoTradeHistory();
   updateAutoTradePLUI();
 
@@ -8542,8 +8569,13 @@ function ensureAutoTradeDailyBaseline() {
   if (autoTradeDailyDateKey !== today) {
     autoTradeDailyDateKey = today;
     autoTradeDailyStartBalance = autoTradeBalance;
+    autoTradeDailyPeakBalance  = autoTradeBalance;
   } else if ((autoTradeDailyStartBalance === null || autoTradeDailyStartBalance === undefined) && autoTradeBalance !== null && autoTradeBalance !== undefined) {
     autoTradeDailyStartBalance = autoTradeBalance;
+  }
+  /* Track intraday peak balance for the daily profit lock */
+  if (autoTradeBalance != null && (autoTradeDailyPeakBalance == null || autoTradeBalance > autoTradeDailyPeakBalance)) {
+    autoTradeDailyPeakBalance = autoTradeBalance;
   }
 }
 
@@ -19353,6 +19385,20 @@ function handleAutoTradeMessage(msg, msgWs) {
       if (!slot) return true; /* matched but no slot — nothing to update */
 
       const isSold = (poc && poc.is_sold) || (poc && poc.status === "sold");
+      if (!isSold && poc && poc.contract_id) {
+        /* #5: Stats-calibrated time stop — cut trades open longer than the
+           median winner resolution time × 2 (stale trades skew to losers). */
+        const timeStopMs = getAdaptiveTimeStopMs();
+        const openEntry = (tradeId && tradeSymbol) ? findTradeByTradeId(tradeSymbol, tradeId)
+          : (byContractId && byContractId.tradeEntry) || null;
+        if (timeStopMs != null && openEntry && !openEntry.timeStopSent &&
+            Number.isFinite(openEntry.startTime) && (Date.now() - openEntry.startTime) > timeStopMs &&
+            poc.is_valid_to_sell && msgWs && msgWs.readyState === WebSocket.OPEN) {
+          openEntry.timeStopSent = true;
+          addLog(`⏱ [${sym}] Adaptive time stop — trade open ${Math.round((Date.now() - openEntry.startTime) / 60000)} min > calibrated ${Math.round(timeStopMs / 60000)} min limit. Selling at market.`);
+          msgWs.send(JSON.stringify({ sell: poc.contract_id, price: 0 }));
+        }
+      }
       if (isSold && slot) {
         const profit = parseFloat(poc.profit) || 0;
         const won = profit > 0;
@@ -19538,6 +19584,171 @@ function calculateRiskAdjustedStake(signal, multiplier) {
   return +fmt(stake, 2);
 }
 
+/* ================= PROFIT-DRIVEN IMPROVEMENTS ================= */
+
+/** Stake multiplier for one stats bucket based on its rolling profit factor.
+ *  PF ≥ 1.5 → full risk, PF 1.0–1.5 → reduced risk, PF < 1.0 → poor risk.
+ *  Buckets without enough samples stay at full risk (never punish on noise). */
+function getExpectancyBucketMultiplier(entries) {
+  const stats = getTradeAnalytics(entries);
+  if (stats.samples < EXPECTANCY_WEIGHT_MIN_SAMPLES) return 1.0;
+  if (stats.pf >= EXPECTANCY_WEIGHT_FULL_PF && stats.expectancy > 0) return 1.0;
+  if (stats.pf >= 1.0 && stats.expectancy >= 0) return EXPECTANCY_WEIGHT_REDUCED;
+  return EXPECTANCY_WEIGHT_POOR;
+}
+
+/** #1: Expectancy-weighted stake allocation.
+ *  Scales stake by rolling expectancy per strategy, per symbol and per session
+ *  so losing buckets stop receiving equal capital.  Returns { mult, reasons }. */
+function getExpectancyStakeMultiplier(strategyName, symbol, session) {
+  const resolved = autoTradeHistory.filter(e => e.result === "WIN" || e.result === "LOSS");
+  let mult = 1.0;
+  const reasons = [];
+  if (strategyName) {
+    const m = getExpectancyBucketMultiplier(resolved.filter(e => e.strategyName === strategyName));
+    if (m < 1) reasons.push(`strategy ${strategyName} ×${m}`);
+    mult *= m;
+  }
+  if (symbol) {
+    const m = getExpectancyBucketMultiplier(resolved.filter(e => e.symbol === symbol));
+    if (m < 1) reasons.push(`symbol ${symbol} ×${m}`);
+    mult *= m;
+  }
+  if (session) {
+    const m = getExpectancyBucketMultiplier(resolved.filter(e => e.session === session));
+    if (m < 1) reasons.push(`session ${session} ×${m}`);
+    mult *= m;
+  }
+  return { mult: Math.max(EXPECTANCY_WEIGHT_FLOOR, mult), reasons };
+}
+
+/** #2: Weighted confluence scoring — each factor contributes its learned
+ *  win-rate edge (Feature 13 stats) instead of a flat +1, then setups are
+ *  tiered for sizing: A → 1.0×, B → 0.5×, C → skip.  Signals without enough
+ *  rated factors default to tier A so early trading is never blocked. */
+function getWeightedConfluenceTier(factors) {
+  const rated = [];
+  for (const f of (factors || [])) {
+    const stats = confluenceFactorStats[f];
+    if (!stats) continue;
+    const total = stats.wins + stats.losses;
+    if (total < CONF_WEIGHT_MIN_SAMPLES) continue;
+    rated.push(stats.wins / total);
+  }
+  if (rated.length < CONF_ADAPTIVE_MIN_RATED) {
+    return { tier: "A", sizeMult: 1.0, score: null, ratedCount: rated.length };
+  }
+  const score = rated.reduce((s, w) => s + w, 0) / rated.length;
+  if (score >= CONF_TIER_A_MIN) return { tier: "A", sizeMult: 1.0, score, ratedCount: rated.length };
+  if (score >= CONF_TIER_B_MIN) return { tier: "B", sizeMult: CONF_TIER_B_SIZE, score, ratedCount: rated.length };
+  return { tier: "C", sizeMult: 0, score, ratedCount: rated.length };
+}
+
+/** Extract fiat currency codes from a Deriv/MT5 forex symbol (e.g. frxEURUSD →
+ *  ["EUR","USD"]).  Returns [] for synthetics so they are never grouped. */
+function getFiatCurrencies(symbol) {
+  const m = /^frx([A-Z]{3})([A-Z]{3})$/.exec(symbol || "");
+  return m ? [m[1], m[2]] : [];
+}
+
+function _activeTradeDir(contractType) {
+  if (contractType === "MULTUP") return "BULL";
+  if (contractType === "MULTDOWN") return "BEAR";
+  if (typeof contractType === "string" && contractType.startsWith("BUY")) return "BULL";
+  if (typeof contractType === "string" && contractType.startsWith("SELL")) return "BEAR";
+  return null;
+}
+
+/** #6: Correlation / basket exposure control.  Computes signed per-currency
+ *  exposure across all open trades (long base = +1, short quote = −1 per
+ *  trade) and blocks a new fiat trade that would push any single currency's
+ *  net exposure past MAX_CORRELATED_CURRENCY_EXPOSURE — preventing several
+ *  trades that are effectively the same macro bet. */
+function checkCorrelatedExposure(symbol, dir) {
+  const [base, quote] = getFiatCurrencies(symbol);
+  if (!base) return { ok: true };  /* synthetics: no correlation grouping */
+  const exposure = {};
+  const bump = (ccy, delta) => { exposure[ccy] = (exposure[ccy] || 0) + delta; };
+  for (const [sym, slot] of autoTradeSlots.entries()) {
+    const [b, q] = getFiatCurrencies(sym);
+    if (!b) continue;
+    for (const t of slot.activeTrades) {
+      const d = _activeTradeDir(t.contractType);
+      if (!d) continue;
+      bump(b, d === "BULL" ? 1 : -1);
+      bump(q, d === "BULL" ? -1 : 1);
+    }
+  }
+  bump(base, dir === "BULL" ? 1 : -1);
+  bump(quote, dir === "BULL" ? -1 : 1);
+  for (const [ccy, net] of Object.entries(exposure)) {
+    if (Math.abs(net) > MAX_CORRELATED_CURRENCY_EXPOSURE) {
+      return { ok: false, reason: `correlated ${ccy} exposure would reach ${net > 0 ? "+" : ""}${net} (cap ±${MAX_CORRELATED_CURRENCY_EXPOSURE})` };
+    }
+  }
+  return { ok: true };
+}
+
+/** #5: Stats-calibrated time stop.  Winners resolve fast — measure the median
+ *  time-to-resolution of winning trades and cut open contracts exceeding
+ *  median × ADAPTIVE_TIME_STOP_MULT (stale trades skew to losers).
+ *  Returns null until enough winners exist to calibrate. */
+function getAdaptiveTimeStopMs() {
+  const durations = autoTradeHistory
+    .filter(e => e.result === "WIN" && Number.isFinite(e.resolvedAt) && Number.isFinite(e.time) && e.resolvedAt > e.time)
+    .map(e => e.resolvedAt - e.time)
+    .sort((a, b) => a - b);
+  if (durations.length < ADAPTIVE_TIME_STOP_MIN_WINNERS) return null;
+  const median = durations[Math.floor(durations.length / 2)];
+  return Math.min(ADAPTIVE_TIME_STOP_MAX_MS, Math.max(ADAPTIVE_TIME_STOP_MIN_MS, median * ADAPTIVE_TIME_STOP_MULT));
+}
+
+/** #5: Adaptive multi-R exit ladder.  Weak learned expectancy (in R) → exit
+ *  fully by 1.5R; strong expectancy → let the default 3R ladder run. */
+function getAdaptiveMultiRLadder() {
+  const stats = getTradeAnalytics(autoTradeHistory);
+  if (stats.rSamples >= EXPECTANCY_WEIGHT_MIN_SAMPLES && stats.expectancyR != null && stats.expectancyR <= 0) {
+    return [ { r: 1.0, pct: 50 }, { r: 1.5, pct: 50 } ];
+  }
+  return multiRLadder;
+}
+
+/** #7: Shadow-result exploitation.  Flags strategy|session buckets where the
+ *  shadow (opposite direction) consistently outperforms the actual results —
+ *  candidates for inverting or disabling that bucket. */
+function getShadowOutperformingBuckets() {
+  const buckets = {};
+  for (const e of autoTradeHistory) {
+    if (e.result !== "WIN" && e.result !== "LOSS") continue;
+    const key = `${e.strategyName || e.source || "breakout"}|${e.session || "?"}`;
+    if (!buckets[key]) buckets[key] = { n: 0, wins: 0, shadowWins: 0 };
+    const b = buckets[key];
+    b.n++;
+    if (e.result === "WIN") b.wins++;
+    if (e.shadowResult === "WIN") b.shadowWins++;
+  }
+  const flagged = [];
+  for (const [key, b] of Object.entries(buckets)) {
+    if (b.n < SHADOW_BUCKET_MIN_SAMPLES) continue;
+    const wr = b.wins / b.n;
+    const shadowWr = b.shadowWins / b.n;
+    if (shadowWr - wr >= SHADOW_BUCKET_EDGE) {
+      flagged.push({ key, samples: b.n, winRate: wr, shadowWinRate: shadowWr });
+    }
+  }
+  return flagged;
+}
+
+const _shadowFlaggedBuckets = new Set();
+function maybeFlagShadowBuckets() {
+  for (const b of getShadowOutperformingBuckets()) {
+    if (_shadowFlaggedBuckets.has(b.key)) continue;
+    _shadowFlaggedBuckets.add(b.key);
+    addLog(`🔮 Shadow edge detected — ${b.key.replace(/\|/g, " / ")}: shadow WR ${(b.shadowWinRate * 100).toFixed(0)}% vs actual ${(b.winRate * 100).toFixed(0)}% over ${b.samples} trades. Consider inverting or disabling this bucket.`);
+  }
+}
+
+
 function mt5BridgeHeaders(extra = {}) {
   const h = Object.assign({ "Content-Type": "application/json" }, extra);
   if (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getToken()) {
@@ -19695,22 +19906,28 @@ async function pollMt5BridgeStatus() {
 
 function getTradeAnalytics(entries) {
   const resolved = (entries || []).filter(e => e && (e.result === "WIN" || e.result === "LOSS") && typeof e.profit === "number");
-  if (resolved.length === 0) return { samples: 0, pf: 0, expectancy: 0, maxDrawdown: 0 };
+  if (resolved.length === 0) return { samples: 0, pf: 0, expectancy: 0, maxDrawdown: 0, rSamples: 0, avgR: null, expectancyR: null };
   let wins = 0, losses = 0, totalWin = 0, totalLoss = 0;
   let eq = 0, peak = 0, maxDrawdown = 0;
+  let rSamples = 0, rSum = 0;
   for (const e of resolved) {
     eq += e.profit;
     if (eq > peak) peak = eq;
     maxDrawdown = Math.max(maxDrawdown, peak - eq);
     if (e.profit > 0) { wins++; totalWin += e.profit; }
     else { losses++; totalLoss += Math.abs(e.profit); }
+    if (Number.isFinite(e.rMultiple)) { rSamples++; rSum += e.rMultiple; }
   }
   const pf = totalLoss > 0 ? totalWin / totalLoss : (totalWin > 0 ? Infinity : 0);
   const avgWin = wins > 0 ? totalWin / wins : 0;
   const avgLoss = losses > 0 ? totalLoss / losses : 0;
   const winRate = resolved.length > 0 ? wins / resolved.length : 0;
   const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
-  return { samples: resolved.length, pf, expectancy, maxDrawdown };
+  /* R-multiple based expectancy — the true optimization target: a 45% WR at
+     +2.1R average beats a 60% WR at +0.8R.  avgR is the mean realized
+     R-multiple across trades that recorded their initial risk. */
+  const avgR = rSamples > 0 ? rSum / rSamples : null;
+  return { samples: resolved.length, pf, expectancy, maxDrawdown, rSamples, avgR, expectancyR: avgR };
 }
 
 function updateStrategyRegimeStats(entry) {
@@ -19864,6 +20081,14 @@ function executeAutoTrade(signal, _capturedWs) {
     }
   }
 
+  /* Regime-aware routing for the main breakout pipeline — breakout/momentum
+     entries only run in TRENDING/TRANSITIONING regimes (mean-reversion
+     strategies keep RANGING via getStrategyAllowedRegimes). */
+  if (signal.source === "breakout" && regime === "RANGING") {
+    addLog("⚠ Auto-trade skipped — breakout signals are routed out of RANGING regime");
+    return;
+  }
+
   /* Allow multiple concurrent trades up to maxConcurrentTrades per symbol */
   const activeCount = slot.activeTrades.length;
   if (activeCount >= maxConcurrentTrades) {
@@ -19929,6 +20154,38 @@ function executeAutoTrade(signal, _capturedWs) {
   let stake = Math.max(MIN_AUTO_TRADE_STAKE, autoTradeCurrentStake);
   const label = autoTradeSourceLabel(signal.source, signal.strategyName);
 
+  /* #6: Correlation / basket exposure control across correlated symbols */
+  const corr = checkCorrelatedExposure(symbol, effectiveDir);
+  if (!corr.ok) {
+    addLog(`⚠ Auto-trade skipped — ${corr.reason}`);
+    return;
+  }
+
+  /* #2: Weighted confluence tier — size stakes on learned factor quality
+     (A-setups 1.0×, B-setups 0.5×, C-setups skipped). */
+  let sizeMult = 1.0;
+  if (adaptiveConfluenceEnabled && signal.entry != null) {
+    const tierFactors = signal._confFactors ||
+      getActiveConfluenceFactors(effectiveDir, signal.entry, signal.candleIdx != null ? signal.candleIdx : candles.length - 1);
+    const tier = getWeightedConfluenceTier(tierFactors);
+    if (tier.tier === "C") {
+      addLog(`⚠ Auto-trade skipped — C-setup (weighted confluence ${(tier.score * 100).toFixed(0)}% over ${tier.ratedCount} rated factors)`);
+      return;
+    }
+    if (tier.sizeMult < 1) {
+      addLog(`📐 ${tier.tier}-setup — stake ×${tier.sizeMult} (weighted confluence ${(tier.score * 100).toFixed(0)}%)`);
+    }
+    sizeMult *= tier.sizeMult;
+  }
+
+  /* #1: Expectancy-weighted allocation per strategy / symbol / session */
+  const expWeight = getExpectancyStakeMultiplier(signal.strategyName, symbol, getActiveSessionName());
+  if (expWeight.mult < 1) {
+    addLog(`📉 Expectancy weighting — stake ×${fmt(expWeight.mult, 2)} (${expWeight.reasons.join(", ")})`);
+  }
+  sizeMult *= expWeight.mult;
+  stake = Math.max(MIN_AUTO_TRADE_STAKE, +(stake * sizeMult).toFixed(2));
+
   if (autoTradeExecutionMode === "mt5") {
     stake = Math.max(mt5MinLot, Math.min(mt5MaxLot, stake));
     submitMt5BridgeTrade({
@@ -19993,6 +20250,9 @@ function executeAutoTrade(signal, _capturedWs) {
   }
 
   stake = calculateRiskAdjustedStake({ entry: signal.entry, sl: tradeSl, tp: tradeTp }, multiplier);
+  /* Re-apply quality/expectancy size multiplier (risk-adjusted stake is
+     recomputed from the base risk budget above). */
+  stake = Math.max(MIN_AUTO_TRADE_STAKE, +(stake * sizeMult).toFixed(2));
   const realism = evaluateTradeRealism({ entry: signal.entry, sl: tradeSl, tp: tradeTp }, multiplier, stake);
   if (!realism.passed) {
     addLog(`⚠ Auto-trade skipped — realism stress failed (cost $${fmt(realism.cost,2)} too high vs expected reward)`);
@@ -20055,7 +20315,9 @@ function executeAutoTrade(signal, _capturedWs) {
     regime,
     session: getActiveSessionName(),
     timeframeSec: getCurrentGranularitySec(),
-    realismCost: realism.cost || 0
+    realismCost: realism.cost || 0,
+    /* Initial dollar risk (SL limit-order value) for realized R-multiple tracking */
+    riskAmount: limitOrder.stop_loss != null ? limitOrder.stop_loss : (realism.riskDollar || null)
   });
 
   const payload = {
@@ -20211,7 +20473,7 @@ function recalcAutoTradePL() {
 }
 
 /** Add a new entry to the auto-trade history array and re-render. */
-function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId, profit, result, originalDir, tradedDir, isOpposite, regime, session, timeframeSec, realismCost }) {
+function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId, profit, result, originalDir, tradedDir, isOpposite, regime, session, timeframeSec, realismCost, riskAmount }) {
   const entry = {
     time: Date.now(),
     source: source || "breakout",
@@ -20227,10 +20489,12 @@ function addAutoTradeHistoryEntry({ source, strategyName, type, symbol, tradeId,
     regime: regime || getCurrentRegimeTag(),
     session: session || getActiveSessionName(),
     timeframeSec: timeframeSec || getCurrentGranularitySec(),
-    realismCost: Number.isFinite(realismCost) ? realismCost : 0
+    realismCost: Number.isFinite(realismCost) ? realismCost : 0,
+    /* Initial dollar risk (loss at SL) — enables realized R-multiple tracking */
+    riskAmount: (Number.isFinite(riskAmount) && riskAmount > 0) ? riskAmount : null
   };
   autoTradeHistory.unshift(entry);
-  /* Cap history to 100 entries */
+  /* Cap history to MAX_AUTO_TRADE_HISTORY entries */
   if (autoTradeHistory.length > MAX_AUTO_TRADE_HISTORY) autoTradeHistory.length = MAX_AUTO_TRADE_HISTORY;
   renderAutoTradeHistory();
   persistAutoTradeHistory();
@@ -20261,6 +20525,12 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
   pending.result = result;
   pending.shadowResult = invertResult(result); /* what the opposite direction would have done */
   pending.resolvedAt = Date.now();
+  /* Realized R-multiple (profit / initial risk) — profit comes from asymmetry,
+     so gates are optimized by expectancy in R rather than by win rate. */
+  pending.rMultiple = (Number.isFinite(pending.riskAmount) && pending.riskAmount > 0 &&
+                       typeof profit === "number" && (result === "WIN" || result === "LOSS"))
+    ? +(profit / pending.riskAmount).toFixed(2)
+    : null;
   /* Recompute P/L from all entries (prevents incremental drift) */
   recalcAutoTradePL();
 
@@ -20304,8 +20574,15 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
   );
   const scopedStats = getTradeAnalytics(scoped);
   if (pending.strategyName && scopedStats.samples >= AUTO_TRADE_STRATEGY_DEMOTE_MIN_SAMPLES) {
-    addLog(`📊 ${pending.strategyName}/${pending.regime}: PF ${scopedStats.pf === Infinity ? "∞" : fmt(scopedStats.pf,2)} | E $${fmt(scopedStats.expectancy,2)} | DD $${fmt(scopedStats.maxDrawdown,2)}`);
+    const rInfo = scopedStats.expectancyR != null ? ` | E(R) ${fmt(scopedStats.expectancyR,2)}R` : "";
+    addLog(`📊 ${pending.strategyName}/${pending.regime}: PF ${scopedStats.pf === Infinity ? "∞" : fmt(scopedStats.pf,2)} | E $${fmt(scopedStats.expectancy,2)}${rInfo} | DD $${fmt(scopedStats.maxDrawdown,2)}`);
   }
+  if (pending.rMultiple != null && (result === "WIN" || result === "LOSS")) {
+    addLog(`📏 Realized R-multiple: ${pending.rMultiple >= 0 ? "+" : ""}${fmt(pending.rMultiple,2)}R (${pending.symbol})`);
+  }
+
+  /* #7: flag strategy/session buckets where the shadow direction outperforms */
+  maybeFlagShadowBuckets();
 
   /* ── Session TP / SL check ── */
   checkAutoTradeSessionLimits();
@@ -20351,6 +20628,22 @@ function checkAutoTradeSessionLimits() {
       autoTradeHalted = true;
       addLog(`🛑 Auto-trade halted — daily loss cap ${AUTO_TRADE_DAILY_LOSS_CAP_PCT}% reached (${fmt(dailyDropPct,1)}% drop today).`);
       showToast("Daily Loss Cap Hit", `Daily drawdown reached ${fmt(dailyDropPct,1)}%. Auto-trading paused.`, "warning", 7000);
+    }
+  }
+
+  /* Daily profit lock (give-back protection) — once the day reaches
+     +AUTO_TRADE_PROFIT_LOCK_TRIGGER_PCT%, stop trading if half of the peak
+     gain is given back, so a good day is never turned into a flat/losing one. */
+  if (!autoTradeHalted && autoTradeDailyStartBalance != null && autoTradeDailyPeakBalance != null &&
+      autoTradeBalance != null && autoTradeDailyStartBalance > 0) {
+    const peakGainPct = (autoTradeDailyPeakBalance - autoTradeDailyStartBalance) / autoTradeDailyStartBalance * 100;
+    const currentGain = autoTradeBalance - autoTradeDailyStartBalance;
+    const peakGain    = autoTradeDailyPeakBalance - autoTradeDailyStartBalance;
+    if (peakGainPct >= AUTO_TRADE_PROFIT_LOCK_TRIGGER_PCT && peakGain > 0 &&
+        currentGain <= peakGain * (1 - AUTO_TRADE_PROFIT_LOCK_GIVEBACK)) {
+      autoTradeHalted = true;
+      addLog(`🔒 Auto-trade halted — daily profit lock: peak gain ${fmt(peakGainPct,1)}% and ${Math.round(AUTO_TRADE_PROFIT_LOCK_GIVEBACK*100)}% of it given back. Locking in +$${fmt(Math.max(0,currentGain),2)}. Reset session to resume.`);
+      showToast("🔒 Daily Profit Lock", `Half of today's peak gain was given back — auto-trading paused to protect +$${fmt(Math.max(0,currentGain),2)}.`, "warning", 8000);
     }
   }
 }
@@ -20453,6 +20746,17 @@ function renderOppositeModeSummary() {
     /* Shadow P/L is the inverse of actual P/L for the same trades */
     const shadowPL     = shadowTrades.reduce((sum, e) => sum - (e.profit || 0), 0);
     html += `<div class="opposite-row"><span class="opp-label">🔮 Shadow:</span> <span>${shadowWins}W / ${shadowLosses}L</span> <span class="opp-wr">${shadowWR}%</span> <span class="${shadowPL >= 0 ? 'opp-profit' : 'opp-loss'}" title="What the other direction would've returned">${shadowPL >= 0 ? '+' : ''}$${fmt(shadowPL, 2)}</span></div>`;
+  }
+
+  /* Expectancy in R across resolved trades that recorded initial risk */
+  const rStats = getTradeAnalytics(autoTradeHistory);
+  if (rStats.expectancyR != null) {
+    html += `<div class="opposite-row"><span class="opp-label">📏 E(R):</span> <span>${rStats.rSamples} trades</span> <span class="${rStats.expectancyR >= 0 ? 'opp-profit' : 'opp-loss'}" title="Average realized R-multiple (profit / initial risk)">${rStats.expectancyR >= 0 ? '+' : ''}${fmt(rStats.expectancyR, 2)}R</span></div>`;
+  }
+
+  /* Buckets where the shadow direction consistently outperforms */
+  for (const b of getShadowOutperformingBuckets().slice(0, 3)) {
+    html += `<div class="opposite-row"><span class="opp-label">⚠️ ${b.key.replace(/\|/g, " / ")}:</span> <span title="Shadow outperforms — consider inverting or disabling">shadow ${(b.shadowWinRate * 100).toFixed(0)}% vs ${(b.winRate * 100).toFixed(0)}% (${b.samples})</span></div>`;
   }
 
   html += `</div>`;
@@ -21640,14 +21944,17 @@ function monitorMultiRLadder(idx) {
   if (!multiRLadderEnabled || !trade || multiRLadder.length === 0) return;
   const c = candles[idx]; if (!c) return;
   const risk = Math.abs(trade.entry - trade.sl); if (risk <= 0) return;
-  for (let li = 0; li < multiRLadder.length; li++) {
+  /* #5: Adaptive ladder — weak learned expectancy exits fully by 1.5R;
+     strong expectancy lets the configured 3R+ ladder run. */
+  const ladder = getAdaptiveMultiRLadder();
+  for (let li = 0; li < ladder.length; li++) {
     if (multiRHitLevels.includes(li)) continue;
-    const level = multiRLadder[li];
+    const level = ladder[li];
     const target = trade.dir === "BULL" ? trade.entry + risk * level.r : trade.entry - risk * level.r;
     const hit = trade.dir === "BULL" ? c.high >= target : c.low <= target;
     if (!hit) continue;
     multiRHitLevels.push(li);
-    const isLast = (li === multiRLadder.length - 1);
+    const isLast = (li === ladder.length - 1);
     addLog(`📊 Multi-R ${level.r}R hit → exit ${level.pct}% @ ${fmt(target,4)}${isLast ? " (FULL EXIT)" : " (partial, SL → BE)"}`);
     showToast(`📊 ${level.r}R Target Hit`, `Exit ${level.pct}% at ${fmt(target,4)}`, isLast ? "trade" : "success", 6000);
     if (isLast) {
