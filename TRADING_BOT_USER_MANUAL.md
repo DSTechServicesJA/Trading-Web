@@ -620,11 +620,42 @@ The strategy always anchors to the current 1-hour block regardless of chart time
 
 ### Strategy 8: Grid Scalper MA
 
-**What it looks for:** Two modes:
+**What it looks for:** Three modes:
 - **Price vs MA mode:** BUY when price crosses above a moving average; SELL when it crosses below
 - **BOS mode:** BUY when price breaks above a confirmed swing high; SELL below a swing low
+- **Triple MA mode:** SMA 50 acts as the trend filter, SMA 20 confirms direction, and SMA 11 times the entry — a pullback must touch SMA 11 and the candle must close back on the trend side (rejection/bounce entry)
 
 **Best for:** Traders who prefer moving average-based systems or simple break-of-structure trades.
+
+#### Recommended Profitable Settings
+
+Use this profile as your starting point, then let the adaptive tools refine it with your own data:
+
+| Setting | Recommended | Why |
+|---|---|---|
+| **Mode** | **Triple MA** (trending markets) or **Price vs MA** (general) | Triple MA is the most selective — it only enters with the trend on a pullback rejection, which is structurally the highest win-rate setup of the three modes. BOS fires more often but with more noise. |
+| **MA Period** (Price vs MA mode) | **21** (default) on 1m; **34–50** on 5m if getting whipsawed | Shorter = more signals but more false crosses. A longer MA filters chop for free. |
+| **Timeframe** | **1m–5m** | Matches the playbook recommendation; typical hold window 5–20 candles. |
+| **Min Confluence Gate** | ✅ ON, threshold **8/16** | Raise to 9–10 for fewer, higher-quality trades. |
+| **Adaptive Confluence** | ✅ ON — start in **ObservationOnly**, switch to **Active** after ~30 resolved trades | The adaptive gate learns which confluence factors actually win for you. Let it gather data before allowing it to reject signals. |
+| **Opposite Mode** | ❌ OFF initially | Only enable if the 🔮 Shadow stats consistently show the opposite direction outperforming. Data first, then flip. |
+| **Tesla 3-6-9** | ✅ ON, Conservative (50/30/20) | Locks in partial profits at 3R/6R/9R milestones. |
+
+**Symbol choice — take-profit is auto-tuned per instrument class:**
+
+| Symbol class | R:R target | Notes |
+|---|---|---|
+| Volatility 1s indices (1HZ…) | **1.5:1** | Quick scalps; needs ~40%+ win rate to profit |
+| Standard Volatility indices (R_…) | **2.5:1** | Best expectancy per trade; only ~29% win rate needed to break even |
+| All other symbols (Gold, forex) | **2.0:1** | Balanced |
+
+**Most profitable combos in practice:**
+- **R_75 / R_100 on 1m, Triple MA mode** — the 2.5R target plus trend-following entries gives the best expectancy math
+- **Gold (XAUUSD) on 1m–5m during London/NY sessions** — Gold's trending session behavior makes MA crosses reliable, and the 2.0× ATR SL cap protects against spikes
+
+**Built-in protections (always active, no tuning needed):** 5-candle cooldown between signals, one pending signal at a time, SL capped at 2.0× ATR, structural swing-based SL with 0.15× ATR buffer, and signals rejected if risk is under 0.05× ATR.
+
+> **Note:** These recommendations come from the strategy's structural logic and this playbook — not from backtest data. Run Adaptive Confluence in ObservationOnly mode for a week, then review the per-factor win rates and shadow stats to tighten the settings empirically.
 
 ---
 
