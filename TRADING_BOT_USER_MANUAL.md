@@ -623,7 +623,7 @@ The strategy always anchors to the current 1-hour block regardless of chart time
 **What it looks for:** Three modes:
 - **Price vs MA mode:** BUY when price crosses above a moving average; SELL when it crosses below
 - **BOS mode:** BUY when price breaks above a confirmed swing high; SELL below a swing low
-- **Triple MA mode:** SMA 50 acts as the trend filter, SMA 20 confirms direction, and SMA 11 times the entry — a pullback must touch SMA 11 and the candle must close back on the trend side (rejection/bounce entry)
+- **Triple MA mode:** SMA 50 acts as the trend filter, SMA 20 confirms direction, and SMA 11 times the entry — a pullback must touch SMA 11 and the candle must close back on the trend side (rejection/bounce entry). These three periods are fixed; the configurable MA Period setting only applies to Price vs MA mode.
 
 **Best for:** Traders who prefer moving average-based systems or simple break-of-structure trades.
 
@@ -637,7 +637,7 @@ Use this profile as your starting point, then let the adaptive tools refine it w
 | **MA Period** (Price vs MA mode) | **21** (default) on 1m; **34–50** on 5m if getting whipsawed | Shorter = more signals but more false crosses. A longer MA filters chop for free. |
 | **Timeframe** | **1m–5m** | Matches the playbook recommendation; typical hold window 5–20 candles. |
 | **Min Confluence Gate** | ✅ ON, threshold **8/16** | Raise to 9–10 for fewer, higher-quality trades. |
-| **Adaptive Confluence** | ✅ ON — start in **ObservationOnly**, switch to **Active** after ~30 resolved trades | The adaptive gate learns which confluence factors actually win for you. Let it gather data before allowing it to reject signals. |
+| **Adaptive Confluence** | ✅ ON — start in **ObservationOnly**, switch to **Active** after ~30 resolved trades | The adaptive gate learns which confluence factors actually win for you. **ObservationOnly** logs what it *would* reject without blocking any signals; **Active** actually rejects low-quality signals. Let it gather data before allowing it to reject. |
 | **Opposite Mode** | ❌ OFF initially | Only enable if the 🔮 Shadow stats consistently show the opposite direction outperforming. Data first, then flip. |
 | **Tesla 3-6-9** | ✅ ON, Conservative (50/30/20) | Locks in partial profits at 3R/6R/9R milestones. |
 
