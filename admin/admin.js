@@ -156,6 +156,8 @@ async function initApp(user) {
   bindModals();
   await loadProfiles();
   bindProfileModals();
+  await loadNotifications();
+  bindNotifications();
 }
 
 /* ═══════════════════════════════════════════════
@@ -1296,3 +1298,128 @@ function bindProfileModals() {
   if (nameInput) nameInput.addEventListener("keydown", e => { if (e.key === "Enter") saveNewProfile(); });
 }
 
+
+/* ═══════════════════════════════════════════════
+   User Notifications
+   ═══════════════════════════════════════════════ */
+async function loadNotifications() {
+  const tbody = document.getElementById("notificationsTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="7" class="table-empty">Loading…</td></tr>`;
+
+  try {
+    const resp = await apiRequest("/admin/notifications");
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger-soft)">
+        Error: ${escHtml(err.error || "Failed to load notifications")}
+      </td></tr>`;
+      return;
+    }
+    const data = await resp.json();
+    renderNotificationsTable(data.notifications || []);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger-soft)">
+      Network error — ${escHtml(e.message)}
+    </td></tr>`;
+  }
+}
+
+function renderNotificationsTable(notifications) {
+  const tbody = document.getElementById("notificationsTableBody");
+  if (!tbody) return;
+  if (!notifications.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="table-empty">No notifications sent yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  for (const n of notifications) {
+    const tr = document.createElement("tr");
+    const recipient = n.user_id
+      ? `👤 ${escHtml(n.target_username || "(deleted user)")}`
+      : `<span class="badge-admin-profile">📢 All users</span>`;
+    const msg = String(n.message || "");
+    const msgShort = msg.length > 120 ? msg.slice(0, 120) + "…" : msg;
+    tr.innerHTML = `
+      <td class="ts">${fmtDate(n.created_at)}</td>
+      <td>${recipient}</td>
+      <td><strong>${escHtml(n.title)}</strong></td>
+      <td class="ts" title="${escHtml(msg)}">${escHtml(msgShort)}</td>
+      <td class="ts">${n.read_count}</td>
+      <td class="ts">${escHtml(n.created_by_username || "—")}</td>
+      <td class="actions-cell">
+        <button type="button" class="btn-icon btn-sm btn-danger" data-naction="delete" data-nid="${n.id}" title="Delete notification">🗑️</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll("[data-naction]").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.currentTarget.dataset.nid;
+      if (!confirm("Delete this notification? Users who have not read it will no longer see it.")) return;
+      try {
+        const resp = await apiRequest(`/admin/notifications?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || "Failed to delete notification");
+          return;
+        }
+        await loadNotifications();
+      } catch (ex) {
+        alert("Network error — " + ex.message);
+      }
+    });
+  });
+}
+
+function bindNotifications() {
+  const sendBtn    = el("notifSendBtn");
+  const refreshBtn = el("refreshNotifsBtn");
+  const errEl      = el("notifError");
+  const okEl       = el("notifSuccess");
+
+  if (refreshBtn) refreshBtn.addEventListener("click", () => loadNotifications());
+  if (!sendBtn) return;
+
+  sendBtn.addEventListener("click", async () => {
+    const username = el("notifRecipient")?.value.trim() || "";
+    const title    = el("notifTitle")?.value.trim() || "";
+    const message  = el("notifMessage")?.value.trim() || "";
+
+    if (errEl) errEl.textContent = "";
+    if (okEl)  okEl.textContent  = "";
+
+    if (!title || !message) {
+      if (errEl) errEl.textContent = "Title and message are required.";
+      return;
+    }
+    if (!username && !confirm("Send this notification to ALL users?")) return;
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending…";
+    try {
+      const resp = await apiRequest("/admin/notifications", {
+        method: "POST",
+        body: JSON.stringify({ username, title, message }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        if (errEl) errEl.textContent = data.error || "Failed to send notification";
+        return;
+      }
+      if (okEl) okEl.textContent = username
+        ? `✅ Notification sent to ${username}.`
+        : "✅ Notification broadcast to all users.";
+      const titleInput = el("notifTitle");
+      const msgInput   = el("notifMessage");
+      if (titleInput) titleInput.value = "";
+      if (msgInput)   msgInput.value   = "";
+      await loadNotifications();
+    } catch (ex) {
+      if (errEl) errEl.textContent = "Network error — " + ex.message;
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "📤 Send Notification";
+    }
+  });
+}

@@ -184,6 +184,59 @@
       </div>
     </section>
 
+    <!-- ── USER NOTIFICATIONS SECTION ── -->
+    <section class="profiles-section" id="notificationsSection">
+      <h1>📣 User Notifications</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        Send an in-app notification to a single user or broadcast to all users.
+        Users see unread notifications as a pop-up panel the next time they open
+        any page while logged in.
+      </p>
+
+      <div class="modal-card" style="max-width:640px;margin:0 0 20px 0;">
+        <div class="form-row">
+          <label>Recipient</label>
+          <input type="text" id="notifRecipient" placeholder="Username — leave blank to send to ALL users" autocomplete="off" />
+          <small class="field-hint">Leave blank to broadcast to every user.</small>
+        </div>
+        <div class="form-row">
+          <label>Title <span class="req">*</span></label>
+          <input type="text" id="notifTitle" placeholder="e.g. Scheduled maintenance tonight" maxlength="150" />
+        </div>
+        <div class="form-row">
+          <label>Message <span class="req">*</span></label>
+          <textarea id="notifMessage" rows="4" maxlength="5000"
+            placeholder="Write your notification message…"
+            style="font-size:13px;width:100%;resize:vertical;background:var(--bg-surface);color:var(--text);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:8px;"></textarea>
+        </div>
+        <div id="notifError" class="form-error"></div>
+        <div id="notifSuccess" style="color:#2ecc71;font-size:13px;margin-bottom:8px;"></div>
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button id="notifSendBtn" type="button" class="btn-primary">📤 Send Notification</button>
+          <button id="refreshNotifsBtn" type="button" class="btn-ghost">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <table class="profiles-table" id="notificationsTable">
+          <thead>
+            <tr>
+              <th>Sent</th>
+              <th>Recipient</th>
+              <th>Title</th>
+              <th>Message</th>
+              <th>Reads</th>
+              <th>Sent By</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="notificationsTableBody">
+            <tr><td colspan="7" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
   </main>
 </div>
 

@@ -46,6 +46,28 @@ try {
         jsonResponse(['error' => 'Account is locked. Please contact support.'], 403);
     }
 
+    /* ── Auto-expiry: mark subscription inactive if expiry has passed ── */
+    $subExpired = $user['subscription_expires_at'] !== null
+        && strtotime($user['subscription_expires_at']) < time();
+
+    if ($subExpired && in_array($user['subscription_status'], ['active', 'trial'], true)) {
+        try {
+            $pdo->prepare("UPDATE users SET subscription_status = 'inactive' WHERE id = ?")
+                ->execute([$user['id']]);
+            $user['subscription_status'] = 'inactive';
+        } catch (\Throwable $ex) {
+            error_log('Login auto-expiry update error: ' . $ex->getMessage());
+        }
+    }
+
+    /* ── Block expired subscriptions (admins always allowed) ── */
+    if (($user['role'] ?? 'user') !== 'admin' && $subExpired) {
+        jsonResponse([
+            'error'  => 'Your subscription has expired. Please renew to regain access.',
+            'reason' => 'subscription_expired',
+        ], 403);
+    }
+
     /* ── Update last_login_at ── */
     $pdo->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')
         ->execute([$user['id']]);

@@ -197,6 +197,7 @@ const ITGuruAuth = (() => {
       localStorage.setItem(SAVED_USER_KEY, username);
     }
 
+    checkNotifications();
     return data;
   }
 
@@ -276,7 +277,12 @@ const ITGuruAuth = (() => {
           }
         }
         updateNavUI();
+        checkNotifications();
         return true;
+      }
+      /* Subscription expired — end the session and block access */
+      if (data.reason === "subscription_expired") {
+        showSubscriptionExpired(data.error || "Your subscription has expired. Please renew to regain access.");
       }
       return false;
     } catch {
@@ -453,6 +459,171 @@ const ITGuruAuth = (() => {
     }
   }
 
+  /**
+   * Block the page with a "subscription expired" overlay and clear the session.
+   * Reuses the login overlay when present; otherwise injects a full-screen div.
+   */
+  function showSubscriptionExpired(message) {
+    logout();
+    const msg = message || "Your subscription has expired. Please renew to regain access.";
+
+    const overlay = document.getElementById("loginOverlay");
+    if (overlay) {
+      overlay.style.display = "flex";
+      const err = document.getElementById("loginError");
+      if (err) err.textContent = "⛔ " + msg;
+      return;
+    }
+
+    /* No login overlay on this page — inject a blocking overlay */
+    let block = document.getElementById("itguruSubExpiredOverlay");
+    if (!block) {
+      block = document.createElement("div");
+      block.id = "itguruSubExpiredOverlay";
+      block.style.cssText =
+        "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;" +
+        "background:rgba(8,10,18,0.96);color:#fff;font-family:Inter,Arial,sans-serif;text-align:center;padding:24px;";
+      const card = document.createElement("div");
+      card.style.cssText = "max-width:420px;";
+      const h = document.createElement("h2");
+      h.textContent = "⛔ Subscription Expired";
+      const p = document.createElement("p");
+      p.style.cssText = "margin:14px 0;line-height:1.5;";
+      p.textContent = msg;
+      const btn = document.createElement("button");
+      btn.textContent = "Back to Login";
+      btn.style.cssText =
+        "padding:10px 22px;border:0;border-radius:8px;background:#e74c3c;color:#fff;font-weight:600;cursor:pointer;";
+      btn.addEventListener("click", () => location.reload());
+      card.appendChild(h); card.appendChild(p); card.appendChild(btn);
+      block.appendChild(card);
+      document.body.appendChild(block);
+    }
+    block.style.display = "flex";
+  }
+
+  /* ── In-app notifications (admin → user) ── */
+  const API_ROOT = AUTH_API_BASE.replace(/\/auth\/?$/, "");
+  let _notifChecked = false;
+
+  /** Fetch a non-auth API endpoint with automatic .php fallback. */
+  async function apiRootFetch(endpoint, options) {
+    let resp = await fetch(`${API_ROOT}/${endpoint}`, options);
+    if (resp.status === 404) {
+      const phpEndpoint = endpoint.includes("?")
+        ? endpoint.replace("?", ".php?")
+        : endpoint + ".php";
+      resp = await fetch(`${API_ROOT}/${phpEndpoint}`, options);
+    }
+    return resp;
+  }
+
+  /**
+   * Fetch unread notifications for the logged-in user and display them
+   * in a dismissible floating panel. Runs at most once per page load.
+   */
+  async function checkNotifications() {
+    if (_notifChecked) return;
+    _notifChecked = true;
+
+    const token = getToken();
+    if (!token) return;
+
+    try {
+      const resp = await apiRootFetch("notifications", {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      if (!resp.ok) return;
+      const data = await safeJson(resp);
+      const notifs = Array.isArray(data.notifications) ? data.notifications : [];
+      if (notifs.length) renderNotificationsPanel(notifs);
+    } catch { /* non-fatal — notifications are best-effort */ }
+  }
+
+  /** Mark a notification (or all) as read on the server. */
+  async function markNotificationRead(payload) {
+    const token = getToken();
+    if (!token) return;
+    try {
+      await apiRootFetch("notifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch { /* best-effort */ }
+  }
+
+  /** Render the floating notifications panel (built with DOM APIs — no HTML injection). */
+  function renderNotificationsPanel(notifs) {
+    let panel = document.getElementById("itguruNotifPanel");
+    if (panel) panel.remove();
+
+    panel = document.createElement("div");
+    panel.id = "itguruNotifPanel";
+    panel.style.cssText =
+      "position:fixed;top:16px;right:16px;z-index:99998;width:340px;max-width:calc(100vw - 32px);" +
+      "max-height:70vh;overflow-y:auto;background:#141826;color:#eee;border:1px solid #2c3350;" +
+      "border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-family:Inter,Arial,sans-serif;font-size:13px;";
+
+    const header = document.createElement("div");
+    header.style.cssText =
+      "display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2c3350;";
+    const hTitle = document.createElement("strong");
+    hTitle.textContent = `🔔 Notifications (${notifs.length})`;
+    const dismissAll = document.createElement("button");
+    dismissAll.textContent = "Dismiss all";
+    dismissAll.style.cssText =
+      "background:none;border:0;color:#8ab4ff;cursor:pointer;font-size:12px;";
+    dismissAll.addEventListener("click", () => {
+      markNotificationRead({ all: true });
+      panel.remove();
+    });
+    header.appendChild(hTitle);
+    header.appendChild(dismissAll);
+    panel.appendChild(header);
+
+    for (const n of notifs) {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:10px 14px;border-bottom:1px solid #222840;";
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:flex-start;justify-content:space-between;gap:8px;";
+      const t = document.createElement("strong");
+      t.textContent = String(n.title || "Notification");
+      const x = document.createElement("button");
+      x.textContent = "✕";
+      x.title = "Dismiss";
+      x.style.cssText = "background:none;border:0;color:#889;cursor:pointer;font-size:13px;flex:0 0 auto;";
+      x.addEventListener("click", () => {
+        markNotificationRead({ id: n.id });
+        item.remove();
+        if (!panel.querySelector("[data-notif-item]")) panel.remove();
+      });
+      item.dataset.notifItem = "1";
+      row.appendChild(t);
+      row.appendChild(x);
+
+      const body = document.createElement("div");
+      body.style.cssText = "margin-top:4px;line-height:1.45;white-space:pre-wrap;color:#cfd4e6;";
+      body.textContent = String(n.message || "");
+
+      const ts = document.createElement("div");
+      ts.style.cssText = "margin-top:6px;font-size:11px;color:#778;";
+      try { ts.textContent = new Date(n.created_at.replace(" ", "T") + "Z").toLocaleString(); }
+      catch { ts.textContent = String(n.created_at || ""); }
+
+      item.appendChild(row);
+      item.appendChild(body);
+      item.appendChild(ts);
+      panel.appendChild(item);
+    }
+
+    document.body.appendChild(panel);
+  }
+
   return {
     isLoggedIn,
     getToken,
@@ -463,6 +634,7 @@ const ITGuruAuth = (() => {
     verify,
     logout,
     updateNavUI,
-    initLoginGate
+    initLoginGate,
+    checkNotifications
   };
 })();
