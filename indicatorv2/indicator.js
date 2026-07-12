@@ -10835,8 +10835,13 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirEmoji} ${dirArrow} ${signal.dir} (${dirLabel})`);
 
-  /* Indicate if opposite mode will reverse this signal for auto-trading */
-  if (autoTradeStrategyOpposite) {
+  /* Indicate if opposite mode will reverse this signal for auto-trading.
+     For Grid Scalper MA the strategy's own Opposite Mode toggle
+     (gridScalperMAOppositeEnabled) must also flip the alert, not only the
+     auto-trade opposite toggle. */
+  const gsOppositeOn = signal.type === "grid_scalper_ma" &&
+    typeof gridScalperMAOppositeEnabled !== "undefined" && gridScalperMAOppositeEnabled;
+  if (autoTradeStrategyOpposite || gsOppositeOn) {
     const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     const oppLabel = oppDir === "BULL" ? "BUY" : "SELL";
     const oppEmoji = oppDir === "BULL" ? "🟢" : "🔴";
@@ -10849,6 +10854,22 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
   if (signal.rr != null) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  }
+
+  /* Show opposite signal details when Grid Scalper opposite mode is active */
+  if ((autoTradeStrategyOpposite || gsOppositeOn) && signal.type === "grid_scalper_ma") {
+    const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
+    const risk = Math.abs(signal.entry - signal.sl);
+    const oppSl = oppDir === "BULL" ? signal.entry - risk : signal.entry + risk;
+    const oppTp = oppDir === "BULL" ? signal.entry + risk * (signal.rr || 2) : signal.entry - risk * (signal.rr || 2);
+    const oppDirLabel = oppDir === "BULL" ? "🟢 BUY" : "🔴 SELL";
+    lines.push(``);
+    lines.push(`<b>━━━ Opposite Signal ━━━</b>`);
+    lines.push(`<b>Direction:</b> ${oppDirLabel}`);
+    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(oppSl, symbol)}</code>`);
+    lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(oppTp, symbol)}</code>`);
+    lines.push(`<b>R:R:</b> 1:${fmt(signal.rr || 2, 1)}`);
   }
 
   /* Strategy-specific details */

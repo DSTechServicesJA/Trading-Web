@@ -48,10 +48,10 @@ try {
     }
 
     /* ── Auto-expiry: mark subscription inactive if expiry has passed ── */
-    if ($user['subscription_status'] === 'active'
-        && $user['subscription_expires_at'] !== null
-        && strtotime($user['subscription_expires_at']) < time()
-    ) {
+    $subExpired = $user['subscription_expires_at'] !== null
+        && strtotime($user['subscription_expires_at']) < time();
+
+    if ($subExpired && in_array($user['subscription_status'], ['active', 'trial'], true)) {
         try {
             $pdo->prepare("UPDATE users SET subscription_status = 'inactive' WHERE id = ?")
                 ->execute([$user['id']]);
@@ -67,6 +67,15 @@ try {
         } catch (\Throwable $ex) {
             error_log('Auto-expiry update error: ' . $ex->getMessage());
         }
+    }
+
+    /* ── Block expired subscriptions (admins always allowed) ── */
+    if (($user['role'] ?? 'user') !== 'admin' && $subExpired) {
+        jsonResponse([
+            'valid'  => false,
+            'error'  => 'Your subscription has expired. Please renew to regain access.',
+            'reason' => 'subscription_expired',
+        ], 403);
     }
 
     /* ── Fetch granted strategies ── */

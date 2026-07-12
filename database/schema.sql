@@ -194,6 +194,44 @@ CREATE TABLE IF NOT EXISTS telegram_link_tokens (
     INDEX idx_tlt_user    (user_id),
     INDEX idx_tlt_expires (expires_at),
 
-    CONSTRAINT fk_tlt_user
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Admin → user notifications
+-- user_id NULL means the notification is a broadcast to all users.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_notifications (
+    id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT UNSIGNED    DEFAULT NULL,
+    title      VARCHAR(150)    NOT NULL,
+    message    TEXT            NOT NULL,
+    created_by INT UNSIGNED    DEFAULT NULL,
+    created_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_un_user    (user_id),
+    INDEX idx_un_created (created_at),
+
+    CONSTRAINT fk_un_user
+        FOREIGN KEY (user_id)    REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_un_created_by
+        FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Per-user read receipts for notifications
+-- (required so broadcast notifications track reads per user)
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_notification_reads (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    notification_id BIGINT UNSIGNED NOT NULL,
+    user_id         INT UNSIGNED    NOT NULL,
+    read_at         TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_unr_notif_user (notification_id, user_id),
+    INDEX idx_unr_user (user_id),
+
+    CONSTRAINT fk_unr_notif
+        FOREIGN KEY (notification_id) REFERENCES user_notifications (id) ON DELETE CASCADE,
+    CONSTRAINT fk_unr_user
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

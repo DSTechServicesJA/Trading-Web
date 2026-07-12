@@ -42,7 +42,7 @@ if (!$payload || empty($payload['sub'])) {
 
 try {
     $pdo  = getDB();
-    $stmt = $pdo->prepare('SELECT id, role, status FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, role, status, subscription_expires_at FROM users WHERE id = ?');
     $stmt->execute([$payload['sub']]);
     $caller = $stmt->fetch();
 } catch (\Throwable $e) {
@@ -55,6 +55,15 @@ if (!$caller) {
 }
 if (($caller['status'] ?? 'active') === 'locked') {
     jsonResponse(['error' => 'Account is locked'], 403);
+}
+if (($caller['role'] ?? 'user') !== 'admin'
+    && $caller['subscription_expires_at'] !== null
+    && strtotime($caller['subscription_expires_at']) < time()
+) {
+    jsonResponse([
+        'error'  => 'Your subscription has expired. Please renew to regain access.',
+        'reason' => 'subscription_expired',
+    ], 403);
 }
 
 $callerId = (int) $caller['id'];

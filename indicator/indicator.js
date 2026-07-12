@@ -16042,8 +16042,13 @@ function buildStrategyTelegramCaption(signal) {
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirEmoji} ${dirArrow} ${signal.dir} (${dirLabel})`);
 
-  /* Indicate if opposite mode will reverse this signal for auto-trading */
-  if (autoTradeStrategyOpposite) {
+  /* Indicate if opposite mode will reverse this signal for auto-trading.
+     For Grid Scalper MA the strategy's own Opposite Mode toggle
+     (gridScalperMAOppositeEnabled) must also flip the alert, not only the
+     auto-trade opposite toggle. */
+  const gsOppositeOn = signal.type === "grid_scalper_ma" &&
+    typeof gridScalperMAOppositeEnabled !== "undefined" && gridScalperMAOppositeEnabled;
+  if (autoTradeStrategyOpposite || gsOppositeOn) {
     const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     const oppLabel = oppDir === "BULL" ? "BUY" : "SELL";
     const oppEmoji = oppDir === "BULL" ? "🟢" : "🔴";
@@ -16063,7 +16068,7 @@ function buildStrategyTelegramCaption(signal) {
   }
 
   /* Show opposite signal details when opposite mode is active */
-  if (autoTradeStrategyOpposite && signal.type === "grid_scalper_ma") {
+  if ((autoTradeStrategyOpposite || gsOppositeOn) && signal.type === "grid_scalper_ma") {
     const oppDir = signal.dir === "BULL" ? "BEAR" : "BULL";
     const risk = Math.abs(signal.entry - signal.sl);
     const oppSl = oppDir === "BULL" ? signal.entry - risk : signal.entry + risk;
