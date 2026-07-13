@@ -15077,13 +15077,46 @@ function renderAdaptiveConfluenceTable() {
     container.innerHTML = '<span class="hint" style="font-size:0.75rem;opacity:0.6;">No data yet — updates after 10+ trades per factor</span>';
     return;
   }
-  container.innerHTML = factors.map(f => {
+  const strongPct = Math.round((typeof CONF_ADAPTIVE_STRONG_WEIGHT !== "undefined" ? CONF_ADAPTIVE_STRONG_WEIGHT : 0.60) * 100);
+  /* Baseline: overall win rate across all recorded factor outcomes */
+  let baseWins = 0, baseTotal = 0;
+  for (const f of factors) {
+    const s = confluenceFactorStats[f];
+    baseWins  += s.wins;
+    baseTotal += s.wins + s.losses;
+  }
+  const baseline = baseTotal > 0 ? baseWins / baseTotal : null;
+  /* Build rows: rated (≥ min samples) sorted by win rate desc, unrated at bottom */
+  const rows = factors.map(f => {
     const s = confluenceFactorStats[f];
     const total = s.wins + s.losses;
-    const rate = total > 0 ? (s.wins / total * 100).toFixed(0) : "--";
-    const barPct = Math.round(getConfluenceFactorWeight(f) * 100);
-    const barColor = barPct >= 60 ? "#22c55e" : barPct >= 40 ? "#f59e0b" : "#ef4444";
-    return `<div class="conf-weight-row"><span class="conf-weight-name">${f}</span><span class="conf-weight-wr">${rate}% (${total})</span><div class="conf-weight-bar-bg"><div class="conf-weight-bar" style="width:${barPct}%;background:${barColor}"></div></div></div>`;
+    const rated = total >= CONF_WEIGHT_MIN_SAMPLES;
+    const rate  = total > 0 ? s.wins / total : 0;
+    return { name: f, total, rated, rate };
+  });
+  rows.sort((a, b) => (b.rated - a.rated) || (b.rate - a.rate) || (b.total - a.total));
+  const proven = rows.filter(r => r.rated && r.rate * 100 >= strongPct);
+  const summary = proven.length > 0
+    ? `<div class="conf-weight-summary">🏆 Proven winners: ${proven.map(r => `<b>${r.name}</b> (${Math.round(r.rate * 100)}%, ${r.total})`).join(", ")}</div>`
+    : `<div class="conf-weight-summary conf-weight-summary-empty">🏆 No proven winners yet (need ≥${strongPct}% win rate on ${CONF_WEIGHT_MIN_SAMPLES}+ trades)</div>`;
+  container.innerHTML = summary + rows.map(r => {
+    const ratePct = Math.round(r.rate * 100);
+    const badge = !r.rated               ? '<span class="conf-weight-badge" style="color:#94a3b8;">⚪ Unrated</span>'
+                : ratePct >= strongPct   ? '<span class="conf-weight-badge" style="color:#22c55e;">🟢 Proven</span>'
+                : ratePct >= 40          ? '<span class="conf-weight-badge" style="color:#f59e0b;">🟡 Neutral</span>'
+                :                          '<span class="conf-weight-badge" style="color:#ef4444;">🔴 Losing</span>';
+    let deltaHtml = "";
+    if (r.rated && baseline != null) {
+      const delta = Math.round((r.rate - baseline) * 100);
+      const deltaColor = delta > 0 ? "#22c55e" : delta < 0 ? "#ef4444" : "#94a3b8";
+      deltaHtml = ` <span style="color:${deltaColor};" title="Edge vs ${Math.round(baseline * 100)}% baseline">${delta >= 0 ? "+" : ""}${delta}%</span>`;
+    } else if (!r.rated) {
+      deltaHtml = ` <span style="opacity:0.5;">collecting data (${r.total}/${CONF_WEIGHT_MIN_SAMPLES})</span>`;
+    }
+    const rateLabel = r.total > 0 ? `${ratePct}% (${r.total})` : "-- (0)";
+    const barPct = Math.round(getConfluenceFactorWeight(r.name) * 100);
+    const barColor = barPct >= strongPct ? "#22c55e" : barPct >= 40 ? "#f59e0b" : "#ef4444";
+    return `<div class="conf-weight-row"><span class="conf-weight-name">${badge} ${r.name}</span><span class="conf-weight-wr">${rateLabel}${deltaHtml}</span><div class="conf-weight-bar-bg"><div class="conf-weight-bar" style="width:${barPct}%;background:${barColor}"></div></div></div>`;
   }).join("");
 }
 
