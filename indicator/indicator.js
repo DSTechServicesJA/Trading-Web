@@ -24762,7 +24762,6 @@ function syncProfitDirToAllPanels() {
     p.filters.minConfluenceEnabled    = minConfluenceEnabled;
     p.filters.minConfluenceValue      = minConfluenceValue;
     p.filters.requiredConfluences     = requiredConfluences.slice();
-  p.filters.requiredConfluences     = requiredConfluences.slice();
     p.filters.doubleRetestEnabled     = doubleRetestEnabled;
     p.filters.confirmBarEnabled       = confirmBarEnabled;
     p.filters.divergenceFilterEnabled = divergenceFilterEnabled;
