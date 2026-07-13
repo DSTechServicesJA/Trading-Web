@@ -11605,7 +11605,8 @@ function _renderGridScalperMAAlerts() {
   if (!listEl) return;
   if (countEl) countEl.textContent = history.length;
 
-  /* Digest includes probability so the cache busts if prob is computed late */
+  /* Digest includes probability so the cache busts if prob is computed late;
+     trailing token is the adaptive verdict ("P"=pass, "F"=fail, ""=none) */
   const digest = history.map(s =>
     `${s.epoch ?? ""}|${s.dir ?? ""}|${s.result ?? ""}|${s.origTPProb != null ? Math.round(s.origTPProb * 100) : ""}|${s.adaptiveQuality ? (s.adaptiveQuality.pass ? "P" : "F") : ""}`
   ).join(",");
