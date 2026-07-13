@@ -1613,6 +1613,15 @@ let stochFilterEnabled = false;
 /* Profit-Direction Constraint filters */
 let minConfluenceEnabled = true;
 let minConfluenceValue   = 11;      /* min confluence score (0-16) to allow trade — raised to 11 to filter weak setups */
+let requiredConfluences  = [];      /* selected confluence factor names — when non-empty, overrides the numeric
+                                       min score: a signal passes only if ALL selected factors are active */
+/* Canonical selectable confluence factor names (mirrors getActiveConfluenceFactors output) */
+const CONFLUENCE_FACTOR_OPTIONS = [
+  "EMA Aligned", "HTF Trend", "Strong Breakout", "Confirm Pattern", "S/R Level",
+  "Confirm Quality", "RSI Favors", "Volume Spike", "Active Session", "Fib Level",
+  "Market Signal", "Preferred Dir", "Momentum", "MACD Aligned", "BB Squeeze",
+  "ADX Trending", "Stoch Aligned"
+];
 let doubleRetestEnabled  = false;   /* require 2 retests of breakout level */
 let confirmBarEnabled    = true;    /* next candle after confirm must close in direction */
 let divergenceFilterEnabled = true; /* RSI divergence at retest */
@@ -2366,6 +2375,7 @@ function initUI() {
   /* Profit-Direction Constraint UI refs */
   UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
   UI.minConfluenceInput      = document.getElementById("minConfluenceInput");
+  UI.requiredConfluenceList  = document.getElementById("requiredConfluenceList");
   UI.doubleRetestToggle      = document.getElementById("doubleRetestToggle");
   UI.confirmBarToggle        = document.getElementById("confirmBarToggle");
   UI.divergenceFilterToggle  = document.getElementById("divergenceFilterToggle");
@@ -3114,9 +3124,9 @@ function processNyOpenRangeCandle(idx) {
 
       /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
       if (minConfluenceEnabled) {
-        const confScore = computeConfluenceScore(dir, c.close, idx);
-        if (confScore < minConfluenceValue) {
-          addLog(`⚠ NY Open Range REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+        const confGate = checkConfluenceGate(dir, c.close, idx);
+        if (!confGate.pass) {
+          addLog(`⚠ NY Open Range REJECTED — ${confGate.reason}`);
           nyOpenRangeRetest = null;
           return;
         }
@@ -3358,9 +3368,9 @@ function detectLondonAsianSweep() {
       if (risk > 0) {
         /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
         if (minConfluenceEnabled) {
-          const confScore = computeConfluenceScore("BEAR", entry, i);
-          if (confScore < minConfluenceValue) {
-            addLog(`⚠ London Sweep SELL REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+          const confGate = checkConfluenceGate("BEAR", entry, i);
+          if (!confGate.pass) {
+            addLog(`⚠ London Sweep SELL REJECTED — ${confGate.reason}`);
             londonSweepSignal = null;
             return;
           }
@@ -3424,9 +3434,9 @@ function detectLondonAsianSweep() {
       if (risk > 0) {
         /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
         if (minConfluenceEnabled) {
-          const confScore = computeConfluenceScore("BULL", entry, i);
-          if (confScore < minConfluenceValue) {
-            addLog(`⚠ London Sweep BUY REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+          const confGate = checkConfluenceGate("BULL", entry, i);
+          if (!confGate.pass) {
+            addLog(`⚠ London Sweep BUY REJECTED — ${confGate.reason}`);
             londonSweepSignal = null;
             return;
           }
@@ -3847,7 +3857,7 @@ function buildTelegramCaption() {
   if (candleInterpEnabled) filters.push("Candle Interp");
   if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : gridScalperMAStrategy === "triple_ma" ? "Triple MA" : "Price vs MA"}]`);
   /* Profit-Direction Constraints */
-  if (minConfluenceEnabled) filters.push(`Min Confluence ≥${minConfluenceValue}`);
+  if (minConfluenceEnabled) filters.push(requiredConfluences.length > 0 ? `Required Confluences [${requiredConfluences.join(", ")}]` : `Min Confluence ≥${minConfluenceValue}`);
   if (doubleRetestEnabled) filters.push("Double Retest");
   if (confirmBarEnabled) filters.push("Confirm Bar");
   if (divergenceFilterEnabled) filters.push("Divergence");
@@ -4668,7 +4678,7 @@ function buildPanelTelegramCaption(p) {
   if (f.scalpingModeEnabled) filters.push("Scalping");
   if (sessionRangesEnabled) filters.push("Session Ranges");
   /* Profit-Direction Constraints */
-  if (f.minConfluenceEnabled) filters.push(`Min Confluence ≥${f.minConfluenceValue}`);
+  if (f.minConfluenceEnabled) filters.push((f.requiredConfluences && f.requiredConfluences.length > 0) ? `Required Confluences [${f.requiredConfluences.join(", ")}]` : `Min Confluence ≥${f.minConfluenceValue}`);
   if (f.doubleRetestEnabled) filters.push("Double Retest");
   if (f.confirmBarEnabled) filters.push("Confirm Bar");
   if (f.divergenceFilterEnabled) filters.push("Divergence");
@@ -4848,6 +4858,7 @@ function saveSettings() {
       /* Profit-Direction Constraints */
       minConfluenceEnabled,
       minConfluenceValue,
+      requiredConfluences,
       doubleRetestEnabled,
       confirmBarEnabled,
       divergenceFilterEnabled,
@@ -5090,6 +5101,7 @@ function restoreSettings() {
     /* Profit-Direction Constraint toggles */
     if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
     if (s.minConfluenceValue != null) minConfluenceValue = s.minConfluenceValue;
+    if (Array.isArray(s.requiredConfluences)) requiredConfluences = s.requiredConfluences.filter(f => typeof f === "string");
     if (s.doubleRetestEnabled != null) doubleRetestEnabled = s.doubleRetestEnabled;
     if (s.confirmBarEnabled != null) confirmBarEnabled = s.confirmBarEnabled;
     if (s.divergenceFilterEnabled != null) divergenceFilterEnabled = s.divergenceFilterEnabled;
@@ -5110,6 +5122,7 @@ function restoreSettings() {
     if (s.mtfStructureEnabled != null) mtfStructureEnabled = s.mtfStructureEnabled;
     if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
     if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+    renderRequiredConfluenceList();
     if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
     if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
     if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
@@ -8722,9 +8735,32 @@ function computeVWAP() {
   }
 }
 
-/* 1. Min Confluence Gate — applied after trade is built (main strategy) or before signal fires (secondary strategies) */
+/* 1. Min Confluence Gate — applied after trade is built (main strategy) or before signal fires (secondary strategies).
+   Shared by every strategy gate: when specific confluences are selected (requiredConfluences non-empty),
+   the numeric min-score threshold is overridden and the signal passes only if ALL selected factors are active. */
+function checkConfluenceGate(overrideDir, overrideLevel, overrideCandleIdx) {
+  if (requiredConfluences.length > 0) {
+    const active = getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleIdx);
+    const missing = requiredConfluences.filter(f => !active.includes(f));
+    return {
+      pass: missing.length === 0,
+      reason: missing.length === 0
+        ? `all ${requiredConfluences.length} selected confluences active`
+        : `missing selected confluence${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`
+    };
+  }
+  const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
+  return {
+    pass: score >= minConfluenceValue,
+    reason: `confluence ${score}/${minConfluenceValue} below minimum`
+  };
+}
+
 function isConfluenceSufficient(overrideDir, overrideLevel, overrideCandleIdx) {
   if (!minConfluenceEnabled) return true;
+  if (requiredConfluences.length > 0) {
+    return checkConfluenceGate(overrideDir, overrideLevel, overrideCandleIdx).pass;
+  }
   const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
   const dynamicMin = getDynamicMinConfluence(getActiveSymbol(), getCurrentGranularitySec(), getCurrentRegimeTag());
   return score >= dynamicMin;
@@ -8944,6 +8980,7 @@ function revertAllSettings() {
   /* Profit-Direction Constraint defaults */
   minConfluenceEnabled    = false;
   minConfluenceValue      = 6;
+  requiredConfluences     = [];
   doubleRetestEnabled     = false;
   confirmBarEnabled       = false;
   divergenceFilterEnabled = false;
@@ -9046,6 +9083,7 @@ function revertAllSettings() {
   if (UI.candleInterpToggle)     UI.candleInterpToggle.checked     = candleInterpEnabled;
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
   if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+  renderRequiredConfluenceList();
   if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
   if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
   if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
@@ -9213,9 +9251,9 @@ function processLiquiditySweep() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Liquidity Sweep REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Liquidity Sweep REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -9458,9 +9496,9 @@ function processStopLossHunt() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Stop Loss Hunt REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Stop Loss Hunt REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -9704,9 +9742,9 @@ function processFailedPinBar() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Failed Pin Bar REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Failed Pin Bar REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -10013,9 +10051,9 @@ function processFibScalp() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Fib Golden Zone REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Fib Golden Zone REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -10291,9 +10329,9 @@ function processTiktokStrategy() {
   if (!signal) return;
 
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ TikTok Fib REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ TikTok Fib REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -11236,9 +11274,9 @@ function processPowerOf3() {
 
   /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Power of 3 REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Power of 3 REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -11859,9 +11897,9 @@ function processPo3_4h() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ 4H PO3 REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ 4H PO3 REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -12253,9 +12291,9 @@ function processBreakerBlock() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Breaker Block REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Breaker Block REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -12569,9 +12607,9 @@ function processOteGoldenPocket() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ OTE Golden Pocket REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ OTE Golden Pocket REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -12931,9 +12969,9 @@ function processOrb() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ ORB REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ ORB REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -13358,9 +13396,9 @@ function processCrtTbs() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ CRT+TBS REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ CRT+TBS REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -13632,9 +13670,9 @@ function processGridScalperMA() {
   if (!signal) return;
 
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Grid Scalper MA REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Grid Scalper MA REJECTED — ${confGate.reason}`);
       /* Log skipped signal if opposite mode logging is available */
       if (typeof logTradeDecision === "function" && typeof GRID_SCALPER_CONFIG !== "undefined" && GRID_SCALPER_CONFIG.IncludeSkippedSignalsInLog) {
         logTradeDecision({
@@ -13647,10 +13685,10 @@ function processGridScalperMA() {
           oppositeModeEnabled: typeof gridScalperMAOppositeEnabled !== "undefined" ? gridScalperMAOppositeEnabled : false,
           executedDirection: null,
           executedSignal: null,
-          confluenceScore: confScore,
+          confluenceScore: computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx),
           confluenceFactors: [],
           spread: typeof currentSpread !== "undefined" ? currentSpread : null
-        }, "SKIPPED", `Confluence ${confScore}/${minConfluenceValue} below minimum`);
+        }, "SKIPPED", `Rejected — ${confGate.reason}`);
       }
       return;
     }
@@ -14366,9 +14404,9 @@ function processFVGStrat() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ FVG Strategy REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ FVG Strategy REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -14759,9 +14797,9 @@ function processMtfTopDown() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog("\u26a0 MTF Top-Down REJECTED \u2014 confluence " + confScore + "/" + minConfluenceValue + " below minimum");
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`\u26a0 MTF Top-Down REJECTED \u2014 ${confGate.reason}`);
       return;
     }
   }
@@ -15388,9 +15426,9 @@ function processCandleInterpretation() {
 
   /* Min Confluence Gate */
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-    if (confScore < minConfluenceValue) {
-      addLog(`⚠ Candle Interp REJECTED — confluence ${confScore}/${minConfluenceValue} below minimum`);
+    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
+    if (!confGate.pass) {
+      addLog(`⚠ Candle Interp REJECTED — ${confGate.reason}`);
       return;
     }
   }
@@ -18992,10 +19030,18 @@ function buildTrade(confirmCandle, confirmIdx) {
   const granSec = getCurrentGranularitySec();
   const dynamicConfluenceMin = getDynamicMinConfluence(symbol, granSec, regime);
   if (minConfluenceEnabled) {
-    const confScore = computeConfluenceScore();
-    if (confScore < dynamicConfluenceMin) {
-      addLog(`⚠ Trade REJECTED — dynamic confluence ${confScore}/${dynamicConfluenceMin} (${regime})`);
-      return;
+    if (requiredConfluences.length > 0) {
+      const confGate = checkConfluenceGate();
+      if (!confGate.pass) {
+        addLog(`⚠ Trade REJECTED — ${confGate.reason}`);
+        return;
+      }
+    } else {
+      const confScore = computeConfluenceScore();
+      if (confScore < dynamicConfluenceMin) {
+        addLog(`⚠ Trade REJECTED — dynamic confluence ${confScore}/${dynamicConfluenceMin} (${regime})`);
+        return;
+      }
     }
   }
   if (requiresStrongBreakoutNow(symbol, granSec, regime) && !(breakout && breakout.strong)) {
@@ -20208,11 +20254,20 @@ function executeAutoTrade(signal, _capturedWs) {
 
   /* Dynamic quality gate by market regime + profile */
   if (minConfluenceEnabled && signal.entry != null) {
-    const dynamicConfMin = getDynamicMinConfluence(symbol, getCurrentGranularitySec(), regime);
-    const confScore = computeConfluenceScore(effectiveDir, signal.entry, signal.candleIdx != null ? signal.candleIdx : candles.length - 1);
-    if (confScore < dynamicConfMin) {
-      addLog(`⚠ Auto-trade skipped — dynamic confluence ${confScore}/${dynamicConfMin} (${regime})`);
-      return;
+    const gateIdx = signal.candleIdx != null ? signal.candleIdx : candles.length - 1;
+    if (requiredConfluences.length > 0) {
+      const confGate = checkConfluenceGate(effectiveDir, signal.entry, gateIdx);
+      if (!confGate.pass) {
+        addLog(`⚠ Auto-trade skipped — ${confGate.reason}`);
+        return;
+      }
+    } else {
+      const dynamicConfMin = getDynamicMinConfluence(symbol, getCurrentGranularitySec(), regime);
+      const confScore = computeConfluenceScore(effectiveDir, signal.entry, gateIdx);
+      if (confScore < dynamicConfMin) {
+        addLog(`⚠ Auto-trade skipped — dynamic confluence ${confScore}/${dynamicConfMin} (${regime})`);
+        return;
+      }
     }
   }
   if (signal.source === "breakout" && requiresStrongBreakoutNow(symbol, getCurrentGranularitySec(), regime) && !(breakout && breakout.strong)) {
@@ -21329,7 +21384,7 @@ function detectOrderblockStrategy(idx) {
     if (!inZone) continue;
 
     if (minConfluenceEnabled) {
-      if (computeConfluenceScore(dir, c.close, idx) < minConfluenceValue) continue;
+      if (!checkConfluenceGate(dir, c.close, idx).pass) continue;
     }
 
     const sl = dir === "BULL" ? obCandle.low  - atrValue * ORDERBLOCK_SL_BUFFER_ATR * getStrategyProfitParams().slBufferMult
@@ -21942,6 +21997,33 @@ function evaluateAdaptiveConfluenceQuality(factors) {
     : `no proven factor (≥${(CONF_ADAPTIVE_STRONG_WEIGHT * 100).toFixed(0)}%) and avg win rate ${(avgWeight * 100).toFixed(0)}% < ${(CONF_ADAPTIVE_AVG_MIN * 100).toFixed(0)}%`;
   return { pass, ratedCount: rated.length, avgWeight, strongFactors, reason };
 }
+/* Render the "Required Confluences" checkbox list in Settings.
+   Selecting any confluence overrides the numeric Min Score gate. */
+function renderRequiredConfluenceList() {
+  const container = UI.requiredConfluenceList || document.getElementById("requiredConfluenceList");
+  if (!container) return;
+  container.innerHTML = "";
+  for (const name of CONFLUENCE_FACTOR_OPTIONS) {
+    const label = document.createElement("label");
+    label.className = "toggle-row";
+    label.style.cssText = "font-size:0.72rem;width:calc(50% - 10px);margin:0;";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = requiredConfluences.includes(name);
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        if (!requiredConfluences.includes(name)) requiredConfluences.push(name);
+      } else {
+        requiredConfluences = requiredConfluences.filter(f => f !== name);
+      }
+      syncProfitDirToAllPanels(); saveSettings(); updateStateUI();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(" " + name));
+    container.appendChild(label);
+  }
+}
+
 function renderAdaptiveConfluenceTable() {
   const container = document.getElementById("adaptiveConfluenceTable");
   if (!container) return;
@@ -24507,6 +24589,7 @@ function savePanel(p) {
   /* Profit-Direction Constraints */
   p.filters.minConfluenceEnabled    = minConfluenceEnabled;
   p.filters.minConfluenceValue      = minConfluenceValue;
+  p.filters.requiredConfluences     = requiredConfluences.slice();
   p.filters.doubleRetestEnabled     = doubleRetestEnabled;
   p.filters.confirmBarEnabled       = confirmBarEnabled;
   p.filters.divergenceFilterEnabled = divergenceFilterEnabled;
@@ -24648,6 +24731,7 @@ function syncFilterUIFromGlobals() {
   /* Profit-Direction Constraints */
   if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
   if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
+  renderRequiredConfluenceList();
   if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
   if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
   if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
@@ -24677,6 +24761,8 @@ function syncProfitDirToAllPanels() {
   for (const p of multiPanels.values()) {
     p.filters.minConfluenceEnabled    = minConfluenceEnabled;
     p.filters.minConfluenceValue      = minConfluenceValue;
+    p.filters.requiredConfluences     = requiredConfluences.slice();
+  p.filters.requiredConfluences     = requiredConfluences.slice();
     p.filters.doubleRetestEnabled     = doubleRetestEnabled;
     p.filters.confirmBarEnabled       = confirmBarEnabled;
     p.filters.divergenceFilterEnabled = divergenceFilterEnabled;
@@ -25920,6 +26006,7 @@ document.addEventListener("DOMContentLoaded", () => {
       syncProfitDirToAllPanels(); saveSettings();
     });
   }
+  renderRequiredConfluenceList();
   if (UI.doubleRetestToggle) {
     UI.doubleRetestToggle.addEventListener("change", () => { doubleRetestEnabled = UI.doubleRetestToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
   }
