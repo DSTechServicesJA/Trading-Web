@@ -17837,6 +17837,10 @@ function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
   if (!dir) return 0;
   /* hasBoCtx: true only when called with no args (main strategy — full breakout state available) */
   const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && overrideCandleIdx === undefined && !!breakout;
+  /* Breakout-state factors also count for secondary strategies when the main breakout
+     state exists and matches the signal direction (keeps score consistent with the
+     Required Confluences gate and the stats panel). */
+  const boMatch = hasBoCtx || (!!breakout && breakout.dir === dir);
 
   let score = 0;
 
@@ -17854,12 +17858,12 @@ function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
   const htf = getHTFTrend();
   if (htf === dir) score++;
 
-  /* Factor 3: Strong breakout candle (main strategy context only) */
-  if (hasBoCtx && breakout.strong) score++;
+  /* Factor 3: Strong breakout candle (breakout state matching signal direction) */
+  if (boMatch && breakout.strong) score++;
 
   /* Factor 4: Pin bar, inside bar, dragonfly/gravestone doji, tweezers, or railway track at retest
-     (main strategy context only — requires retestInfo from the breakout state machine) */
-  if (hasBoCtx && retestInfo && retestInfo.candleIdx < candles.length) {
+     (breakout state matching signal direction — requires retestInfo from the breakout state machine) */
+  if (boMatch && retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
     if (isPinBar(rc, dir) || (prevRC && isInsideBar(prevRC, rc)) ||
@@ -17874,8 +17878,8 @@ function computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx) {
   /* Factor 5: S/R confluence */
   if (level != null && hasSRConfluence(level)) score++;
 
-  /* Factor 5b: Extra confirmation pattern quality (main strategy context only) */
-  if (hasBoCtx && confirmInfo && confirmInfo.pattern) {
+  /* Factor 5b: Extra confirmation pattern quality (breakout state matching signal direction) */
+  if (boMatch && confirmInfo && confirmInfo.pattern) {
     const p = confirmInfo.pattern;
     if (p === "piercing line" || p === "dark cloud cover" ||
         p === "tweezers bottom" || p === "tweezers top" ||
@@ -18016,6 +18020,11 @@ function getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleId
   const level = overrideLevel !== undefined ? overrideLevel : (breakout ? breakout.level : null);
   if (!dir) return [];
   const hasBoCtx = overrideDir === undefined && overrideLevel === undefined && overrideCandleIdx === undefined && !!breakout;
+  /* Breakout-state factors (Strong Breakout / Confirm Pattern / Confirm Quality) also count for
+     secondary strategies when the main breakout state exists and matches the signal direction —
+     this keeps the Required Confluences gate consistent with the stats panel, which reads the
+     same global breakout state. */
+  const boMatch = hasBoCtx || (!!breakout && breakout.dir === dir);
 
   const factors = [];
 
@@ -18030,11 +18039,11 @@ function getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleId
   const htf = getHTFTrend();
   if (htf === dir) factors.push("HTF Trend");
 
-  /* Factor 3: Strong breakout candle (main strategy context only) */
-  if (hasBoCtx && breakout.strong) factors.push("Strong Breakout");
+  /* Factor 3: Strong breakout candle (breakout state matching signal direction) */
+  if (boMatch && breakout.strong) factors.push("Strong Breakout");
 
-  /* Factor 4: Confirm pattern at retest (main strategy context only) */
-  if (hasBoCtx && retestInfo && retestInfo.candleIdx < candles.length) {
+  /* Factor 4: Confirm pattern at retest (breakout state matching signal direction) */
+  if (boMatch && retestInfo && retestInfo.candleIdx < candles.length) {
     const rc = candles[retestInfo.candleIdx];
     const prevRC = retestInfo.candleIdx > 0 ? candles[retestInfo.candleIdx - 1] : null;
     if (isPinBar(rc, dir) || (prevRC && isInsideBar(prevRC, rc)) ||
@@ -18049,8 +18058,8 @@ function getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleId
   /* Factor 5: S/R confluence */
   if (level != null && hasSRConfluence(level)) factors.push("S/R Level");
 
-  /* Factor 5b: Extra confirmation pattern quality (main strategy context only) */
-  if (hasBoCtx && confirmInfo && confirmInfo.pattern) {
+  /* Factor 5b: Extra confirmation pattern quality (breakout state matching signal direction) */
+  if (boMatch && confirmInfo && confirmInfo.pattern) {
     const p = confirmInfo.pattern;
     if (p === "piercing line" || p === "dark cloud cover" ||
         p === "tweezers bottom" || p === "tweezers top" ||
