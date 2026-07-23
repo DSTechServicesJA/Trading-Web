@@ -79,13 +79,7 @@ const SYMBOL_TUNING = {
     LOSS_CLUSTER_LIMIT: 2,
     DRAWDOWN_MULTIPLIER: 1.6
   },
-  "R_75": {
-    EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.08,
-    STAKE_SCALE: 1.06,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.6
-  },
+  // NOTE: R_75 tuning removed — deprecated by Deriv API (use 1HZ equivalents)
   "V_50": {
     EXPECTANCY_WINDOW: 6,
     ENTROPY_SLOPE_CUT: 0.08,
@@ -282,14 +276,14 @@ let expectancyPaused = false;
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
   FAST: ["1HZ75V", "1HZ50V", "1HZ100V"],
-  STANDARD: ["V_75", "R_75", "V_50"]
+  STANDARD: ["V_75", "1HZ75V", "V_50"]
 };
 const MARKET_SIGNAL_LABEL = {
   "1HZ75V":  "1HZ75V",
   "1HZ50V":  "1HZ50V",
   "1HZ100V": "1HZ100V",
   "V_75": "V_75",
-  "R_75": "R_75",
+  "1HZ75V": "1HZ75V",
   "V_50": "V_50"
 };
 

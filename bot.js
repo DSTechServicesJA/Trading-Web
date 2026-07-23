@@ -78,7 +78,7 @@ const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 const MODE_TO_SYMBOL = {
   TREND: "1HZ75V",
   ODD_EVEN: "1HZ75V",
-  REVERSAL: "R_75"
+  REVERSAL: "1HZ75V"
 };
 
 
@@ -107,21 +107,7 @@ const SYMBOL_TUNING = {
     DRAWDOWN_MULTIPLIER: 1.2
   },
 
-  // ⚖️ STANDARD VOLATILITY MARKETS — BALANCED
-  "R_75": {
-    EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.06,   // tightened from 0.08
-    STAKE_SCALE: 1.06,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.6
-  },
-  "R_50": {
-    EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.06,   // tightened from 0.08
-    STAKE_SCALE: 1.06,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.6
-  },
+  // NOTE: R_75 and R_50 tuning removed — deprecated by Deriv API (use 1HZ equivalents)
 
   // 💱 FOREX MARKETS — SLOW/PATIENT (shared preset spread across all pairs)
 };
@@ -154,7 +140,7 @@ const RSI_SLOPE_TUNING = {
 let CURRENT_SYMBOL = "1HZ75V";
 let TUNING = SYMBOL_TUNING[CURRENT_SYMBOL];
 const PREFERRED_SYMBOL = CURRENT_SYMBOL;
-const FALLBACK_SYMBOL  = "R_75";
+const FALLBACK_SYMBOL  = "1HZ75V";
 
 // ================= PER-SYMBOL STAKING LIMITS (from contracts_for API) =================
 const symbolStakingLimits = {};   // { symbol: { min: Number, max: Number } }
@@ -2600,7 +2586,7 @@ let modeDisabledUntil = {
 
 // ================= MULTI-VIEW SCANNER (indicator-style watchlist) =================
 let multiViewEnabled = false;
-let multiViewSymbols = ["R_100", "R_50", "R_10", "frxEURUSD", "frxGBPUSD"];
+let multiViewSymbols = ["1HZ100V", "1HZ50V", "1HZ10V", "frxEURUSD", "frxGBPUSD"];
 let multiViewStatusEl = null;
 let suppressStatusUpdates = false;
 let activeTradeSymbol = null;
@@ -2637,7 +2623,7 @@ function hasAnyInFlightTrades() {
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
   FAST: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
-  STANDARD: ["R_10", "R_25", "R_50", "R_75", "R_100"],
+  STANDARD: ["1HZ10V", "1HZ25V", "1HZ50V", "1HZ75V", "1HZ100V"],
   FOREX: [
     "frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxUSDCHF", "frxAUDUSD", "frxUSDCAD", "frxNZDUSD",
     "frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURCAD", "frxEURCHF", "frxEURNZD",
@@ -2652,7 +2638,7 @@ const SYMBOL_SPEED = {
 
 const INDICATOR_SYMBOL_GROUPS = {
   FAST_1S: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
-  VOLATILITY: ["R_10", "R_25", "R_50", "R_75", "R_100"],
+  VOLATILITY: ["1HZ10V", "1HZ25V", "1HZ50V", "1HZ75V", "1HZ100V"],
   BOOM: ["BOOM300N", "BOOM500", "BOOM600", "BOOM900", "BOOM1000"],
   CRASH: ["CRASH300N", "CRASH500", "CRASH600", "CRASH900", "CRASH1000"],
   JUMP: ["JD10", "JD25", "JD50", "JD75", "JD100"],
@@ -3122,12 +3108,9 @@ function applyPo3TuningForSymbol(sym, options = {}) {
   }
 }
 const MARKET_SIGNAL_LABEL = {
-  "1HZ75V":  "1-Second Vol 75",
-  "1HZ50V":  "1-Second Vol 50",
-  "1HZ100V": "1-Second Vol 100",
-  "R_100": "Volatility 100",
-  "R_75": "Volatility 75",
-  "R_50": "Volatility 50",
+  "1HZ75V":  "Volatility 75 (1s)",
+  "1HZ50V":  "Volatility 50 (1s)",
+  "1HZ100V": "Volatility 100 (1s)",
   "frxEURUSD": "EUR/USD",
   "frxGBPUSD": "GBP/USD",
   "frxAUDUSD": "AUD/USD",

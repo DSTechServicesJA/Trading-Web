@@ -320,11 +320,7 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "1HZ300V":  [50, 100, 200, 300, 500],
 
   /* --- Volatility (Standard) --- */
-  "R_10":     [20, 50, 100, 200, 300, 500],
-  "R_25":     [20, 50, 100, 200, 300, 500],
-  "R_50":     [50, 100, 200, 300, 500],
-  "R_75":     [50, 100, 200, 300, 500],
-  "R_100":    [50, 100, 200, 300, 500],
+  /* NOTE: R_10–R_100 removed — deprecated by Deriv API (use 1HZ equivalents) */
 
   /* --- Boom Indices --- */
   "BOOM300N": [50, 100, 200, 300, 500],
@@ -556,7 +552,7 @@ const SYMBOL_SPECS = (() => {
   const syntheticSymbols = [
     "1HZ10V","1HZ15V","1HZ25V","1HZ30V","1HZ50V","1HZ75V","1HZ90V",
     "1HZ100V","1HZ150V","1HZ200V","1HZ250V","1HZ300V",
-    "R_10","R_25","R_50","R_75","R_100",
+    /* NOTE: R_10–R_100 removed — deprecated by Deriv API */
     "BOOM300N","BOOM500","BOOM600","BOOM900","BOOM1000",
     "CRASH300N","CRASH500","CRASH600","CRASH900","CRASH1000",
     "JD10","JD25","JD50","JD75","JD100",
@@ -927,7 +923,7 @@ function getMarketTuning() {
 function getStrategyProfitParams(symbol) {
   if (!symbol) symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
   const isVol1s  = /^1HZ/i.test(symbol);
-  const isVolStd = /^R_/i.test(symbol);
+  const isVolStd = /^R_/i.test(symbol); /* legacy — R_ symbols deprecated by Deriv API */
 
   if (isVol1s) {
     /* Volatility 1s: ultra-fast 1-second candles — optimise for quick, high-RR scalps */
@@ -2206,7 +2202,7 @@ let confluenceFactorStats = {};       /* { factorName: { wins, losses } } */
 
 /* ================= FEATURE: SCANNER WATCHLIST (8) ================= */
 let scannerEnabled  = false;
-let scannerSymbols  = ["R_100", "R_50", "R_10", "frxEURUSD", "frxGBPUSD"];
+let scannerSymbols  = ["1HZ100V", "1HZ50V", "1HZ10V", "frxEURUSD", "frxGBPUSD"];
 
 /* ================= UI REFS ================= */
 const UI = {};
@@ -6558,7 +6554,7 @@ function getMarketRecommendations(symbol) {
               + "Confluence score (0-16) gauges overall setup quality."
         };
       }
-      /* Volatility Standard (R_10, R_25, R_50, R_75, R_100) */
+      /* Volatility Standard (legacy R_ symbols — deprecated by Deriv API) */
       return {
         label: "⚡ Volatility (Standard) — Breakout Strategy",
         timeframe: { text: "5–15 min", gran: 300 },
