@@ -283,7 +283,6 @@ const MARKET_SIGNAL_LABEL = {
   "1HZ50V":  "1HZ50V",
   "1HZ100V": "1HZ100V",
   "V_75": "V_75",
-  "1HZ75V": "1HZ75V",
   "V_50": "V_50"
 };
 
