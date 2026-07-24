@@ -501,6 +501,7 @@ const DEPRECATED_SYMBOL_MAP = {
 };
 
 function migrateSymbol(sym) {
+  if (!sym || typeof sym !== "string") return sym;
   return DEPRECATED_SYMBOL_MAP[sym] || sym;
 }
 

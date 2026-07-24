@@ -586,6 +586,7 @@ const DEPRECATED_SYMBOL_MAP = {
 
 /** Return the current symbol code, migrating deprecated names. */
 function migrateSymbol(sym) {
+  if (!sym || typeof sym !== "string") return sym;
   return DEPRECATED_SYMBOL_MAP[sym] || sym;
 }
 
