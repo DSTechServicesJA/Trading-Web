@@ -136,7 +136,7 @@ autoTradeGridScalperV2 = true;
 - **Aggressive:** 45-50% (3%+ basket TP, wider SL)
 
 ### Optimal Markets
-- Step Index (R_100, R_50, stpRNG series)
+- Step Index (STPIDX100–STPIDX500 series)
 - Forex Majors (EURUSD, GBPUSD, USDJPY)
 - 5-minute timeframe
 - High liquidity sessions (London, NY Opens)
