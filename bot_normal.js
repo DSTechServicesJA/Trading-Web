@@ -1241,7 +1241,7 @@ if (currentStake > BASE_STAKE * 1.6) {
     currency: "USD",
     duration: 1,
     duration_unit: "t",
-    symbol
+    underlying_symbol: symbol
   }));
 }
 

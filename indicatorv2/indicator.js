@@ -1174,7 +1174,7 @@ function fetchValidMultipliers(sym) {
 
     ws.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD" }));
+      ws.send(JSON.stringify({ contracts_for: sym }));
     } catch (err) {
       console.warn("contracts_for (multipliers) send failed:", err);
       ws.removeEventListener("message", handler);
@@ -13854,7 +13854,7 @@ function executeAutoTrade(signal) {
     basis: "stake",
     contract_type: contractType,
     currency: "USD",
-    symbol,
+    underlying_symbol: symbol,
     multiplier,
     passthrough: { auto_trade: true, source: signal.source || "breakout", strategyName: signal.strategyName || null, tradeSymbol: symbol, tradeId }
   };

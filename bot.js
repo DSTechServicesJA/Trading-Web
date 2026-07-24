@@ -201,7 +201,7 @@ function fetchStakingLimits(sym) {
 
     ws.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym, currency: "USD" }));
+      ws.send(JSON.stringify({ contracts_for: sym }));
     } catch (err) {
       console.warn("contracts_for send failed:", err);
       ws.removeEventListener("message", handler);
@@ -4959,7 +4959,7 @@ function placeTrade() {
     currency: "USD",
     duration: 1,
     duration_unit: "t",
-    symbol
+    underlying_symbol: symbol
   }));
 }
 
