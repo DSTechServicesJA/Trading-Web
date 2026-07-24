@@ -486,6 +486,25 @@ const SYMBOL_SPECS = (() => {
   return s;
 })();
 
+/* ================= DEPRECATED SYMBOL MIGRATION ================= */
+const DEPRECATED_SYMBOL_MAP = {
+  "R_10":    "1HZ10V",
+  "R_25":    "1HZ25V",
+  "R_50":    "1HZ50V",
+  "R_75":    "1HZ75V",
+  "R_100":   "1HZ100V",
+  "stpRNG":  "STPIDX100",
+  "stpRNG2": "STPIDX200",
+  "stpRNG3": "STPIDX300",
+  "stpRNG4": "STPIDX400",
+  "stpRNG5": "STPIDX500"
+};
+
+function migrateSymbol(sym) {
+  if (!sym || typeof sym !== "string") return sym;
+  return DEPRECATED_SYMBOL_MAP[sym] || sym;
+}
+
 /* ================= CREDENTIAL ENCRYPTION ================= */
 /**
  * XOR-based obfuscation for credentials stored in localStorage.
@@ -4217,7 +4236,7 @@ function restoreSettings() {
       updateWsUrl();
       if (UI.appIdInput) UI.appIdInput.value = APP_ID;
     }
-    if (s.symbol && UI.symbolSelect) UI.symbolSelect.value = s.symbol;
+    if (s.symbol && UI.symbolSelect) UI.symbolSelect.value = migrateSymbol(s.symbol);
     if (s.granularity && UI.granSelect) UI.granSelect.value = s.granularity;
     if (s.risk && UI.riskInput) UI.riskInput.value = s.risk;
     if (s.reward && UI.rewardInput) UI.rewardInput.value = s.reward;
@@ -4499,7 +4518,7 @@ function restoreSettings() {
     if (s.adaptiveConfluenceEnabled != null) adaptiveConfluenceEnabled = s.adaptiveConfluenceEnabled;
     if (s.scannerEnabled != null)           scannerEnabled           = s.scannerEnabled;
     if (s.scannerSymbols != null) {
-      try { const arr = JSON.parse(s.scannerSymbols); if (Array.isArray(arr)) scannerSymbols = arr; } catch(e) {}
+      try { const arr = JSON.parse(s.scannerSymbols); if (Array.isArray(arr)) scannerSymbols = arr.map(migrateSymbol); } catch(e) {}
     }
     if (s.backtestSpeedMs != null) backtestSpeedMs = Math.max(BACKTEST_MIN_SPEED_MS, Math.min(BACKTEST_MAX_SPEED_MS, parseInt(s.backtestSpeedMs,10) || BACKTEST_DEFAULT_SPEED_MS));
     if (UI.orderblockToggle)          UI.orderblockToggle.checked          = orderblockEnabled;
@@ -6725,7 +6744,8 @@ function subscribeCandles(socket, symbol, gran) {
     end: "latest",
     granularity: gran,
     style: "candles",
-    subscribe: 1
+    subscribe: 1,
+    product_type: "basic"
   }));
 }
 
@@ -18058,6 +18078,7 @@ function disconnectAllPanels() {
 
 /* ---- Add / remove a symbol panel ---- */
 function addSymbolPanel(symbol) {
+  symbol = migrateSymbol(symbol);
   if (multiPanels.has(symbol)) return;
   if (multiPanels.size >= MULTI_MAX_PANELS) {
     addLog(`[Multi] Max ${MULTI_MAX_PANELS} panels reached`);
