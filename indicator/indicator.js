@@ -7869,8 +7869,7 @@ function subscribeCandles(socket, symbol, gran) {
     end: "latest",
     granularity: gran,
     style: "candles",
-    subscribe: 1,
-    product_type: "basic"
+    subscribe: 1
   }));
 }
 
