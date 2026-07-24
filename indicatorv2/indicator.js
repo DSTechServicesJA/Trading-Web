@@ -273,12 +273,12 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "JD75":     [50, 100, 200, 300, 500],
   "JD100":    [50, 100, 200, 300, 500],
 
-  /* --- Step Indices --- */
-  "stpRNG":   [50, 100, 200, 300, 500],
-  "stpRNG2":  [50, 100, 200, 300, 500],
-  "stpRNG3":  [50, 100, 200, 300, 500],
-  "stpRNG4":  [50, 100, 200, 300, 500],
-  "stpRNG5":  [50, 100, 200, 300, 500],
+  /* --- Step Indices (STPIDX – replaces deprecated stpRNG series) --- */
+  "STPIDX100": [50, 100, 200, 300, 500],
+  "STPIDX200": [50, 100, 200, 300, 500],
+  "STPIDX300": [50, 100, 200, 300, 500],
+  "STPIDX400": [50, 100, 200, 300, 500],
+  "STPIDX500": [50, 100, 200, 300, 500],
 
   /* --- Daily Reset Indices --- */
   "RDBULL":   [50, 100, 200, 300, 500],
@@ -476,7 +476,7 @@ const SYMBOL_SPECS = (() => {
     "BOOM300N","BOOM500","BOOM600","BOOM900","BOOM1000",
     "CRASH300N","CRASH500","CRASH600","CRASH900","CRASH1000",
     "JD10","JD25","JD50","JD75","JD100",
-    "stpRNG","stpRNG2","stpRNG3","stpRNG4","stpRNG5",
+    "STPIDX100","STPIDX200","STPIDX300","STPIDX400","STPIDX500",
     "RDBULL","RDBEAR",
     "DEX600DN","DEX600UP","DEX900DN","DEX900UP","DEX1500DN","DEX1500UP",
     "DSI10","DSI20","DSI30"
@@ -556,7 +556,7 @@ function getMarketType(symbol) {
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^stpRNG/i.test(symbol)) return "step";
+  if (/^STPIDX/i.test(symbol)) return "step";
   if (/^(RDBULL|RDBEAR)/i.test(symbol)) return "dailyreset";
   if (/^DEX/i.test(symbol))   return "dex";
   if (/^DSI/i.test(symbol))   return "driftswitch";
