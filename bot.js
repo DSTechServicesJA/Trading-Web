@@ -5581,14 +5581,11 @@ function connectWS() {
     }
 
     if (d.msg_type === "proposal_open_contract") {
-      const openContractId = String(d.proposal_open_contract?.contract_id || "");
-      if (d.subscription?.id && openContractId && derivSubscriptions) {
-        derivSubscriptions.remember("proposal_open_contract", openContractId, d.subscription.id);
-      }
-    }
-
-    if (d.msg_type === "proposal_open_contract" && d.proposal_open_contract.is_sold) {
       const contractId = String(d.proposal_open_contract?.contract_id || "");
+      if (d.subscription?.id && contractId && derivSubscriptions) {
+        derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
+      }
+      if (!d.proposal_open_contract.is_sold) return;
       const settledSym = contractIdToSymbol.get(contractId) || activeTradeSymbol;
 
       if (settledSym && symbolStateMap.has(settledSym)) {

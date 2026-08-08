@@ -108,7 +108,7 @@
 
     function forgetType(socket, type) {
       const prefix = `${type}::`;
-      for (const [mapKey, subscriptionId] of tracked.entries()) {
+      for (const [mapKey, subscriptionId] of Array.from(tracked.entries())) {
         if (!mapKey.startsWith(prefix)) continue;
         if (subscriptionId) send(socket, { forget: subscriptionId });
         tracked.delete(mapKey);

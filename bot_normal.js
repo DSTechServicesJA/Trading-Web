@@ -1669,10 +1669,7 @@ function connectWS() {
       if (d.subscription?.id && contractId && derivSubscriptions) {
         derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
       }
-    }
-
-    if (d.msg_type === "proposal_open_contract" && d.proposal_open_contract.is_sold) {
-      const contractId = String(d.proposal_open_contract?.contract_id || "");
+      if (!d.proposal_open_contract.is_sold) return;
       if (contractId && derivSubscriptions) {
         derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
       }
