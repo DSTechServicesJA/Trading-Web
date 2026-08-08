@@ -131,7 +131,7 @@ $("connectBtn").onclick = () => {
 function subscribeTicks(socket = ws) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !authorized) return;
   if (derivSubscriptions) {
-    derivSubscriptions.sync(socket, "ticks", [SYMBOL], () => ({ ticks: SYMBOL, subscribe: 1 }));
+    derivSubscriptions.sync(socket, "ticks", [SYMBOL], (key) => ({ ticks: key, subscribe: 1 }));
   } else {
     socket.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
   }

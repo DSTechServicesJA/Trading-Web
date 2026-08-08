@@ -9,11 +9,14 @@
     return String(value || "").trim();
   }
 
-  function scrubUrl(url) {
-    const clean = new URL(url.href);
+  function scrubUrl(locationLike) {
+    const href = typeof locationLike === "string"
+      ? locationLike
+      : (locationLike && locationLike.href) || (global.location && global.location.href) || "/";
+    const clean = new URL(href, global.location && global.location.origin ? global.location.origin : undefined);
     clean.hash = "";
     ["access_token", "token", "code", "state"].forEach((key) => clean.searchParams.delete(key));
-    return clean.pathname + clean.search + clean.hash;
+    return clean.pathname + clean.search;
   }
 
   function captureOAuthToken(options) {

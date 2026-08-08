@@ -99,7 +99,7 @@ const RSI_SLOPE_TUNING = {
 let CURRENT_SYMBOL = "1HZ75V";
 let TUNING = SYMBOL_TUNING[CURRENT_SYMBOL];
 const PREFERRED_SYMBOL = CURRENT_SYMBOL;
-const FALLBACK_SYMBOL  = "1HZ75V";
+const FALLBACK_SYMBOL  = "1HZ50V";
 
 const stopLossInput   = document.getElementById("stopLoss");
 //const BASE_STAKE = 0.35;
@@ -1507,6 +1507,7 @@ function subscribeTickStream(symbolKey, socket = ws) {
     derivSubscriptions.sync(socket, "ticks", [symbolKey], () => ({ ticks: symbolKey, subscribe: 1 }));
     return;
   }
+  socket.send(JSON.stringify({ forget_all: "ticks" }));
   socket.send(JSON.stringify({ ticks: symbolKey, subscribe: 1 }));
 }
 
@@ -1567,7 +1568,7 @@ function connectWS() {
 
       // One-time fallback if preferred 1s symbol fails to subscribe
       if ((msg.toLowerCase().includes("market") || msg.toLowerCase().includes("symbol")) && symbol === PREFERRED_SYMBOL) {
-        console.warn("Tick subscription failed for 1HZ75V; retrying preferred 1HZ feed.");
+        console.warn(`Tick subscription failed for ${PREFERRED_SYMBOL}; falling back to ${FALLBACK_SYMBOL}.`);
         symbol = FALLBACK_SYMBOL;
         applySymbolTuning(symbol);
         updateSymbolSpeedBadge(symbol);
