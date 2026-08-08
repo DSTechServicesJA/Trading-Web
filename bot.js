@@ -5585,38 +5585,39 @@ function connectWS() {
       if (d.subscription?.id && contractId && derivSubscriptions) {
         derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
       }
-      if (!d.proposal_open_contract.is_sold) return;
-      const settledSym = contractIdToSymbol.get(contractId) || activeTradeSymbol;
+      if (d.proposal_open_contract.is_sold) {
+        const settledSym = contractIdToSymbol.get(contractId) || activeTradeSymbol;
 
-      if (settledSym && symbolStateMap.has(settledSym)) {
-        const runtimeBefore = captureRuntimeSymbolState();
-        const tradeState = ensureSymbolRuntimeState(settledSym);
-        applyRuntimeSymbolState({ ...tradeState, symbol: settledSym });
-        handleResult(d.proposal_open_contract);
-        symbolStateMap.set(settledSym, captureRuntimeSymbolState());
-        applyRuntimeSymbolState(runtimeBefore);
-      } else {
-        handleResult(d.proposal_open_contract);
-      }
+        if (settledSym && symbolStateMap.has(settledSym)) {
+          const runtimeBefore = captureRuntimeSymbolState();
+          const tradeState = ensureSymbolRuntimeState(settledSym);
+          applyRuntimeSymbolState({ ...tradeState, symbol: settledSym });
+          handleResult(d.proposal_open_contract);
+          symbolStateMap.set(settledSym, captureRuntimeSymbolState());
+          applyRuntimeSymbolState(runtimeBefore);
+        } else {
+          handleResult(d.proposal_open_contract);
+        }
 
-      if (settledSym) {
-        const slot = getSymbolTradeSlot(settledSym);
-        slot.inFlight = false;
-        slot.currentSide = null;
-        slot.currentMode = null;
-        slot.proposalId = null;
-        slot.contractId = null;
-        slot.lastUpdate = Date.now();
-        if (activeTradeSymbol === settledSym) activeTradeSymbol = null;
-      }
+        if (settledSym) {
+          const slot = getSymbolTradeSlot(settledSym);
+          slot.inFlight = false;
+          slot.currentSide = null;
+          slot.currentMode = null;
+          slot.proposalId = null;
+          slot.contractId = null;
+          slot.lastUpdate = Date.now();
+          if (activeTradeSymbol === settledSym) activeTradeSymbol = null;
+        }
 
-      tradeInProgress = hasAnyInFlightTrades();
-      if (contractId) contractIdToSymbol.delete(contractId);
-      if (contractId && derivSubscriptions) {
-        derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+        tradeInProgress = hasAnyInFlightTrades();
+        if (contractId) contractIdToSymbol.delete(contractId);
+        if (contractId && derivSubscriptions) {
+          derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+        }
+        updateMultiViewPanel();
+        executeQueuedTradeIfPossible();
       }
-      updateMultiViewPanel();
-      executeQueuedTradeIfPossible();
     }
   };
 

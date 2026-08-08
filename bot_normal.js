@@ -1504,7 +1504,7 @@ function subscribeBalanceStream(socket = ws) {
 function subscribeTickStream(symbolKey, socket = ws) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !authorized || !symbolKey) return;
   if (derivSubscriptions) {
-    derivSubscriptions.sync(socket, "ticks", [symbolKey], () => ({ ticks: symbolKey, subscribe: 1 }));
+    derivSubscriptions.sync(socket, "ticks", [symbolKey], (key) => ({ ticks: key, subscribe: 1 }));
     return;
   }
   socket.send(JSON.stringify({ forget_all: "ticks" }));
@@ -1669,11 +1669,12 @@ function connectWS() {
       if (d.subscription?.id && contractId && derivSubscriptions) {
         derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
       }
-      if (!d.proposal_open_contract.is_sold) return;
-      if (contractId && derivSubscriptions) {
-        derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+      if (d.proposal_open_contract.is_sold) {
+        if (contractId && derivSubscriptions) {
+          derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+        }
+        handleResult(d.proposal_open_contract);
       }
-      handleResult(d.proposal_open_contract);
     }
   };
 
