@@ -9,6 +9,13 @@
 const APP_ID = 120128;
 const SYMBOL = "1HZ75V"; // Volatility 75 (1s) style symbol seen in Deriv tooling
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`; // Deriv WS base
+const DERIV_WS = window.DerivWsUtils || null;
+const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
+const WS_RECONNECT_BASE_MS = DERIV_WS?.DEFAULT_RECONNECT_BASE_MS || 1000;
+const WS_RECONNECT_MAX_MS = DERIV_WS?.DEFAULT_RECONNECT_MAX_MS || 30000;
+const derivSubscriptions = DERIV_WS?.createSubscriptionManager
+  ? DERIV_WS.createSubscriptionManager()
+  : null;
 // NOTE: Trade flow on Deriv is authorize -> proposal -> buy -> monitor (kept here as simulation)
 
 const DIGIT_WINDOW = 40;
@@ -30,7 +37,11 @@ let awaitingResult = false;
 let lastTick = null;
 let pendingSim = null; // { type: "DIGITEVEN"|"DIGITODD" }
 let currentContractId = null;
+let currentContractSubscriptionId = null;
 let sessionProfit = 0;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let intentionalClose = false;
 
 let session = {
   trades: 0,
@@ -108,22 +119,63 @@ function addTradeHistory({ type, result, info }) {
 
 // ===== CONNECT =====
 $("connectBtn").onclick = () => {
-  const token = $("token").value.trim();
+  const token = DERIV_WS?.sanitizeToken ? DERIV_WS.sanitizeToken($("token").value) : $("token").value.trim();
   if (!token) {
     setStatus("API Token Required");
     return;
   }
-  connectWS(token);
+  sessionStorage.setItem("deriv_token", token);
+  connectWS();
 };
 
-function connectWS(token) {
+function subscribeTicks(socket = ws) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !authorized) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "ticks", [SYMBOL], () => ({ ticks: SYMBOL, subscribe: 1 }));
+  } else {
+    socket.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
+  }
+  setStatus("Tick stream subscribed");
+}
+
+function subscribeOpenContract(contractId, socket = ws) {
+  if (!contractId || !socket || socket.readyState !== WebSocket.OPEN) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "proposal_open_contract", [String(contractId)], () => ({
+      proposal_open_contract: 1,
+      contract_id: contractId,
+      subscribe: 1
+    }));
+    return;
+  }
+  socket.send(JSON.stringify({
+    proposal_open_contract: 1,
+    contract_id: contractId,
+    subscribe: 1
+  }));
+}
+
+function connectWS() {
   // close existing
   if (ws && ws.readyState === 1) ws.close();
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  intentionalClose = false;
 
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
+    const token = sessionStorage.getItem("deriv_token") || "";
+    if (!token) {
+      setStatus("API Token Required");
+      intentionalClose = true;
+      ws.close();
+      return;
+    }
     setStatus("Authorizing...");
+    reconnectAttempts = 0;
     ws.send(JSON.stringify({ authorize: token }));
   };
 
@@ -132,6 +184,18 @@ function connectWS(token) {
   ws.onclose = () => {
     setStatus("Disconnected");
     stopPing();
+    if (derivSubscriptions) derivSubscriptions.clear();
+    currentContractSubscriptionId = null;
+    if (intentionalClose) return;
+    const delay = DERIV_WS?.nextReconnectDelay
+      ? DERIV_WS.nextReconnectDelay(reconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
+      : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), WS_RECONNECT_MAX_MS);
+    reconnectAttempts += 1;
+    setStatus(`Disconnected — reconnecting in ${(delay / 1000).toFixed(1)}s`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connectWS();
+    }, delay);
   };
 }
 function updatePL() {
@@ -154,23 +218,28 @@ function updatePL() {
 
 
 function unsubscribeContract() {
-  if (!currentContractId) return;
-
-  ws.send(JSON.stringify({
-    forget: currentContractId
-  }));
-
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    currentContractId = null;
+    currentContractSubscriptionId = null;
+    return;
+  }
+  if (currentContractSubscriptionId) {
+    ws.send(JSON.stringify({ forget: currentContractSubscriptionId }));
+  } else if (derivSubscriptions && currentContractId) {
+    derivSubscriptions.forget(ws, "proposal_open_contract", String(currentContractId));
+  }
   currentContractId = null;
+  currentContractSubscriptionId = null;
 }
 
-// Keep WS alive (Deriv WS sessions time out after inactivity; send ping ~30s)
+// Keep WS alive (Deriv WS sessions time out after inactivity; send ping regularly)
 function startPing() {
   stopPing();
   pingTimer = setInterval(() => {
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ ping: 1 }));
     }
-  }, 30000);
+  }, WS_PING_INTERVAL_MS);
 }
 function stopPing() {
   if (pingTimer) clearInterval(pingTimer);
@@ -191,31 +260,32 @@ function handleMessage(data) {
     updateBalance(data.authorize.balance);
     setStatus("Authorized — Subscribing ticks");
     updateStakeDisplay();
-    subscribeTicks();
+    subscribeTicks(ws);
     startPing();
   }
 
   // Ticks
-  if (data.tick) handleTick(data.tick);
+  if (data.tick) {
+    if (data.subscription?.id && derivSubscriptions) {
+      derivSubscriptions.remember("ticks", SYMBOL, data.subscription.id);
+    }
+    handleTick(data.tick);
+  }
 
   if (data.buy) {
     currentContractId = data.buy.contract_id;
-    ws.send(JSON.stringify({
-      proposal_open_contract: 1,
-      contract_id: currentContractId,
-      subscribe: 1
-    }));
+    subscribeOpenContract(currentContractId, ws);
   }
 
   if (data.proposal_open_contract) {
+    if (data.subscription?.id) {
+      currentContractSubscriptionId = data.subscription.id;
+      if (derivSubscriptions && currentContractId) {
+        derivSubscriptions.remember("proposal_open_contract", String(currentContractId), data.subscription.id);
+      }
+    }
     handleContractUpdate(data.proposal_open_contract);
   }
-}
-
-// ===== TICKS =====
-function subscribeTicks() {
-  ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
-  setStatus("Tick stream subscribed");
 }
 
 function handleTick(tick) {

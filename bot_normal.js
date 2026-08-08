@@ -44,6 +44,16 @@ console.log("IT GURU JS BOOTING...");
 /* ================= CONFIG ================= */
 const APP_ID = 120128;
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+const DERIV_WS = window.DerivWsUtils || null;
+const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
+const WS_RECONNECT_BASE_MS = DERIV_WS?.DEFAULT_RECONNECT_BASE_MS || 1000;
+const WS_RECONNECT_MAX_MS = DERIV_WS?.DEFAULT_RECONNECT_MAX_MS || 30000;
+const derivSubscriptions = DERIV_WS?.createSubscriptionManager
+  ? DERIV_WS.createSubscriptionManager()
+  : null;
+let wsReconnectAttempts = 0;
+let wsReconnectTimer = null;
+let wsIntentionalClose = false;
 
 
 // ================= SYMBOL TUNING PRESETS =================
@@ -71,22 +81,7 @@ const SYMBOL_TUNING = {
     DRAWDOWN_MULTIPLIER: 1.2
   },
 
-  // ⚖️ STANDARD VOLATILITY MARKETS — BALANCED
-  "V_75": {
-    EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.08,
-    STAKE_SCALE: 1.06,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.6
-  },
-  // NOTE: R_75 tuning removed — deprecated by Deriv API (use 1HZ equivalents)
-  "V_50": {
-    EXPECTANCY_WINDOW: 6,
-    ENTROPY_SLOPE_CUT: 0.08,
-    STAKE_SCALE: 1.06,
-    LOSS_CLUSTER_LIMIT: 2,
-    DRAWDOWN_MULTIPLIER: 1.6
-  }
+  // NOTE: Legacy V_50/V_75 tuning removed — use current 1HZ symbols only
 };
 
 // ================= RSI SLOPE TUNING =================
@@ -104,7 +99,7 @@ const RSI_SLOPE_TUNING = {
 let CURRENT_SYMBOL = "1HZ75V";
 let TUNING = SYMBOL_TUNING[CURRENT_SYMBOL];
 const PREFERRED_SYMBOL = CURRENT_SYMBOL;
-const FALLBACK_SYMBOL  = "V_75";
+const FALLBACK_SYMBOL  = "1HZ75V";
 
 const stopLossInput   = document.getElementById("stopLoss");
 //const BASE_STAKE = 0.35;
@@ -276,14 +271,12 @@ let expectancyPaused = false;
 // ================= SYMBOL SPEED CLASSIFICATION =================
 const SYMBOL_SPEED = {
   FAST: ["1HZ75V", "1HZ50V", "1HZ100V"],
-  STANDARD: ["V_75", "1HZ75V", "V_50"]
+  STANDARD: ["1HZ75V", "1HZ50V", "1HZ100V"]
 };
 const MARKET_SIGNAL_LABEL = {
   "1HZ75V":  "1HZ75V",
   "1HZ50V":  "1HZ50V",
-  "1HZ100V": "1HZ100V",
-  "V_75": "V_75",
-  "V_50": "V_50"
+  "1HZ100V": "1HZ100V"
 };
 
 function wireControls() {
@@ -349,8 +342,7 @@ pinSymbol(newSymbol);
 
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ forget_all: "ticks" }));
-      ws.send(JSON.stringify({ ticks: newSymbol, subscribe: 1 }));
+      subscribeTickStream(newSymbol);
     }
 pinSymbol(newSymbol);
     setStatus(`Symbol changed to ${newSymbol}`, "#38bdf8");
@@ -1241,7 +1233,7 @@ if (currentStake > BASE_STAKE * 1.6) {
     currency: "USD",
     duration: 1,
     duration_unit: "t",
-    underlying_symbol: symbol
+    symbol
   }));
 }
 
@@ -1500,20 +1492,69 @@ function calcRSI(prices, period = RSI_PERIOD){
 setInterval(updateFeedHealth, 500);
 let wsStarted = false;
 
+function subscribeBalanceStream(socket = ws) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !authorized) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "balance", ["account"], () => ({ balance: 1, subscribe: 1 }));
+    return;
+  }
+  socket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+}
+
+function subscribeTickStream(symbolKey, socket = ws) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !authorized || !symbolKey) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "ticks", [symbolKey], () => ({ ticks: symbolKey, subscribe: 1 }));
+    return;
+  }
+  socket.send(JSON.stringify({ ticks: symbolKey, subscribe: 1 }));
+}
+
+function subscribeOpenContract(contractId, socket = ws) {
+  const key = String(contractId || "");
+  if (!key || !socket || socket.readyState !== WebSocket.OPEN) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "proposal_open_contract", [key], () => ({
+      proposal_open_contract: 1,
+      contract_id: contractId,
+      subscribe: 1
+    }));
+    return;
+  }
+  socket.send(JSON.stringify({
+    proposal_open_contract: 1,
+    contract_id: contractId,
+    subscribe: 1
+  }));
+}
+
+function clearTrackedSubscriptions(socket = ws) {
+  if (!derivSubscriptions || !socket || socket.readyState !== WebSocket.OPEN) return;
+  derivSubscriptions.forgetType(socket, "ticks");
+  derivSubscriptions.forgetType(socket, "balance");
+  derivSubscriptions.forgetType(socket, "proposal_open_contract");
+}
+
 /* ================= WEBSOCKET ================= */
 function connectWS() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  wsIntentionalClose = false;
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     const token = sessionStorage.getItem("deriv_token");
     if (token) ws.send(JSON.stringify({ authorize: token }));
+    wsReconnectAttempts = 0;
 
     clearInterval(wsHeartbeat);
     wsHeartbeat = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ ping: 1 }));
       }
-    }, 60000);
+    }, WS_PING_INTERVAL_MS);
   };
 
   ws.onmessage = e => {
@@ -1526,13 +1567,13 @@ function connectWS() {
 
       // One-time fallback if preferred 1s symbol fails to subscribe
       if ((msg.toLowerCase().includes("market") || msg.toLowerCase().includes("symbol")) && symbol === PREFERRED_SYMBOL) {
-        console.warn("Tick subscription failed for 1HZ75V; falling back to V_75.");
+        console.warn("Tick subscription failed for 1HZ75V; retrying preferred 1HZ feed.");
         symbol = FALLBACK_SYMBOL;
         applySymbolTuning(symbol);
         updateSymbolSpeedBadge(symbol);
         updateMarketSignalBySymbol(symbol);
 
-        ws.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
+        subscribeTickStream(symbol);
         setStatus(`Fallback feed: ${symbol}`, "#f59e0b");
         setLiveViewSymbol(symbol); // update iframe view
       }
@@ -1548,11 +1589,9 @@ function connectWS() {
       setStatus("Authorized – loading market", "#22c55e");
 
       requestActiveSymbols().then(() => {
-        // balance stream
-        ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+        subscribeBalanceStream();
 
-        // 🔑 tick stream (ONLY place)
-        ws.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
+        subscribeTickStream(symbol);
         setLiveViewSymbol(symbol);
         startTickWatchdog();
 
@@ -1562,12 +1601,18 @@ function connectWS() {
     }
 
     if (d.msg_type === "balance") {
+      if (d.subscription?.id && derivSubscriptions) {
+        derivSubscriptions.remember("balance", "account", d.subscription.id);
+      }
       balanceEl.textContent = Number(d.balance.balance).toFixed(2);
     }
 
     if (d.msg_type === "tick") {
       lastTickAt = Date.now();
       watchdogTriggered = false;
+      if (d.subscription?.id && derivSubscriptions) {
+        derivSubscriptions.remember("ticks", d.tick.symbol || symbol, d.subscription.id);
+      }
 
       cachedBias = null;
       const price = Number(d.tick.quote);
@@ -1615,24 +1660,38 @@ function connectWS() {
     }
 
     if (d.msg_type === "buy") {
-      ws.send(JSON.stringify({
-        proposal_open_contract: 1,
-        contract_id: d.buy.contract_id,
-        subscribe: 1
-      }));
+      subscribeOpenContract(d.buy.contract_id);
+    }
+
+    if (d.msg_type === "proposal_open_contract") {
+      const contractId = String(d.proposal_open_contract?.contract_id || "");
+      if (d.subscription?.id && contractId && derivSubscriptions) {
+        derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
+      }
     }
 
     if (d.msg_type === "proposal_open_contract" && d.proposal_open_contract.is_sold) {
+      const contractId = String(d.proposal_open_contract?.contract_id || "");
+      if (contractId && derivSubscriptions) {
+        derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+      }
       handleResult(d.proposal_open_contract);
     }
   };
 
   ws.onclose = () => {
     clearInterval(wsHeartbeat);
+    if (derivSubscriptions) derivSubscriptions.clear();
+    if (wsIntentionalClose) return;
     setStatus("Connection closed – reconnecting...", "#f59e0b");
-    setTimeout(() => {
+    const delay = DERIV_WS?.nextReconnectDelay
+      ? DERIV_WS.nextReconnectDelay(wsReconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
+      : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, wsReconnectAttempts), WS_RECONNECT_MAX_MS);
+    wsReconnectAttempts += 1;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
       try { connectWS(); } catch (err) { console.error("Reconnect failed:", err); }
-    }, 1500);
+    }, delay);
   };
 
   ws.onerror = (err) => {
@@ -1658,8 +1717,7 @@ function startTickWatchdog() {
       setStatus("Feed stalled — resyncing ticks…", "#f59e0b");
 
       try {
-        ws.send(JSON.stringify({ forget_all: "ticks" }));
-        ws.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
+        subscribeTickStream(symbol);
         setLiveViewSymbol(symbol);
       } catch (e) {
         console.error("Watchdog resubscribe failed:", e);
@@ -1682,21 +1740,17 @@ if (
     applySymbolTuning(symbol);
     updateSymbolSpeedBadge(symbol);
     updateMarketSignalBySymbol(symbol);
-    ws.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
+    subscribeTickStream(symbol);
     setLiveViewSymbol(symbol);
   }
 }
 
 // Capture OAuth token from URL hash
 (function captureOAuthToken() {
-  if (window.location.hash.includes("access_token")) {
-    const params = new URLSearchParams(window.location.hash.substring(1));
-    const token = params.get("access_token");
-    if (token) {
-      sessionStorage.setItem("deriv_token", token);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }
+  DERIV_WS?.captureOAuthToken({
+    storageKey: "deriv_token",
+    logger: (message) => console.warn(message)
+  });
 })();
 
 /* ================= AUTH CONTROLS ================= */
@@ -1705,7 +1759,9 @@ const tokenInput = document.getElementById("token");
 const oauthLoginBtn = document.getElementById("oauthLogin");
 
 connectBtn?.addEventListener("click", () => {
-  const token = tokenInput.value.trim();
+  const token = DERIV_WS?.sanitizeToken
+    ? DERIV_WS.sanitizeToken(tokenInput.value)
+    : tokenInput.value.trim();
   if (!token) {
     alert("Please enter a Deriv API token.");
     return;
@@ -1726,8 +1782,10 @@ connectBtn?.addEventListener("click", () => {
 });
 
 oauthLoginBtn?.addEventListener("click", () => {
-  const redirect = encodeURIComponent(window.location.href);
-  const url = `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&redirect_uri=${redirect}`;
+  const redirect = `${window.location.origin}${window.location.pathname}`;
+  const url = DERIV_WS?.buildOAuthUrl
+    ? DERIV_WS.buildOAuthUrl({ appId: APP_ID, redirectUri: redirect, responseType: "token" })
+    : `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token`;
   window.location.href = url;
 });
 
@@ -1757,13 +1815,13 @@ logoutBtn?.addEventListener("click", () => {
   tradeInProgress = false;
 
   authorized = false;
+  wsIntentionalClose = true;
   sessionStorage.removeItem("deriv_token");
 
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ["ticks","balance","proposal","proposal_open_contract"].forEach(t => {
-        ws.send(JSON.stringify({ forget_all: t }));
-      });
+      clearTrackedSubscriptions(ws);
+      ws.send(JSON.stringify({ forget_all: "proposal" }));
     }
   } catch (e) {
     console.warn("forget_all failed:", e);
@@ -1771,6 +1829,11 @@ logoutBtn?.addEventListener("click", () => {
 
   if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   clearInterval(wsHeartbeat);
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (derivSubscriptions) derivSubscriptions.clear();
 
   setStatus("Logged out", "#cbd5e1");
   balanceEl.textContent = "---";
@@ -1993,4 +2056,3 @@ function logLoss(profit) {
     lossCount
   });
 }
-

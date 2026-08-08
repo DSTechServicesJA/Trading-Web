@@ -13873,7 +13873,7 @@ function executeAutoTrade(signal) {
     basis: "stake",
     contract_type: contractType,
     currency: "USD",
-    underlying_symbol: symbol,
+    symbol,
     multiplier,
     passthrough: { auto_trade: true, source: signal.source || "breakout", strategyName: signal.strategyName || null, tradeSymbol: symbol, tradeId }
   };
@@ -16709,12 +16709,7 @@ function initLoginGate() {
   if (typeof ITGuruAuth !== "undefined") {
     ITGuruAuth.initLoginGate({
       onLogin: () => {
-        /* Restore saved Deriv API token from settings if any */
-        const remembered = localStorage.getItem("itguru_deriv_token");
-        if (remembered) {
-          const derivToken = _deobfuscate(remembered);
-          if (derivToken) sessionStorage.setItem(DERIV_TOKEN_KEY, derivToken);
-        }
+        localStorage.removeItem("itguru_deriv_token");
         /* Refresh user data (role + strategies) from server */
         ITGuruAuth.verify().then(() => applyStrategyAccess()).catch(() => { /* silent auth verify */ });
       }
@@ -18645,8 +18640,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const token = UI.derivTokenInput.value.trim();
       if (token) {
         sessionStorage.setItem(DERIV_TOKEN_KEY, token);
-        localStorage.setItem("itguru_deriv_token", _obfuscate(token));
-        addLog("Deriv API token updated. Reconnect to apply.");
+        localStorage.removeItem("itguru_deriv_token");
+        addLog("Deriv API token updated for this session only. Reconnect to apply.");
       } else {
         sessionStorage.removeItem(DERIV_TOKEN_KEY);
         localStorage.removeItem("itguru_deriv_token");
