@@ -75,6 +75,16 @@ console.log("IT GURU JS BOOTING...");
 /* ================= CONFIG ================= */
 const APP_ID = 120128;
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+const DERIV_WS = window.DerivWsUtils || null;
+const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
+const WS_RECONNECT_BASE_MS = DERIV_WS?.DEFAULT_RECONNECT_BASE_MS || 1000;
+const WS_RECONNECT_MAX_MS = DERIV_WS?.DEFAULT_RECONNECT_MAX_MS || 30000;
+const derivSubscriptions = DERIV_WS?.createSubscriptionManager
+  ? DERIV_WS.createSubscriptionManager()
+  : null;
+let wsReconnectAttempts = 0;
+let wsReconnectTimer = null;
+let wsIntentionalClose = false;
 const MODE_TO_SYMBOL = {
   TREND: "1HZ75V",
   ODD_EVEN: "1HZ75V",
@@ -140,7 +150,7 @@ const RSI_SLOPE_TUNING = {
 let CURRENT_SYMBOL = "1HZ75V";
 let TUNING = SYMBOL_TUNING[CURRENT_SYMBOL];
 const PREFERRED_SYMBOL = CURRENT_SYMBOL;
-const FALLBACK_SYMBOL  = "1HZ75V";
+const FALLBACK_SYMBOL  = "1HZ50V";
 
 // ================= PER-SYMBOL STAKING LIMITS (from contracts_for API) =================
 const symbolStakingLimits = {};   // { symbol: { min: Number, max: Number } }
@@ -2720,12 +2730,55 @@ function getSubscribedTickSymbols() {
   return Array.from(set);
 }
 
+function subscribeBalanceStream(socket = ws) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || !authorized) return;
+  if (derivSubscriptions) {
+    derivSubscriptions.sync(socket, "balance", ["account"], () => ({ balance: 1, subscribe: 1 }));
+    return;
+  }
+  socket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+}
+
+function subscribeOpenContract(contractId, socket = ws) {
+  const key = String(contractId || "");
+  if (!key || !socket || socket.readyState !== WebSocket.OPEN) return;
+  if (derivSubscriptions) {
+    if (derivSubscriptions.has("proposal_open_contract", key)) return;
+    derivSubscriptions.markRequested("proposal_open_contract", key);
+    socket.send(JSON.stringify({
+      proposal_open_contract: 1,
+      contract_id: contractId,
+      subscribe: 1
+    }));
+    return;
+  }
+  socket.send(JSON.stringify({
+    proposal_open_contract: 1,
+    contract_id: contractId,
+    subscribe: 1
+  }));
+}
+
+function clearTrackedSubscriptions(socket = ws) {
+  if (!derivSubscriptions || !socket || socket.readyState !== WebSocket.OPEN) return;
+  derivSubscriptions.forgetType(socket, "ticks");
+  derivSubscriptions.forgetType(socket, "balance");
+  derivSubscriptions.forgetType(socket, "proposal_open_contract");
+}
+
 function subscribeTickUniverse() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !authorized) return;
   const tickSymbols = getSubscribedTickSymbols();
   try {
-    ws.send(JSON.stringify({ forget_all: "ticks" }));
-    tickSymbols.forEach(sym => ws.send(JSON.stringify({ ticks: sym, subscribe: 1 })));
+    if (derivSubscriptions) {
+      derivSubscriptions.sync(ws, "ticks", tickSymbols, (sym) => ({
+        ticks: sym,
+        subscribe: 1
+      }));
+    } else {
+      ws.send(JSON.stringify({ forget_all: "ticks" }));
+      tickSymbols.forEach(sym => ws.send(JSON.stringify({ ticks: sym, subscribe: 1 })));
+    }
   } catch (e) {
     console.warn("Tick universe subscribe failed:", e);
   }
@@ -4959,7 +5012,7 @@ function placeTrade() {
     currency: "USD",
     duration: 1,
     duration_unit: "t",
-    underlying_symbol: symbol
+    symbol
   }));
 }
 
@@ -5357,18 +5410,24 @@ function processTickForSymbol(sym, quoteValue) {
 
 /* ================= WEBSOCKET ================= */
 function connectWS() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  wsIntentionalClose = false;
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     const token = sessionStorage.getItem("deriv_token");
     if (token) ws.send(JSON.stringify({ authorize: token }));
+    wsReconnectAttempts = 0;
 
     clearInterval(wsHeartbeat);
     wsHeartbeat = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ ping: 1 }));
       }
-    }, 60000);
+    }, WS_PING_INTERVAL_MS);
   };
 
   ws.onmessage = e => {
@@ -5377,10 +5436,17 @@ function connectWS() {
     if (d.error) {
       const msg = d.error.message || "Unknown error";
       const errType = d.msg_type || "";
+      const errCode = d.error.code || "";
 
       // contracts_for errors are non-fatal — just log & continue with defaults
       if (errType === "contracts_for") {
         console.warn("contracts_for error (using default stakes):", msg);
+        return;
+      }
+
+      if (errCode === "RateLimitExceeded") {
+        console.warn("Deriv rate limit hit:", d.error);
+        setStatus("Rate limit reached — backing off requests", "#f59e0b");
         return;
       }
 
@@ -5389,7 +5455,7 @@ function connectWS() {
 
       // One-time fallback if preferred 1s symbol fails to subscribe
       if ((msg.toLowerCase().includes("market") || msg.toLowerCase().includes("symbol")) && symbol === PREFERRED_SYMBOL) {
-        console.warn("Tick subscription failed for 1HZ75V; falling back to R_75.");
+        console.warn(`Tick subscription failed for ${PREFERRED_SYMBOL}; falling back to ${FALLBACK_SYMBOL}.`);
         symbol = FALLBACK_SYMBOL;
         applySymbolTuning(symbol);
         updateSymbolSpeedBadge(symbol);
@@ -5414,8 +5480,7 @@ function connectWS() {
       setStatus("Authorized – loading market", "#22c55e");
 
       requestActiveSymbols().then(() => {
-        // balance stream
-        ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+        subscribeBalanceStream();
 
         // 🔑 tick streams (single or multi-view)
         subscribeTickUniverse();
@@ -5428,6 +5493,9 @@ function connectWS() {
     }
 
     if (d.msg_type === "balance") {
+      if (d.subscription?.id && derivSubscriptions) {
+        derivSubscriptions.remember("balance", "account", d.subscription.id);
+      }
       balanceEl.textContent = Number(d.balance.balance).toFixed(2);
     }
 
@@ -5435,6 +5503,9 @@ function connectWS() {
       lastTickAt = Date.now();
       watchdogTriggered = false;
       const tickSym = d.tick.symbol || symbol;
+      if (d.subscription?.id && derivSubscriptions) {
+        derivSubscriptions.remember("ticks", tickSym, d.subscription.id);
+      }
       processTickForSymbol(tickSym, d.tick.quote);
     }
 
@@ -5505,55 +5576,66 @@ function connectWS() {
       if (contractId && tradeSym) {
         contractIdToSymbol.set(String(contractId), tradeSym);
       }
-      ws.send(JSON.stringify({
-        proposal_open_contract: 1,
-        contract_id: contractId,
-        subscribe: 1
-      }));
+      subscribeOpenContract(contractId);
       updateMultiViewPanel();
     }
 
-    if (d.msg_type === "proposal_open_contract" && d.proposal_open_contract.is_sold) {
+    if (d.msg_type === "proposal_open_contract") {
       const contractId = String(d.proposal_open_contract?.contract_id || "");
-      const settledSym = contractIdToSymbol.get(contractId) || activeTradeSymbol;
-
-      if (settledSym && symbolStateMap.has(settledSym)) {
-        const runtimeBefore = captureRuntimeSymbolState();
-        const tradeState = ensureSymbolRuntimeState(settledSym);
-        applyRuntimeSymbolState({ ...tradeState, symbol: settledSym });
-        handleResult(d.proposal_open_contract);
-        symbolStateMap.set(settledSym, captureRuntimeSymbolState());
-        applyRuntimeSymbolState(runtimeBefore);
-      } else {
-        handleResult(d.proposal_open_contract);
+      if (d.subscription?.id && contractId && derivSubscriptions) {
+        derivSubscriptions.remember("proposal_open_contract", contractId, d.subscription.id);
       }
+      if (d.proposal_open_contract.is_sold) {
+        const settledSym = contractIdToSymbol.get(contractId) || activeTradeSymbol;
 
-      if (settledSym) {
-        const slot = getSymbolTradeSlot(settledSym);
-        slot.inFlight = false;
-        slot.currentSide = null;
-        slot.currentMode = null;
-        slot.proposalId = null;
-        slot.contractId = null;
-        slot.lastUpdate = Date.now();
-        if (activeTradeSymbol === settledSym) activeTradeSymbol = null;
+        if (settledSym && symbolStateMap.has(settledSym)) {
+          const runtimeBefore = captureRuntimeSymbolState();
+          const tradeState = ensureSymbolRuntimeState(settledSym);
+          applyRuntimeSymbolState({ ...tradeState, symbol: settledSym });
+          handleResult(d.proposal_open_contract);
+          symbolStateMap.set(settledSym, captureRuntimeSymbolState());
+          applyRuntimeSymbolState(runtimeBefore);
+        } else {
+          handleResult(d.proposal_open_contract);
+        }
+
+        if (settledSym) {
+          const slot = getSymbolTradeSlot(settledSym);
+          slot.inFlight = false;
+          slot.currentSide = null;
+          slot.currentMode = null;
+          slot.proposalId = null;
+          slot.contractId = null;
+          slot.lastUpdate = Date.now();
+          if (activeTradeSymbol === settledSym) activeTradeSymbol = null;
+        }
+
+        tradeInProgress = hasAnyInFlightTrades();
+        if (contractId) contractIdToSymbol.delete(contractId);
+        if (contractId && derivSubscriptions) {
+          derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+        }
+        updateMultiViewPanel();
+        executeQueuedTradeIfPossible();
       }
-
-      tradeInProgress = hasAnyInFlightTrades();
-      if (contractId) contractIdToSymbol.delete(contractId);
-      updateMultiViewPanel();
-      executeQueuedTradeIfPossible();
     }
   };
 
   ws.onclose = () => {
     clearInterval(wsHeartbeat);
+    if (derivSubscriptions) derivSubscriptions.clear();
+    if (wsIntentionalClose) return;
     // #27: Save state before reconnect
     saveWsState();
     setStatus("Connection closed – reconnecting...", "#f59e0b");
-    setTimeout(() => {
+    const delay = DERIV_WS?.nextReconnectDelay
+      ? DERIV_WS.nextReconnectDelay(wsReconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
+      : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, wsReconnectAttempts), WS_RECONNECT_MAX_MS);
+    wsReconnectAttempts += 1;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
       try { connectWS(); } catch (err) { console.error("Reconnect failed:", err); }
-    }, 1500);
+    }, delay);
   };
 
   ws.onerror = (err) => {
@@ -5609,14 +5691,10 @@ if (
 
 // Capture OAuth token from URL hash
 (function captureOAuthToken() {
-  if (window.location.hash.includes("access_token")) {
-    const params = new URLSearchParams(window.location.hash.substring(1));
-    const token = params.get("access_token");
-    if (token) {
-      sessionStorage.setItem("deriv_token", token);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }
+  DERIV_WS?.captureOAuthToken({
+    storageKey: "deriv_token",
+    logger: (message) => console.warn(message)
+  });
 })();
 
 /* ================= AUTH CONTROLS ================= */
@@ -5625,7 +5703,9 @@ const tokenInput = document.getElementById("token");
 const oauthLoginBtn = document.getElementById("oauthLogin");
 
 connectBtn?.addEventListener("click", () => {
-  const token = tokenInput.value.trim();
+  const token = DERIV_WS?.sanitizeToken
+    ? DERIV_WS.sanitizeToken(tokenInput.value)
+    : tokenInput.value.trim();
   if (!token) {
     alert("Please enter a Deriv API token.");
     return;
@@ -5646,8 +5726,10 @@ connectBtn?.addEventListener("click", () => {
 });
 
 oauthLoginBtn?.addEventListener("click", () => {
-  const redirect = encodeURIComponent(window.location.href);
-  const url = `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&redirect_uri=${redirect}`;
+  const redirect = `${window.location.origin}${window.location.pathname}`;
+  const url = DERIV_WS?.buildOAuthUrl
+    ? DERIV_WS.buildOAuthUrl({ appId: APP_ID, redirectUri: redirect, responseType: "token" })
+    : `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&redirect_uri=${encodeURIComponent(redirect)}&response_type=token`;
   window.location.href = url;
 });
 
@@ -5664,13 +5746,13 @@ logoutBtn?.addEventListener("click", () => {
   tradeInProgress = false;
 
   authorized = false;
+  wsIntentionalClose = true;
   sessionStorage.removeItem("deriv_token");
 
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ["ticks","balance","proposal","proposal_open_contract"].forEach(t => {
-        ws.send(JSON.stringify({ forget_all: t }));
-      });
+      clearTrackedSubscriptions(ws);
+      ws.send(JSON.stringify({ forget_all: "proposal" }));
     }
   } catch (e) {
     console.warn("forget_all failed:", e);
@@ -5678,6 +5760,11 @@ logoutBtn?.addEventListener("click", () => {
 
   if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   clearInterval(wsHeartbeat);
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (derivSubscriptions) derivSubscriptions.clear();
 
   setStatus("Logged out", "#cbd5e1");
   balanceEl.textContent = "---";
@@ -6392,4 +6479,3 @@ drawPriceChart = function() {
     chartCtx.fillText(lastPatternSignal.pattern, x - 70, y);
   }
 };
-
