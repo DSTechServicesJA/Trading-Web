@@ -3889,3 +3889,45 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   font-style: italic;
   margin-top: 3px;
 }
+
+/* ---- Deriv OAuth Login ---- */
+.deriv-login-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.deriv-login-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 6px;
+  background: #c40000;
+  color: #fff;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.deriv-login-btn:hover { background: #a30000; }
+.deriv-disconnect-btn {
+  display: none;
+  align-items: center;
+  padding: 7px 12px;
+  border: 1px solid var(--border, #334155);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.82em;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.deriv-disconnect-btn:hover { border-color: #ef4444; color: #ef4444; }
+.deriv-account-status {
+  font-size: 0.82em;
+  color: var(--text-muted, #94a3b8);
+}
+.deriv-account-status.connected { color: #22c55e; }
