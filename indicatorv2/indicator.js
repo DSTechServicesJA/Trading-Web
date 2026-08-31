@@ -953,6 +953,11 @@ let teslaBEHit  = false;
 let connectTime = null;
 let uptimeInterval = null;
 
+/* Public market feed stats (reflected in #publicFeedPanel) */
+let publicFeedTickCount  = 0;
+let publicFeedLastUpdate = null;  // Date or null
+let autoStartFeedEnabled = true;  // overridden by API config + localStorage toggle
+
 /* Candle countdown timer */
 let candleCountdownInterval = null;
 
@@ -2073,6 +2078,17 @@ function initUI() {
   /* Feature 8: Scanner */
   UI.scannerToggle           = document.getElementById("scannerToggle");
   UI.scannerSymbolPicker     = document.getElementById("scannerSymbolPicker");
+
+  /* Public Market Feed panel */
+  UI.publicFeedPanel     = document.getElementById("publicFeedPanel");
+  UI.publicFeedStatus    = document.getElementById("publicFeedStatus");
+  UI.pfSymbol            = document.getElementById("pfSymbol");
+  UI.pfPrice             = document.getElementById("pfPrice");
+  UI.pfLastUpdate        = document.getElementById("pfLastUpdate");
+  UI.pfTickCount         = document.getElementById("pfTickCount");
+  UI.startPublicFeedBtn  = document.getElementById("startPublicFeedBtn");
+  UI.stopPublicFeedBtn   = document.getElementById("stopPublicFeedBtn");
+  UI.autoStartFeedToggle = document.getElementById("autoStartFeedToggle");
 }
 
 /* ================= HELPERS ================= */
@@ -2155,6 +2171,80 @@ function getRecommendedOrderType() {
     return entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
   }
   return entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
+}
+
+/* ── Public Feed Panel ── */
+/**
+ * Sync the #publicFeedPanel display to the current WebSocket state.
+ * Called whenever wsStatus changes, on each tick, and during reconnects.
+ *
+ * @param {'disconnected'|'connecting'|'connected'|'reconnecting'|'error'} state
+ * @param {object} [opts]  Optional overrides: { symbol, price }
+ */
+function updatePublicFeedPanel(state, opts = {}) {
+  if (!UI.publicFeedStatus) return;
+
+  const statusEl = UI.publicFeedStatus;
+
+  switch (state) {
+    case 'connected':
+      statusEl.textContent = 'Connected ✅';
+      statusEl.className   = 'public-feed-status connected';
+      if (UI.startPublicFeedBtn) UI.startPublicFeedBtn.disabled = true;
+      if (UI.stopPublicFeedBtn)  UI.stopPublicFeedBtn.disabled  = false;
+      // Hide the "feed required" notice once connected
+      if (UI.publicFeedPanel) UI.publicFeedPanel.classList.remove('pf-disconnected-state');
+      break;
+    case 'connecting':
+      statusEl.textContent = 'Connecting…';
+      statusEl.className   = 'public-feed-status connecting';
+      if (UI.startPublicFeedBtn) UI.startPublicFeedBtn.disabled = true;
+      if (UI.stopPublicFeedBtn)  UI.stopPublicFeedBtn.disabled  = true;
+      if (UI.publicFeedPanel) UI.publicFeedPanel.classList.add('pf-disconnected-state');
+      break;
+    case 'reconnecting':
+      statusEl.textContent = 'Reconnecting…';
+      statusEl.className   = 'public-feed-status reconnecting';
+      if (UI.startPublicFeedBtn) UI.startPublicFeedBtn.disabled = true;
+      if (UI.stopPublicFeedBtn)  UI.stopPublicFeedBtn.disabled  = true;
+      if (UI.publicFeedPanel) UI.publicFeedPanel.classList.add('pf-disconnected-state');
+      break;
+    case 'error':
+      statusEl.textContent = 'Error ⚠';
+      statusEl.className   = 'public-feed-status error';
+      if (UI.startPublicFeedBtn) UI.startPublicFeedBtn.disabled = false;
+      if (UI.stopPublicFeedBtn)  UI.stopPublicFeedBtn.disabled  = true;
+      if (UI.publicFeedPanel) UI.publicFeedPanel.classList.add('pf-disconnected-state');
+      break;
+    default: // disconnected
+      statusEl.textContent = 'Disconnected ❌';
+      statusEl.className   = 'public-feed-status disconnected';
+      if (UI.startPublicFeedBtn) UI.startPublicFeedBtn.disabled = false;
+      if (UI.stopPublicFeedBtn)  UI.stopPublicFeedBtn.disabled  = true;
+      if (UI.publicFeedPanel) UI.publicFeedPanel.classList.add('pf-disconnected-state');
+      break;
+  }
+
+  // Update symbol / price if provided (comes from tick messages)
+  if (opts.symbol && UI.pfSymbol)  UI.pfSymbol.textContent  = opts.symbol;
+  if (opts.price  && UI.pfPrice)   UI.pfPrice.textContent   = opts.price;
+}
+
+/**
+ * Record a tick arriving from the live feed and refresh the panel counters.
+ * Call once per processed tick/OHLC message.
+ *
+ * @param {string} symbol
+ * @param {string|number} price
+ */
+function recordPublicFeedTick(symbol, price) {
+  publicFeedTickCount++;
+  publicFeedLastUpdate = new Date();
+
+  if (UI.pfTickCount)   UI.pfTickCount.textContent   = publicFeedTickCount.toLocaleString();
+  if (UI.pfSymbol)      UI.pfSymbol.textContent      = symbol || '--';
+  if (UI.pfPrice)       UI.pfPrice.textContent       = price  != null ? String(price) : '--';
+  if (UI.pfLastUpdate)  UI.pfLastUpdate.textContent  = publicFeedLastUpdate.toLocaleTimeString();
 }
 
 function addLog(msg) {
@@ -6786,9 +6876,14 @@ function connect() {
     UI.connectBtn.disabled = true;
     UI.disconnectBtn.disabled = false;
     reconnectAttempts = 0;
+    publicFeedTickCount = 0;
+    updatePublicFeedPanel('connected');
     startUptimeTimer();
     startPing();
     startStreamWatchdog();
+
+    /* Notify user that the public feed is active */
+    showToast("📡 Public Feed Active", "Connected to Deriv public market feed. Indicators are now active.", "success", 5000);
 
     /* Start NY Open Range timer if enabled */
     if (nyOpenRangeEnabled) startNyOpenRangeTimer();
@@ -6889,7 +6984,10 @@ function connect() {
         open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
       };
 
-      if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
+          /* Track public feed tick count and last-update time */
+          recordPublicFeedTick(o.symbol || getActiveSymbol(), fmt(c.close, 4));
+
+          if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
         candles[candles.length - 1] = c;
       } else {
         candles.push(c);
@@ -6939,6 +7037,7 @@ function connect() {
     UI.wsStatus.className = "status-badge disabled";
     UI.connectBtn.disabled = false;
     UI.disconnectBtn.disabled = true;
+    updatePublicFeedPanel(intentionalClose ? 'disconnected' : 'reconnecting');
     stopUptimeTimer();
     addLog("WebSocket closed");
 
@@ -7061,6 +7160,7 @@ function disconnect() {
   UI.wsStatus.className = "status-badge disabled";
   UI.connectBtn.disabled = false;
   UI.disconnectBtn.disabled = true;
+  updatePublicFeedPanel('disconnected');
   addLog("Disconnected");
 }
 
@@ -7082,6 +7182,7 @@ function scheduleReconnect() {
   addLog(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
   UI.wsStatus.textContent = "RECONNECTING";
   UI.wsStatus.className = "status-badge warning";
+  updatePublicFeedPanel('reconnecting');
   
   reconnectTimer = setTimeout(() => {
     if (!intentionalClose) {
@@ -19265,6 +19366,61 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Fetch news calendar on load if enabled */
   if (newsPauseEnabled) fetchNewsCalendar();
+
+  /* ── Public Market Feed controls ── */
+  const AUTO_START_FEED_KEY = "itguru_autoStartFeed";
+
+  // Restore auto-start preference from localStorage
+  try {
+    const saved = localStorage.getItem(AUTO_START_FEED_KEY);
+    if (saved !== null) autoStartFeedEnabled = JSON.parse(saved) === true;
+  } catch (_) { /* ignore */ }
+
+  // Sync checkbox
+  if (UI.autoStartFeedToggle) {
+    UI.autoStartFeedToggle.checked = autoStartFeedEnabled;
+    UI.autoStartFeedToggle.addEventListener("change", () => {
+      autoStartFeedEnabled = UI.autoStartFeedToggle.checked;
+      try { localStorage.setItem(AUTO_START_FEED_KEY, JSON.stringify(autoStartFeedEnabled)); } catch (_) {}
+      saveSettings();
+    });
+  }
+
+  // Wire Start / Stop buttons (they delegate to the existing connect/disconnect)
+  if (UI.startPublicFeedBtn) {
+    UI.startPublicFeedBtn.addEventListener("click", () => {
+      updatePublicFeedPanel('connecting');
+      connect();
+    });
+  }
+  if (UI.stopPublicFeedBtn) {
+    UI.stopPublicFeedBtn.addEventListener("click", disconnect);
+  }
+
+  // Initialise panel to disconnected state
+  updatePublicFeedPanel('disconnected');
+
+  // Auto-start: fetch server config first, fall back to local preference
+  fetch("/api/market-data/feed-config.php")
+    .then(r => r.ok ? r.json() : null)
+    .then(cfg => {
+      // Server config wins over local localStorage if it exists
+      const serverAutoStart = cfg && typeof cfg.autoStart === "boolean" ? cfg.autoStart : null;
+      const shouldStart = serverAutoStart !== null ? serverAutoStart : autoStartFeedEnabled;
+
+      if (shouldStart) {
+        updatePublicFeedPanel('connecting');
+        // Small delay so the UI renders before the connection attempt
+        setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
+      }
+    })
+    .catch(() => {
+      // Network error or server unavailable – honour local preference only
+      if (autoStartFeedEnabled) {
+        updatePublicFeedPanel('connecting');
+        setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
+      }
+    });
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();

@@ -177,6 +177,34 @@
     <div id="strategyTickerTrack" class="signal-banner-track"></div>
   </div>
 
+  <!-- ===== PUBLIC MARKET FEED PANEL ===== -->
+  <div id="publicFeedPanel" class="public-feed-panel">
+    <div class="public-feed-inner">
+
+      <div class="public-feed-info">
+        <span class="public-feed-icon">📡</span>
+        <span class="public-feed-label">Public Market Feed</span>
+        <span id="publicFeedStatus" class="public-feed-status disconnected">Disconnected ❌</span>
+      </div>
+
+      <div class="public-feed-stats">
+        <div class="public-feed-stat"><span class="pf-stat-label">Symbol</span><span id="pfSymbol" class="pf-stat-value">--</span></div>
+        <div class="public-feed-stat"><span class="pf-stat-label">Price</span><span id="pfPrice" class="pf-stat-value">--</span></div>
+        <div class="public-feed-stat"><span class="pf-stat-label">Updated</span><span id="pfLastUpdate" class="pf-stat-value">--</span></div>
+        <div class="public-feed-stat"><span class="pf-stat-label">Ticks</span><span id="pfTickCount" class="pf-stat-value">0</span></div>
+      </div>
+
+      <div class="public-feed-actions">
+        <button id="startPublicFeedBtn" type="button" class="pf-start-btn" title="Connect to Deriv public market feed">▶ Start Public Market Feed</button>
+        <button id="stopPublicFeedBtn"  type="button" class="pf-stop-btn"  title="Disconnect from public feed" disabled>⏹ Stop</button>
+      </div>
+
+    </div>
+    <div class="public-feed-notice">
+      ⚠ Public market feed is required before indicators and charts can update.
+    </div>
+  </div>
+
   <!-- ========== GRID ========== -->
   <div class="layout-grid">
 
@@ -223,6 +251,15 @@
             </div>
             <p class="hint">Your Deriv API app_id and API token. Tokens are kept for the current session only. Reconnect after changing.<br>
               <strong>Login with Deriv</strong> to authenticate via Deriv OAuth and auto-fill your token.</p>
+
+            <!-- Auto-start public feed toggle -->
+            <div class="param-row" style="margin-top:8px;">
+              <label class="toggle-label" for="autoStartFeedToggle">
+                <input type="checkbox" id="autoStartFeedToggle" class="toggle-input" />
+                Auto-start public market feed on page load
+              </label>
+            </div>
+            <p class="hint">When enabled, the public price feed connects automatically when you open the dashboard (no API token required). Matches the server-side <code>AUTO_START_PUBLIC_FEED</code> option.</p>
           </section>
 
           <!-- Symbol Selection -->
