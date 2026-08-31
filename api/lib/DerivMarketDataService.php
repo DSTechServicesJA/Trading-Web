@@ -101,6 +101,36 @@ class DerivMarketDataService
     }
 
     /**
+     * Subscribe to real-time OHLC candle updates for the given market symbol.
+     *
+     * @param string $symbol       e.g. "1HZ75V", "R_75"
+     * @param int    $granularity  Candle interval in seconds (60, 120, 300, …)
+     * @throws RuntimeException if not connected.
+     */
+    public function subscribeCandles(string $symbol, int $granularity = 60): void
+    {
+        $this->assertConnected();
+
+        $key = "{$symbol}:candle:{$granularity}";
+        if (isset($this->subscriptions[$key])) {
+            $this->log("Already subscribed to candles for $symbol @ {$granularity}s — skipping");
+            return;
+        }
+
+        $payload = [
+            'ticks_history' => $symbol,
+            'style'         => 'candles',
+            'granularity'   => $granularity,
+            'count'         => 10,
+            'subscribe'     => 1,
+        ];
+
+        $this->sendFrame(json_encode($payload));
+        $this->subscriptions[$key] = null;
+        $this->log("Subscribed to candles: $symbol @ {$granularity}s");
+    }
+
+    /**
      * Collect incoming messages for up to $maxMessages ticks or $timeoutSec seconds.
      *
      * Returns an array of normalised tick/candle records:
@@ -404,7 +434,7 @@ class DerivMarketDataService
 
         // ── Read server response ──
         $response = $this->readRaw($socket, 4096, $this->connectTimeoutSec);
-        if ($response === null || !str_contains($response, '101')) {
+        if ($response === null || !preg_match('/^HTTP\/1\.[01] 101\b/', $response)) {
             fclose($socket);
             $preview = substr($response ?? '', 0, 200);
             throw new RuntimeException(
@@ -557,15 +587,31 @@ class DerivMarketDataService
             if ($maskKey === false || strlen($maskKey) < 4) return null;
         }
 
-        // Read payload
-        $payload = '';
+        // Read payload — spin until all bytes arrive or deadline is exceeded.
+        $payload   = '';
         $remaining = $payLen;
+        $deadline  = microtime(true) + $this->readTimeoutSec;
         while ($remaining > 0) {
+            if (microtime(true) > $deadline) {
+                // Timed out mid-frame — stream is now desynchronised; signal close.
+                $this->connected = false;
+                $this->log('readFrame: timeout reading payload — connection desynchronised', 'warning');
+                return null;
+            }
             $chunk = @fread($this->socket, min($remaining, 4096));
-            if ($chunk === false || $chunk === '') {
-                // No data yet — non-blocking mode; return null so caller can retry
-                if ($payload === '' && $remaining === $payLen) return null;
-                break;
+            if ($chunk === false) {
+                $this->connected = false;
+                $this->log('readFrame: fread returned false — connection lost', 'warning');
+                return null;
+            }
+            if ($chunk === '') {
+                if ($payload === '' && $remaining === $payLen) {
+                    // No header bytes consumed yet — nothing available this iteration
+                    return null;
+                }
+                // Bytes already consumed — spin until the rest arrive
+                usleep(2000);
+                continue;
             }
             $payload   .= $chunk;
             $remaining -= strlen($chunk);

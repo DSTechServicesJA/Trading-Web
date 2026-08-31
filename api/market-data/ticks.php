@@ -70,7 +70,12 @@ try {
     ]);
 
     $svc->connect();
-    $svc->subscribeMarketData($symbol);
+
+    if ($rawType === 'candle') {
+        $svc->subscribeCandles($symbol);
+    } else {
+        $svc->subscribeMarketData($symbol);
+    }
 
     $ticks = $svc->listen($count, $timeout);
     $svc->close();
