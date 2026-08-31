@@ -67,11 +67,19 @@
 
 /* ================= CONFIG ================= */
 let APP_ID  = 120128;
-let WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
-/** Rebuild WS_URL after APP_ID changes */
+/** Public market-data endpoint — no API token required (charts, indicators, analysis). */
+const PUBLIC_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
+
+/** Authenticated trading endpoint — used only for authorize / buy / sell / balance. */
+let AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+
+/** Legacy alias — always points to the public feed. */
+let WS_URL = PUBLIC_WS_URL;
+
+/** Rebuild AUTH_WS_URL after APP_ID changes (WS_URL stays on the public feed). */
 function updateWsUrl() {
-  WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+  AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 }
 
 /** Safely parse a JSON response, returning {} on empty/invalid body */
@@ -1098,7 +1106,8 @@ async function waitForApiCallSlot(endpoint, maxWaitMs = 20000) {
 
 /* ================= STATE ================= */
 let authorized    = false;
-let ws            = null;
+let ws            = null;   /* public market-data WebSocket (charts + indicators) */
+let authWs        = null;   /* authenticated WebSocket — trading actions only */
 let candles       = [];
 let rangeStartEpoch = null;
 let openingRange  = null;
@@ -1380,7 +1389,9 @@ function getSymbolSpecs(symbol) {
  */
 function fetchValidMultipliers(sym) {
   if (symbolMultiplierCache[sym]) return Promise.resolve(symbolMultiplierCache[sym]);
-  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+  /* contracts_for is an authenticated API call — prefer authWs, fall back to ws */
+  const apiWs = (authWs && authWs.readyState === WebSocket.OPEN) ? authWs : ws;
+  if (!apiWs || apiWs.readyState !== WebSocket.OPEN) return Promise.resolve(null);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -1391,7 +1402,7 @@ function fetchValidMultipliers(sym) {
       if (d.msg_type !== "contracts_for") return;
       /* Only handle the response for our symbol */
       if (d.echo_req && d.echo_req.contracts_for !== sym) return;
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
 
       if (d.error) {
         console.warn(`contracts_for (multipliers) error for ${sym}:`, d.error.message);
@@ -1432,19 +1443,19 @@ function fetchValidMultipliers(sym) {
       done(validMultipliers);
     };
 
-    ws.addEventListener("message", handler);
+    apiWs.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym }));
+      apiWs.send(JSON.stringify({ contracts_for: sym }));
     } catch (err) {
       console.warn("contracts_for (multipliers) send failed:", err);
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
       done(null);
       return;
     }
 
     /* Timeout after 10 s so we don't hang forever */
     setTimeout(() => {
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
       done(null);
     }, 10000);
   });
@@ -7655,6 +7666,10 @@ function startPing() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ ping: 1 }));
     }
+    /* Keep the authenticated trading connection alive too */
+    if (authWs && authWs.readyState === WebSocket.OPEN) {
+      authWs.send(JSON.stringify({ ping: 1 }));
+    }
   }, PING_INTERVAL_MS);
 }
 
@@ -7908,7 +7923,8 @@ function connect() {
   const symbol = UI.symbolSelect.value;
   const gran   = parseInt(UI.granSelect.value, 10);
 
-  ws = new WebSocket(WS_URL);
+  /* ── Public market-data feed (no auth token required) ── */
+  ws = new WebSocket(PUBLIC_WS_URL);
   const thisWs = ws; /* capture reference to detect stale handlers */
 
   ws.onopen = () => {
@@ -7925,16 +7941,12 @@ function connect() {
     /* Start NY Open Range timer if enabled */
     if (nyOpenRangeEnabled) startNyOpenRangeTimer();
 
-    /* Authorize with stored Deriv token first to bind live account */
-    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
-    if (token) {
-      addLog("Authorizing with Deriv account…");
-      thisWs.send(JSON.stringify({ authorize: token }));
-    } else {
-      /* No token – subscribe directly (unauthenticated public feed) */
-      addLog(`Connected – subscribing to ${symbol} (${gran}s candles)`);
-      subscribeCandles(thisWs, symbol, gran);
-    }
+    /* Subscribe to market data directly — no auth required on the public feed */
+    addLog(`Connected to public feed – subscribing to ${symbol} (${gran}s candles)`);
+    subscribeCandles(thisWs, symbol, gran);
+
+    /* Also open the authenticated trading connection if a token is set */
+    connectAuthWs(symbol);
   };
 
   ws.onmessage = (evt) => {
@@ -7945,59 +7957,7 @@ function connect() {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
 
     if (msg.error) {
-      /* Delegate auto-trade errors to the shared handler first */
-      if (handleAutoTradeMessage(msg, thisWs)) return;
-
-      addLog("API error: " + msg.error.message);
-      /* If authorization fails, still subscribe to public market data */
-      if (msg.msg_type === "authorize") {
-        addLog("⚠ Authorization failed – using public data feed");
-        authorized = false;
-        updateAccountBadge(null);
-        subscribeCandles(thisWs, symbol, gran);
-      }
-      return;
-    }
-
-    /* Authorize response – verify account type, then subscribe to candles */
-    if (msg.msg_type === "authorize") {
-      authorized = true;
-      const acct = msg.authorize;
-      const isReal = !acct.is_virtual;
-      updateAccountBadge(acct);
-      addLog(streamMode
-        ? `✅ Authorized (${isReal ? "REAL" : "DEMO"})`
-        : `✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
-      if (!isReal) {
-        addLog("⚠ Demo account detected – switch to a real account token for live market data");
-      }
-      /* Set initial balance and subscribe to live balance stream */
-      autoTradeBalance = parseFloat(acct.balance) || null;
-      if (sessionStartBalance === null || sessionStartBalance === undefined) sessionStartBalance = autoTradeBalance;
-      ensureAutoTradeDailyBaseline();
-      updateAutoTradeBalanceUI();
-      updateAutoTradeBalanceVisibility();
-      thisWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-      /* Fetch valid multipliers for the current symbol on connect */
-      autoUpdateMultiplier(symbol);
-      /* Re-subscribe to any in-flight contracts that survived a reconnect */
-      for (const [sym, slot] of autoTradeSlots.entries()) {
-        if (slot.pendingContractId) {
-          addLog(`🔄 Re-subscribing to contract ${slot.pendingContractId} after reconnect (${sym})…`);
-          slot.contractId = slot.pendingContractId;
-          slot.inProgress = true;
-          slot.pendingContractId = null;
-          thisWs.send(JSON.stringify({
-            proposal_open_contract: 1,
-            contract_id: slot.contractId,
-            subscribe: 1,
-            passthrough: { auto_trade: true, source: "reconnect", tradeSymbol: sym }
-          }));
-          startAutoTradePendingTimeout(sym, thisWs);
-        }
-      }
-      addLog(`Subscribing to ${symbol} (${gran}s candles)`);
-      subscribeCandles(thisWs, symbol, gran);
+      addLog("Feed error: " + msg.error.message);
       return;
     }
 
@@ -8086,9 +8046,6 @@ function connect() {
       if (bosChochEnabled) detectBosChoch();
       drawChart();
     }
-
-    /* ---- Auto-trade: delegate proposal / buy / POC / balance to shared handler ---- */
-    if (handleAutoTradeMessage(msg, thisWs)) return;
   };
 
   ws.onclose = () => {
@@ -8208,11 +8165,23 @@ function disconnect() {
       if (dyingWs.readyState === WebSocket.OPEN) {
         dyingWs.send(JSON.stringify({ forget_all: "candles" }));
         dyingWs.send(JSON.stringify({ forget_all: "ticks" }));
-        dyingWs.send(JSON.stringify({ forget_all: "balance" }));
       }
     } catch (e) { /* ignore send errors during teardown */ }
 
     dyingWs.close();
+  }
+
+  /* Close the authenticated trading connection too */
+  if (authWs) {
+    const dyingAuth = authWs;
+    authWs = null;
+    dyingAuth.onopen = dyingAuth.onmessage = dyingAuth.onclose = dyingAuth.onerror = null;
+    try {
+      if (dyingAuth.readyState === WebSocket.OPEN) {
+        dyingAuth.send(JSON.stringify({ forget_all: "balance" }));
+      }
+    } catch (e) { /* ignore */ }
+    dyingAuth.close();
   }
 
   /* Update UI so the connect button is re-enabled (onclose won't fire
@@ -8222,6 +8191,110 @@ function disconnect() {
   UI.connectBtn.disabled = false;
   UI.disconnectBtn.disabled = true;
   addLog("Disconnected");
+}
+
+/**
+ * Open the authenticated WebSocket for trading actions (authorize / buy / sell / balance).
+ * Called after the public feed connects successfully when a Deriv token is stored.
+ * Market data (charts, indicators) always comes from the public feed — this channel
+ * is strictly for account-bound operations.
+ *
+ * @param {string} symbol — currently-selected symbol (used for multiplier pre-fetch)
+ */
+function connectAuthWs(symbol) {
+  const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
+  if (!token) return; /* no token — trading disabled, public-feed-only mode */
+
+  if (authWs && authWs.readyState <= 1) return; /* already connecting or open */
+
+  authWs = new WebSocket(AUTH_WS_URL);
+  const thisAuthWs = authWs;
+
+  authWs.onopen = () => {
+    if (thisAuthWs !== authWs) return;
+    addLog("Authorizing Deriv account for trading…");
+    thisAuthWs.send(JSON.stringify({ authorize: token }));
+  };
+
+  authWs.onmessage = (evt) => {
+    if (thisAuthWs !== authWs) return;
+    const msg = JSON.parse(evt.data);
+
+    if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
+
+    if (msg.error) {
+      if (handleAutoTradeMessage(msg, thisAuthWs)) return;
+      addLog("Auth error: " + msg.error.message);
+      if (msg.msg_type === "authorize") {
+        addLog("⚠ Authorization failed – trading disabled (market data still active)");
+        authorized = false;
+        updateAccountBadge(null);
+      }
+      return;
+    }
+
+    /* ── Authorize response ── */
+    if (msg.msg_type === "authorize") {
+      authorized = true;
+      const acct = msg.authorize;
+      const isReal = !acct.is_virtual;
+      updateAccountBadge(acct);
+      addLog(streamMode
+        ? `✅ Authorized (${isReal ? "REAL" : "DEMO"})`
+        : `✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
+      if (!isReal) {
+        addLog("⚠ Demo account – switch to a real account token for live trading");
+      }
+      autoTradeBalance = parseFloat(acct.balance) || null;
+      if (sessionStartBalance === null || sessionStartBalance === undefined) sessionStartBalance = autoTradeBalance;
+      ensureAutoTradeDailyBaseline();
+      updateAutoTradeBalanceUI();
+      updateAutoTradeBalanceVisibility();
+      thisAuthWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+      autoUpdateMultiplier(symbol);
+      /* Re-subscribe to any in-flight contracts that survived a reconnect */
+      for (const [sym, slot] of autoTradeSlots.entries()) {
+        if (slot.pendingContractId) {
+          addLog(`🔄 Re-subscribing to contract ${slot.pendingContractId} after reconnect (${sym})…`);
+          slot.contractId = slot.pendingContractId;
+          slot.inProgress = true;
+          slot.pendingContractId = null;
+          thisAuthWs.send(JSON.stringify({
+            proposal_open_contract: 1,
+            contract_id: slot.contractId,
+            subscribe: 1,
+            passthrough: { auto_trade: true, source: "reconnect", tradeSymbol: sym }
+          }));
+          startAutoTradePendingTimeout(sym, thisAuthWs);
+        }
+      }
+      return;
+    }
+
+    /* Delegate proposal / buy / POC / balance to the shared handler */
+    handleAutoTradeMessage(msg, thisAuthWs);
+  };
+
+  authWs.onclose = () => {
+    if (thisAuthWs !== authWs) return;
+    if (!intentionalClose) {
+      for (const [sym, slot] of autoTradeSlots.entries()) {
+        if (slot.contractId) {
+          slot.pendingContractId = slot.contractId;
+          addLog(`📌 Preserving contract ${slot.contractId} for re-subscribe after auth reconnect (${sym})`);
+        }
+      }
+    }
+    authorized = false;
+    authWs = null;
+    updateAccountBadge(null);
+    addLog("Auth WebSocket closed" + (intentionalClose ? "" : " — will reconnect with next market feed cycle"));
+  };
+
+  authWs.onerror = (evt) => {
+    if (thisAuthWs !== authWs) return;
+    addLog("Auth WebSocket error: " + (evt.message || "connection failed"));
+  };
 }
 
 function scheduleReconnect() {
@@ -20186,14 +20259,13 @@ function executeAutoTrade(signal, _capturedWs) {
   }
 
   /* Capture the WS that should carry this trade — in multi-panel mode
-     activatePanel() has already set `ws` to the panel's own WS.
-     _capturedWs is provided by the async multiplier-fetch retry path to
-     preserve the correct panel WS even if activatePanel() has since
-     switched `ws` to a different panel. */
-  const tradeWs = _capturedWs || ws;
+     _capturedWs is the panel's own authenticated WS.  In single-panel mode
+     route through the dedicated auth channel; the public feed carries market
+     data only and must never be used for trade execution. */
+  const tradeWs = _capturedWs || authWs;
   if (autoTradeExecutionMode !== "mt5") {
     if (!tradeWs || tradeWs.readyState !== WebSocket.OPEN) {
-      addLog("⚠ Auto-trade skipped — WebSocket not connected");
+      addLog("⚠ Auto-trade skipped — auth WebSocket not connected (set Deriv token in Settings)");
       return;
     }
     if (!authorized) {
@@ -20556,7 +20628,7 @@ function clearAutoTradePendingTimeout(symbol, tradeId) {
  *  @param {string} [tradeId] — if provided, timeout is for a specific concurrent trade */
 function startAutoTradePendingTimeout(symbol, tradeWs, tradeId) {
   const slot = getAutoTradeSlot(symbol);
-  const wsRef = tradeWs || ws;
+  const wsRef = tradeWs || authWs;
   const tradeEntry = tradeId ? findTradeByTradeId(symbol, tradeId) : null;
 
   if (tradeEntry) {
