@@ -3217,6 +3217,15 @@ lastModeBindAt = Date.now();
 
 
 function wireControls() {
+  /* ── Start Public Market Feed button ── */
+  const startPublicFeedBtn = document.getElementById("startPublicFeedBtn");
+  if (startPublicFeedBtn) {
+    startPublicFeedBtn.onclick = () => {
+      console.log("[PublicFeed] User clicked Start Public Market Feed");
+      connectWS();
+    };
+  }
+
   if (startBtn) {
     startBtn.onclick = () => {
       botRunning = true;
@@ -3540,7 +3549,7 @@ function updateFeedHealth() {
 
   let state = "OFFLINE";
 
-  if (!authorized || !ws || ws.readyState !== WebSocket.OPEN) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
     state = "OFFLINE";
   } else if (!lastTickAt) {
     state = "DELAYED";
@@ -5425,18 +5434,48 @@ function processTickForSymbol(sym, quoteValue) {
 }
 
 /* ================= WEBSOCKET ================= */
+
+/** Update the feed status bar in the UI */
+function updateFeedStatusBar(state) {
+  const indicator = document.getElementById("feedStatusIndicator");
+  const text = document.getElementById("feedStatusText");
+  if (!indicator || !text) return;
+  if (state === "connected") {
+    indicator.textContent = "🟢";
+    text.textContent = "Connected";
+    text.style.color = "#22c55e";
+  } else if (state === "connecting") {
+    indicator.textContent = "🟡";
+    text.textContent = "Connecting…";
+    text.style.color = "#f59e0b";
+  } else {
+    indicator.textContent = "🔴";
+    text.textContent = "Public market feed is offline. Click Start Public Market Feed to enable live charts and indicators.";
+    text.style.color = "#94a3b8";
+  }
+}
+
 function connectWS() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    console.log("[PublicFeed] Already connected or connecting — skipping duplicate");
+    return;
+  }
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
   wsIntentionalClose = false;
+  updateFeedStatusBar("connecting");
+
+  console.log("[PublicFeed] Attempting Deriv public feed connection to", CHART_WS_URL);
 
   /* --- Public feed: ticks / market data only --- */
   ws = new WebSocket(CHART_WS_URL);
 
   ws.onopen = () => {
     wsReconnectAttempts = 0;
+    console.log("[PublicFeed] WebSocket connected");
+    updateFeedStatusBar("connected");
 
     clearInterval(wsHeartbeat);
     wsHeartbeat = setInterval(() => {
@@ -5449,6 +5488,7 @@ function connectWS() {
     }, WS_PING_INTERVAL_MS);
 
     /* Subscribe ticks immediately — public feed needs no auth */
+    console.log("[PublicFeed] Subscribing to symbol", symbol);
     subscribeTickUniverse();
     setLiveViewSymbol(symbol);
     startTickWatchdog();
@@ -5464,6 +5504,7 @@ function connectWS() {
 
     if (d.error) {
       const msg = d.error.message || "Unknown error";
+      console.error("[PublicFeed] Error:", d.error.code, msg);
 
       if (d.error.code === "RateLimitExceeded") {
         console.warn("Deriv rate limit hit:", d.error);
@@ -5489,6 +5530,7 @@ function connectWS() {
       lastTickAt = Date.now();
       watchdogTriggered = false;
       const tickSym = d.tick.underlying_symbol || d.tick.symbol || symbol;
+      console.debug("[PublicFeed] Received tick data:", tickSym, d.tick.quote);
       if (d.subscription?.id && derivSubscriptions) {
         derivSubscriptions.remember("ticks", tickSym, d.subscription.id);
       }
@@ -5496,12 +5538,15 @@ function connectWS() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     clearInterval(wsHeartbeat);
     if (derivSubscriptions) derivSubscriptions.clear();
+    console.log(`[PublicFeed] WebSocket closed: ${ev.code} / ${ev.reason}`);
+    updateFeedStatusBar("disconnected");
     if (wsIntentionalClose) return;
     saveWsState();
     setStatus("Connection closed – reconnecting...", "#f59e0b");
+    updateFeedStatusBar("connecting");
     const delay = DERIV_WS?.nextReconnectDelay
       ? DERIV_WS.nextReconnectDelay(wsReconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
       : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, wsReconnectAttempts), WS_RECONNECT_MAX_MS);
@@ -5513,7 +5558,8 @@ function connectWS() {
   };
 
   ws.onerror = (err) => {
-    console.error("WS error:", err);
+    console.error("[PublicFeed] WebSocket error:", err);
+    updateFeedStatusBar("disconnected");
   };
 }
 

@@ -70,9 +70,15 @@ class DerivMarketDataService
      */
     public function connect(): void
     {
-        $this->socket    = $this->openStream($this->wsUrl);
-        $this->connected = true;
-        $this->log('Connected to ' . $this->wsUrl);
+        $this->log('Attempting Deriv public feed connection to ' . $this->wsUrl);
+        try {
+            $this->socket    = $this->openStream($this->wsUrl);
+            $this->connected = true;
+            $this->log('WebSocket connected — handshake succeeded');
+        } catch (\Throwable $e) {
+            $this->log('Connection failed: ' . $e->getMessage(), 'error');
+            throw $e;
+        }
     }
 
     /**
@@ -97,7 +103,7 @@ class DerivMarketDataService
 
         $this->sendFrame(json_encode($payload));
         $this->subscriptions[$symbol] = null;   // ID assigned on first tick response
-        $this->log("Subscribed to market data: $symbol");
+        $this->log("Subscribing to symbol $symbol");
     }
 
     /**
@@ -179,10 +185,12 @@ class DerivMarketDataService
                     . ($msg['error']['message'] ?? 'no message'),
                     'error'
                 );
+                $this->log('Raw error response: ' . $raw, 'debug');
                 continue;
             }
 
             $msgType = $msg['msg_type'] ?? '';
+            $this->log("Received message type: $msgType");
 
             // Store subscription IDs so we can forget cleanly on close
             if ($msgType === 'tick' && isset($msg['subscription']['id'])) {
@@ -194,6 +202,7 @@ class DerivMarketDataService
 
             $normalised = $this->normaliseMessage($msg);
             if ($normalised !== null) {
+                $this->log('Received tick data: ' . ($normalised['symbol'] ?? 'unknown') . ' @ ' . ($normalised['price'] ?? '?'));
                 $collected[] = $normalised;
             }
         }
@@ -434,6 +443,7 @@ class DerivMarketDataService
 
         // ── Read server response ──
         $response = $this->readRaw($socket, 4096, $this->connectTimeoutSec);
+        $this->log('WebSocket handshake result: ' . substr($response ?? '(null)', 0, 80));
         if ($response === null || !preg_match('/^HTTP\/1\.[01] 101\b/', $response)) {
             fclose($socket);
             $preview = substr($response ?? '', 0, 200);
@@ -627,8 +637,14 @@ class DerivMarketDataService
 
         // Handle server-initiated close
         if ($opcode === 0x8) {
+            $closeCode = 0;
+            $closeReason = '';
+            if (strlen($payload) >= 2) {
+                $closeCode = unpack('n', substr($payload, 0, 2))[1];
+                $closeReason = substr($payload, 2);
+            }
             $this->connected = false;
-            $this->log('Server closed the WebSocket connection', 'warning');
+            $this->log("WebSocket closed: $closeCode / $closeReason", 'warning');
             return null;
         }
 
