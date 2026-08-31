@@ -214,7 +214,15 @@
                 <input type="password" id="derivTokenInput" class="param-input" placeholder="Paste token…" />
               </div>
             </div>
-            <p class="hint">Your Deriv API app_id and API token. Tokens are kept for the current session only. Reconnect after changing.</p>
+            <div class="deriv-login-row">
+              <button id="derivLoginBtn" type="button" class="deriv-login-btn">
+                <span class="deriv-login-icon">🔐</span> Login with Deriv
+              </button>
+              <button id="derivDisconnectBtn" type="button" class="deriv-disconnect-btn">Disconnect</button>
+              <span id="derivAccountStatus" class="deriv-account-status"></span>
+            </div>
+            <p class="hint">Your Deriv API app_id and API token. Tokens are kept for the current session only. Reconnect after changing.<br>
+              <strong>Login with Deriv</strong> to authenticate via Deriv OAuth and auto-fill your token.</p>
           </section>
 
           <!-- Symbol Selection -->
@@ -1878,6 +1886,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"></script>
 <script src="../auth.js"></script>
+<script src="../deriv-ws.js"></script>
 <script src="../grid-scalper-ma-opposite.js"></script>
 <script src="indicator.js"></script>
 <script>

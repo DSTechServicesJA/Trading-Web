@@ -24026,6 +24026,21 @@ function syncConfigFromUI() {
 }
 
 /* ================= LOGIN GATE ================= */
+/**
+ * Update the Deriv OAuth status badge and disconnect button visibility.
+ * Called on page load and whenever the token changes.
+ */
+function updateDerivStatus() {
+  const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
+  const statusEl = document.getElementById("derivAccountStatus");
+  const disconnectBtn = document.getElementById("derivDisconnectBtn");
+  if (statusEl) {
+    statusEl.textContent = token ? "● Connected" : "";
+    statusEl.className = "deriv-account-status" + (token ? " connected" : "");
+  }
+  if (disconnectBtn) disconnectBtn.style.display = token ? "inline-flex" : "none";
+}
+
 function initLoginGate() {
   /* Use the shared auth module if available */
   if (typeof ITGuruAuth !== "undefined") {
@@ -26171,9 +26186,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   if (UI.derivTokenInput) {
+    /* Capture OAuth token from URL redirect (Deriv OAuth flow) */
+    if (typeof DerivWsUtils !== "undefined") {
+      const captured = DerivWsUtils.captureOAuthToken({ storageKey: DERIV_TOKEN_KEY, logger: addLog });
+      if (captured && captured.accessToken) {
+        UI.derivTokenInput.value = captured.accessToken;
+        addLog("✅ Deriv account connected via OAuth. Reconnect to apply.");
+      }
+    }
+
     /* Restore saved token into the input */
     const savedToken = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
-    if (savedToken) UI.derivTokenInput.value = savedToken;
+    if (savedToken && !UI.derivTokenInput.value) UI.derivTokenInput.value = savedToken;
 
     UI.derivTokenInput.addEventListener("change", () => {
       const token = UI.derivTokenInput.value.trim();
@@ -26186,8 +26210,37 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.removeItem("itguru_deriv_token");
         addLog("Deriv API token cleared.");
       }
+      updateDerivStatus();
     });
   }
+
+  /* ── Deriv OAuth login / disconnect buttons ── */
+  updateDerivStatus();
+
+  const derivLoginBtn = document.getElementById("derivLoginBtn");
+  if (derivLoginBtn) {
+    derivLoginBtn.addEventListener("click", () => {
+      if (typeof DerivWsUtils === "undefined") {
+        addLog("⚠ DerivWsUtils not loaded — cannot start OAuth flow.");
+        return;
+      }
+      const redirectUri = location.origin + location.pathname;
+      const url = DerivWsUtils.buildOAuthUrl({ appId: APP_ID, redirectUri, responseType: "token" });
+      location.href = url;
+    });
+  }
+
+  const derivDisconnectBtn = document.getElementById("derivDisconnectBtn");
+  if (derivDisconnectBtn) {
+    derivDisconnectBtn.addEventListener("click", () => {
+      sessionStorage.removeItem(DERIV_TOKEN_KEY);
+      localStorage.removeItem("itguru_deriv_token");
+      if (UI.derivTokenInput) UI.derivTokenInput.value = "";
+      updateDerivStatus();
+      addLog("Deriv account disconnected.");
+    });
+  }
+
   if (UI.revertSettingsBtn) {
     UI.revertSettingsBtn.addEventListener("click", () => { revertAllSettings(); });
   }
