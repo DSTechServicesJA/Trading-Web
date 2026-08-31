@@ -46,6 +46,12 @@ class DerivPublicFeedService
     /** symbols that should be resubscribed after reconnect */
     private array $pendingSymbols = [];
 
+    /**
+     * Candle subscriptions that should be resubscribed after reconnect.
+     * Format: [['symbol' => '...', 'granularity' => 60], ...]
+     */
+    private array $pendingCandles = [];
+
     public function __construct(array $options = [])
     {
         $this->transport = new DerivMarketDataService($options);
@@ -89,9 +95,14 @@ class DerivPublicFeedService
         $this->disconnect();
         $this->connect();
 
-        // Restore subscriptions
+        // Restore tick subscriptions
         foreach ($this->pendingSymbols as $sym) {
             $this->transport->subscribeMarketData($sym);
+        }
+
+        // Restore candle subscriptions with their original granularity
+        foreach ($this->pendingCandles as $entry) {
+            $this->transport->subscribeCandles($entry['symbol'], $entry['granularity']);
         }
     }
 
@@ -128,9 +139,22 @@ class DerivPublicFeedService
     public function subscribeCandles(string $symbol, int $granularity = 60): void
     {
         $symbol = strtoupper(trim($symbol));
-        if (!in_array($symbol, $this->pendingSymbols, true)) {
-            $this->pendingSymbols[] = $symbol;
+
+        // Track candle subscriptions separately so reconnect can restore them
+        // with the correct granularity; update granularity if already registered.
+        $found = false;
+        foreach ($this->pendingCandles as &$entry) {
+            if ($entry['symbol'] === $symbol) {
+                $entry['granularity'] = $granularity;
+                $found = true;
+                break;
+            }
         }
+        unset($entry);
+        if (!$found) {
+            $this->pendingCandles[] = ['symbol' => $symbol, 'granularity' => $granularity];
+        }
+
         $this->transport->subscribeCandles($symbol, $granularity);
     }
 
@@ -154,10 +178,21 @@ class DerivPublicFeedService
 
         $normalised = [];
         foreach ($raw as $tick) {
-            $normalised[] = $tick;   // listen() already returns normalised shape
-            $sym = $tick['symbol'] ?? null;
-            if ($sym !== null) {
-                $this->latestPrices[$sym] = $tick;
+            // $tick is the DerivMarketDataService normalised shape which includes
+            // a 'raw' key holding the original WebSocket frame. Run it through
+            // processMarketData() to produce the documented public-feed shape.
+            $rawFrame = $tick['raw'] ?? null;
+            if (!is_array($rawFrame)) {
+                continue;
+            }
+            $norm = $this->processMarketData($rawFrame);
+            if ($norm === null) {
+                continue;
+            }
+            $normalised[] = $norm;
+            $sym = $norm['symbol'] ?? null;
+            if ($sym !== null && $sym !== '') {
+                $this->latestPrices[$sym] = $norm;
             }
         }
 
@@ -201,7 +236,7 @@ class DerivPublicFeedService
                 'high'      => (float) ($c['high']  ?? 0),
                 'low'       => (float) ($c['low']   ?? 0),
                 'close'     => (float) ($c['close'] ?? 0),
-                'volume'    => (int) ($c['pip_size'] ?? 1),
+                'volume'    => 1,
             ];
         }
 
