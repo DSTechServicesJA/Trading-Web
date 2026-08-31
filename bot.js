@@ -73,8 +73,14 @@ console.log("IT GURU JS BOOTING...");
    ========================================================= */
 
 /* ================= CONFIG ================= */
-const APP_ID = 120128;
-const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+// APP_ID can be overridden via localStorage key "itguru_app_id" for custom Deriv apps.
+// Register your app at https://app.deriv.com/account/api-token and set the matching app_id.
+let APP_ID = (function () {
+  const stored = parseInt(localStorage.getItem("itguru_app_id"), 10);
+  return (stored > 0) ? stored : 120128;
+}());
+let WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+
 const DERIV_WS = window.DerivWsUtils || null;
 const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
 const WS_RECONNECT_BASE_MS = DERIV_WS?.DEFAULT_RECONNECT_BASE_MS || 1000;
@@ -5012,7 +5018,7 @@ function placeTrade() {
     currency: "USD",
     duration: 1,
     duration_unit: "t",
-    symbol
+    underlying_symbol: symbol
   }));
 }
 
@@ -5251,7 +5257,7 @@ function requestActiveSymbols() {
 
       ws.removeEventListener("message", handler);
 
-      const list = (d.active_symbols || []).map(s => s.symbol);
+      const list = (d.active_symbols || []).map(s => s.underlying_symbol || s.symbol);
       const pinned = pinnedSymbol();
       
 // 1️⃣ Decide symbol
@@ -5450,6 +5456,16 @@ function connectWS() {
         return;
       }
 
+      // Auth errors: clear stale token and prompt re-login
+      const authCodes = ["InvalidToken", "AuthorizationRequired", "AuthorizationCodeExpired", "InvalidAppID", "DisabledClient"];
+      if (errType === "authorize" || authCodes.includes(errCode)) {
+        authorized = false;
+        sessionStorage.removeItem("deriv_token");
+        console.error(`Deriv auth error [${errCode}]: ${msg}`);
+        setStatus(`Auth failed (${errCode || errType}): ${msg} — please re-enter your token`, "#ef4444");
+        return;
+      }
+
       setStatus(msg, "#ef4444");
       tradeInProgress = false;
 
@@ -5502,7 +5518,7 @@ function connectWS() {
     if (d.msg_type === "tick") {
       lastTickAt = Date.now();
       watchdogTriggered = false;
-      const tickSym = d.tick.symbol || symbol;
+      const tickSym = d.tick.underlying_symbol || d.tick.symbol || symbol;
       if (d.subscription?.id && derivSubscriptions) {
         derivSubscriptions.remember("ticks", tickSym, d.subscription.id);
       }
@@ -5515,7 +5531,7 @@ function connectWS() {
       const payout = Number(proposal.payout ?? 0);
       const payoutRatio = ask > 0 ? payout / ask : 0;
       const proposalId = proposal.id;
-      const proposalSym = d.echo_req?.symbol || activeTradeSymbol || symbol;
+      const proposalSym = d.echo_req?.underlying_symbol || d.echo_req?.symbol || activeTradeSymbol || symbol;
 
       if (!botRunning) return;
       if (!proposalId || !proposalSym) return;
