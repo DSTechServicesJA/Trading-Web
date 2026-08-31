@@ -180,7 +180,8 @@ function getSymbolMaxStake(sym) {
  */
 function fetchStakingLimits(sym) {
   if (symbolStakingLimits[sym]) return Promise.resolve(symbolStakingLimits[sym]);
-  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+  const apiWs = (authWs && authWs.readyState === WebSocket.OPEN) ? authWs : null;
+  if (!apiWs) return Promise.resolve(null);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -189,7 +190,7 @@ function fetchStakingLimits(sym) {
     const handler = (e) => {
       const d = JSON.parse(e.data);
       if (d.msg_type !== "contracts_for") return;
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
 
       const contracts = d.contracts_for?.available ?? [];
       if (!contracts.length) {
@@ -219,19 +220,19 @@ function fetchStakingLimits(sym) {
       done(symbolStakingLimits[sym]);
     };
 
-    ws.addEventListener("message", handler);
+    apiWs.addEventListener("message", handler);
     try {
-      ws.send(JSON.stringify({ contracts_for: sym }));
+      apiWs.send(JSON.stringify({ contracts_for: sym }));
     } catch (err) {
       console.warn("contracts_for send failed:", err);
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
       done(null);
       return;
     }
 
     // Timeout: don't block forever if API doesn't respond
     setTimeout(() => {
-      ws.removeEventListener("message", handler);
+      apiWs.removeEventListener("message", handler);
       done(null);
     }, 10000);
   });
@@ -2186,8 +2187,8 @@ function isTokenExpiring() {
 
 function reauthorizeOnReconnect() {
   const token = getStoredToken();
-  if (token && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ authorize: token }));
+  if (token && authWs && authWs.readyState === WebSocket.OPEN) {
+    authWs.send(JSON.stringify({ authorize: token }));
   }
 }
 
@@ -2528,6 +2529,7 @@ let chartPrices = [];
 
 /* ================= STATE ================= */
 let ws;
+let authWs;     /* authenticated WebSocket — trading actions only */
 let wsHeartbeat; // interval id for ping
 let symbol = PREFERRED_SYMBOL;
 let authorized = false;
@@ -2740,7 +2742,7 @@ function getSubscribedTickSymbols() {
   return Array.from(set);
 }
 
-function subscribeBalanceStream(socket = ws) {
+function subscribeBalanceStream(socket = authWs || ws) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !authorized) return;
   if (derivSubscriptions) {
     derivSubscriptions.sync(socket, "balance", ["account"], () => ({ balance: 1, subscribe: 1 }));
@@ -2749,7 +2751,7 @@ function subscribeBalanceStream(socket = ws) {
   socket.send(JSON.stringify({ balance: 1, subscribe: 1 }));
 }
 
-function subscribeOpenContract(contractId, socket = ws) {
+function subscribeOpenContract(contractId, socket = authWs || ws) {
   const key = String(contractId || "");
   if (!key || !socket || socket.readyState !== WebSocket.OPEN) return;
   if (derivSubscriptions) {
@@ -2772,12 +2774,16 @@ function subscribeOpenContract(contractId, socket = ws) {
 function clearTrackedSubscriptions(socket = ws) {
   if (!derivSubscriptions || !socket || socket.readyState !== WebSocket.OPEN) return;
   derivSubscriptions.forgetType(socket, "ticks");
-  derivSubscriptions.forgetType(socket, "balance");
-  derivSubscriptions.forgetType(socket, "proposal_open_contract");
+  /* balance and POC subscriptions belong to the auth channel */
+  if (authWs && authWs.readyState === WebSocket.OPEN) {
+    derivSubscriptions.forgetType(authWs, "balance");
+    derivSubscriptions.forgetType(authWs, "proposal_open_contract");
+  }
 }
 
 function subscribeTickUniverse() {
-  if (!ws || ws.readyState !== WebSocket.OPEN || !authorized) return;
+  /* Ticks come from the public feed — no authorization required */
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const tickSymbols = getSubscribedTickSymbols();
   try {
     if (derivSubscriptions) {
@@ -5014,7 +5020,7 @@ function placeTrade() {
     clamp(currentStake, getSymbolMinStake(symbol), getSymbolMaxStake(symbol))
   );
 
-  ws.send(JSON.stringify({
+  (authWs && authWs.readyState === WebSocket.OPEN ? authWs : ws).send(JSON.stringify({
     proposal: 1,
     amount: finalAmount,
     basis: "stake",
@@ -5425,11 +5431,11 @@ function connectWS() {
     wsReconnectTimer = null;
   }
   wsIntentionalClose = false;
-  ws = new WebSocket(WS_URL);
+
+  /* --- Public feed: ticks / market data only --- */
+  ws = new WebSocket(CHART_WS_URL);
 
   ws.onopen = () => {
-    const token = sessionStorage.getItem("deriv_token");
-    if (token) ws.send(JSON.stringify({ authorize: token }));
     wsReconnectAttempts = 0;
 
     clearInterval(wsHeartbeat);
@@ -5437,7 +5443,20 @@ function connectWS() {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ ping: 1 }));
       }
+      if (authWs && authWs.readyState === WebSocket.OPEN) {
+        authWs.send(JSON.stringify({ ping: 1 }));
+      }
     }, WS_PING_INTERVAL_MS);
+
+    /* Subscribe ticks immediately — public feed needs no auth */
+    subscribeTickUniverse();
+    setLiveViewSymbol(symbol);
+    startTickWatchdog();
+    startBtn.disabled = false;
+    setStatus(`Public feed connected: ${symbol}`, "#22c55e");
+
+    /* Open authenticated channel for trading */
+    connectAuthWs();
   };
 
   ws.onmessage = e => {
@@ -5445,22 +5464,91 @@ function connectWS() {
 
     if (d.error) {
       const msg = d.error.message || "Unknown error";
+
+      if (d.error.code === "RateLimitExceeded") {
+        console.warn("Deriv rate limit hit:", d.error);
+        setStatus("Rate limit reached — backing off requests", "#f59e0b");
+        return;
+      }
+
+      // One-time fallback if preferred symbol fails to subscribe
+      if ((msg.toLowerCase().includes("market") || msg.toLowerCase().includes("symbol")) && symbol === PREFERRED_SYMBOL) {
+        console.warn(`Tick subscription failed for ${PREFERRED_SYMBOL}; falling back to ${FALLBACK_SYMBOL}.`);
+        symbol = FALLBACK_SYMBOL;
+        applySymbolTuning(symbol);
+        updateSymbolSpeedBadge(symbol);
+        updateMarketSignalBySymbol(symbol);
+        subscribeTickUniverse();
+        setStatus(`Fallback feed: ${symbol}`, "#f59e0b");
+        setLiveViewSymbol(symbol);
+      }
+      return;
+    }
+
+    if (d.msg_type === "tick") {
+      lastTickAt = Date.now();
+      watchdogTriggered = false;
+      const tickSym = d.tick.underlying_symbol || d.tick.symbol || symbol;
+      if (d.subscription?.id && derivSubscriptions) {
+        derivSubscriptions.remember("ticks", tickSym, d.subscription.id);
+      }
+      processTickForSymbol(tickSym, d.tick.quote);
+    }
+  };
+
+  ws.onclose = () => {
+    clearInterval(wsHeartbeat);
+    if (derivSubscriptions) derivSubscriptions.clear();
+    if (wsIntentionalClose) return;
+    saveWsState();
+    setStatus("Connection closed – reconnecting...", "#f59e0b");
+    const delay = DERIV_WS?.nextReconnectDelay
+      ? DERIV_WS.nextReconnectDelay(wsReconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
+      : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, wsReconnectAttempts), WS_RECONNECT_MAX_MS);
+    wsReconnectAttempts += 1;
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectTimer = null;
+      try { connectWS(); } catch (err) { console.error("Reconnect failed:", err); }
+    }, delay);
+  };
+
+  ws.onerror = (err) => {
+    console.error("WS error:", err);
+  };
+}
+
+function connectAuthWs() {
+  const token = sessionStorage.getItem("deriv_token");
+  if (!token) return;
+
+  if (authWs && (authWs.readyState === WebSocket.OPEN || authWs.readyState === WebSocket.CONNECTING)) {
+    authWs.close();
+  }
+
+  authWs = new WebSocket(WS_URL);
+
+  authWs.onopen = () => {
+    authWs.send(JSON.stringify({ authorize: token }));
+  };
+
+  authWs.onmessage = e => {
+    const d = JSON.parse(e.data);
+
+    if (d.error) {
+      const msg = d.error.message || "Unknown error";
       const errType = d.msg_type || "";
       const errCode = d.error.code || "";
 
-      // contracts_for errors are non-fatal — just log & continue with defaults
       if (errType === "contracts_for") {
         console.warn("contracts_for error (using default stakes):", msg);
         return;
       }
 
       if (errCode === "RateLimitExceeded") {
-        console.warn("Deriv rate limit hit:", d.error);
-        setStatus("Rate limit reached — backing off requests", "#f59e0b");
+        console.warn("Auth WS rate limit hit:", d.error);
         return;
       }
 
-      // Auth errors: clear stale token and prompt re-login
       const authCodes = ["InvalidToken", "AuthorizationRequired", "AuthorizationCodeExpired", "InvalidAppID", "DisabledClient"];
       if (errType === "authorize" || authCodes.includes(errCode)) {
         authorized = false;
@@ -5472,19 +5560,6 @@ function connectWS() {
 
       setStatus(msg, "#ef4444");
       tradeInProgress = false;
-
-      // One-time fallback if preferred 1s symbol fails to subscribe
-      if ((msg.toLowerCase().includes("market") || msg.toLowerCase().includes("symbol")) && symbol === PREFERRED_SYMBOL) {
-        console.warn(`Tick subscription failed for ${PREFERRED_SYMBOL}; falling back to ${FALLBACK_SYMBOL}.`);
-        symbol = FALLBACK_SYMBOL;
-        applySymbolTuning(symbol);
-        updateSymbolSpeedBadge(symbol);
-        updateMarketSignalBySymbol(symbol);
-
-        subscribeTickUniverse();
-        setStatus(`Fallback feed: ${symbol}`, "#f59e0b");
-        setLiveViewSymbol(symbol); // update iframe view
-      }
       return;
     }
 
@@ -5494,21 +5569,11 @@ function connectWS() {
       const oauthLoginBtn = document.getElementById("oauthLogin");
       if (oauthLoginBtn) oauthLoginBtn.style.display = "none";
 
-      // #27: Restore state after reconnect
       restoreWsState();
-
-      setStatus("Authorized – loading market", "#22c55e");
+      setStatus("Authorized – live feed active", "#22c55e");
 
       requestActiveSymbols().then(() => {
         subscribeBalanceStream();
-
-        // 🔑 tick streams (single or multi-view)
-        subscribeTickUniverse();
-        setLiveViewSymbol(symbol);
-        startTickWatchdog();
-
-        startBtn.disabled = false;
-        setStatus(`Live feed: ${symbol}`, "#22c55e");
       });
     }
 
@@ -5517,16 +5582,6 @@ function connectWS() {
         derivSubscriptions.remember("balance", "account", d.subscription.id);
       }
       balanceEl.textContent = Number(d.balance.balance).toFixed(2);
-    }
-
-    if (d.msg_type === "tick") {
-      lastTickAt = Date.now();
-      watchdogTriggered = false;
-      const tickSym = d.tick.underlying_symbol || d.tick.symbol || symbol;
-      if (d.subscription?.id && derivSubscriptions) {
-        derivSubscriptions.remember("ticks", tickSym, d.subscription.id);
-      }
-      processTickForSymbol(tickSym, d.tick.quote);
     }
 
     if (d.msg_type === "proposal") {
@@ -5577,7 +5632,7 @@ function connectWS() {
       proposalIdToSymbol.set(proposalId, tradeSym);
       slot.proposalId = proposalId;
       slot.lastUpdate = Date.now();
-      ws.send(JSON.stringify({ buy: proposalId, price: ask }));
+      authWs.send(JSON.stringify({ buy: proposalId, price: ask }));
       updateMultiViewPanel();
     }
 
@@ -5633,7 +5688,7 @@ function connectWS() {
         tradeInProgress = hasAnyInFlightTrades();
         if (contractId) contractIdToSymbol.delete(contractId);
         if (contractId && derivSubscriptions) {
-          derivSubscriptions.forget(ws, "proposal_open_contract", contractId);
+          derivSubscriptions.forget(authWs, "proposal_open_contract", contractId);
         }
         updateMultiViewPanel();
         executeQueuedTradeIfPossible();
@@ -5641,25 +5696,14 @@ function connectWS() {
     }
   };
 
-  ws.onclose = () => {
-    clearInterval(wsHeartbeat);
-    if (derivSubscriptions) derivSubscriptions.clear();
+  authWs.onclose = () => {
+    authorized = false;
     if (wsIntentionalClose) return;
-    // #27: Save state before reconnect
-    saveWsState();
-    setStatus("Connection closed – reconnecting...", "#f59e0b");
-    const delay = DERIV_WS?.nextReconnectDelay
-      ? DERIV_WS.nextReconnectDelay(wsReconnectAttempts, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS)
-      : Math.min(WS_RECONNECT_BASE_MS * Math.pow(2, wsReconnectAttempts), WS_RECONNECT_MAX_MS);
-    wsReconnectAttempts += 1;
-    wsReconnectTimer = setTimeout(() => {
-      wsReconnectTimer = null;
-      try { connectWS(); } catch (err) { console.error("Reconnect failed:", err); }
-    }, delay);
+    console.warn("Auth WS closed unexpectedly");
   };
 
-  ws.onerror = (err) => {
-    console.error("WS error:", err);
+  authWs.onerror = (err) => {
+    console.error("Auth WS error:", err);
   };
 }
 
@@ -5667,7 +5711,7 @@ function startTickWatchdog() {
   clearInterval(tickWatchdogTimer);
 
   tickWatchdogTimer = setInterval(() => {
-    if (!authorized || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const now = Date.now();
 
@@ -5733,13 +5777,13 @@ connectBtn?.addEventListener("click", () => {
 
   sessionStorage.setItem("deriv_token", token);
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ authorize: token }));
+  if (authWs && authWs.readyState === WebSocket.OPEN) {
+    authWs.send(JSON.stringify({ authorize: token }));
+  } else if (!wsStarted) {
+    wsStarted = true;
+    connectWS();
   } else {
-    if (!wsStarted) {
-      wsStarted = true;
-      connectWS();
-    }
+    connectAuthWs();
   }
 
   setStatus("Authorizing…", "#cbd5e1");
@@ -5770,14 +5814,17 @@ logoutBtn?.addEventListener("click", () => {
   sessionStorage.removeItem("deriv_token");
 
   try {
+    if (authWs && authWs.readyState === WebSocket.OPEN) {
+      authWs.send(JSON.stringify({ forget_all: "proposal" }));
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       clearTrackedSubscriptions(ws);
-      ws.send(JSON.stringify({ forget_all: "proposal" }));
     }
   } catch (e) {
     console.warn("forget_all failed:", e);
   }
 
+  if (authWs && authWs.readyState === WebSocket.OPEN) authWs.close();
   if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   clearInterval(wsHeartbeat);
   if (wsReconnectTimer) {
