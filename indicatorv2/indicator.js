@@ -2226,8 +2226,8 @@ function updatePublicFeedPanel(state, opts = {}) {
   }
 
   // Update symbol / price if provided (comes from tick messages)
-  if (opts.symbol && UI.pfSymbol)  UI.pfSymbol.textContent  = opts.symbol;
-  if (opts.price  && UI.pfPrice)   UI.pfPrice.textContent   = opts.price;
+  if (opts.symbol != null && UI.pfSymbol)  UI.pfSymbol.textContent  = opts.symbol;
+  if (opts.price  != null && UI.pfPrice)   UI.pfPrice.textContent   = opts.price;
 }
 
 /**
@@ -6877,6 +6877,8 @@ function connect() {
     UI.disconnectBtn.disabled = false;
     reconnectAttempts = 0;
     publicFeedTickCount = 0;
+    if (UI.pfTickCount)  UI.pfTickCount.textContent  = '0';
+    if (UI.pfLastUpdate) UI.pfLastUpdate.textContent = '--';
     updatePublicFeedPanel('connected');
     startUptimeTimer();
     startPing();
