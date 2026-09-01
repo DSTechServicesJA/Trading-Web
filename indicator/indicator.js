@@ -532,11 +532,6 @@ const SYMBOL_SPECS = (() => {
  * Used to auto-migrate symbols persisted in localStorage from older versions.
  */
 const DEPRECATED_SYMBOL_MAP = {
-  "R_10":    "1HZ10V",
-  "R_25":    "1HZ25V",
-  "R_50":    "1HZ50V",
-  "R_75":    "1HZ75V",
-  "R_100":   "1HZ100V",
   "stpRNG":  "STPIDX",
   "stpRNG2": "STPIDX200",
   "stpRNG3": "STPIDX300",
