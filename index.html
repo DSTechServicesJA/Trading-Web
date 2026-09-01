@@ -223,8 +223,11 @@
                 <option value="1HZ50V">1HZ50V</option>
                 <option value="1HZ100V">1HZ100V</option>
               </optgroup>
-              <!-- Volatility Standard (R_75/R_100/R_50) removed: deprecated by Deriv API.
-                   Use the 1HZ equivalents above instead. -->
+              <optgroup label="Volatility Standard">
+                <option value="R_75">R_75</option>
+                <option value="R_100">R_100</option>
+                <option value="R_50">R_50</option>
+              </optgroup>
               <optgroup label="FOREX">
                 <option value="frxEURUSD">EUR/USD</option>
                 <option value="frxGBPUSD">GBP/USD</option>
@@ -247,7 +250,7 @@
               type="text"
               id="multiViewSymbolsInput"
               placeholder="1HZ100V, 1HZ50V, frxEURUSD, BOOM500"
-              value="1HZ100V, 1HZ50V, 1HZ10V, frxEURUSD, frxGBPUSD"
+              value="1HZ100V, 1HZ50V, 1HZ10V, R_75, R_100, R_50, frxEURUSD, frxGBPUSD"
             />
             <p class="hint" id="multiViewStatus">Scanner OFF</p>
             <div class="multiview-panel" id="multiViewPanel">

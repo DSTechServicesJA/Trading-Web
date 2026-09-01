@@ -2608,7 +2608,7 @@ let modeDisabledUntil = {
 
 // ================= MULTI-VIEW SCANNER (indicator-style watchlist) =================
 let multiViewEnabled = false;
-let multiViewSymbols = ["1HZ100V", "1HZ50V", "1HZ10V", "frxEURUSD", "frxGBPUSD"];
+let multiViewSymbols = ["1HZ100V", "1HZ50V", "1HZ10V", "R_75", "R_100", "R_50", "frxEURUSD", "frxGBPUSD"];
 let multiViewStatusEl = null;
 let suppressStatusUpdates = false;
 let activeTradeSymbol = null;
