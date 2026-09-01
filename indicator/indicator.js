@@ -8024,11 +8024,12 @@ function connect() {
       /* Also validate all dropdown options and flag unavailable ones */
       if (UI.symbolSelect) {
         for (const opt of UI.symbolSelect.options) {
+          if (!opt.dataset.origLabel) opt.dataset.origLabel = opt.textContent;
           if (opt.value && !validSet.has(opt.value)) {
-            opt.textContent = opt.textContent.replace(/ \[unavailable\]$/, "") + " [unavailable]";
+            opt.textContent = opt.dataset.origLabel + " [unavailable]";
             opt.classList.add("symbol-unavailable");
           } else {
-            opt.textContent = opt.textContent.replace(/ \[unavailable\]$/, "");
+            opt.textContent = opt.dataset.origLabel;
             opt.classList.remove("symbol-unavailable");
           }
         }
