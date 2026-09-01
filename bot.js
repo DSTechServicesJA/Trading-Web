@@ -2670,6 +2670,13 @@ const INDICATOR_SYMBOL_GROUPS = {
   FOREX_EXOTICS: ["frxUSDMXN", "frxUSDSGD", "frxUSDPLN"],
   COMMODITIES: ["frxXAUUSD", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"]
 };
+const STEP_INDEX_LABELS = {
+  "stpRNG": "Step Index 100",
+  "stpRNG2": "Step Index 200",
+  "stpRNG3": "Step Index 300",
+  "stpRNG4": "Step Index 400",
+  "stpRNG5": "Step Index 500"
+};
 
 function listContains(list, sym) {
   return Array.isArray(list) && list.includes(sym);
@@ -2681,12 +2688,7 @@ function formatSymbolLabel(sym) {
     return `${p.slice(0, 3)}/${p.slice(3)}`;
   }
   /* Step Index: show friendly names for the Deriv stpRNG codes */
-  const stepLabels = {
-    "stpRNG": "Step Index 100", "stpRNG2": "Step Index 200",
-    "stpRNG3": "Step Index 300", "stpRNG4": "Step Index 400",
-    "stpRNG5": "Step Index 500"
-  };
-  if (stepLabels[sym]) return stepLabels[sym];
+  if (STEP_INDEX_LABELS[sym]) return STEP_INDEX_LABELS[sym];
   return sym;
 }
 
