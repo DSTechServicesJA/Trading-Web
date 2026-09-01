@@ -1109,6 +1109,7 @@ async function waitForApiCallSlot(endpoint, maxWaitMs = 20000) {
 /* ================= STATE ================= */
 let authorized    = false;
 let ws            = null;   /* public market-data WebSocket (charts + indicators) */
+let _cachedActiveSymbols = null; /* Set of valid symbol codes from active_symbols API */
 let authWs        = null;   /* authenticated WebSocket — trading actions only */
 let candles       = [];
 let rangeStartEpoch = null;
@@ -7979,6 +7980,14 @@ function connect() {
     addLog(`Connected to public feed – subscribing to ${symbol} (${gran}s candles)`);
     subscribeCandles(thisWs, symbol, gran);
 
+    /* Validate symbol against the API's active_symbols list.
+       This runs in parallel — if the symbol turns out to be invalid the error
+       handler below will surface it, but this also lets us cache the valid
+       set so the UI can warn early on future switches. */
+    if (thisWs.readyState === WebSocket.OPEN) {
+      thisWs.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
+    }
+
     /* Also open the authenticated trading connection if a token is set */
     connectAuthWs(symbol);
   };
@@ -7991,7 +8000,39 @@ function connect() {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
 
     if (msg.error) {
-      addLog("Feed error: " + msg.error.message);
+      const sym = (msg.echo_req && (msg.echo_req.ticks_history || msg.echo_req.ticks)) || "";
+      if (sym) {
+        addLog(`⚠️ Feed error for "${sym}": ${msg.error.message} (code: ${msg.error.code || "unknown"})`);
+        showToast("Symbol Error", `"${sym}" — ${msg.error.message}. Check symbol code.`, "warning", 8000);
+      } else {
+        addLog("Feed error: " + msg.error.message);
+      }
+      return;
+    }
+
+    /* Handle active_symbols validation response */
+    if (msg.msg_type === "active_symbols" && msg.active_symbols) {
+      const validSet = new Set(msg.active_symbols.map(s => s.symbol));
+      _cachedActiveSymbols = validSet;
+      const currentSym = UI.symbolSelect ? UI.symbolSelect.value : symbol;
+      if (!validSet.has(currentSym)) {
+        addLog(`⚠️ Symbol "${currentSym}" is NOT in the active_symbols list — chart may not receive data.`);
+        showToast("Invalid Symbol", `"${currentSym}" is not available on Deriv. Select a different symbol.`, "warning", 10000);
+      } else {
+        addLog(`✅ Symbol "${currentSym}" verified against active_symbols`);
+      }
+      /* Also validate all dropdown options and flag unavailable ones */
+      if (UI.symbolSelect) {
+        for (const opt of UI.symbolSelect.options) {
+          if (opt.value && !validSet.has(opt.value)) {
+            opt.textContent = opt.textContent.replace(/ \[unavailable\]$/, "") + " [unavailable]";
+            opt.classList.add("symbol-unavailable");
+          } else {
+            opt.textContent = opt.textContent.replace(/ \[unavailable\]$/, "");
+            opt.classList.remove("symbol-unavailable");
+          }
+        }
+      }
       return;
     }
 
@@ -8011,8 +8052,9 @@ function connect() {
       startCandleCountdown();
     }
 
-    /* Streaming OHLC */
-    if (msg.ohlc) {
+    /* Streaming OHLC — use else-if so the historical batch's numeric ohlc flag
+       (ohlc: 1) does not accidentally enter this branch. */
+    else if (msg.ohlc && typeof msg.ohlc === "object") {
       feedWatchdog();
       const o = msg.ohlc;
       const c = {
@@ -24983,6 +25025,15 @@ function syncProfitDirToAllPanels() {
 function connectPanel(p) {
   if (p.ws && p.ws.readyState <= 1) return;
   if (p.unavailable) return; /* symbol rejected by the API – do not reconnect */
+  /* Early validation: if we have a cached active_symbols set, reject
+     symbols that are not in it before wasting a WebSocket connection. */
+  if (_cachedActiveSymbols && !_cachedActiveSymbols.has(p.symbol)) {
+    addLog(`[Multi] ${p.symbol} is not in the active_symbols list — skipping`);
+    p.unavailable = true;
+    p.unavailableReason = "Symbol not available on Deriv";
+    updatePanelCardUI(p);
+    return;
+  }
   p.intentionalClose = false;
   /* Clear any pending reconnect timer from a previous auto-reconnect cycle */
   if (p.reconnectTimer) { clearTimeout(p.reconnectTimer); p.reconnectTimer = null; }
@@ -25203,8 +25254,9 @@ function connectPanel(p) {
       remapPendingSignalIndices();
     }
 
-    /* Streaming OHLC */
-    if (msg.ohlc) {
+    /* Streaming OHLC — use else-if so the historical batch's numeric ohlc flag
+       (ohlc: 1) does not accidentally enter this branch. */
+    else if (msg.ohlc && typeof msg.ohlc === "object") {
       p._lastDataTs = Date.now();
       const o = msg.ohlc;
       const c = {

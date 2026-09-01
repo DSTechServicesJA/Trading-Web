@@ -3972,3 +3972,9 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   align-items: center;
   gap: 6px;
 }
+
+/* ---- Unavailable symbol marker ---- */
+.symbol-unavailable {
+  color: #ef4444 !important;
+  opacity: 0.6;
+}
