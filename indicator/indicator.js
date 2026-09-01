@@ -8054,7 +8054,11 @@ function connect() {
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
-      addLog(`📊 ${symbol}: received ${candles.length} historical candles (first ${fmt(candles[0].close, 2)} @ ${candles[0].epoch}, last ${fmt(candles[candles.length - 1].close, 2)} @ ${candles[candles.length - 1].epoch})`);
+      if (candles.length > 0) {
+        addLog(`📊 ${symbol}: received ${candles.length} historical candles (first ${fmt(candles[0].close, 2)} @ ${candles[0].epoch}, last ${fmt(candles[candles.length - 1].close, 2)} @ ${candles[candles.length - 1].epoch})`);
+      } else {
+        addLog(`⚠️ ${symbol}: historical candle request returned 0 candles — no data to compute indicators`);
+      }
       computeEMAs();
       processAllCandles();
       logIndicatorSnapshot(symbol);
