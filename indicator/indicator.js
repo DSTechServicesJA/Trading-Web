@@ -7958,7 +7958,7 @@ function connect() {
 
   /* ── Deriv API feed — supports ticks_history (OHLC candles) without authorization ── */
   updateFeedStatusBar("connecting");
-  ws = new WebSocket(AUTH_WS_URL);
+  ws = new WebSocket(PUBLIC_WS_URL);
   const thisWs = ws; /* capture reference to detect stale handlers */
 
   ws.onopen = () => {
@@ -25175,7 +25175,7 @@ function connectPanel(p) {
   p.sessionRangeHistory   = p.sessionRangeHistory   || [];
   p.connected = false;
 
-  const panelWs = new WebSocket(WS_URL);
+  const panelWs = new WebSocket(PUBLIC_WS_URL);
 
   panelWs.onopen = () => {
     if (p.ws !== panelWs) return; /* stale connection */
@@ -25185,13 +25185,9 @@ function connectPanel(p) {
     updatePanelCardUI(p);
     addLog(`[Multi] ${p.symbol} connected`);
 
-    /* Authorize with stored Deriv token to bind live account */
-    const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
-    if (token) {
-      panelWs.send(JSON.stringify({ authorize: token }));
-    } else {
-      subscribeCandles(panelWs, p.symbol, gran);
-    }
+    /* Public feed — subscribe to candles directly (no auth needed).
+       Auth for trading is handled by the separate connectAuthWs channel. */
+    subscribeCandles(panelWs, p.symbol, gran);
 
     /* Keepalive ping */
     p.pingTimer = setInterval(() => {
