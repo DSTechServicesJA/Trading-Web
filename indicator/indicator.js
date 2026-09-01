@@ -71,15 +71,17 @@ let APP_ID  = 120128;
 /** Public market-data endpoint — no API token required (charts, indicators, analysis). */
 const PUBLIC_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 
-/** Authenticated trading endpoint — used only for authorize / buy / sell / balance. */
+/** Standard Deriv API endpoint — supports ticks_history (OHLC candles), authorize, trading.
+ *  Used for both the chart data feed and authenticated trading actions. */
 let AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
-/** Legacy alias — always points to the public feed. */
-let WS_URL = PUBLIC_WS_URL;
+/** Alias for the standard Deriv API — used for chart candle subscriptions and panels. */
+let WS_URL = AUTH_WS_URL;
 
-/** Rebuild AUTH_WS_URL after APP_ID changes (WS_URL stays on the public feed). */
+/** Rebuild AUTH_WS_URL and WS_URL after APP_ID changes. */
 function updateWsUrl() {
   AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+  WS_URL = AUTH_WS_URL;
 }
 
 /** Safely parse a JSON response, returning {} on empty/invalid body */
@@ -7923,8 +7925,8 @@ function connect() {
   const symbol = UI.symbolSelect.value;
   const gran   = parseInt(UI.granSelect.value, 10);
 
-  /* ── Public market-data feed (no auth token required) ── */
-  ws = new WebSocket(PUBLIC_WS_URL);
+  /* ── Deriv API feed — supports ticks_history (OHLC candles) without authorization ── */
+  ws = new WebSocket(AUTH_WS_URL);
   const thisWs = ws; /* capture reference to detect stale handlers */
 
   ws.onopen = () => {
