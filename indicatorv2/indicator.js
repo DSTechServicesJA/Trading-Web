@@ -522,8 +522,6 @@ function migrateSymbol(sym) {
   return DEPRECATED_SYMBOL_MAP[sym] || sym;
 }
 
-/* Canonical Step Index symbols (Deriv API codes), for validation/logging. */
-const STEP_INDEX_SYMBOLS = ["stpRNG", "stpRNG2", "stpRNG3", "stpRNG4", "stpRNG5"];
 const STEP_INDEX_LABELS = {
   "stpRNG":  "Step Index 100",
   "stpRNG2": "Step Index 200",

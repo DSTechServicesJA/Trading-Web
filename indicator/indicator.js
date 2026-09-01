@@ -531,7 +531,7 @@ const SYMBOL_SPECS = (() => {
  * Map deprecated/incorrect Deriv API symbol codes to their current equivalents.
  * Used to auto-migrate symbols persisted in localStorage from older versions.
  *
- * NOTE: "STPIDX", "STPIDX200"–"STPIDX500" were invented by this app and are
+ * NOTE: "STPIDX", "STPIDX100"–"STPIDX500" were invented by this app and are
  * NOT valid Deriv WebSocket symbols. The real Deriv Step Index codes are
  * stpRNG (Step Index 100) through stpRNG5 (Step Index 500).
  */
@@ -550,8 +550,6 @@ function migrateSymbol(sym) {
   return DEPRECATED_SYMBOL_MAP[sym] || sym;
 }
 
-/* Canonical Step Index symbols (Deriv API codes), for validation/logging. */
-const STEP_INDEX_SYMBOLS = ["stpRNG", "stpRNG2", "stpRNG3", "stpRNG4", "stpRNG5"];
 const STEP_INDEX_LABELS = {
   "stpRNG":  "Step Index 100",
   "stpRNG2": "Step Index 200",
