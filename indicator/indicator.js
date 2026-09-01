@@ -8010,7 +8010,7 @@ function connect() {
       return;
     }
 
-    /* Handle active_symbols validation response */
+    /* Handle active_symbols response — rebuild the symbol dropdown dynamically */
     if (msg.msg_type === "active_symbols" && msg.active_symbols) {
       const validSet = new Set(msg.active_symbols.map(s => s.symbol));
       _cachedActiveSymbols = validSet;
@@ -8021,18 +8021,52 @@ function connect() {
       } else {
         addLog(`✅ Symbol "${currentSym}" verified against active_symbols`);
       }
-      /* Also validate all dropdown options and flag unavailable ones */
+
+      /* Dynamically rebuild the <select> from the API response so that the
+         symbol list always reflects what Deriv actually offers. Symbols are
+         grouped by submarket_display_name within each market. */
       if (UI.symbolSelect) {
-        for (const opt of UI.symbolSelect.options) {
-          if (!opt.dataset.origLabel) opt.dataset.origLabel = opt.textContent;
-          if (opt.value && !validSet.has(opt.value)) {
-            opt.textContent = opt.dataset.origLabel + " [unavailable]";
-            opt.classList.add("symbol-unavailable");
-          } else {
-            opt.textContent = opt.dataset.origLabel;
-            opt.classList.remove("symbol-unavailable");
+        /* Build grouped structure: market → submarket → [assets] */
+        const grouped = new Map();
+        for (const asset of msg.active_symbols) {
+          const marketKey = asset.market_display_name || asset.market || "Other";
+          const subKey    = asset.submarket_display_name || asset.submarket || marketKey;
+          if (!grouped.has(marketKey)) grouped.set(marketKey, new Map());
+          const subs = grouped.get(marketKey);
+          if (!subs.has(subKey)) subs.set(subKey, []);
+          subs.get(subKey).push(asset);
+        }
+
+        /* Sort assets within each group alphabetically by display_name */
+        for (const [, subs] of grouped) {
+          for (const [, assets] of subs) {
+            assets.sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
           }
         }
+
+        /* Clear old options and rebuild */
+        UI.symbolSelect.innerHTML = "";
+        for (const [market, subs] of grouped) {
+          for (const [sub, assets] of subs) {
+            const label = market === sub ? market : `${market} — ${sub}`;
+            const optgroup = document.createElement("optgroup");
+            optgroup.label = label;
+            for (const asset of assets) {
+              const opt = document.createElement("option");
+              opt.value = asset.symbol;
+              opt.textContent = asset.display_name || asset.symbol;
+              optgroup.appendChild(opt);
+            }
+            UI.symbolSelect.appendChild(optgroup);
+          }
+        }
+
+        /* Restore previous selection if it still exists; otherwise keep the first option */
+        if (validSet.has(currentSym)) {
+          UI.symbolSelect.value = currentSym;
+        }
+        updateCurrentSymbolLabel();
+        addLog(`📋 Symbol list refreshed — ${msg.active_symbols.length} symbols loaded from API`);
       }
       return;
     }
