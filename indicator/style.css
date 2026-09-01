@@ -3931,3 +3931,44 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   color: var(--text-muted, #94a3b8);
 }
 .deriv-account-status.connected { color: #22c55e; }
+
+/* ===== Public Market Feed Bar ===== */
+.public-feed-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(99, 102, 241, 0.06);
+  border-bottom: 1px solid var(--glass-border);
+  flex-wrap: wrap;
+}
+.public-feed-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--primary, #6366f1), #4f46e5);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.public-feed-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #818cf8, var(--primary, #6366f1));
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+}
+.public-feed-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.feed-status-bar {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

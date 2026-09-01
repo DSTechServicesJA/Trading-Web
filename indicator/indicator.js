@@ -7909,6 +7909,36 @@ function updateAccountBadge(acct) {
 }
 
 /* ================= WEBSOCKET ================= */
+
+/** Update the public feed status bar below the nav */
+function updateFeedStatusBar(state) {
+  const indicator = document.getElementById("feedStatusIndicator");
+  const text = document.getElementById("feedStatusText");
+  const btn  = document.getElementById("startPublicFeedBtn");
+  if (!indicator || !text) return;
+  if (state === "connected") {
+    indicator.textContent = "🟢";
+    text.textContent = "Connected to public market feed.";
+    text.style.color = "#22c55e";
+    if (btn) { btn.disabled = true; btn.textContent = "📡 Feed Connected"; }
+  } else if (state === "connecting") {
+    indicator.textContent = "🟡";
+    text.textContent = "Connecting to public market feed…";
+    text.style.color = "#f59e0b";
+    if (btn) { btn.disabled = true; btn.textContent = "📡 Connecting…"; }
+  } else if (state === "reconnecting") {
+    indicator.textContent = "🟡";
+    text.textContent = "Reconnecting to public market feed…";
+    text.style.color = "#f59e0b";
+    if (btn) { btn.disabled = false; btn.textContent = "📡 Start Public Market Feed"; }
+  } else {
+    indicator.textContent = "🔴";
+    text.textContent = "Public market feed is offline. Click Start Public Market Feed to enable live charts and indicators.";
+    text.style.color = "#94a3b8";
+    if (btn) { btn.disabled = false; btn.textContent = "📡 Start Public Market Feed"; }
+  }
+}
+
 function connect() {
   if (ws && ws.readyState <= 1) return;
   intentionalClose = false;
@@ -7926,6 +7956,7 @@ function connect() {
   const gran   = parseInt(UI.granSelect.value, 10);
 
   /* ── Deriv API feed — supports ticks_history (OHLC candles) without authorization ── */
+  updateFeedStatusBar("connecting");
   ws = new WebSocket(AUTH_WS_URL);
   const thisWs = ws; /* capture reference to detect stale handlers */
 
@@ -7935,6 +7966,7 @@ function connect() {
     UI.wsStatus.className = "status-badge enabled";
     UI.connectBtn.disabled = true;
     UI.disconnectBtn.disabled = false;
+    updateFeedStatusBar("connected");
     reconnectAttempts = 0;
     startUptimeTimer();
     startPing();
@@ -8059,6 +8091,7 @@ function connect() {
     UI.wsStatus.className = "status-badge disabled";
     UI.connectBtn.disabled = false;
     UI.disconnectBtn.disabled = true;
+    updateFeedStatusBar("disconnected");
     stopUptimeTimer();
     addLog("WebSocket closed");
 
@@ -8192,6 +8225,7 @@ function disconnect() {
   UI.wsStatus.className = "status-badge disabled";
   UI.connectBtn.disabled = false;
   UI.disconnectBtn.disabled = true;
+  updateFeedStatusBar("disconnected");
   addLog("Disconnected");
 }
 
@@ -8310,6 +8344,7 @@ function scheduleReconnect() {
     addLog("⚠️ Max reconnection attempts reached. Please check your connection and click Connect.");
     UI.wsStatus.textContent = "FAILED";
     UI.wsStatus.className = "status-badge error";
+    updateFeedStatusBar("disconnected");
     showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", TOAST_ERROR_DURATION_MS);
     return;
   }
@@ -8317,6 +8352,7 @@ function scheduleReconnect() {
   addLog(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
   UI.wsStatus.textContent = "RECONNECTING";
   UI.wsStatus.className = "status-badge warning";
+  updateFeedStatusBar("reconnecting");
   
   reconnectTimer = setTimeout(() => {
     if (!intentionalClose) {
@@ -25776,6 +25812,15 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Button handlers */
   UI.connectBtn.addEventListener("click", connect);
   UI.disconnectBtn.addEventListener("click", disconnect);
+
+  /* Start Public Market Feed button — mirrors root index.html behaviour */
+  const startPublicFeedBtn = document.getElementById("startPublicFeedBtn");
+  if (startPublicFeedBtn) {
+    startPublicFeedBtn.addEventListener("click", () => {
+      console.log("[PublicFeed] User clicked Start Public Market Feed");
+      connect();
+    });
+  }
   if (UI.resetSessionBtn) {
     UI.resetSessionBtn.addEventListener("click", () => {
       if (confirm("Reset session? This clears all signals, stats, and log.")) resetSession();
