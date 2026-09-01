@@ -142,7 +142,7 @@ const FOREX_TUNING = {
 };
 [
   "frxEURUSD", "frxGBPUSD", "frxAUDUSD", "frxUSDJPY",
-  "frxUSDCAD", "frxUSDCHF", "frxNZDUSD"
+  "frxNZDUSD"
 ].forEach(sym => { SYMBOL_TUNING[sym] = FOREX_TUNING; });
 
 // ================= RSI SLOPE TUNING =================
@@ -2647,31 +2647,28 @@ const SYMBOL_SPEED = {
   FAST: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
   STANDARD: ["1HZ10V", "1HZ25V", "1HZ50V", "1HZ75V", "1HZ100V"],
   FOREX: [
-    "frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxUSDCHF", "frxAUDUSD", "frxUSDCAD", "frxNZDUSD",
-    "frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURCAD", "frxEURCHF", "frxEURNZD",
-    "frxGBPJPY", "frxGBPAUD", "frxGBPCAD", "frxGBPCHF", "frxGBPNZD",
-    "frxAUDJPY", "frxAUDNZD", "frxAUDCAD", "frxAUDCHF",
-    "frxNZDJPY", "frxNZDCAD", "frxNZDCHF",
-    "frxCADJPY", "frxCADCHF", "frxCHFJPY",
-    "frxUSDMXN", "frxUSDNOK", "frxUSDSEK", "frxUSDSGD", "frxUSDZAR", "frxUSDPLN", "frxUSDTRY", "frxUSDHKD",
-    "frxXAUUSD", "XAUUSDmicro", "XAUUSD.s", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"
+    "frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxAUDUSD", "frxNZDUSD",
+    "frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURNZD",
+    "frxGBPJPY", "frxGBPAUD", "frxGBPNZD",
+    "frxAUDJPY", "frxAUDNZD",
+    "frxNZDJPY",
+    "frxUSDMXN", "frxUSDSGD", "frxUSDPLN",
+    "frxXAUUSD", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"
   ]
 };
 
 const INDICATOR_SYMBOL_GROUPS = {
   FAST_1S: ["1HZ10V", "1HZ15V", "1HZ25V", "1HZ30V", "1HZ50V", "1HZ75V", "1HZ90V", "1HZ100V", "1HZ150V", "1HZ200V", "1HZ250V", "1HZ300V"],
-  VOLATILITY: ["1HZ10V", "1HZ25V", "1HZ50V", "1HZ75V", "1HZ100V"],
+  VOLATILITY: ["R_10", "R_25", "R_50", "R_75", "R_100"],
   BOOM: ["BOOM300N", "BOOM500", "BOOM600", "BOOM900", "BOOM1000"],
   CRASH: ["CRASH300N", "CRASH500", "CRASH600", "CRASH900", "CRASH1000"],
   JUMP: ["JD10", "JD25", "JD50", "JD75", "JD100"],
-  STEP: ["STPIDX100", "STPIDX200", "STPIDX300", "STPIDX400", "STPIDX500"],
+  STEP: ["STPIDX", "STPIDX200", "STPIDX300", "STPIDX400", "STPIDX500"],
   DAILY_RESET: ["RDBULL", "RDBEAR"],
-  DEX: ["DEX600DN", "DEX600UP", "DEX900DN", "DEX900UP", "DEX1500DN", "DEX1500UP"],
-  DRIFT_SWITCH: ["DSI10", "DSI20", "DSI30"],
-  FOREX_MAJORS: ["frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxUSDCHF", "frxAUDUSD", "frxUSDCAD", "frxNZDUSD"],
-  FOREX_CROSSES: ["frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURCAD", "frxEURCHF", "frxEURNZD", "frxGBPJPY", "frxGBPAUD", "frxGBPCAD", "frxGBPCHF", "frxGBPNZD", "frxAUDJPY", "frxAUDNZD", "frxAUDCAD", "frxAUDCHF", "frxNZDJPY", "frxNZDCAD", "frxNZDCHF", "frxCADJPY", "frxCADCHF", "frxCHFJPY"],
-  FOREX_EXOTICS: ["frxUSDMXN", "frxUSDNOK", "frxUSDSEK", "frxUSDSGD", "frxUSDZAR", "frxUSDPLN", "frxUSDTRY", "frxUSDHKD"],
-  COMMODITIES: ["frxXAUUSD", "XAUUSDmicro", "XAUUSD.s", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"]
+  FOREX_MAJORS: ["frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxAUDUSD", "frxNZDUSD"],
+  FOREX_CROSSES: ["frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURNZD", "frxGBPJPY", "frxGBPAUD", "frxGBPNZD", "frxAUDJPY", "frxAUDNZD", "frxNZDJPY"],
+  FOREX_EXOTICS: ["frxUSDMXN", "frxUSDSGD", "frxUSDPLN"],
+  COMMODITIES: ["frxXAUUSD", "frxXAGUSD", "frxXPTUSD", "frxXPDUSD"]
 };
 
 function listContains(list, sym) {
@@ -2699,8 +2696,6 @@ function populateBotSymbolSelectFromIndicatorList() {
     ["Jump", INDICATOR_SYMBOL_GROUPS.JUMP],
     ["Step", INDICATOR_SYMBOL_GROUPS.STEP],
     ["Daily Reset", INDICATOR_SYMBOL_GROUPS.DAILY_RESET],
-    ["DEX", INDICATOR_SYMBOL_GROUPS.DEX],
-    ["Drift Switch", INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH],
     ["Forex Majors", INDICATOR_SYMBOL_GROUPS.FOREX_MAJORS],
     ["Forex Crosses", INDICATOR_SYMBOL_GROUPS.FOREX_CROSSES],
     ["Forex Exotics", INDICATOR_SYMBOL_GROUPS.FOREX_EXOTICS],
@@ -3049,8 +3044,6 @@ function getPo3RecommendedTuning(sym) {
       listContains(INDICATOR_SYMBOL_GROUPS.CRASH, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.JUMP, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.STEP, sym) ||
-      listContains(INDICATOR_SYMBOL_GROUPS.DEX, sym) ||
-      listContains(INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.DAILY_RESET, sym)) {
     return { sweepLookback: 10, bodyPct: 0.72, fvgMinPct: 0.00010, note: "Spike-style synthetics benefit from wider sweep context and stronger displacement confirmation." };
   }
@@ -3079,8 +3072,6 @@ function getPo3PresetBadgeInfo(sym, hasCustom) {
       listContains(INDICATOR_SYMBOL_GROUPS.CRASH, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.JUMP, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.STEP, sym) ||
-      listContains(INDICATOR_SYMBOL_GROUPS.DEX, sym) ||
-      listContains(INDICATOR_SYMBOL_GROUPS.DRIFT_SWITCH, sym) ||
       listContains(INDICATOR_SYMBOL_GROUPS.DAILY_RESET, sym)) {
     return { text: "SPIKE", className: "spike" };
   }
@@ -3184,8 +3175,6 @@ const MARKET_SIGNAL_LABEL = {
   "frxGBPUSD": "GBP/USD",
   "frxAUDUSD": "AUD/USD",
   "frxUSDJPY": "USD/JPY",
-  "frxUSDCAD": "USD/CAD",
-  "frxUSDCHF": "USD/CHF",
   "frxNZDUSD": "NZD/USD"
 };
 
