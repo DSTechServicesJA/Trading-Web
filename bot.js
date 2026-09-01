@@ -2663,7 +2663,7 @@ const INDICATOR_SYMBOL_GROUPS = {
   BOOM: ["BOOM300N", "BOOM500", "BOOM600", "BOOM900", "BOOM1000"],
   CRASH: ["CRASH300N", "CRASH500", "CRASH600", "CRASH900", "CRASH1000"],
   JUMP: ["JD10", "JD25", "JD50", "JD75", "JD100"],
-  STEP: ["STPIDX", "STPIDX200", "STPIDX300", "STPIDX400", "STPIDX500"],
+  STEP: ["stpRNG", "stpRNG2", "stpRNG3", "stpRNG4", "stpRNG5"],
   DAILY_RESET: ["RDBULL", "RDBEAR"],
   FOREX_MAJORS: ["frxEURUSD", "frxGBPUSD", "frxUSDJPY", "frxAUDUSD", "frxNZDUSD"],
   FOREX_CROSSES: ["frxEURGBP", "frxEURJPY", "frxEURAUD", "frxEURNZD", "frxGBPJPY", "frxGBPAUD", "frxGBPNZD", "frxAUDJPY", "frxAUDNZD", "frxNZDJPY"],
@@ -2680,6 +2680,13 @@ function formatSymbolLabel(sym) {
     const p = sym.slice(3);
     return `${p.slice(0, 3)}/${p.slice(3)}`;
   }
+  /* Step Index: show friendly names for the Deriv stpRNG codes */
+  const stepLabels = {
+    "stpRNG": "Step Index 100", "stpRNG2": "Step Index 200",
+    "stpRNG3": "Step Index 300", "stpRNG4": "Step Index 400",
+    "stpRNG5": "Step Index 500"
+  };
+  if (stepLabels[sym]) return stepLabels[sym];
   return sym;
 }
 
