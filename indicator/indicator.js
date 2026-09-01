@@ -330,7 +330,11 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "1HZ300V":  [50, 100, 200, 300, 500],
 
   /* --- Volatility (Standard) --- */
-  /* NOTE: R_10–R_100 removed — deprecated by Deriv API (use 1HZ equivalents) */
+  "R_10":     [20, 50, 100, 200, 300, 500],
+  "R_25":     [20, 50, 100, 200, 300, 500],
+  "R_50":     [50, 100, 200, 300, 500],
+  "R_75":     [50, 100, 200, 300, 500],
+  "R_100":    [50, 100, 200, 300, 500],
 
   /* --- Boom Indices --- */
   "BOOM300N": [50, 100, 200, 300, 500],
@@ -354,7 +358,7 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "JD100":    [50, 100, 200, 300, 500],
 
   /* --- Step Indices (STPIDX – replaces deprecated stpRNG series) --- */
-  "STPIDX100": [50, 100, 200, 300, 500],
+  "STPIDX":    [50, 100, 200, 300, 500],
   "STPIDX200": [50, 100, 200, 300, 500],
   "STPIDX300": [50, 100, 200, 300, 500],
   "STPIDX400": [50, 100, 200, 300, 500],
@@ -364,68 +368,36 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "RDBULL":   [50, 100, 200, 300, 500],
   "RDBEAR":   [50, 100, 200, 300, 500],
 
-  /* --- DEX Indices --- */
-  "DEX600DN": [50, 100, 200, 300, 500],
-  "DEX600UP": [50, 100, 200, 300, 500],
-  "DEX900DN": [50, 100, 200, 300, 500],
-  "DEX900UP": [50, 100, 200, 300, 500],
-  "DEX1500DN": [50, 100, 200, 300, 500],
-  "DEX1500UP": [50, 100, 200, 300, 500],
-
-  /* --- Drift Switch Indices --- */
-  "DSI10":    [50, 100, 200, 300, 500],
-  "DSI20":    [50, 100, 200, 300, 500],
-  "DSI30":    [50, 100, 200, 300, 500],
 
   /* --- Forex Majors --- */
   "frxEURUSD":[50, 100, 200, 300, 500],
   "frxGBPUSD":[50, 100, 200, 300, 500],
   "frxUSDJPY":[50, 100, 200, 300, 500],
-  "frxUSDCHF":[50, 100, 200, 300, 500],
   "frxAUDUSD":[50, 100, 200, 300, 500],
-  "frxUSDCAD":[50, 100, 200, 300, 500],
   "frxNZDUSD":[50, 100, 200, 300, 500],
 
   /* --- Forex Crosses --- */
   "frxEURGBP":[50, 100, 200, 300, 500],
   "frxEURJPY":[50, 100, 200, 300, 500],
   "frxEURAUD":[50, 100, 200, 300, 500],
-  "frxEURCAD":[50, 100, 200, 300, 500],
-  "frxEURCHF":[50, 100, 200, 300, 500],
   "frxEURNZD":[50, 100, 200, 300, 500],
   "frxGBPJPY":[50, 100, 200, 300, 500],
   "frxGBPAUD":[50, 100, 200, 300, 500],
-  "frxGBPCAD":[50, 100, 200, 300, 500],
-  "frxGBPCHF":[50, 100, 200, 300, 500],
   "frxGBPNZD":[50, 100, 200, 300, 500],
   "frxAUDJPY":[50, 100, 200, 300, 500],
   "frxAUDNZD":[50, 100, 200, 300, 500],
-  "frxAUDCAD":[50, 100, 200, 300, 500],
-  "frxAUDCHF":[50, 100, 200, 300, 500],
   "frxNZDJPY":[50, 100, 200, 300, 500],
-  "frxNZDCAD":[50, 100, 200, 300, 500],
-  "frxNZDCHF":[50, 100, 200, 300, 500],
-  "frxCADJPY":[50, 100, 200, 300, 500],
-  "frxCADCHF":[50, 100, 200, 300, 500],
-  "frxCHFJPY":[50, 100, 200, 300, 500],
 
   /* --- Forex Exotics --- */
   "frxUSDMXN":[50, 100, 200, 300, 500],
-  "frxUSDNOK":[50, 100, 200, 300, 500],
-  "frxUSDSEK":[50, 100, 200, 300, 500],
   "frxUSDSGD":[50, 100, 200, 300, 500],
-  "frxUSDZAR":[50, 100, 200, 300, 500],
   "frxUSDPLN":[50, 100, 200, 300, 500],
-  "frxUSDTRY":[50, 100, 200, 300, 500],
-  "frxUSDHKD":[50, 100, 200, 300, 500],
 
   /* --- Commodities --- */
   "frxXAUUSD":[50, 100, 200, 300, 500],
   "frxXAGUSD":[50, 100, 200, 300, 500],
   "frxXPTUSD":[50, 100, 200, 300, 500],
-  "frxXPDUSD":[50, 100, 200, 300, 500],
-  "XAUUSDmicro":[50, 100, 200, 300, 500],
-  "XAUUSD.s":  [50, 100, 200, 300, 500]
+  "frxXPDUSD":[50, 100, 200, 300, 500]
 };
 
 /**
@@ -514,62 +486,40 @@ const SYMBOL_SPECS = (() => {
   fx("frxAUDUSD", "USD", 0.0001, 100000);
   fx("frxNZDUSD", "USD", 0.0001, 100000);
   fx("frxUSDJPY", "JPY", 0.01,   100000);
-  fx("frxUSDCAD", "CAD", 0.0001, 100000);
-  fx("frxUSDCHF", "CHF", 0.0001, 100000);
 
   /* ---------- Forex Crosses ---------- */
   fx("frxEURGBP", "GBP", 0.0001, 100000);
   fx("frxEURJPY", "JPY", 0.01,   100000);
   fx("frxEURAUD", "AUD", 0.0001, 100000);
-  fx("frxEURCAD", "CAD", 0.0001, 100000);
-  fx("frxEURCHF", "CHF", 0.0001, 100000);
   fx("frxEURNZD", "NZD", 0.0001, 100000);
   fx("frxGBPJPY", "JPY", 0.01,   100000);
   fx("frxGBPAUD", "AUD", 0.0001, 100000);
-  fx("frxGBPCAD", "CAD", 0.0001, 100000);
-  fx("frxGBPCHF", "CHF", 0.0001, 100000);
   fx("frxGBPNZD", "NZD", 0.0001, 100000);
   fx("frxAUDJPY", "JPY", 0.01,   100000);
   fx("frxAUDNZD", "NZD", 0.0001, 100000);
-  fx("frxAUDCAD", "CAD", 0.0001, 100000);
-  fx("frxAUDCHF", "CHF", 0.0001, 100000);
   fx("frxNZDJPY", "JPY", 0.01,   100000);
-  fx("frxNZDCAD", "CAD", 0.0001, 100000);
-  fx("frxNZDCHF", "CHF", 0.0001, 100000);
-  fx("frxCADJPY", "JPY", 0.01,   100000);
-  fx("frxCADCHF", "CHF", 0.0001, 100000);
-  fx("frxCHFJPY", "JPY", 0.01,   100000);
 
   /* ---------- Forex Exotics ---------- */
   fx("frxUSDMXN", "MXN", 0.0001, 100000);
-  fx("frxUSDNOK", "NOK", 0.0001, 100000);
-  fx("frxUSDSEK", "SEK", 0.0001, 100000);
   fx("frxUSDSGD", "SGD", 0.0001, 100000);
-  fx("frxUSDZAR", "ZAR", 0.0001, 100000);
   fx("frxUSDPLN", "PLN", 0.0001, 100000);
-  fx("frxUSDTRY", "TRY", 0.0001, 100000);
-  fx("frxUSDHKD", "HKD", 0.0001, 100000);
 
   /* ---------- Commodities ---------- */
   fx("frxXAUUSD", "USD", 0.01,   100);    /* Gold:          100 oz / lot, pip = $0.01 */
   fx("frxXAGUSD", "USD", 0.001,  5000);   /* Silver:       5000 oz / lot, pip = $0.001 */
   fx("frxXPTUSD", "USD", 0.01,   100);    /* Platinum:      100 oz / lot */
   fx("frxXPDUSD", "USD", 0.01,   100);    /* Palladium:     100 oz / lot */
-  fx("XAUUSDmicro","USD", 0.01,   10);    /* Gold Micro:     10 oz / lot, pip = $0.01 */
-  fx("XAUUSD.s",  "USD", 0.01,   100);    /* Gold Spot:     100 oz / lot, pip = $0.01 */
 
   /* ---------- Synthetics (Deriv MT5 — lot-size applies, contractSize = 1) --- */
   const syntheticSymbols = [
     "1HZ10V","1HZ15V","1HZ25V","1HZ30V","1HZ50V","1HZ75V","1HZ90V",
     "1HZ100V","1HZ150V","1HZ200V","1HZ250V","1HZ300V",
-    /* NOTE: R_10–R_100 removed — deprecated by Deriv API */
+    "R_10","R_25","R_50","R_75","R_100",
     "BOOM300N","BOOM500","BOOM600","BOOM900","BOOM1000",
     "CRASH300N","CRASH500","CRASH600","CRASH900","CRASH1000",
     "JD10","JD25","JD50","JD75","JD100",
-    "STPIDX100","STPIDX200","STPIDX300","STPIDX400","STPIDX500",
-    "RDBULL","RDBEAR",
-    "DEX600DN","DEX600UP","DEX900DN","DEX900UP","DEX1500DN","DEX1500UP",
-    "DSI10","DSI20","DSI30"
+    "STPIDX","STPIDX200","STPIDX300","STPIDX400","STPIDX500",
+    "RDBULL","RDBEAR"
   ];
   syntheticSymbols.forEach(sym => { s[sym] = { type: "synthetic", contractSize: 1 }; });
 
@@ -587,7 +537,7 @@ const DEPRECATED_SYMBOL_MAP = {
   "R_50":    "1HZ50V",
   "R_75":    "1HZ75V",
   "R_100":   "1HZ100V",
-  "stpRNG":  "STPIDX100",
+  "stpRNG":  "STPIDX",
   "stpRNG2": "STPIDX200",
   "stpRNG3": "STPIDX300",
   "stpRNG4": "STPIDX400",
