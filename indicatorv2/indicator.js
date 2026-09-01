@@ -281,12 +281,12 @@ const SYMBOL_FALLBACK_MULTIPLIERS = {
   "JD75":     [50, 100, 200, 300, 500],
   "JD100":    [50, 100, 200, 300, 500],
 
-  /* --- Step Indices (STPIDX – replaces deprecated stpRNG series) --- */
-  "STPIDX100": [50, 100, 200, 300, 500],
-  "STPIDX200": [50, 100, 200, 300, 500],
-  "STPIDX300": [50, 100, 200, 300, 500],
-  "STPIDX400": [50, 100, 200, 300, 500],
-  "STPIDX500": [50, 100, 200, 300, 500],
+  /* --- Step Indices (stpRNG = Step Index 100 … stpRNG5 = Step Index 500) --- */
+  "stpRNG":  [50, 100, 200, 300, 500],
+  "stpRNG2": [50, 100, 200, 300, 500],
+  "stpRNG3": [50, 100, 200, 300, 500],
+  "stpRNG4": [50, 100, 200, 300, 500],
+  "stpRNG5": [50, 100, 200, 300, 500],
 
   /* --- Daily Reset Indices --- */
   "RDBULL":   [50, 100, 200, 300, 500],
@@ -484,7 +484,7 @@ const SYMBOL_SPECS = (() => {
     "BOOM300N","BOOM500","BOOM600","BOOM900","BOOM1000",
     "CRASH300N","CRASH500","CRASH600","CRASH900","CRASH1000",
     "JD10","JD25","JD50","JD75","JD100",
-    "STPIDX100","STPIDX200","STPIDX300","STPIDX400","STPIDX500",
+    "stpRNG","stpRNG2","stpRNG3","stpRNG4","stpRNG5",
     "RDBULL","RDBEAR",
     "DEX600DN","DEX600UP","DEX900DN","DEX900UP","DEX1500DN","DEX1500UP",
     "DSI10","DSI20","DSI30"
@@ -495,22 +495,53 @@ const SYMBOL_SPECS = (() => {
 })();
 
 /* ================= DEPRECATED SYMBOL MIGRATION ================= */
+/**
+ * Map deprecated/incorrect Deriv API symbol codes to their current equivalents.
+ * Used to auto-migrate symbols persisted in localStorage from older versions.
+ *
+ * NOTE: "STPIDX", "STPIDX100"–"STPIDX500" were invented by this app and are
+ * NOT valid Deriv WebSocket symbols. The real Deriv Step Index codes are
+ * stpRNG (Step Index 100) through stpRNG5 (Step Index 500).
+ */
 const DEPRECATED_SYMBOL_MAP = {
   "R_10":    "1HZ10V",
   "R_25":    "1HZ25V",
   "R_50":    "1HZ50V",
   "R_75":    "1HZ75V",
   "R_100":   "1HZ100V",
-  "stpRNG":  "STPIDX100",
-  "stpRNG2": "STPIDX200",
-  "stpRNG3": "STPIDX300",
-  "stpRNG4": "STPIDX400",
-  "stpRNG5": "STPIDX500"
+  "STPIDX":    "stpRNG",
+  "STPIDX100": "stpRNG",
+  "STPIDX200": "stpRNG2",
+  "STPIDX300": "stpRNG3",
+  "STPIDX400": "stpRNG4",
+  "STPIDX500": "stpRNG5"
 };
 
 function migrateSymbol(sym) {
   if (!sym || typeof sym !== "string") return sym;
   return DEPRECATED_SYMBOL_MAP[sym] || sym;
+}
+
+/* Canonical Step Index symbols (Deriv API codes), for validation/logging. */
+const STEP_INDEX_SYMBOLS = ["stpRNG", "stpRNG2", "stpRNG3", "stpRNG4", "stpRNG5"];
+const STEP_INDEX_LABELS = {
+  "stpRNG":  "Step Index 100",
+  "stpRNG2": "Step Index 200",
+  "stpRNG3": "Step Index 300",
+  "stpRNG4": "Step Index 400",
+  "stpRNG5": "Step Index 500"
+};
+
+/**
+ * Resolve the symbol to request from the Deriv feed: migrate any deprecated
+ * or invented code to the canonical Deriv code. Returns the canonical symbol.
+ */
+function resolveFeedSymbol(sym) {
+  const resolved = migrateSymbol(sym);
+  if (resolved !== sym) {
+    addLog(`🔀 Symbol migration: "${sym}" → "${resolved}" (Deriv canonical code)`);
+  }
+  return resolved;
 }
 
 /* ================= CREDENTIAL ENCRYPTION ================= */
@@ -583,7 +614,7 @@ function getMarketType(symbol) {
   if (/^BOOM/i.test(symbol))  return "boom";
   if (/^CRASH/i.test(symbol)) return "crash";
   if (/^JD/i.test(symbol))    return "jump";
-  if (/^STPIDX/i.test(symbol)) return "step";
+  if (/^stpRNG\d*$/i.test(symbol) || /^STPIDX/i.test(symbol)) return "step";
   if (/^(RDBULL|RDBEAR)/i.test(symbol)) return "dailyreset";
   if (/^DEX/i.test(symbol))   return "dex";
   if (/^DSI/i.test(symbol))   return "driftswitch";
@@ -6878,8 +6909,10 @@ function connect() {
   reconnectAttempts = 0;
   resetIndicator();
 
-  const symbol = UI.symbolSelect.value;
+  const symbol = resolveFeedSymbol(UI.symbolSelect.value);
+  if (symbol !== UI.symbolSelect.value) UI.symbolSelect.value = symbol;
   const gran   = parseInt(UI.granSelect.value, 10);
+  addLog(`📈 Selected symbol: ${symbol} (${getMarketType(symbol)} market, ${STEP_INDEX_LABELS[symbol] || getSymbolLabel(symbol)}), granularity ${gran}s`);
 
   /* ── Public market-data feed (no auth token required) ── */
   ws = new WebSocket(PUBLIC_WS_URL);
@@ -6922,7 +6955,7 @@ function connect() {
     if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
 
     if (msg.error) {
-      addLog("Feed error: " + msg.error.message);
+      addLog(`Feed error [${msg.error.code || "?"}] for ${symbol}: ${msg.error.message}`);
       return;
     }
 
@@ -6933,8 +6966,14 @@ function connect() {
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
+      if (candles.length > 0) {
+        addLog(`📊 ${symbol}: received ${candles.length} historical candles (first ${fmt(candles[0].close, 2)} @ ${candles[0].epoch}, last ${fmt(candles[candles.length - 1].close, 2)} @ ${candles[candles.length - 1].epoch})`);
+      } else {
+        addLog(`⚠️ ${symbol}: historical candle request returned 0 candles — no data to compute indicators`);
+      }
       computeEMAs();
       processAllCandles();
+      logIndicatorSnapshot(symbol);
       drawChart();
       startCandleCountdown();
     }
@@ -6950,6 +6989,7 @@ function connect() {
           /* Track public feed tick count and last-update time */
           recordPublicFeedTick(o.symbol || getActiveSymbol(), fmt(c.close, 4));
 
+          const isNewCandle = !(candles.length > 0 && candles[candles.length - 1].epoch === c.epoch);
           if (candles.length > 0 && candles[candles.length - 1].epoch === c.epoch) {
         candles[candles.length - 1] = c;
       } else {
@@ -6974,6 +7014,9 @@ function connect() {
       computeStochastic();
       computeEMA200();
       computeVWAP();
+      if (isNewCandle && getMarketType(symbol) === "step") {
+        logIndicatorSnapshot(symbol);
+      }
       processLatestCandle();
       processLiveScalp();
       processCustomStrategies();
@@ -7315,6 +7358,29 @@ function computeEMAs() {
   emaFast = computeEMA(closes, EMA_FAST_PERIOD);
   emaSlow = computeEMA(closes, EMA_SLOW_PERIOD);
   emaHTF  = computeEMA(closes, HTF_EMA_PERIOD);
+}
+
+/**
+ * Requirement #10: detailed per-symbol indicator logging for Step Index (and
+ * other) markets. Logs the latest computed value of each indicator so failures
+ * are visible in the signal log instead of silently skipping.
+ */
+function logIndicatorSnapshot(symbol) {
+  try {
+    const last = (a) => (Array.isArray(a) && a.length) ? a[a.length - 1] : null;
+    const f = (v, d = 4) => (v == null || isNaN(v)) ? "--" : fmt(v, d);
+    addLog(
+      `📈 ${symbol} indicators — ` +
+      `RSI:${f(last(rsiValues), 1)} MACD:${f(last(macdHistogram), 4)} ` +
+      `EMA${EMA_FAST_PERIOD}:${f(last(emaFast))} EMA${EMA_SLOW_PERIOD}:${f(last(emaSlow))} ` +
+      `BB[${f(last(bbLower))}/${f(last(bbMiddle))}/${f(last(bbUpper))}] ` +
+      `ATR:${f(atrValue)} ADX:${f(adxValue, 1)} ` +
+      `Stoch%K:${f(last(stochK), 1)} %D:${f(last(stochD), 1)} ` +
+      `VWAP:${f(last(vwapValues))}`
+    );
+  } catch (e) {
+    addLog(`⚠️ ${symbol} indicator snapshot failed: ${e.message}`);
+  }
 }
 
 function computeEMA(data, period) {
