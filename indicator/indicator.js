@@ -8044,10 +8044,12 @@ function connect() {
           }
         }
 
-        /* Clear old options and rebuild */
+        /* Clear old options and rebuild (sort markets & submarkets alphabetically) */
         UI.symbolSelect.innerHTML = "";
-        for (const [market, subs] of grouped) {
-          for (const [sub, assets] of subs) {
+        const sortedMarkets = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        for (const [market, subs] of sortedMarkets) {
+          const sortedSubs = Array.from(subs.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+          for (const [sub, assets] of sortedSubs) {
             const label = market === sub ? market : `${market} — ${sub}`;
             const optgroup = document.createElement("optgroup");
             optgroup.label = label;
