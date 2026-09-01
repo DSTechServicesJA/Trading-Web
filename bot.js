@@ -2688,7 +2688,7 @@ function formatSymbolLabel(sym) {
     return `${p.slice(0, 3)}/${p.slice(3)}`;
   }
   /* Step Index: show friendly names for the Deriv stpRNG codes */
-  if (STEP_INDEX_LABELS[sym]) return STEP_INDEX_LABELS[sym];
+  if (Object.prototype.hasOwnProperty.call(STEP_INDEX_LABELS, sym)) return STEP_INDEX_LABELS[sym];
   return sym;
 }
 
