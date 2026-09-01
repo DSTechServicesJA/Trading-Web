@@ -7930,7 +7930,7 @@ function updateFeedStatusBar(state) {
     indicator.textContent = "🟡";
     text.textContent = "Reconnecting to public market feed…";
     text.style.color = "#f59e0b";
-    if (btn) { btn.disabled = false; btn.textContent = "📡 Start Public Market Feed"; }
+    if (btn) { btn.disabled = true; btn.textContent = "📡 Reconnecting…"; }
   } else {
     indicator.textContent = "🔴";
     text.textContent = "Public market feed is offline. Click Start Public Market Feed to enable live charts and indicators.";
@@ -25817,7 +25817,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const startPublicFeedBtn = document.getElementById("startPublicFeedBtn");
   if (startPublicFeedBtn) {
     startPublicFeedBtn.addEventListener("click", () => {
-      console.log("[PublicFeed] User clicked Start Public Market Feed");
+      addLog("[PublicFeed] User clicked Start Public Market Feed");
       connect();
     });
   }
