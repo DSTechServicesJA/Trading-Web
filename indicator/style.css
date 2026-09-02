@@ -897,6 +897,7 @@ button:disabled {
   color: var(--text-muted);
   transition: transform 0.2s;
 }
+.collapsible.open::after { transform: rotate(90deg); }
 .collapsible-body { display: none; }
 .collapsible-body.open { display: block; }
 
