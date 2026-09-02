@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 $symbol = $argv[1] ?? 'R_100';
-$wsUrl  = 'wss://api.derivws.com/trading/v1/options/ws/public';
+$wsUrl  = 'wss://ws.derivws.com/websockets/v3?app_id=120128';
 $maxTicks = 5;
 $timeout  = 15;
 

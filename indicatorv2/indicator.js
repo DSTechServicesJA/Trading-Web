@@ -68,8 +68,10 @@
 /* ================= CONFIG ================= */
 let APP_ID  = 120128;
 
-/** Public market-data endpoint — no API token required (charts, indicators, analysis). */
-const PUBLIC_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
+/** Public market-data endpoint — no API token required (charts, indicators, analysis).
+ *  This is the same Deriv API WebSocket endpoint used for authenticated trading;
+ *  no auth token is sent on it, so it is safe to use for public market data. */
+let PUBLIC_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
 /** Authenticated trading endpoint — used only for authorize / buy / sell / balance. */
 let AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
@@ -77,9 +79,11 @@ let AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 /** Legacy alias — always points to the public feed. */
 let WS_URL = PUBLIC_WS_URL;
 
-/** Rebuild AUTH_WS_URL after APP_ID changes (WS_URL stays on the public feed). */
+/** Rebuild AUTH_WS_URL/PUBLIC_WS_URL after APP_ID changes (WS_URL stays on the public feed). */
 function updateWsUrl() {
+  PUBLIC_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
   AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+  WS_URL = PUBLIC_WS_URL;
 }
 
 /** Safely parse a JSON response, returning {} on empty/invalid body */

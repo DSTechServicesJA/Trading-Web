@@ -10,7 +10,7 @@ const APP_ID = 120128;
 const SYMBOL = "1HZ75V"; // Volatility 75 (1s) style symbol seen in Deriv tooling
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`; // Deriv WS base
 // Public market-data WebSocket (no auth token required — chart/tick data only).
-const CHART_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
+const CHART_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 const DERIV_WS = window.DerivWsUtils || null;
 const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
 const WS_RECONNECT_BASE_MS = DERIV_WS?.DEFAULT_RECONNECT_BASE_MS || 1000;

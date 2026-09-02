@@ -82,8 +82,10 @@ let APP_ID = (function () {
 let WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
 // Public market-data WebSocket (no auth token required — chart/tick data only).
+// This is the same Deriv API WebSocket endpoint used for trading; no auth token
+// is sent on it, so it is safe to use for public market/chart data.
 // Trading messages (buy, sell, propose, authorize) still use WS_URL above.
-const CHART_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
+const CHART_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
 const DERIV_WS = window.DerivWsUtils || null;
 const WS_PING_INTERVAL_MS = DERIV_WS?.DEFAULT_PING_INTERVAL_MS || 12000;
