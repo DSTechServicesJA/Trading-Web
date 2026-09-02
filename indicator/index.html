@@ -1045,10 +1045,10 @@
                   <input type="number" id="gridScalperV2MaxLevelsInput" min="1" max="10" step="1" value="3" style="width:100%;margin-top:3px;" />
                 </label>
                 <label class="hint" for="gridScalperV2MinGridInput">Min Grid Distance
-                  <input type="number" id="gridScalperV2MinGridInput" min="0.00001" step="0.01" value="0.4" style="width:100%;margin-top:3px;" />
+                  <input type="number" id="gridScalperV2MinGridInput" min="0.01" step="0.01" value="0.4" style="width:100%;margin-top:3px;" />
                 </label>
                 <label class="hint" for="gridScalperV2MaxGridInput">Max Grid Distance
-                  <input type="number" id="gridScalperV2MaxGridInput" min="0.00001" step="0.01" value="3.5" style="width:100%;margin-top:3px;" />
+                  <input type="number" id="gridScalperV2MaxGridInput" min="0.01" step="0.01" value="3.5" style="width:100%;margin-top:3px;" />
                 </label>
                 <label class="hint" for="gridScalperV2StopMode">Smart Stop Mode
                   <select id="gridScalperV2StopMode" style="width:100%;margin-top:3px;">
@@ -1091,7 +1091,7 @@
                 </label>
               </div>
               <button id="gridScalperV2BacktestBtn" class="analysis-btn" type="button">📊 Compare Current vs Enhanced</button>
-              <pre id="gridScalperV2BacktestReport" style="margin-top:8px;white-space:pre-wrap;max-height:220px;overflow:auto;padding:10px;border-radius:8px;background:rgba(15,23,42,0.55);color:var(--text-primary);border:1px solid var(--glass-border);font-size:0.75rem;"></pre>
+              <pre id="gridScalperV2BacktestReport" role="status" aria-live="polite" style="margin-top:8px;white-space:pre-wrap;max-height:220px;overflow:auto;padding:10px;border-radius:8px;background:rgba(15,23,42,0.55);color:var(--text-primary);border:1px solid var(--glass-border);font-size:0.75rem;"></pre>
 
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
