@@ -17764,20 +17764,41 @@ function initMultiSymbolPicker() {
 
 /* ================= BOOT ================= */
 document.addEventListener("DOMContentLoaded", () => {
- try {
-  initUI();
-  initLoginGate();
-  restoreSettings();
-  /* Auto-apply recommended settings on boot so the Active column
-     and all filter toggles reflect the current symbol's recommendations */
-  applyRecommendedSettings();
-  restoreSignalLog();
-  restoreSignalHistory();
-  initTheme();
+  const initWarnings = [];
+  const reportInitError = (scope, err) => {
+    console.error(`Indicator init step failed: ${scope}`, err);
+    initWarnings.push(scope);
+  };
+  const safeRun = (scope, fn) => {
+    try {
+      fn();
+    } catch (err) {
+      reportInitError(scope, err);
+    }
+  };
+  const safeBind = (el, eventName, handler, scope) => {
+    if (!el) {
+      reportInitError(scope, new Error("Missing element"));
+      return;
+    }
+    safeRun(scope, () => el.addEventListener(eventName, handler));
+  };
+
+  safeRun("core boot sequence", () => {
+    initUI();
+    initLoginGate();
+    restoreSettings();
+    /* Auto-apply recommended settings on boot so the Active column
+       and all filter toggles reflect the current symbol's recommendations */
+    applyRecommendedSettings();
+    restoreSignalLog();
+    restoreSignalHistory();
+    initTheme();
+  });
 
   /* Initialize Grid Scalper MA Opposite Mode & Adaptive System */
   if (typeof initGridScalperMAOpposite === "function") {
-    initGridScalperMAOpposite();
+    safeRun("grid scalper MA opposite init", () => initGridScalperMAOpposite());
   }
 
   /* Restore stream mode from localStorage before wiring UI */
@@ -17786,11 +17807,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (saved !== null) streamMode = JSON.parse(saved) === true;
   } catch { /* ignore */ }
 
-  initKeyboardShortcuts();
+  safeRun("keyboard shortcuts init", () => initKeyboardShortcuts());
 
   /* Button handlers */
-  UI.connectBtn.addEventListener("click", connect);
-  UI.disconnectBtn.addEventListener("click", disconnect);
+  safeBind(UI.connectBtn, "click", connect, "connect button listener");
+  safeBind(UI.disconnectBtn, "click", disconnect, "disconnect button listener");
 
   /* Start Public Market Feed button — mirrors root index.html behaviour */
   const startPublicFeedBtn = document.getElementById("startPublicFeedBtn");
@@ -17807,8 +17828,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* Debounced reconnect on symbol/timeframe change */
-  UI.symbolSelect.addEventListener("change", () => { saveSettings(); updateCurrentSymbolLabel(); applyRecommendedSettings(); autoUpdateMultiplier(UI.symbolSelect.value); debouncedReconnect(); });
-  UI.granSelect.addEventListener("change",   () => { saveSettings(); updateRecommendedSettings(); debouncedReconnect(); });
+  safeBind(UI.symbolSelect, "change", () => { saveSettings(); updateCurrentSymbolLabel(); applyRecommendedSettings(); autoUpdateMultiplier(UI.symbolSelect.value); debouncedReconnect(); }, "symbol select listener");
+  safeBind(UI.granSelect, "change",   () => { saveSettings(); updateRecommendedSettings(); debouncedReconnect(); }, "timeframe select listener");
 
   /* Recalculate trade when risk/reward inputs change */
   function onRRChange() {
@@ -17822,8 +17843,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   }
-  UI.riskInput.addEventListener("input", onRRChange);
-  UI.rewardInput.addEventListener("input", onRRChange);
+  safeBind(UI.riskInput, "input", onRRChange, "risk input listener");
+  safeBind(UI.rewardInput, "input", onRRChange, "reward input listener");
 
   /* Account size & risk % listeners */
   if (UI.accountSizeInput) {
@@ -18105,7 +18126,7 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.teslaScalingPlan.addEventListener("change", () => { teslaScalingPlan = UI.teslaScalingPlan.value; saveSettings(); });
   }
   if (UI.rsiFilterToggle) {
-    UI.rsiFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: RSI Filter", UI.rsiFilterToggle.checked); rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.rsiFilterToggle.addEventListener("change", () => { rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.volumeSpikeToggle) {
     UI.volumeSpikeToggle.addEventListener("change", () => { volumeSpikeEnabled = UI.volumeSpikeToggle.checked; saveSettings(); updateStateUI(); });
@@ -18120,16 +18141,16 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.macdFilterToggle) {
-    UI.macdFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: MACD Filter", UI.macdFilterToggle.checked); macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.macdFilterToggle.addEventListener("change", () => { macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.bbSqueezeFilterToggle) {
-    UI.bbSqueezeFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Bollinger Bands Squeeze Filter", UI.bbSqueezeFilterToggle.checked); bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.bbSqueezeFilterToggle.addEventListener("change", () => { bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.adxFilterToggle) {
     UI.adxFilterToggle.addEventListener("change", () => { adxFilterEnabled = UI.adxFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.stochFilterToggle) {
-    UI.stochFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Stochastic Filter", UI.stochFilterToggle.checked); stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.stochFilterToggle.addEventListener("change", () => { stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
@@ -18934,11 +18955,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.streamModeBtn) UI.streamModeBtn.addEventListener("click", toggleStreamMode);
   /* Apply stream mode visuals now that the button is in the DOM */
-  applyStreamMode();
+  safeRun("apply stream mode visuals", () => applyStreamMode());
 
   /* EMA toggle */
   if (UI.emaToggle) {
-    UI.emaToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: EMA", UI.emaToggle.checked); saveSettings(); drawChart(); });
+    UI.emaToggle.addEventListener("change", () => { saveSettings(); drawChart(); });
   }
 
   /* Symbol nav buttons */
@@ -18995,19 +19016,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /* Multi-symbol picker */
-  initMultiSymbolPicker();
+  safeRun("multi-symbol picker init", () => initMultiSymbolPicker());
 
   /* ---- Feature initialisation ---- */
-  loadProfiles();
-  renderProfilesList();
-  loadSignalNotes();
-  loadConfluenceStats();
+  safeRun("profiles load", () => loadProfiles());
+  safeRun("profiles render", () => renderProfilesList());
+  safeRun("signal notes load", () => loadSignalNotes());
+  safeRun("confluence stats load", () => loadConfluenceStats());
 
   /* Feature 2: Orderblock toggle */
   if (UI.orderblockToggle) {
     UI.orderblockToggle.checked = orderblockEnabled;
     UI.orderblockToggle.addEventListener("change", () => {
-      console.log("Indicator toggle clicked: Orderblock", UI.orderblockToggle.checked);
       orderblockEnabled = UI.orderblockToggle.checked;
       saveSettings(); drawChart(); updateStrategyBadges();
     });
@@ -19172,12 +19192,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (newsPauseEnabled) fetchNewsCalendar();
   setInterval(() => { pollMt5BridgeStatus(); }, MT5_STATUS_POLL_MS);
 
-  addLog("Indicator ready – press Connect to start");
-  updateStatsUI();
- } catch (err) {
-  /* Guard against any single init step throwing and silently aborting
-     all remaining event-listener bindings (including indicator toggles). */
-  console.error("Indicator init error – some controls may not respond to clicks:", err);
-  try { addLog("⚠️ Initialization error – some buttons may not respond. Check console (F12) and reload."); } catch (_) { /* addLog itself may be unavailable */ }
- }
+  safeRun("ready message", () => addLog("Indicator ready – press Connect to start"));
+  safeRun("stats UI init", () => updateStatsUI());
+  if (initWarnings.length) {
+    try { addLog("⚠️ Initialization issue detected. Some controls may not respond; check console (F12)."); } catch (_) { /* addLog itself may be unavailable */ }
+  }
 });
