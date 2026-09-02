@@ -91,7 +91,38 @@ if ($dbOk && ($checks['users_table'] ?? '') === 'ok') {
     }
 }
 
-/* ── 4c. JWT encode / decode round-trip ── */
+/* ── 4c. Optional auth columns/tables for the latest feature set ── */
+if ($dbOk && ($checks['users_table'] ?? '') === 'ok') {
+    $missingUserColumns = [];
+    foreach ([
+        'role',
+        'status',
+        'subscription_status',
+        'subscription_plan',
+        'subscription_expires_at',
+        'telegram_user_id',
+        'telegram_username',
+        'telegram_linked_at',
+        'last_login_at',
+    ] as $column) {
+        if (!tableHasColumn($pdo, 'users', $column)) {
+            $missingUserColumns[] = $column;
+        }
+    }
+
+    $checks['users_optional_columns'] = $missingUserColumns
+        ? 'WARN — missing optional columns: ' . implode(', ', $missingUserColumns) . '; latest features may be limited until database/schema.sql is re-run'
+        : 'ok';
+
+    $strategyTableReady = tableExists($pdo, 'strategy_access')
+        && tableHasColumn($pdo, 'strategy_access', 'user_id')
+        && tableHasColumn($pdo, 'strategy_access', 'strategy_key');
+    $checks['strategy_access_table'] = $strategyTableReady
+        ? 'ok'
+        : 'WARN — strategy_access table is missing or incomplete; per-strategy access control will be unavailable until database/schema.sql is re-run';
+}
+
+/* ── 4d. JWT encode / decode round-trip ── */
 try {
     $testToken = jwtEncode(['test' => true, 'iat' => time(), 'exp' => time() + 60]);
     $decoded   = jwtDecode($testToken);
@@ -106,7 +137,7 @@ try {
     $allOk = false;
 }
 
-/* ── 4d. password_hash / password_verify sanity check ── */
+/* ── 4e. password_hash / password_verify sanity check ── */
 try {
     $testHash = password_hash('test', PASSWORD_BCRYPT, ['cost' => 4]);
     if ($testHash === false) {

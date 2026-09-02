@@ -697,6 +697,26 @@ let _multiPanelGran = null;        /* gran (seconds) for the panel currently bei
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
 let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
 
+/* ================= UI REFS ================= */
+const UI = new Proxy({}, {
+  get(target, prop) {
+    if (typeof prop !== "string") return target[prop];
+    if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+    return document.getElementById(prop);
+  },
+  set(target, prop, value) {
+    target[prop] = value;
+    return true;
+  }
+});
+
+function initUI() {
+  UI.canvas = document.getElementById("mainChart");
+  UI.ctx = UI.canvas ? UI.canvas.getContext("2d") : null;
+  UI.exportBtn = document.getElementById("exportSignalsBtn");
+  UI.exportPdfBtn = document.getElementById("exportPdfBtn");
+}
+
 /* #19: Shared helper — returns the current chart granularity in seconds.
  * When processing a multi-panel, returns that panel's own granularity so
  * lower-TF logic (fast-track confirmation, SL buffer) uses the correct value. */
