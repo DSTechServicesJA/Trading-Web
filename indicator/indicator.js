@@ -1929,21 +1929,65 @@ function normalizeGridScalperV2Settings() {
 
 function applyGridScalperV2SettingsToUI() {
   const s = normalizeGridScalperV2Settings();
-  if (UI.gridScalperV2AtrMultiplierInput) UI.gridScalperV2AtrMultiplierInput.value = s.gridAtrMultiplier;
-  if (UI.gridScalperV2MinGridInput) UI.gridScalperV2MinGridInput.value = s.minGridDistance;
-  if (UI.gridScalperV2MaxGridInput) UI.gridScalperV2MaxGridInput.value = s.maxGridDistance;
-  if (UI.gridScalperV2MaxLevelsInput) UI.gridScalperV2MaxLevelsInput.value = s.maxGridLevels;
-  if (UI.gridScalperV2StopMode) UI.gridScalperV2StopMode.value = s.stopMode;
-  if (UI.gridScalperV2AtrStopInput) UI.gridScalperV2AtrStopInput.value = s.atrStopMultiplier;
-  if (UI.gridScalperV2BreakEvenInput) UI.gridScalperV2BreakEvenInput.value = s.breakEvenTriggerR;
-  if (UI.gridScalperV2BreakEvenBufferInput) UI.gridScalperV2BreakEvenBufferInput.value = s.breakEvenBufferAtr;
-  if (UI.gridScalperV2ConfidenceInput) UI.gridScalperV2ConfidenceInput.value = s.confidenceThreshold;
-  if (UI.gridScalperV2EntryScoreInput) UI.gridScalperV2EntryScoreInput.value = s.entryScoreThreshold;
-  if (UI.gridScalperV2DailyDDInput) UI.gridScalperV2DailyDDInput.value = s.dailyDrawdownLimitPct;
-  if (UI.gridScalperV2ConsecutiveLossInput) UI.gridScalperV2ConsecutiveLossInput.value = s.consecutiveLossLimit;
-  if (UI.gridScalperV2Tp1ShareInput) UI.gridScalperV2Tp1ShareInput.value = Math.round(s.tp1Share * 100);
-  if (UI.gridScalperV2Tp2ShareInput) UI.gridScalperV2Tp2ShareInput.value = Math.round(s.tp2Share * 100);
-  if (UI.gridScalperV2Tp3ShareInput) UI.gridScalperV2Tp3ShareInput.value = Math.round(s.tp3Share * 100);
+  const pick = (uiKey, id) => UI[uiKey] || document.getElementById(id);
+  const mappings = [
+    ["gridScalperV2AtrMultiplierInput", "gridScalperV2AtrMultiplierInput", s.gridAtrMultiplier],
+    ["gridScalperV2MinGridInput", "gridScalperV2MinGridInput", s.minGridDistance],
+    ["gridScalperV2MaxGridInput", "gridScalperV2MaxGridInput", s.maxGridDistance],
+    ["gridScalperV2MaxLevelsInput", "gridScalperV2MaxLevelsInput", s.maxGridLevels],
+    ["gridScalperV2StopMode", "gridScalperV2StopMode", s.stopMode],
+    ["gridScalperV2AtrStopInput", "gridScalperV2AtrStopInput", s.atrStopMultiplier],
+    ["gridScalperV2BreakEvenInput", "gridScalperV2BreakEvenInput", s.breakEvenTriggerR],
+    ["gridScalperV2BreakEvenBufferInput", "gridScalperV2BreakEvenBufferInput", s.breakEvenBufferAtr],
+    ["gridScalperV2ConfidenceInput", "gridScalperV2ConfidenceInput", s.confidenceThreshold],
+    ["gridScalperV2EntryScoreInput", "gridScalperV2EntryScoreInput", s.entryScoreThreshold],
+    ["gridScalperV2DailyDDInput", "gridScalperV2DailyDDInput", s.dailyDrawdownLimitPct],
+    ["gridScalperV2ConsecutiveLossInput", "gridScalperV2ConsecutiveLossInput", s.consecutiveLossLimit],
+    ["gridScalperV2Tp1ShareInput", "gridScalperV2Tp1ShareInput", Math.round(s.tp1Share * 100)],
+    ["gridScalperV2Tp2ShareInput", "gridScalperV2Tp2ShareInput", Math.round(s.tp2Share * 100)],
+    ["gridScalperV2Tp3ShareInput", "gridScalperV2Tp3ShareInput", Math.round(s.tp3Share * 100)],
+    ["gridScalperV2BacktestSymbolsInput", "gridScalperV2BacktestSymbolsInput", s.backtestSymbols]
+  ];
+  for (const [uiKey, id, value] of mappings) {
+    const el = pick(uiKey, id);
+    if (el) el.value = value;
+  }
+}
+
+function syncGridScalperV2SettingsFromUI() {
+  const pick = (uiKey, id) => UI[uiKey] || document.getElementById(id);
+  const current = Object.assign({}, gridScalperV2Settings || {});
+  const numberFields = [
+    ["gridScalperV2AtrMultiplierInput", "gridScalperV2AtrMultiplierInput", "gridAtrMultiplier"],
+    ["gridScalperV2MinGridInput", "gridScalperV2MinGridInput", "minGridDistance"],
+    ["gridScalperV2MaxGridInput", "gridScalperV2MaxGridInput", "maxGridDistance"],
+    ["gridScalperV2MaxLevelsInput", "gridScalperV2MaxLevelsInput", "maxGridLevels"],
+    ["gridScalperV2AtrStopInput", "gridScalperV2AtrStopInput", "atrStopMultiplier"],
+    ["gridScalperV2BreakEvenInput", "gridScalperV2BreakEvenInput", "breakEvenTriggerR"],
+    ["gridScalperV2BreakEvenBufferInput", "gridScalperV2BreakEvenBufferInput", "breakEvenBufferAtr"],
+    ["gridScalperV2ConfidenceInput", "gridScalperV2ConfidenceInput", "confidenceThreshold"],
+    ["gridScalperV2EntryScoreInput", "gridScalperV2EntryScoreInput", "entryScoreThreshold"],
+    ["gridScalperV2DailyDDInput", "gridScalperV2DailyDDInput", "dailyDrawdownLimitPct"],
+    ["gridScalperV2ConsecutiveLossInput", "gridScalperV2ConsecutiveLossInput", "consecutiveLossLimit"],
+    ["gridScalperV2Tp1ShareInput", "gridScalperV2Tp1ShareInput", "tp1Share"],
+    ["gridScalperV2Tp2ShareInput", "gridScalperV2Tp2ShareInput", "tp2Share"],
+    ["gridScalperV2Tp3ShareInput", "gridScalperV2Tp3ShareInput", "tp3Share"]
+  ];
+  for (const [uiKey, id, field] of numberFields) {
+    const el = pick(uiKey, id);
+    if (!el) continue;
+    const value = parseFloat(el.value);
+    if (!Number.isFinite(value)) continue;
+    current[field] = field.startsWith("tp") && field.endsWith("Share") ? value / 100 : value;
+  }
+  const stopModeEl = pick("gridScalperV2StopMode", "gridScalperV2StopMode");
+  if (stopModeEl) current.stopMode = stopModeEl.value === "swing" ? "swing" : "atr";
+  const backtestSymbolsEl = pick("gridScalperV2BacktestSymbolsInput", "gridScalperV2BacktestSymbolsInput");
+  if (backtestSymbolsEl) current.backtestSymbols = String(backtestSymbolsEl.value || "").trim() || GRID_SCALPER_V2_DEFAULTS.backtestSymbols;
+  gridScalperV2Settings = current;
+  normalizeGridScalperV2Settings();
+  applyGridScalperV2SettingsToUI();
+  updateGridScalperV2DashboardUI();
 }
 
 function gridV2_getDayKey(ts = Date.now()) {
@@ -3525,6 +3569,8 @@ function renderStrategyAlerts() {
   _renderAlertList(UI.sessionRangeAlertList, UI.sessionRangeAlertCount, sessionRangeHistory, "🌍", "Session Range");
   /* Grid Scalper MA — custom renderer with TP probability bars */
   _renderGridScalperMAAlerts();
+  /* Grid Scalper V2 */
+  _renderGridScalperV2Alerts();
   /* Fair Value Gap (FVG) */
   _renderAlertList(UI.fvgStratAlertList, UI.fvgStratAlertCount, fvgStratHistory, "🎯", "Fair Value Gap");
   /* MTF Top-Down */
@@ -3543,7 +3589,7 @@ function renderStrategyAlerts() {
   const totalCount = liquiditySweepHistory.length + stopLossHuntHistory.length
     + failedPinBarHistory.length + fibScalpHistory.length + po3History.length
     + nyOpenRangeHistory.length + sessionRangeHistory.length + gridScalperMAHistory.length
-    + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
+    + gridScalperV2History.length + fvgStratHistory.length + mtfTopDownHistory.length + orderblockHistory.length
     + tiktokHistory.length + po3_4hHistory.length + breakerBlockHistory.length
     + oteGoldenPocketHistory.length + crtTbsHistory.length;
   if (UI.strategyAlertTotalCount) UI.strategyAlertTotalCount.textContent = totalCount;
@@ -3683,6 +3729,42 @@ function _renderGridScalperMAAlerts() {
                  + ` <small style="opacity:0.5;">${ts}</small>`
                  + adaptiveHtml
                  + probHtml;
+    listEl.appendChild(li);
+  }
+}
+
+function _renderGridScalperV2Alerts() {
+  const listEl = UI.gridScalperV2AlertList || document.getElementById("gridScalperV2AlertList");
+  const countEl = UI.gridScalperV2AlertCount || document.getElementById("gridScalperV2AlertCount");
+  if (!listEl) return;
+  if (countEl) countEl.textContent = gridScalperV2History.length;
+  const digest = gridScalperV2History.map(s =>
+    `${s.epoch ?? ""}|${s.dir ?? ""}|${s.result ?? ""}|${s.openGridLevels ?? ""}|${s.signalStrength ?? ""}`
+  ).join(",");
+  if (listEl._alertDigest === digest) return;
+  listEl._alertDigest = digest;
+  listEl.innerHTML = "";
+  for (const s of gridScalperV2History) {
+    const li = document.createElement("li");
+    li.className = "scalp-alert-item";
+    const isBuy = s.dir === "BUY";
+    const dirIcon = isBuy ? "▲" : "▼";
+    const dirColor = isBuy ? "#22c55e" : "#ef4444";
+    const resultBadge = s.result === "WIN" ? ' <span style="color:#22c55e;">WIN ✓</span>'
+      : s.result === "LOSS" ? ' <span style="color:#ef4444;">LOSS ✗</span>'
+      : s.result === "EXPIRED" ? ' <span style="color:#f59e0b;">EXPIRED ⏱</span>'
+      : ' <span style="color:#94a3b8;">PENDING…</span>';
+    const ts = new Date((s.epoch || Math.floor(Date.now() / 1000)) * 1000).toLocaleTimeString();
+    const target = Array.isArray(s.targets) && s.targets.length ? s.targets[s.targets.length - 1].price : s.tp;
+    li.innerHTML = `<span style="color:${dirColor};font-weight:700;">💹 ${dirIcon} ${s.dir}</span> `
+      + `<span style="opacity:0.7;">${s.symbol || "--"}</span> `
+      + `@ <b>${fmt(s.entry, 4)}</b> `
+      + `| SL ${fmt(s.stopLoss ?? s.sl, 4)} | TP ${fmt(target, 4)}`
+      + ` <span style="color:#60a5fa;font-size:0.85em;">${s.regime || "--"}</span>`
+      + ` <span style="color:#c084fc;font-size:0.85em;">${s.signalStrength || 0}%</span>`
+      + ` <span style="color:#f59e0b;font-size:0.85em;">L:${s.openGridLevels || 0}/${s.maxTrades || 0}</span>`
+      + resultBadge
+      + ` <small style="opacity:0.5;">${ts}</small>`;
     listEl.appendChild(li);
   }
 }
@@ -15420,6 +15502,7 @@ function drawChart() {
     { history: nyOpenRangeHistory,    enabled: nyOpenRangeEnabled,    emoji: "🕤", color: "#f97316" },
     { history: sessionRangeHistory,   enabled: sessionRangesEnabled,  emoji: "🌍", color: "#8b5cf6" },
     { history: gridScalperMAHistory,  enabled: gridScalperMAEnabled,  emoji: "🔲", color: "#e11d48" },
+    { history: gridScalperV2History,  enabled: gridScalperV2Enabled,  emoji: "💹", color: "#14b8a6" },
     { history: fvgStratHistory,       enabled: fvgStratEnabled,       emoji: "🎯", color: "#f59e0b" },
     { history: mtfTopDownHistory,     enabled: mtfTopDownEnabled,     emoji: "⏱", color: "#6366f1" },
     { history: candleInterpHistory,   enabled: candleInterpEnabled,   emoji: "🕯", color: "#a855f7" },
@@ -16080,6 +16163,7 @@ function applyStrategyAccess() {
     { id: "candleInterpToggle",    key: "candle_interp",    fn: () => { candleInterpEnabled   = false; } },
     { id: "orderblockToggle",      key: "orderblock",       fn: () => { orderblockEnabled     = false; } },
     { id: "tiktokToggle",          key: "tiktok",           fn: () => { tiktokEnabled         = false; } },
+    { id: "gridScalperV2Toggle",   key: "grid_scalper_v2",  fn: () => { gridScalperV2Enabled  = false; } },
     { id: "po3_4hToggle",          key: "po3_4h",           fn: () => { po3_4hEnabled         = false; } },
     { id: "breakerBlockToggle",    key: "breaker_block",    fn: () => { breakerBlockEnabled   = false; } },
     { id: "oteGoldenPocketToggle", key: "ote_golden_pocket", fn: () => { oteGoldenPocketEnabled = false; } },
@@ -16129,6 +16213,7 @@ function updateStrategyBadges() {
     { badgeId: "stratBadge-candleInterp",   toggleId: "candleInterpToggle",   enabled: candleInterpEnabled   },
     { badgeId: "stratBadge-orderblock",     toggleId: "orderblockToggle",     enabled: orderblockEnabled     },
     { badgeId: "stratBadge-tiktok",         toggleId: "tiktokToggle",         enabled: tiktokEnabled         },
+    { badgeId: "stratBadge-gridScalperV2",  toggleId: "gridScalperV2Toggle",  enabled: gridScalperV2Enabled  },
     { badgeId: "stratBadge-po3_4h",         toggleId: "po3_4hToggle",         enabled: po3_4hEnabled         },
     { badgeId: "stratBadge-breakerBlock",   toggleId: "breakerBlockToggle",   enabled: breakerBlockEnabled   },
     { badgeId: "stratBadge-oteGoldenPocket", toggleId: "oteGoldenPocketToggle", enabled: oteGoldenPocketEnabled },
@@ -18513,8 +18598,8 @@ document.addEventListener("DOMContentLoaded", () => {
       gridScalperV2Enabled = UI.gridScalperV2Toggle.checked;
       saveSettings();
       if (gridScalperV2Enabled) {
-        addLog("💹 Grid Scalper V2 strategy enabled — M5 grid scalping with smart entry, risk controls & basket exits");
-        showToast("Grid Scalper V2 Enabled", "Scanning for ranging setups with exhaustion patterns. Max 4 trades per basket.", "info", 5000);
+        addLog("💹 Grid Scalper V2 strategy enabled — range-only grid scalping with smart entry, adaptive spacing, and strict risk controls");
+        showToast("Grid Scalper V2 Enabled", `Scanning for ranging setups only. Max ${normalizeGridScalperV2Settings().maxGridLevels} grid levels.`, "info", 5000);
       } else {
         addLog("💹 Grid Scalper V2 strategy disabled");
         gridScalperV2State = null;
@@ -18554,6 +18639,40 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSettings();
     });
   }
+  [
+    UI.gridScalperV2AtrMultiplierInput || document.getElementById("gridScalperV2AtrMultiplierInput"),
+    UI.gridScalperV2MinGridInput || document.getElementById("gridScalperV2MinGridInput"),
+    UI.gridScalperV2MaxGridInput || document.getElementById("gridScalperV2MaxGridInput"),
+    UI.gridScalperV2MaxLevelsInput || document.getElementById("gridScalperV2MaxLevelsInput"),
+    UI.gridScalperV2StopMode || document.getElementById("gridScalperV2StopMode"),
+    UI.gridScalperV2AtrStopInput || document.getElementById("gridScalperV2AtrStopInput"),
+    UI.gridScalperV2BreakEvenInput || document.getElementById("gridScalperV2BreakEvenInput"),
+    UI.gridScalperV2BreakEvenBufferInput || document.getElementById("gridScalperV2BreakEvenBufferInput"),
+    UI.gridScalperV2ConfidenceInput || document.getElementById("gridScalperV2ConfidenceInput"),
+    UI.gridScalperV2EntryScoreInput || document.getElementById("gridScalperV2EntryScoreInput"),
+    UI.gridScalperV2DailyDDInput || document.getElementById("gridScalperV2DailyDDInput"),
+    UI.gridScalperV2ConsecutiveLossInput || document.getElementById("gridScalperV2ConsecutiveLossInput"),
+    UI.gridScalperV2Tp1ShareInput || document.getElementById("gridScalperV2Tp1ShareInput"),
+    UI.gridScalperV2Tp2ShareInput || document.getElementById("gridScalperV2Tp2ShareInput"),
+    UI.gridScalperV2Tp3ShareInput || document.getElementById("gridScalperV2Tp3ShareInput"),
+    UI.gridScalperV2BacktestSymbolsInput || document.getElementById("gridScalperV2BacktestSymbolsInput")
+  ].filter(Boolean).forEach(el => {
+    const eventName = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(eventName, () => {
+      syncGridScalperV2SettingsFromUI();
+      saveSettings();
+    });
+  });
+  const gridScalperV2BacktestBtn = UI.gridScalperV2BacktestBtn || document.getElementById("gridScalperV2BacktestBtn");
+  if (gridScalperV2BacktestBtn) {
+    gridScalperV2BacktestBtn.addEventListener("click", () => {
+      syncGridScalperV2SettingsFromUI();
+      saveSettings();
+      runGridScalperV2ComparisonBacktest();
+    });
+  }
+  applyGridScalperV2SettingsToUI();
+  updateGridScalperV2DashboardUI();
   /* Strategy 15: 4H PO3 Liquidity Play listener */
   if (UI.po3_4hToggle) {
     UI.po3_4hToggle.addEventListener("change", () => {
