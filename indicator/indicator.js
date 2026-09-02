@@ -1594,7 +1594,6 @@ let gridScalperMAPeriod    = 21;             /* MA period for Price vs MA mode *
 let gridScalperMAHistory   = [];             /* alert history */
 let lastGridScalperMAIdx   = -999;
 let autoTradeGridScalperMA = true;
-let gridScalperMAOppositeEnabled = false;    /* execute/log opposite direction for Grid Scalper MA */
 let gridScalperAdaptiveEnabled = false;      /* adaptive confluence gate toggle */
 let gridScalperAdaptiveModeValue = "Off";    /* Off | ObservationOnly | Active */
 const GRID_SCALPER_MA_MAX_HISTORY  = 30;
