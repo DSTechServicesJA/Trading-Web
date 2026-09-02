@@ -1,6 +1,9 @@
 document.addEventListener("DOMContentLoaded", () => {
   console.log("DOM READY — BOOTING APP");
 
+  // Initialize login gate first so Sign In remains clickable even if later boot code fails.
+  initLoginGate();
+
   // 1️⃣ Init UI refs
 initUI();
 
@@ -25,9 +28,6 @@ updatePayoutEdgeUI();
 
   // 3b️⃣ Restore adaptive data (pattern stats, confluence log, hourly stats, etc.)
   restoreAdaptiveData();
-
-  // 4️⃣ Login gate LAST (blocks UI if needed)
-  initLoginGate();
 
   // #23: Restore theme preference
   initTheme();
