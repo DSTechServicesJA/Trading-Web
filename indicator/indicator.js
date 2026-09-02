@@ -1795,26 +1795,7 @@ const CANDLE_INTERP_LEVEL_TOL_ATR = 0.5;  /* ATR tolerance for "at key level" */
 const CANDLE_INTERP_VOL_SPIKE     = 1.5;  /* volume spike multiplier vs avg */
 
 /* ================= STRATEGY 19: GRID SCALPER V2 ================= */
-/**
- * Grid Scalper V2 – Step Index + Forex | M5 Timeframe
- * 
- * Core features:
- *   1. Smart ranging detection – only entry when market is ranging
- *   2. Exhaustion pattern detection – enter only after spike/step exhaustion
- *   3. ATR-based dynamic grid spacing – prevents over-trading
- *   4. Hard position limits – max 4 simultaneous trades enforced
- *   5. Basket-based exit – closes all at 2% profit or time-based exit
- *   6. Drawdown kill switch – closes all at 4.5% account loss
- *   7. Trend filter pause – disables new entries if trend detected
- *   8. Partial profit taking – locks in wins at 0.8% per trade
- * 
- * Entry Rules:
- *   - Must be in RANGE mode (ATR < threshold)
- *   - Must detect exhaustion (price moved 2+ ATR from EMA, now reverting)
- *   - RSI confirmation required (< 40 for BUY, > 60 for SELL)
- *   - No spread filter (max_spread_pips)
- *   - Max 4 trades hard limit
- */
+
 let gridScalperV2Enabled = false;         /* master toggle */
 let gridScalperV2History = [];            /* signal history */
 let gridScalperV2State = null;            /* current active grid state */
@@ -1823,9268 +1804,1071 @@ let autoTradeGridScalperV2 = true;        /* auto-trade sub-toggle */
 
 const GRID_SCALPER_V2_MAX_HISTORY = 50;
 const GRID_SCALPER_V2_COOLDOWN = 2;       /* min candles between grid starts */
-const GRID_SCALPER_V2_MAX_TRADES = 4;     /* HARD LIMIT: never exceed 4 trades */
-const GRID_SCALPER_V2_MAX_DURATION = 180; /* max hold time per trade (minutes) */
-
-/* Input parameters (tuned for Step Index M5) */
-const GRID_SCALPER_V2_LOT_SIZE = 0.15;                    /* base lot per trade */
-const GRID_SCALPER_V2_GRID_MULTIPLIER = 1.4;             /* ATR * this = grid spacing */
-const GRID_SCALPER_V2_INITIAL_OFFSET = 0.9;              /* ATR * this = distance to 1st TP */
-const GRID_SCALPER_V2_ATR_PERIOD = 14;
-const GRID_SCALPER_V2_EMA_PERIOD = 18;                   /* shorter EMA for M5 */
-const GRID_SCALPER_V2_RSI_PERIOD = 14;
-
-/* Risk management */
-const GRID_SCALPER_V2_MAX_DRAWDOWN_PCT = 4.5;            /* account equity kill switch */
-const GRID_SCALPER_V2_MAX_TRADE_LOSS = 40;               /* max USD loss per trade */
-const GRID_SCALPER_V2_BASKET_TP_PCT = 2.0;               /* close all at this basket profit */
-const GRID_SCALPER_V2_PARTIAL_CLOSE_PCT = 0.8;           /* close 50% at this per-trade profit */
-const GRID_SCALPER_V2_FIRST_GRID_TP = 0.4;               /* quick TP for 1st entry */
-
-/* Volatility & range detection */
-const GRID_SCALPER_V2_RANGE_THRESHOLD_ATR = 1.1;        /* ATR < this = ranging */
-const GRID_SCALPER_V2_TREND_STRENGTH_ATR = 1.7;         /* distance from EMA for trend */
-const GRID_SCALPER_V2_LOOKBACK_BARS = 6;                /* exhaustion pattern lookback */
-
-/* Safety */
-const GRID_SCALPER_V2_MAX_SPREAD_PIPS = 4;              /* reject if spread > this */
-
-/* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
-/**
- * Power of 3 (PO3) strategy – Accumulation → Manipulation → Expansion.
- *
- * Concept (ICT methodology):
- *   1. Mark the current 1-hour candle open price.
- *   2. Use the daily EMA trend (EMA 21 vs EMA 8) to define the day's bias:
- *      - Bullish day → look for BUY below the 1H open.
- *      - Bearish day → look for SELL above the 1H open.
- *   3. Accumulation: price consolidates near the 1H open.
- *   4. Manipulation: a 15-minute sell-side sweep below the 1H open (bullish)
- *      or a buy-side sweep above the 1H open (bearish).
- *   5. Expansion: a 5-minute market structure shift (MSS) with displacement
- *      (a strong body candle that leaves a Fair Value Gap – FVG).
- *   6. Entry: when price returns into the FVG.
- *   7. SL: below the manipulation low (bullish) / above the manipulation high (bearish).
- *   8. TP1: 1H candle high (bullish) / 1H candle low (bearish) + external liquidity.
- *   9. Partial at 1–2R, let the rest run.
- */
-let po3Enabled = false;              /* master toggle */
-let po3History = [];                 /* alert history */
-const PO3_MAX_HISTORY = 30;
-const PO3_COOLDOWN = 5;             /* min candles between alerts */
-const PO3_MAX_CANDLES = 30;         /* timeout: close trade monitoring after N candles */
-const PO3_SWEEP_LOOKBACK = 6;       /* base candles to look back for manipulation sweep at 60s TF */
-/* #19: PO3 sweep lookback is scaled proportionally to the timeframe at usage time
- * via getPo3SweepLookback(). This constant is the baseline at 1-minute granularity. */
-function getPo3SweepLookback() {
-  const gran = getCurrentGranularitySec();
-  /* Scale: 6 candles at 60s = 6 min of lookback. Keep the same real-time window
-   * proportionally: e.g. 15-min candles → 6 × (900/60) = 90 candles would be too many,
-   * so cap at 20 to stay practical, while ensuring at least 6. */
-  return Math.max(PO3_SWEEP_LOOKBACK, Math.min(20, Math.ceil(PO3_SWEEP_LOOKBACK * (900 / gran))));
-}
-const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
-const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
-const PO3_ENTRY_MAX_AGE_SAFE = 1;   /* allows 1-candle lag after a touch (safer, less strict) */
-const PO3_ENTRY_MAX_AGE_STRICT = 0; /* only current-touch candle is valid (strictest timing) */
-let po3EntryMaxAge = PO3_ENTRY_MAX_AGE_SAFE;
-let lastPo3Idx = -999;
-
-/* ================= STRATEGY 8: GRID SCALPER MA ================= */
-/**
- * Grid Scalper MA — two selectable signal modes:
- *   "price_vs_ma" : BUY when prev close < MA and current close > MA;
- *                   SELL when prev close > MA and current close < MA.
- *   "bos"         : BUY when current close breaks above a confirmed swing high;
- *                   SELL when current close breaks below a confirmed swing low.
- */
-let gridScalperMAEnabled   = false;          /* master toggle */
-let gridScalperMAStrategy  = "price_vs_ma";  /* "price_vs_ma" | "bos" */
-let gridScalperMAPeriod    = 21;             /* MA period for Price vs MA mode */
-let gridScalperMAHistory   = [];             /* alert history */
-let lastGridScalperMAIdx   = -999;
-let autoTradeGridScalperMA = true;
-const GRID_SCALPER_MA_MAX_HISTORY = 30;
-const GRID_SCALPER_MA_COOLDOWN    = 5;    /* min candles between signals */
-const GRID_SCALPER_MA_BOS_LOOKBACK = 30;  /* candles to scan for swing points in BOS mode */
-const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0; /* max SL distance as ATR multiple */
-
-/* ── Grid Scalper MA: Opposite Mode & Adaptive Confluence state ── */
-/* gridScalperMAOppositeEnabled is declared in grid-scalper-ma-opposite.js,
-   which is always loaded before this file. Re-declaring it here with `let`
-   would collide in the shared global lexical scope and throw a SyntaxError
-   that aborts this entire script. */
-let gridScalperAdaptiveEnabled   = false; /* adaptive confluence learning */
-let gridScalperAdaptiveModeValue = "Off"; /* "Off" | "ObservationOnly" | "Active" */
-/* TP_PROB_MIN_SAMPLE is also declared in grid-scalper-ma-opposite.js (shared constant). */
-const GS_FLIP_MIN_STATS                 = 10;   /* minimum resolved trades before hiding "need more data" */
-const TP_PROB_SIGNIFICANCE_THRESHOLD    = 0.05; /* min difference to declare one direction better */
-let _signalIdCounter = 0;
-/* Cumulative Grid Scalper MA resolved-outcome tracking (persisted to localStorage
-   so stats survive page reloads and panel/symbol switches, unlike the in-memory
-   gridScalperMAHistory which resets). */
-let gsFlipStats = { wins: 0, losses: 0, bullWins: 0, bullLosses: 0, bearWins: 0, bearLosses: 0 };
-
-/* ── Grid Scalper MA: Symbol-category profit (R:R) settings ──
- *  Volatility 1s (1HZ*) — fast tick action, tighter TP for rapid captures.
- *  Volatility Standard (R_*) — slower structure, wider TP for bigger moves.
- *  Default fallback for other asset classes keeps the original 2:1 R:R.          */
-const GRID_SCALPER_MA_RR_VOL1S     = 1.5; /* Volatility 1s: quick 1.5:1 scalp */
-const GRID_SCALPER_MA_RR_STANDARD  = 2.5; /* Volatility Standard: ride 2.5:1 */
-const GRID_SCALPER_MA_RR_DEFAULT   = 2.0; /* all other symbols: balanced 2:1 */
-
-/* ================= STRATEGY 9: FAIR VALUE GAP (FVG) ================= */
-/**
- * Fair Value Gap (FVG) Strategy — Supply & Demand with FVG confluence.
- *
- * Concept (as described in the strategy guide):
- *   1. Spot a "big push" — 3+ consecutive strong directional candles (bodies ≥ 60%
- *      of range and range ≥ 0.5× ATR) that create obvious imbalances.
- *   2. Identify FVGs within the push: a 3-candle pattern where the middle candle
- *      moves so aggressively that candle[i].low > candle[i-2].high (bullish FVG)
- *      or candle[i].high < candle[i-2].low (bearish FVG).
- *   3. Mark the demand/supply zone: the origin candle BEFORE the big push started.
- *      This is the most powerful level — not the FVG itself.  The FVG signals that
- *      price will likely retrace to fill the imbalance, carrying it back to the zone.
- *   4. Fibonacci: measure from swing low to swing high.  Only enter when price is
- *      at a "discount" — below the 50% retracement level (bullish) or above it
- *      (bearish).  Anything below 50% = cheap, above 50% = premium.
- *   5. Confirmation: wait for a bullish/bearish engulfing pattern at the demand zone,
- *      indicating real buying/selling momentum at the origin level.
- *   6. Entry at the confirmation candle close.
- *   7. SL below the demand zone low (bullish) or above supply zone high (bearish)
- *      with a small ATR buffer.
- *   8. TP at the recent swing high (bullish) / swing low (bearish).
- *   9. Market structure filter: long-term EMA trend must agree with trade direction.
- */
-let fvgStratEnabled  = false;           /* master toggle */
-let fvgStratHistory  = [];              /* alert history */
-let lastFvgStratIdx  = -999;
-const FVG_STRAT_MAX_HISTORY  = 30;
-const FVG_STRAT_COOLDOWN     = 8;       /* min candles between signals */
-const FVG_STRAT_MAX_CANDLES  = 40;      /* trade monitoring timeout */
-const FVG_PUSH_MIN_CANDLES   = 3;       /* min consecutive strong candles for a "big push" */
-const FVG_PUSH_BODY_PCT      = 0.55;    /* body must be ≥ 55% of range to count as a strong push candle */
-const FVG_PUSH_ATR_MIN       = 0.4;     /* range must be ≥ 0.4× ATR to count as strong */
-const FVG_MIN_SIZE_ATR       = 0.2;     /* FVG gap must be ≥ this fraction of ATR */
-const FVG_ZONE_ATR_BUFFER    = 0.15;    /* ATR buffer below/above demand/supply zone */
-const FVG_LOOKBACK           = 60;      /* candles to scan for push + zone */
-const FVG_FIB_DISCOUNT       = 0.5;     /* below this fib retracement level = discount */
-
-/* ================= MTF TOP-DOWN STRATEGY (Strategy 11) ================= */
-/*
- * Multi-Timeframe Top-Down approach:
- *   1. Synthesise "4H equivalent" bars from the current candle stream.
- *   2. computeMtfBias()     – HH/HL vs LH/LL structure → BULL | BEAR | NEUTRAL
- *   3. detectMtfSetup()     – 1H-equivalent consolidation + bias-aligned breakout
- *   4. detectMtfConfirmation() – current-TF retest of the broken level
- *   5. detectMtfTopDown()   – entry on pin-bar / engulfing / micro-BOS at the zone
- *   Entry  : close of the trigger candle
- *   SL     : wick extreme + 0.3 × ATR buffer
- *   TP     : 4H swing high (BULL) or swing low (BEAR), min 2:1 R:R
- */
-let mtfTopDownEnabled   = false;    /* master toggle */
-let mtfTopDownHistory   = [];       /* alert history */
-let lastMtfTopDownIdx   = -999;     /* cooldown tracker */
-let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
-
-const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
-const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
-const MTF_TOP_DOWN_MAX_CANDLES = 60;  /* monitoring timeout (candles) */
-const MTF_BIAS_TF_MULT         = 16;  /* ×current TF → "4H" synthesis ratio */
-const MTF_SETUP_TF_MULT        = 4;   /* ×current TF → "1H" synthesis ratio */
-const MTF_BIAS_LOOKBACK        = 6;   /* synthesised 4H bars for bias */
-const MTF_SETUP_LOOKBACK       = 12;  /* synthesised 1H bars for setup range */
-const MTF_MIN_RR               = 2.0; /* minimum acceptable R:R */
-const MTF_SL_ATR_BUFFER        = 0.3; /* ATR buffer beyond wick for SL */
-const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest */
-
-/* ================= LIVE SCALP SCANNER ================= */
-let liveScalpEnabled = false;       /* master toggle */
-let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
-let liveScalpHistory = [];          /* recent scalp alerts: { dir, price, sl, tp, conf, reasons[], epoch, candleIdx } */
-const LIVE_SCALP_MAX_HISTORY = 30;
-const LIVE_SCALP_COOLDOWN_CANDLES = 3;  /* min candles between consecutive scalp alerts */
-let lastScalpCandleIdx = -999;
-
-/* ================= STRATEGY 12: ORDERBLOCK DETECTION ================= */
-let orderblockEnabled  = false;       /* master toggle */
-let orderblockHistory  = [];          /* alert history */
-let lastOrderblockIdx  = -999;
-let autoTradeOrderblock = true;
-
-/* ================= STRATEGY 15: 4H POWER OF 3 (HDF PO3) LIQUIDITY PLAY ================= */
-/**
- * 4H Power of 3 (PO3) Liquidity Play – Intraday Execution.
- *
- * Uses the HDF Power 3 indicator concept on synthesised 4H candles:
- *   1. Identify the opening of each new 4H candle.
- *   2. Accumulation: price moves sideways near the 4H open (range-bound).
- *   3. Manipulation: price sweeps below accumulation lows (bullish) or above highs (bearish).
- *   4. Distribution/CISD: Change in State of Delivery — price shifts structure back in bias direction.
- *   5. Entry after CISD confirmation.
- *   6. SL below the manipulation low (bullish) / above manipulation high (bearish).
- *   7. TP at minimum 2:1 R:R or nearest liquidity.
- *
- * Only trades in the direction of higher-timeframe bias (EMA alignment).
- */
-let po3_4hEnabled = false;           /* master toggle */
-let po3_4hHistory = [];              /* alert history */
-let lastPo3_4hIdx = -999;
-let autoTradePo3_4h = true;
-const PO3_4H_MAX_HISTORY = 30;
-const PO3_4H_COOLDOWN = 5;          /* min candles between alerts */
-const PO3_4H_MAX_CANDLES = 60;      /* trade monitoring timeout */
-const PO3_4H_ACCUM_MIN_CANDLES = 3; /* min candles in accumulation phase */
-const PO3_4H_SWEEP_ATR_MULT = 0.25; /* min sweep distance as ATR fraction */
-
-/* ================= STRATEGY 16: 1H ACCUMULATION BREAKER BLOCK SCALPING ================= */
-/**
- * 1H Accumulation Break + 1M Breaker Block Scalping.
- *
- * Concept:
- *   1. Identify accumulation candles on synthesised 1H: large body, small wicks.
- *   2. Mark their high/low as liquidity targets.
- *   3. On execution timeframe: detect liquidity sweep (break above high or below low).
- *   4. After sweep, identify breaker block structure:
- *      Bullish: Low → High → Lower Low → Higher High (after low swept)
- *      Bearish: High → Low → Higher High → Lower Low (after high swept)
- *   5. Enter on retest of the breaker block.
- *   6. SL just beyond the breaker block extreme.
- *   7. TP at 2:1 R:R.
- */
-let breakerBlockEnabled = false;     /* master toggle */
-let breakerBlockHistory = [];        /* alert history */
-let lastBreakerBlockIdx = -999;
-let autoTradeBreakerBlock = true;
-const BREAKER_BLOCK_MAX_HISTORY = 30;
-const BREAKER_BLOCK_COOLDOWN = 5;    /* min candles between alerts */
-const BREAKER_BLOCK_MAX_CANDLES = 40; /* trade monitoring timeout */
-const BREAKER_ACCUM_BODY_PCT = 0.65; /* accumulation candle body must be ≥ 65% of range */
-const BREAKER_ACCUM_WICK_PCT = 0.20; /* each wick must be ≤ 20% of range */
-const BREAKER_SWEEP_ATR_MULT = 0.15; /* min sweep distance beyond level */
-
-/* ================= STRATEGY 17: OTE GOLDEN POCKET ================= */
-/**
- * OTE (Optimal Trade Entry) — Golden Pocket Strategy
- * Enters at the Fibonacci 0.705 retracement level within the Golden Pocket
- * zone (0.705–0.786) after a clear expansion leg with confluence confirmation.
- */
-let oteGoldenPocketEnabled = false;   /* master toggle */
-let oteGoldenPocketHistory = [];      /* alert history */
-let lastOteGoldenPocketIdx = -999;
-let autoTradeOteGoldenPocket = true;
-const OTE_MAX_HISTORY = 30;
-const OTE_COOLDOWN = 8;              /* min candles between alerts */
-const OTE_MAX_CANDLES = 60;          /* trade monitoring timeout */
-const OTE_FIB_LEVELS = [0, 0.5, 0.705, 0.786, 1.0];
-const OTE_ENTRY_LEVEL = 0.705;
-const OTE_GOLDEN_LOW = 0.705;
-const OTE_GOLDEN_HIGH = 0.786;
-const OTE_MIN_EXPANSION_ATR = 2.0;   /* min expansion leg in ATR multiples */
-const OTE_MIN_RR = 3.0;             /* minimum R:R ratio */
-
-/* ================= STRATEGY 18: OPENING RANGE BREAKOUT (ORB) ================= */
-/**
- * ORB — Opening Range Breakout Strategy
- * Marks the high/low of the first 15 minutes of the session.
- * Detects breakouts, retests, failed breakouts, and re-entries.
- * Multi-timeframe: executed on 1m, manageable on 5m+.
- */
-let orbEnabled = false;               /* master toggle */
-let orbHistory = [];                  /* alert history */
-let lastOrbIdx = -999;
-let autoTradeOrb = true;
-const ORB_MAX_HISTORY = 30;
-const ORB_COOLDOWN = 5;               /* min candles between alerts */
-const ORB_MAX_CANDLES = 120;          /* trade monitoring timeout */
-const ORB_SESSION_MINUTES = 15;       /* opening range duration */
-const ORB_MIN_RANGE_ATR = 0.5;        /* min ORB range in ATR multiples */
-const ORB_MAX_RANGE_ATR = 4.0;        /* max ORB range (filter out spikes) */
-const ORB_RETEST_TOLERANCE_ATR = 0.15; /* retest proximity threshold */
-let orbCandleConfirmation = true;     /* require candle close confirmation */
-
-/* ORB state tracked per session */
-let _orbSessionHigh = null;
-let _orbSessionLow  = null;
-let _orbSessionEstablished = false;
-let _orbBreakHigh = false;            /* price broke above ORB High */
-let _orbBreakLow  = false;            /* price broke below ORB Low */
-let _orbRetestHigh = false;           /* retest of ORB High after breakout above */
-let _orbRetestLow  = false;           /* retest of ORB Low after breakout below */
-let _orbSessionStartEpoch = null;     /* epoch of session start */
-
-/* ================= STRATEGY 20: CRT + TBS (TURTLE BODY SOUP) ================= */
-/**
- * CRT (Candle Range Theory) + TBS Strategy
- * Uses HTF A+ CRT candles to establish directional bias, then drops to LTF
- * to find Turtle Body Soup (TBS) entries confirmed by Model #1 displacement.
- *
- * State Machine:
- *   0: Find A+ HTF CRT candle
- *   1: Plot CRT levels (CRTH, CRTL, CRT50)
- *   2: Wait for HTF CRT manipulation
- *   3: Validate manipulation (close inside CRT range)
- *   4: Activate LTF entry mode
- *   5: Detect LTF swing structure (old high/low)
- *   6: Detect TBS candle
- *   7: Detect Model #1 confirmation
- *   8: Print entry signal
- */
-let crtTbsEnabled = false;            /* master toggle */
-let crtTbsHistory = [];               /* alert history */
-let lastCrtTbsIdx = -999;
-let autoTradeCrtTbs = true;
-const CRT_TBS_MAX_HISTORY = 30;
-const CRT_TBS_COOLDOWN = 8;           /* min candles between alerts */
-const CRT_TBS_MAX_CANDLES = 80;       /* trade monitoring timeout */
-const CRT_TBS_HTF_RATIO = 4;         /* HTF candle = 4× LTF candles (e.g. 1H vs 15m) */
-const CRT_TBS_SWING_LOOKBACK = 5;    /* bars to confirm swing high/low */
-const CRT_TBS_MIN_CRT_BODY_ATR = 0.8; /* min CRT body in ATR multiples for A+ grade */
-const CRT_TBS_DISPLACEMENT_MULT = 1.2; /* displacement body > avgBody × mult */
-const CRT_TBS_MIN_BODY_RANGE_RATIO = 0.4; /* min body/range for A+ CRT candle */
-const CRT_TBS_MODEL1_TIMEOUT = 10;   /* max candles to wait for Model #1 after TBS */
-
-/* CRT+TBS working state */
-let _crtState = 0;                    /* state machine position */
-let _crtHigh = null;                  /* CRT High level */
-let _crtLow = null;                   /* CRT Low level */
-let _crt50 = null;                    /* CRT 50% level */
-let _crtBias = null;                  /* 'sell' or 'buy' after manipulation */
-let _crtManipCandle = null;           /* the HTF manipulation candle index */
-let _crtLtfOldHigh = null;            /* LTF old high (swing high) for sell bias */
-let _crtLtfOldLow = null;             /* LTF old low (swing low) for buy bias */
-let _crtTbsDetected = false;          /* TBS candle found */
-let _crtTbsCandleIdx = null;          /* index of TBS candle */
-let _crtStrictTbs = true;             /* require body close (not just wick) */
-
-/* ================= FEATURE: SESSION HEATMAP (17) ================= */
-let sessionHeatmapEnabled = false;    /* draw session colour bands on chart */
-
-/* ================= FEATURE: CANDLE PATTERN ANNOTATIONS (6) ================= */
-let candleAnnotationsEnabled = true;  /* draw labels above/below pattern candles */
-
-/* ================= FEATURE: VOLUME PROFILE (9) ================= */
-let volumeProfileEnabled = false;     /* range-based histogram on chart right edge */
-
-/* ================= FEATURE: FIBONACCI EXTENSIONS (10) ================= */
-let fibExtensionsEnabled = false;     /* draw 1.272/1.414/1.618/2.0/2.618 extension levels */
-
-/* ================= FEATURE: BOS / ChoCH MARKERS (5) ================= */
-let bosChochEnabled  = false;         /* draw BOS/ChoCH labels on chart */
-let bosChochMarkers  = [];            /* [{ idx, type:"BOS"|"ChoCH", dir:"BULL"|"BEAR", price }] */
-
-/* ================= FEATURE: DIVERGENCE VISUAL MARKERS (7) ================= */
-let divergenceVisualEnabled = false;  /* draw divergence lines on price + RSI panel */
-let divergenceMarkers = [];           /* [{ boIdx, rtIdx, dir, rsiBO, rsiRT, priceBO, priceRT }] */
-
-/* ================= FEATURE: NAMED SETTINGS PROFILES (4) ================= */
-const PROFILES_LS_KEY = "itguru_indicator_profiles";
-let savedProfiles = {};               /* { name: settingsSnapshot } */
-
-/* ================= FEATURE: SIGNAL NOTES (12) ================= */
-const SIGNAL_NOTES_LS_KEY = "itguru_signal_notes";
-let signalNotes = {};                 /* { signalId: noteText } */
-
-/* ================= FEATURE: BACKTESTING ENGINE (1) ================= */
-let backtestMode      = false;
-let backtestIdx       = 0;
-let backtestInterval  = null;
-let backtestSpeedMs   = BACKTEST_DEFAULT_SPEED_MS;
-let _backtestCandles  = [];
-
-/* ================= FEATURE: MULTI-R PARTIAL EXIT LADDER (15) ================= */
-let multiRLadderEnabled = false;
-let multiRLadder   = JSON.parse(JSON.stringify(MULTI_R_LADDER_DEFAULT));
-let multiRHitLevels = [];             /* indices of already-triggered ladder levels */
-
-/* ================= FEATURE: ECONOMIC CALENDAR / NEWS PAUSE (11) ================= */
-let newsPauseEnabled  = false;
-let newsPauseMinutes  = NEWS_PAUSE_DEFAULT_MIN;
-let newsEvents        = [];           /* [{ time, title, impact, currency }] */
-let _newsCacheFetched = 0;
-
-/* ================= FEATURE: ADAPTIVE CONFLUENCE WEIGHTING (13) ================= */
-let adaptiveConfluenceEnabled = false;
-let confluenceFactorStats = {};       /* { factorName: { wins, losses } } */
-
-/* ================= FEATURE: SCANNER WATCHLIST (8) ================= */
-let scannerEnabled  = false;
-let scannerSymbols  = ["1HZ100V", "1HZ50V", "1HZ10V", "frxEURUSD", "frxGBPUSD"];
-
-/* ================= UI REFS ================= */
-const UI = {};
-function initUI() {
-  UI.symbolSelect   = document.getElementById("symbolSelect");
-  UI.granSelect     = document.getElementById("granSelect");
-  UI.riskInput      = document.getElementById("riskInput");
-  UI.rewardInput    = document.getElementById("rewardInput");
-  UI.connectBtn     = document.getElementById("connectBtn");
-  UI.disconnectBtn  = document.getElementById("disconnectBtn");
-  UI.resetSessionBtn = document.getElementById("resetSessionBtn");
-  UI.wsStatus       = document.getElementById("wsStatus");
-  UI.accountTypeBadge = document.getElementById("accountTypeBadge");
-  UI.candleCount    = document.getElementById("candleCount");
-  UI.livePrice      = document.getElementById("livePrice");
-  UI.phaseLabel     = document.getElementById("phaseLabel");
-  UI.rangeHigh      = document.getElementById("rangeHigh");
-  UI.rangeLow       = document.getElementById("rangeLow");
-  UI.breakoutDir    = document.getElementById("breakoutDir");
-  UI.nextAction     = document.getElementById("nextAction");
-  UI.retestStatus   = document.getElementById("retestStatus");
-  UI.confirmStatus  = document.getElementById("confirmStatus");
-  UI.entryPrice     = document.getElementById("entryPrice");
-  UI.slPrice        = document.getElementById("slPrice");
-  UI.tpPrice        = document.getElementById("tpPrice");
-  UI.rrDisplay      = document.getElementById("rrDisplay");
-  UI.dollarRisk     = document.getElementById("dollarRisk");
-  UI.dollarReward   = document.getElementById("dollarReward");
-  UI.positionSize   = document.getElementById("positionSize");
-  UI.dollarRiskCard   = document.getElementById("dollarRiskCard");
-  UI.dollarRewardCard = document.getElementById("dollarRewardCard");
-  UI.positionSizeCard = document.getElementById("positionSizeCard");
-  UI.positionSizeLabel = document.getElementById("positionSizeLabel");
-  UI.pipsCard         = document.getElementById("pipsCard");
-  UI.pipsValue        = document.getElementById("pipsValue");
-  UI.accountSizeInput = document.getElementById("accountSizeInput");
-  UI.riskPercentInput = document.getElementById("riskPercentInput");
-  UI.autoTradeToggle        = document.getElementById("autoTradeToggle");
-  UI.autoTradeScalpToggle   = document.getElementById("autoTradeScalpToggle");
-  UI.autoTradeStrategyToggle = document.getElementById("autoTradeStrategyToggle");
-  UI.autoTradeScalpOppositeToggle   = document.getElementById("autoTradeScalpOppositeToggle");
-  UI.autoTradeStrategyOppositeToggle = document.getElementById("autoTradeStrategyOppositeToggle");
-  /* Per-strategy auto-trade sub-toggles */
-  UI.autoTradeLiquiditySweepToggle = document.getElementById("autoTradeLiquiditySweepToggle");
-  UI.autoTradeStopLossHuntToggle   = document.getElementById("autoTradeStopLossHuntToggle");
-  UI.autoTradeFailedPinBarToggle   = document.getElementById("autoTradeFailedPinBarToggle");
-  UI.autoTradeFibScalpToggle       = document.getElementById("autoTradeFibScalpToggle");
-  UI.autoTradePo3Toggle            = document.getElementById("autoTradePo3Toggle");
-  UI.autoTradeNYOpenRangeToggle    = document.getElementById("autoTradeNYOpenRangeToggle");
-  UI.autoTradeSessionRangeToggle   = document.getElementById("autoTradeSessionRangeToggle");
-  UI.autoTradeStake         = document.getElementById("autoTradeStake");
-  UI.autoTradeMaxStake      = document.getElementById("autoTradeMaxStake");
-  UI.autoTradeExecutionMode = document.getElementById("autoTradeExecutionMode");
-  UI.autoTradeMultiplier    = document.getElementById("autoTradeMultiplier");
-  UI.maxConcurrentTrades    = document.getElementById("maxConcurrentTrades");
-  UI.autoTradeSessionTP     = document.getElementById("autoTradeSessionTP");
-  UI.autoTradeSessionSL     = document.getElementById("autoTradeSessionSL");
-  UI.mt5SignalApiUrl        = document.getElementById("mt5SignalApiUrl");
-  UI.mt5StatusApiUrl        = document.getElementById("mt5StatusApiUrl");
-  UI.mt5MinStopPoints       = document.getElementById("mt5MinStopPoints");
-  UI.mt5FreezePoints        = document.getElementById("mt5FreezePoints");
-  UI.mt5LotStep             = document.getElementById("mt5LotStep");
-  UI.mt5MinLot              = document.getElementById("mt5MinLot");
-  UI.mt5MaxLot              = document.getElementById("mt5MaxLot");
-  UI.mt5StatusPollingToggle = document.getElementById("mt5StatusPollingToggle");
-  UI.autoTradeBalanceSection = document.getElementById("autoTradeBalanceSection");
-  UI.autoTradeBalanceValue   = document.getElementById("autoTradeBalanceValue");
-  UI.autoTradePLValue        = document.getElementById("autoTradePLValue");
-  UI.autoTradeCurrentStakeDisplay = document.getElementById("autoTradeCurrentStakeDisplay");
-  UI.autoTradeHistoryList    = document.getElementById("autoTradeHistoryList");
-  UI.autoTradeHistoryEmpty   = document.getElementById("autoTradeHistoryEmpty");
-  UI.signalLog      = document.getElementById("signalLog");
-  UI.canvas         = document.getElementById("mainChart");
-  UI.ctx            = UI.canvas.getContext("2d");
-  UI.uptimeDisplay  = document.getElementById("uptimeDisplay");
-  UI.candleCountdown = document.getElementById("candleCountdown");
-
-  /* Configurable parameter inputs */
-  UI.appIdInput       = document.getElementById("appIdInput");
-  UI.derivTokenInput  = document.getElementById("derivTokenInput");
-  UI.rangeDuration    = document.getElementById("rangeDuration");
-  UI.touchTolerance   = document.getElementById("touchTolerance");
-  UI.dojiRatio        = document.getElementById("dojiRatio");
-  UI.lookbackPeriod   = document.getElementById("lookbackPeriod");
-
-  /* Stats */
-  UI.signalWins       = document.getElementById("signalWins");
-  UI.signalLosses     = document.getElementById("signalLosses");
-  UI.signalBreakevens = document.getElementById("signalBreakevens");
-  UI.signalWinRate    = document.getElementById("signalWinRate");
-  UI.signalCount      = document.getElementById("signalCount");
-
-  /* New indicator state displays */
-  UI.emaFilterStatus    = document.getElementById("emaFilterStatus");
-  UI.htfTrend           = document.getElementById("htfTrend");
-  UI.atrDisplay         = document.getElementById("atrDisplay");
-  UI.breakoutStrength   = document.getElementById("breakoutStrength");
-  UI.trailingSLDisplay  = document.getElementById("trailingSLDisplay");
-  UI.partialTpDisplay   = document.getElementById("partialTpDisplay");
-
-  /* Strategy filter toggles */
-  UI.autoResetToggle    = document.getElementById("autoResetToggle");
-  UI.emaFilterToggle    = document.getElementById("emaFilterToggle");
-  UI.htfFilterToggle    = document.getElementById("htfFilterToggle");
-  UI.atrToleranceToggle = document.getElementById("atrToleranceToggle");
-  UI.trailingStopToggle = document.getElementById("trailingStopToggle");
-  UI.partialTpToggle    = document.getElementById("partialTpToggle");
-  UI.falseBreakoutToggle = document.getElementById("falseBreakoutToggle");
-  UI.minRRToggle         = document.getElementById("minRRToggle");
-  UI.minRRInput          = document.getElementById("minRRInput");
-  UI.pureTrailingToggle  = document.getElementById("pureTrailingToggle");
-  UI.teslaScalingToggle  = document.getElementById("teslaScalingToggle");
-  UI.teslaScalingPlan    = document.getElementById("teslaScalingPlan");
-
-  /* New indicator state displays */
-  UI.confluenceDisplay  = document.getElementById("confluenceDisplay");
-  UI.srConfluenceDisplay = document.getElementById("srConfluenceDisplay");
-
-  /* New filter UI refs */
-  UI.rsiFilterToggle     = document.getElementById("rsiFilterToggle");
-  UI.volumeSpikeToggle   = document.getElementById("volumeSpikeToggle");
-  UI.sessionFilterToggle = document.getElementById("sessionFilterToggle");
-  UI.sessionFilterMode   = document.getElementById("sessionFilterMode");
-  UI.fibRetestToggle     = document.getElementById("fibRetestToggle");
-  UI.autoApplyRecToggle  = document.getElementById("autoApplyRecToggle");
-  UI.lockTimeframeToggle = document.getElementById("lockTimeframeToggle");
-  UI.lockRRToggle        = document.getElementById("lockRRToggle");
-  UI.lockRangeMinToggle  = document.getElementById("lockRangeMinToggle");
-  UI.lockIndicatorFiltersToggle = document.getElementById("lockIndicatorFiltersToggle");
-  UI.rsiDisplay          = document.getElementById("rsiDisplay");
-  UI.volumeSpikeDisplay  = document.getElementById("volumeSpikeDisplay");
-  UI.sessionDisplay      = document.getElementById("sessionDisplay");
-  UI.fibRetestDisplay    = document.getElementById("fibRetestDisplay");
-
-  /* GainzAlgo V2 UI refs */
-  UI.macdFilterToggle      = document.getElementById("macdFilterToggle");
-  UI.bbSqueezeFilterToggle = document.getElementById("bbSqueezeFilterToggle");
-  UI.adxFilterToggle       = document.getElementById("adxFilterToggle");
-  UI.stochFilterToggle     = document.getElementById("stochFilterToggle");
-  UI.macdDisplay           = document.getElementById("macdDisplay");
-  UI.bbSqueezeDisplay      = document.getElementById("bbSqueezeDisplay");
-  UI.adxDisplay            = document.getElementById("adxDisplay");
-  UI.stochDisplay          = document.getElementById("stochDisplay");
-  UI.volatilityRegime      = document.getElementById("volatilityRegime");
-  UI.signalStrengthGauge   = document.getElementById("signalStrengthGauge");
-  UI.signalStrengthLabel   = document.getElementById("signalStrengthLabel");
-
-  /* Scalping mode */
-  UI.scalpingModeToggle    = document.getElementById("scalpingModeToggle");
-  UI.nyOpenRangeToggle     = document.getElementById("nyOpenRangeToggle");
-  UI.toastContainer        = document.getElementById("toastContainer");
-
-  /* Session Ranges UI refs */
-  UI.sessionRangesToggle   = document.getElementById("sessionRangesToggle");
-  UI.sessionRangeAsianDisplay  = document.getElementById("sessionRangeAsianDisplay");
-  UI.sessionRangeLondonDisplay = document.getElementById("sessionRangeLondonDisplay");
-  UI.sessionRangeNYDisplay     = document.getElementById("sessionRangeNYDisplay");
-  UI.asianTightDisplay         = document.getElementById("asianTightDisplay");
-  UI.londonSweepDisplay        = document.getElementById("londonSweepDisplay");
-  UI.sessionRangeTradeDisplay  = document.getElementById("sessionRangeTradeDisplay");
-  UI.sessionRangeEntryDisplay  = document.getElementById("sessionRangeEntryDisplay");
-  UI.sessionRangeSLDisplay     = document.getElementById("sessionRangeSLDisplay");
-  UI.sessionRangeTPDisplay     = document.getElementById("sessionRangeTPDisplay");
-  UI.sessionRangeRRDisplay     = document.getElementById("sessionRangeRRDisplay");
-
-  /* Profit-Direction Constraint UI refs */
-  UI.minConfluenceToggle     = document.getElementById("minConfluenceToggle");
-  UI.minConfluenceInput      = document.getElementById("minConfluenceInput");
-  UI.requiredConfluenceList  = document.getElementById("requiredConfluenceList");
-  UI.doubleRetestToggle      = document.getElementById("doubleRetestToggle");
-  UI.confirmBarToggle        = document.getElementById("confirmBarToggle");
-  UI.divergenceFilterToggle  = document.getElementById("divergenceFilterToggle");
-  UI.adxHardGateToggle       = document.getElementById("adxHardGateToggle");
-  UI.adxMaxInput             = document.getElementById("adxMaxInput");
-  UI.breakoutDistToggle      = document.getElementById("breakoutDistToggle");
-  UI.breakoutDistInput       = document.getElementById("breakoutDistInput");
-  UI.timeDecayToggle         = document.getElementById("timeDecayToggle");
-  UI.timeDecayInput          = document.getElementById("timeDecayInput");
-  UI.consecutiveDirToggle    = document.getElementById("consecutiveDirToggle");
-  UI.vwapFilterToggle        = document.getElementById("vwapFilterToggle");
-  UI.stochCrossToggle        = document.getElementById("stochCrossToggle");
-  UI.rangeSizeToggle         = document.getElementById("rangeSizeToggle");
-  UI.rangeSizeMinInput       = document.getElementById("rangeSizeMinInput");
-  UI.rangeSizeMaxInput       = document.getElementById("rangeSizeMaxInput");
-  UI.hhhlToggle              = document.getElementById("hhhlToggle");
-  UI.followThroughToggle     = document.getElementById("followThroughToggle");
-  UI.mtfStructureToggle      = document.getElementById("mtfStructureToggle");
-  UI.revertSettingsBtn       = document.getElementById("revertSettingsBtn");
-
-  /* Strategy 1: Liquidity Sweep */
-  UI.liquiditySweepToggle  = document.getElementById("liquiditySweepToggle");
-  UI.liquiditySweepAlertList = document.getElementById("liquiditySweepAlertList");
-  UI.liquiditySweepCount   = document.getElementById("liquiditySweepCount");
-
-  /* Strategy 2: Stop Loss Hunt */
-  UI.stopLossHuntToggle    = document.getElementById("stopLossHuntToggle");
-  UI.stopLossHuntAlertList = document.getElementById("stopLossHuntAlertList");
-  UI.stopLossHuntCount     = document.getElementById("stopLossHuntCount");
-
-  /* Strategy 3: Failed Pin Bar */
-  UI.failedPinBarToggle    = document.getElementById("failedPinBarToggle");
-  UI.failedPinBarAlertList = document.getElementById("failedPinBarAlertList");
-  UI.failedPinBarCount     = document.getElementById("failedPinBarCount");
-
-  /* Strategy 4: Fib Golden Zone Scalp */
-  UI.fibScalpToggle        = document.getElementById("fibScalpToggle");
-  UI.fibScalpAlertList     = document.getElementById("fibScalpAlertList");
-  UI.fibScalpCount         = document.getElementById("fibScalpCount");
-
-  /* Strategy 5: Power of 3 (ICT) */
-  UI.po3Toggle             = document.getElementById("po3Toggle");
-  UI.po3FreshnessMode      = document.getElementById("po3FreshnessMode");
-  UI.po3FreshnessModeQuick = document.getElementById("po3FreshnessModeQuick");
-  UI.po3FreshnessBadge     = document.getElementById("po3FreshnessBadge");
-  UI.po3AlertList          = document.getElementById("po3AlertList");
-  UI.po3Count              = document.getElementById("po3Count");
-
-  /* Strategy 8: Grid Scalper MA */
-  UI.gridScalperMAToggle         = document.getElementById("gridScalperMAToggle");
-  UI.gridScalperMAStrategySelect = document.getElementById("gridScalperMAStrategySelect");
-  UI.gridScalperMAPeriodInput    = document.getElementById("gridScalperMAPeriodInput");
-  UI.gridScalperMAAlertList      = document.getElementById("gridScalperMAAlertList");
-  UI.gridScalperMAAlertCount     = document.getElementById("gridScalperMAAlertCount");
-  UI.autoTradeGridScalperMAToggle = document.getElementById("autoTradeGridScalperMAToggle");
-
-  /* Strategy 9: Fair Value Gap (FVG) */
-  UI.fvgStratToggle        = document.getElementById("fvgStratToggle");
-  UI.fvgStratAlertList     = document.getElementById("fvgStratAlertList");
-  UI.fvgStratAlertCount    = document.getElementById("fvgStratAlertCount");
-  UI.autoTradeFvgStratToggle = document.getElementById("autoTradeFvgStratToggle");
-
-  /* Strategy 11: MTF Top-Down */
-  UI.mtfTopDownToggle          = document.getElementById("mtfTopDownToggle");
-  UI.mtfTopDownAlertList       = document.getElementById("mtfTopDownAlertList");
-  UI.mtfTopDownAlertCount      = document.getElementById("mtfTopDownAlertCount");
-  UI.autoTradeMtfTopDownToggle = document.getElementById("autoTradeMtfTopDownToggle");
-
-  /* Strategy 14: Candlestick Interpretation */
-  UI.candleInterpToggle          = document.getElementById("candleInterpToggle");
-  UI.candleInterpAlertList       = document.getElementById("candleInterpAlertList");
-  UI.candleInterpAlertCount      = document.getElementById("candleInterpAlertCount");
-  UI.autoTradeCandleInterpToggle = document.getElementById("autoTradeCandleInterpToggle");
-
-  /* Strategy 13: TikTok Fibonacci */
-  UI.tiktokToggle          = document.getElementById("tiktokToggle");
-  UI.tiktokAlertList       = document.getElementById("tiktokAlertList");
-  UI.tiktokCount           = document.getElementById("tiktokCount");
-  UI.autoTradeTiktokToggle = document.getElementById("autoTradeTiktokToggle");
-
-  /* Strategy 19: Grid Scalper V2 */
-  UI.gridScalperV2Toggle          = document.getElementById("gridScalperV2Toggle");
-  UI.gridScalperV2AlertList       = document.getElementById("gridScalperV2AlertList");
-  UI.gridScalperV2Count           = document.getElementById("gridScalperV2Count");
-  UI.autoTradeGridScalperV2Toggle = document.getElementById("autoTradeGridScalperV2Toggle");
-
-  /* Strategy 15: 4H PO3 Liquidity Play */
-  UI.po3_4hToggle          = document.getElementById("po3_4hToggle");
-  UI.po3_4hAlertList       = document.getElementById("po3_4hAlertList");
-  UI.po3_4hAlertCount      = document.getElementById("po3_4hAlertCount");
-  UI.autoTradePo3_4hToggle = document.getElementById("autoTradePo3_4hToggle");
-
-  /* Strategy 16: 1H Accumulation Breaker Block */
-  UI.breakerBlockToggle          = document.getElementById("breakerBlockToggle");
-  UI.breakerBlockAlertList       = document.getElementById("breakerBlockAlertList");
-  UI.breakerBlockAlertCount      = document.getElementById("breakerBlockAlertCount");
-  UI.autoTradeBreakerBlockToggle = document.getElementById("autoTradeBreakerBlockToggle");
-
-  /* Strategy 17: OTE Golden Pocket */
-  UI.oteGoldenPocketToggle       = document.getElementById("oteGoldenPocketToggle");
-  UI.oteGoldenPocketAlertList    = document.getElementById("oteGoldenPocketAlertList");
-  UI.oteGoldenPocketAlertCount   = document.getElementById("oteGoldenPocketAlertCount");
-  UI.autoTradeOteGoldenPocketToggle = document.getElementById("autoTradeOteGoldenPocketToggle");
-
-  /* Strategy 18: ORB */
-  UI.orbToggle               = document.getElementById("orbToggle");
-  UI.orbAlertList            = document.getElementById("orbAlertList");
-  UI.orbAlertCount           = document.getElementById("orbAlertCount");
-  UI.autoTradeOrbToggle      = document.getElementById("autoTradeOrbToggle");
-  UI.orbCandleConfirmToggle  = document.getElementById("orbCandleConfirmToggle");
-
-  /* Strategy 20: CRT + TBS */
-  UI.crtTbsToggle            = document.getElementById("crtTbsToggle");
-  UI.crtTbsAlertList         = document.getElementById("crtTbsAlertList");
-  UI.crtTbsAlertCount        = document.getElementById("crtTbsAlertCount");
-  UI.autoTradeCrtTbsToggle   = document.getElementById("autoTradeCrtTbsToggle");
-  UI.crtTbsStrictToggle      = document.getElementById("crtTbsStrictToggle");
-
-  /* NY Open Range alerts */
-  UI.nyOpenRangeAlertList  = document.getElementById("nyOpenRangeAlertList");
-  UI.nyOpenRangeAlertCount = document.getElementById("nyOpenRangeAlertCount");
-
-  /* Session Range alerts */
-  UI.sessionRangeAlertList  = document.getElementById("sessionRangeAlertList");
-  UI.sessionRangeAlertCount = document.getElementById("sessionRangeAlertCount");
-
-  /* Strategy Alerts header total count badge */
-  UI.strategyAlertTotalCount = document.getElementById("strategyAlertTotalCount");
-
-  /* Live Scalp Scanner */
-  UI.liveScalpToggle       = document.getElementById("liveScalpToggle");
-  UI.liveScalpMinConf      = document.getElementById("liveScalpMinConf");
-  UI.scalpAlertList        = document.getElementById("scalpAlertList");
-  UI.scalpAlertBanner      = document.getElementById("scalpAlertBanner");
-  UI.scalpAlertBannerText  = document.getElementById("scalpAlertBannerText");
-  UI.scalpAlertCount       = document.getElementById("scalpAlertCount");
-
-  /* Live Scalp Stats */
-  UI.scalpStatsTotal       = document.getElementById("scalpStatsTotal");
-  UI.scalpStatsWins        = document.getElementById("scalpStatsWins");
-  UI.scalpStatsLosses      = document.getElementById("scalpStatsLosses");
-  UI.scalpStatsWinRate     = document.getElementById("scalpStatsWinRate");
-  UI.scalpStatsBull        = document.getElementById("scalpStatsBull");
-  UI.scalpStatsBear        = document.getElementById("scalpStatsBear");
-  UI.scalpStatsAvgConf     = document.getElementById("scalpStatsAvgConf");
-  UI.scalpStatsBestConf    = document.getElementById("scalpStatsBestConf");
-  UI.scalpStatsLastTime    = document.getElementById("scalpStatsLastTime");
-
-  /* Live Signal Ticker Banner */
-  UI.signalBanner      = document.getElementById("signalBanner");
-  UI.signalBannerTrack = document.getElementById("signalBannerTrack");
-
-  /* Live Scalp Ticker Banner */
-  UI.scalpTickerBanner = document.getElementById("scalpTickerBanner");
-  UI.scalpTickerTrack  = document.getElementById("scalpTickerTrack");
-
-  /* Live Strategies Ticker Banner */
-  UI.strategyTickerBanner = document.getElementById("strategyTickerBanner");
-  UI.strategyTickerTrack  = document.getElementById("strategyTickerTrack");
-
-  /* Tool buttons */
-  UI.exportBtn        = document.getElementById("exportSignalsBtn");
-  UI.themeToggleBtn   = document.getElementById("themeToggleBtn");
-  UI.soundToggleBtn   = document.getElementById("soundToggleBtn");
-  UI.notifToggleBtn   = document.getElementById("notifToggleBtn");
-  UI.streamModeBtn    = document.getElementById("streamModeBtn");
-  UI.emaToggle        = document.getElementById("emaToggle");
-
-  /* Symbol nav */
-  UI.prevSymbolBtn      = document.getElementById("prevSymbolBtn");
-  UI.nextSymbolBtn      = document.getElementById("nextSymbolBtn");
-  UI.currentSymbolLabel = document.getElementById("currentSymbolLabel");
-
-  /* Recommended settings active badges */
-  UI.recActive_timeframe    = document.getElementById("recActive_timeframe");
-  UI.recActive_rr           = document.getElementById("recActive_rr");
-  UI.recActive_range        = document.getElementById("recActive_range");
-  UI.recActive_ema          = document.getElementById("recActive_ema");
-  UI.recActive_htf          = document.getElementById("recActive_htf");
-  UI.recActive_atr          = document.getElementById("recActive_atr");
-  UI.recActive_trailing     = document.getElementById("recActive_trailing");
-  UI.recActive_partialTp    = document.getElementById("recActive_partialTp");
-  UI.recActive_falseBreakout = document.getElementById("recActive_falseBreakout");
-  UI.recActive_minRR        = document.getElementById("recActive_minRR");
-  UI.recActive_rsiFilter    = document.getElementById("recActive_rsiFilter");
-  UI.recActive_volSpike     = document.getElementById("recActive_volSpike");
-  UI.recActive_session      = document.getElementById("recActive_session");
-  UI.recActive_fib          = document.getElementById("recActive_fib");
-  UI.recActive_macd         = document.getElementById("recActive_macd");
-  UI.recActive_bbSqueeze    = document.getElementById("recActive_bbSqueeze");
-  UI.recActive_adx          = document.getElementById("recActive_adx");
-  UI.recActive_stoch        = document.getElementById("recActive_stoch");
-
-  /* Recommended settings dynamic "Rec" column badges */
-  UI.recRec_timeframe     = document.getElementById("recRec_timeframe");
-  UI.recRec_rr            = document.getElementById("recRec_rr");
-  UI.recRec_range         = document.getElementById("recRec_range");
-  UI.recRec_ema           = document.getElementById("recRec_ema");
-  UI.recRec_htf           = document.getElementById("recRec_htf");
-  UI.recRec_atr           = document.getElementById("recRec_atr");
-  UI.recRec_trailing      = document.getElementById("recRec_trailing");
-  UI.recRec_partialTp     = document.getElementById("recRec_partialTp");
-  UI.recRec_falseBreakout = document.getElementById("recRec_falseBreakout");
-  UI.recRec_minRR         = document.getElementById("recRec_minRR");
-  UI.recRec_rsiFilter     = document.getElementById("recRec_rsiFilter");
-  UI.recRec_volSpike      = document.getElementById("recRec_volSpike");
-  UI.recRec_session       = document.getElementById("recRec_session");
-  UI.recRec_fib           = document.getElementById("recRec_fib");
-  UI.recRec_macd          = document.getElementById("recRec_macd");
-  UI.recRec_bbSqueeze     = document.getElementById("recRec_bbSqueeze");
-  UI.recRec_adx           = document.getElementById("recRec_adx");
-  UI.recRec_stoch         = document.getElementById("recRec_stoch");
-  UI.recMarketLabel       = document.getElementById("recMarketLabel");
-  UI.recMarketSignals     = document.getElementById("recMarketSignals");
-  UI.recSignalsList       = document.getElementById("recSignalsList");
-  UI.recHintText          = document.getElementById("recHintText");
-
-  /* Market type badge */
-  UI.marketTypeBadge      = document.getElementById("marketTypeBadge");
-
-  /* Login gate */
-  UI.loginOverlay     = document.getElementById("loginOverlay");
-  UI.loginBtn         = document.getElementById("loginBtn");
-  UI.loginError       = document.getElementById("loginError");
-
-  /* Telegram */
-  UI.telegramBotToken       = document.getElementById("telegramBotToken");
-  UI.telegramChatId         = document.getElementById("telegramChatId");
-  UI.telegramAutoSendToggle = document.getElementById("telegramAutoSendToggle");
-  UI.telegramScalpAutoSendToggle = document.getElementById("telegramScalpAutoSendToggle");
-  UI.telegramOutcomeSendToggle   = document.getElementById("telegramOutcomeSendToggle");
-  UI.telegramScalpOutcomeSendToggle = document.getElementById("telegramScalpOutcomeSendToggle");
-  UI.telegramSessionRangeAutoSendToggle = document.getElementById("telegramSessionRangeAutoSendToggle");
-  UI.telegramSessionRangeOutcomeSendToggle = document.getElementById("telegramSessionRangeOutcomeSendToggle");
-  UI.telegramStrategyAutoSendToggle    = document.getElementById("telegramStrategyAutoSendToggle");
-  UI.telegramStrategyOutcomeSendToggle = document.getElementById("telegramStrategyOutcomeSendToggle");
-  UI.telegramShadowOutcomeSendToggle   = document.getElementById("telegramShadowOutcomeSendToggle");
-  UI.telegramProfitExitAlertToggle     = document.getElementById("telegramProfitExitAlertToggle");
-  UI.telegramSendNowBtn     = document.getElementById("telegramSendNowBtn");
-  UI.telegramSendScalpNowBtn    = document.getElementById("telegramSendScalpNowBtn");
-  UI.telegramSendStrategyNowBtn = document.getElementById("telegramSendStrategyNowBtn");
-  UI.telegramStatus         = document.getElementById("telegramStatus");
-
-  /* Feature 2: Orderblock toggle */
-  UI.orderblockToggle        = document.getElementById("orderblockToggle");
-  UI.autoTradeOrderblockToggle = document.getElementById("autoTradeOrderblockToggle");
-
-  /* Feature 17: Session heatmap */
-  UI.sessionHeatmapToggle    = document.getElementById("sessionHeatmapToggle");
-
-  /* Feature 6: Candle annotations */
-  UI.candleAnnotationsToggle = document.getElementById("candleAnnotationsToggle");
-
-  /* Feature 9: Volume profile */
-  UI.volumeProfileToggle     = document.getElementById("volumeProfileToggle");
-
-  /* Feature 10: Fib extensions */
-  UI.fibExtensionsToggle     = document.getElementById("fibExtensionsToggle");
-
-  /* Feature 5: BOS/ChoCH */
-  UI.bosChochToggle          = document.getElementById("bosChochToggle");
-
-  /* Feature 7: Divergence visual */
-  UI.divergenceVisualToggle  = document.getElementById("divergenceVisualToggle");
-
-  /* Feature 11: News pause */
-  UI.newsPauseToggle         = document.getElementById("newsPauseToggle");
-  UI.newsPauseMinutesInput   = document.getElementById("newsPauseMinutesInput");
-
-  /* Feature 15: Multi-R ladder */
-  UI.multiRLadderToggle      = document.getElementById("multiRLadderToggle");
-
-  /* Feature 13: Adaptive confluence */
-  UI.adaptiveConfluenceToggle = document.getElementById("adaptiveConfluenceToggle");
-
-  /* Feature 1: Backtest */
-  UI.backtestSpeedInput      = document.getElementById("backtestSpeedInput");
-
-  /* Feature 8: Scanner */
-  UI.scannerToggle           = document.getElementById("scannerToggle");
-  UI.scannerSymbolPicker     = document.getElementById("scannerSymbolPicker");
-}
-
-/* ================= HELPERS ================= */
-function fmt(v, d) {
-  if (v == null) return "--";
-  const n = Number(v);
-  return isNaN(n) ? "--" : n.toFixed(d != null ? d : 2); /* == null intentional: catches both null and undefined */
-}
-
-/**
- * Returns the correct number of decimal places to display a price for the
- * given symbol, matching the precision accepted by MT5 for that instrument.
- *
- * Logic:
- *   - For known forex pairs (pipSize ≤ 0.0001): d+1 (5-digit MT5 standard)
- *   - For metal commodities (XAU, XAG, XPT, XPD): exact pip decimal places
- *   - For forex pairs with pipSize > 0.0001 (e.g. JPY, 0.01): exact pip decimal places
- *   - For synthetics / unknown symbols without a pipSize: inferred from
- *     priceSample magnitude (≥10 000 → 2 dp, ≥1 000 → 3 dp, ≥100 → 4 dp, else 5 dp)
- *
- * @param {string}  symbol       – Deriv symbol identifier
- * @param {number}  [priceSample] – a representative price used as fallback for synthetics
- * @returns {number} number of decimal places
- */
-function getSymbolDigits(symbol, priceSample) {
-  const sp = getSymbolSpecs(symbol);
-  if (sp && sp.pipSize) {
-    const d = Math.round(-Math.log10(sp.pipSize));
-    const isMetal = /^frx(XAU|XAG|XPT|XPD)/i.test(symbol || "") || /^XAUUSD/i.test(symbol || "");
-    /* Standard forex pairs use 5-digit (fractional pip) precision on MT5 */
-    if (!isMetal && sp.type === "forex" && sp.pipSize <= 0.0001) return d + 1;
-    return d;
-  }
-  /* Synthetics / unknown: infer from price magnitude */
-  if (priceSample != null && priceSample > 0) {
-    if (priceSample >= 10000) return 2;
-    if (priceSample >= 1000)  return 3;
-    if (priceSample >= 100)   return 4;
-    return 5;
-  }
-  return 5;
-}
-
-/**
- * Format a price value to the correct decimal places for the given symbol.
- * Uses getSymbolDigits() with the price itself as the fallback magnitude hint.
- *
- * @param {number} price  – the price to format
- * @param {string} symbol – Deriv symbol identifier
- * @returns {string}
- */
-function fmtPrice(price, symbol) {
-  if (price === null || price === undefined) return "--";
-  const n = Number(price);
-  if (isNaN(n)) return "--";
-  const d = getSymbolDigits(symbol, n);
-  return n.toFixed(d);
-}
-
-/**
- * Returns the recommended MT5 order type based on entry price vs current price.
- *
- * MT5 pending-order rules:
- *   BUY  STOP  → entry ABOVE current price
- *   BUY  LIMIT → entry BELOW  current price
- *   SELL STOP  → entry BELOW  current price
- *   SELL LIMIT → entry ABOVE  current price
- *
- * Returns null when there is no breakout or no price data.
- */
-function getRecommendedOrderType() {
-  if (!breakout) return null;
-  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
-  if (currentPrice === null || currentPrice === undefined) return null;
-
-  /* Use trade entry if available, otherwise fall back to breakout level */
-  const entryLevel = trade ? trade.entry : breakout.level;
-
-  if (breakout.dir === "BULL") {
-    return entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
-  }
-  return entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
-}
-
-function addLog(msg) {
-  if (!UI.signalLog) return;
-  const li = document.createElement("li");
-  const now = new Date();
-  /* Prefix with symbol when logging from a multi-panel context */
-  const prefix = _multiPanelProcessing ? `[${_multiPanelProcessing}] ` : "";
-  li.textContent = `[${now.toLocaleTimeString()}] ${prefix}${msg}`;
-  UI.signalLog.prepend(li);
-  while (UI.signalLog.children.length > SIGNAL_LOG_MAX_DOM) UI.signalLog.lastChild.remove();
-  persistSignalLog();
-}
-
-function setPhase(newPhase) {
-  const prevPhase = phase;
-  phase = newPhase;
-
-  /* Only update the main phase badge when NOT processing a non-focused panel */
-  const isFocusedOrSingle = !_multiPanelProcessing || _multiPanelProcessing === focusedPanelSymbol;
-  if (isFocusedOrSingle && UI.phaseLabel) {
-    UI.phaseLabel.textContent = newPhase;
-    UI.phaseLabel.className = "status-badge " + ({
-      WAITING: "disabled", RANGE: "warning", BREAKOUT: "enabled",
-      RETEST: "warning", INDECISION: "warning", CONFIRM: "enabled", TRADE: "bull"
-    }[newPhase] || "disabled");
-  }
-  /* Play alert on meaningful phase transitions (live only, skip historical batch) */
-  if (prevPhase !== newPhase && newPhase !== "WAITING" && !_historicalProcessing) {
-    playPhaseAlert(newPhase);
-    /* Send browser notification for focused panel or single mode */
-    if (isFocusedOrSingle) sendPhaseNotification(newPhase);
-    /* Also send notification for non-focused panels reaching TRADE (actionable) */
-    if (!isFocusedOrSingle && newPhase === "TRADE") sendPhaseNotification(newPhase);
-  }
-  /* Auto-focus the panel that fired a TRADE signal so chart markup is visible.
-     Only for live streaming signals — skip during historical batch processing. */
-  if (prevPhase !== newPhase && newPhase === "TRADE" && _multiPanelProcessing && !_historicalProcessing) {
-    const panelSymbol = _multiPanelProcessing;
-    /* Defer focus until after savePanel() completes so panel state is up-to-date */
-    const FOCUS_DELAY_MS = 50;
-    setTimeout(() => {
-      if (multiPanels.has(panelSymbol)) {
-        focusPanel(panelSymbol);
-        showToast("📈 TRADE Signal", `${getSymbolLabel(panelSymbol)} entered TRADE phase — chart focused`, "trade", 5000);
-      }
-    }, FOCUS_DELAY_MS);
-  }
-
-  /* Auto-send Telegram on TRADE phase — for ALL panels, not just focused.
-     Only for live streaming signals — skip during historical batch processing. */
-  if (prevPhase !== newPhase && newPhase === "TRADE" && !_historicalProcessing) {
-    if (telegramAutoSend) {
-      if (_multiPanelProcessing) {
-        /* Multi-panel: use panel-specific Telegram send (mini-chart + panel state) */
-        const panelSymbol = _multiPanelProcessing;
-        const targetPanel = multiPanels.get(panelSymbol);
-        if (targetPanel) targetPanel._tradeTelegramSent = true;
-        addLog("📤 Telegram auto-send triggered — TRADE signal");
-        setTimeout(() => sendPanelTelegramAlert(panelSymbol), CHART_RENDER_DELAY_MS);
-      } else {
-        /* Single-symbol mode: use main chart as before */
-        addLog("📤 Telegram auto-send triggered — TRADE signal");
-        setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
-      }
-    } else {
-      /* Warn user that Telegram isn't configured when a TRADE fires */
-      const { token, chatId } = getTelegramCredentials();
-      if (!token || !chatId) {
-        showToast("⚠️ Telegram Not Configured",
-          "A TRADE signal fired but Telegram bot token / chat ID are not set. Configure in Settings → Telegram.",
-          "warning", 8000);
-      } else {
-        showToast("ℹ️ Telegram Auto-Send Off",
-          "A TRADE signal fired but Telegram auto-send is disabled. Enable it in Settings → Telegram.",
-          "info", 6000);
-      }
-    }
-  }
-}
-
-/* ================= SOUND & NOTIFICATIONS ================= */
-function playPhaseAlert(phaseName) {
-  if (!soundEnabled) return;
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    const freqMap = {
-      RANGE: 440, BREAKOUT: 660, RETEST: 550,
-      INDECISION: 500, CONFIRM: 770, TRADE: 880
-    };
-    osc.frequency.value = freqMap[phaseName] || 440;
-    osc.type = phaseName === "TRADE" ? "sine" : "triangle";
-    gain.gain.value = 0.1;
-    osc.start();
-    osc.stop(ctx.currentTime + 0.15);
-  } catch (e) { /* audio not available */ }
-}
-
-/**
- * Global notification throttle.  Prevents rapid-fire browser notifications
- * when multiple strategies / panels fire signals in quick succession.
- * Rules:
- *   1. At most NOTIFICATION_BURST_MAX notifications in any sliding
- *      NOTIFICATION_BURST_WINDOW_MS window.
- *   2. At least NOTIFICATION_COOLDOWN_MS between consecutive notifications.
- * Suppressed notifications are silently dropped (toast + sound still fire).
- */
-function throttledNotification(title, body) {
-  const now = Date.now();
-  /* Prune timestamps outside the burst window */
-  _notifTimestamps = _notifTimestamps.filter(t => now - t < NOTIFICATION_BURST_WINDOW_MS);
-
-  /* Check cooldown since last notification */
-  const lastNotifTime = _notifTimestamps[_notifTimestamps.length - 1];
-  if (lastNotifTime && now - lastNotifTime < NOTIFICATION_COOLDOWN_MS) {
-    return; /* too soon after the last notification */
-  }
-  /* Check burst limit */
-  if (_notifTimestamps.length >= NOTIFICATION_BURST_MAX) {
-    return; /* burst cap reached */
-  }
-
-  _notifTimestamps.push(now);
-  new Notification(title, { body, icon: NOTIF_ICON });
-}
-
-function sendPhaseNotification(phaseName) {
-  if (!notificationsEnabled || !("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
-  const symbol = _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
-  let body = `${symbol} moved to ${phaseName} phase`;
-  /*
-   * Append order-type hint for actionable phases:
-   *   RETEST phase  = breakout just happened, waiting for retest → STOP orders
-   *   INDECISION    = retest found, waiting for indecision       → LIMIT orders
-   */
-  const orderType = getRecommendedOrderType();
-  if (orderType && (phaseName === "RETEST" || phaseName === "INDECISION")) {
-    body += ` — ${orderType}`;
-  }
-  throttledNotification(`IT Guru Indicator: ${phaseName}`, body);
-}
-
-function requestNotificationPermission() {
-  if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-  }
-}
-
-/* ================= ON-SCREEN TOAST NOTIFICATIONS ================= */
-/**
- * Show a non-blocking on-screen toast notification.
- * @param {string} title   – bold title text
- * @param {string} msg     – description text
- * @param {string} type    – "info" | "success" | "warning" | "trade"
- * @param {number} duration – auto-dismiss in ms (0 = manual dismiss only)
- */
-function showToast(title, msg, type = "info", duration = 6000) {
-  const container = UI.toastContainer || document.getElementById("toastContainer");
-  if (!container) return;
-
-  const iconMap = { info: "🔔", success: "✅", warning: "⚠️", trade: "📈" };
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
-
-  const iconSpan = document.createElement("span");
-  iconSpan.className = "toast-icon";
-  iconSpan.textContent = iconMap[type] || "🔔";
-
-  const body = document.createElement("div");
-  body.className = "toast-body";
-  const titleDiv = document.createElement("div");
-  titleDiv.className = "toast-title";
-  titleDiv.textContent = title;
-  const msgDiv = document.createElement("div");
-  msgDiv.className = "toast-msg";
-  msgDiv.textContent = msg;
-  body.appendChild(titleDiv);
-  body.appendChild(msgDiv);
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "toast-close";
-  closeBtn.setAttribute("aria-label", "Dismiss");
-  closeBtn.textContent = "\u00D7";
-
-  toast.appendChild(iconSpan);
-  toast.appendChild(body);
-  toast.appendChild(closeBtn);
-
-  const dismiss = () => {
-    toast.classList.add("toast-out");
-    toast.addEventListener("animationend", () => toast.remove());
-  };
-  closeBtn.addEventListener("click", dismiss);
-  container.appendChild(toast);
-
-  /* Keep max 5 toasts on screen */
-  while (container.children.length > 5) container.firstElementChild.remove();
-
-  if (duration > 0) setTimeout(dismiss, duration);
-}
-
-/* ================= NY OPEN RANGE (9:30 AM EST) STRATEGY ================= */
-/**
- * Convert current time to Eastern Time (EST/EDT-aware) using Intl.
- * Returns { hours, minutes } in ET.
- */
-function getEasternTime() {
-  const now = new Date();
-  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const parts = new Date(etStr);
-  return { hours: parts.getHours(), minutes: parts.getMinutes(), seconds: parts.getSeconds() };
-}
-
-/**
- * Start the clock-checker interval that watches for 9:30 AM EST.
- * Fires a toast + browser notification when it's time.
- */
-function startNyOpenRangeTimer() {
-  if (_nyOpenRangeTimerInterval) return;
-  _nyOpenRangeTimerInterval = setInterval(() => {
-    if (!nyOpenRangeEnabled) return;
-    const et = getEasternTime();
-    /* Notify at 9:30 AM EST (once per day).
-       Check the full minute window to avoid missing due to interval drift. */
-    if (et.hours === 9 && et.minutes === 30 && !_nyOpenRangeNotified) {
-      _nyOpenRangeNotified = true;
-      nyOpenRangePhase = "RANGE";
-      const sym = getActiveSymbol();
-      showToast(
-        "\uD83D\uDD64 9:30 AM EST \u2014 NY Open",
-        `Market open! Analyzing ${sym} for the 9:30\u20139:35 opening range. Marking high & low\u2026`,
-        "warning", 10000
-      );
-      sendPhaseNotification("NY_OPEN_RANGE");
-      addLog("\uD83D\uDD64 NY Open Range: 9:30 AM EST reached \u2014 collecting 9:30\u20139:35 range");
-      playPhaseAlert("RANGE");
-      // Send Telegram notification for NY Open (only when auto-send is enabled)
-      if (telegramAutoSend) {
-        setTimeout(() => sendTelegramAlert(), CHART_RENDER_DELAY_MS);
-      }
-    }
-    /* Reset notification flag after the window passes (after 9:36) so it can fire again tomorrow */
-    if ((et.hours === 9 && et.minutes >= 36) || et.hours >= 10) {
-      _nyOpenRangeNotified = false;
-    }
-  }, 5000);   /* check every 5 seconds */
-}
-
-function stopNyOpenRangeTimer() {
-  if (_nyOpenRangeTimerInterval) {
-    clearInterval(_nyOpenRangeTimerInterval);
-    _nyOpenRangeTimerInterval = null;
-  }
-}
-
-/**
- * Given candle data, determine if a candle falls within the 9:30–9:35 AM EST window.
- * Uses candle epoch (Unix seconds).
- */
-function isInNyOpenWindow(epochSec) {
-  const d = new Date(epochSec * 1000);
-  const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const etDate = new Date(etStr);
-  const h = etDate.getHours();
-  const m = etDate.getMinutes();
-  return (h === 9 && m >= 30 && m < 35);
-}
-
-/**
- * Build the NY Open Range from candle data (9:30–9:35 AM EST window).
- * Looks at all candles and finds those within the 5-min window.
- */
-function buildNyOpenRange() {
-  if (!nyOpenRangeEnabled || candles.length === 0) return;
-  if (nyOpenRange) return;  /* already built */
-
-  let high = -Infinity, low = Infinity;
-  let startIdx = -1, endIdx = -1;
-  let startEpoch = 0, endEpoch = 0;
-
-  for (let i = 0; i < candles.length; i++) {
-    if (isInNyOpenWindow(candles[i].epoch)) {
-      if (startIdx < 0) {
-        startIdx = i;
-        startEpoch = candles[i].epoch;
-      }
-      if (candles[i].high > high) high = candles[i].high;
-      if (candles[i].low < low)   low = candles[i].low;
-      endIdx = i;
-      endEpoch = candles[i].epoch;
-    }
-  }
-
-  if (startIdx < 0 || high === -Infinity || candles.length === 0) return;
-
-  /* Check if the window has closed (latest candle is past 9:35 AM EST) */
-  const lastCandle = candles[candles.length - 1];
-  if (!isInNyOpenWindow(lastCandle.epoch) && endIdx >= 0) {
-    /* Window has passed — range is complete */
-    nyOpenRange = { high, low, startIdx, endIdx, startEpoch, endEpoch };
-    nyOpenRangePhase = "BREAKOUT";
-    addLog(`🕤 NY Open Range set: High ${fmt(high, 4)}, Low ${fmt(low, 4)} (candles #${startIdx}–#${endIdx})`);
-    showToast(
-      "NY Open Range Set",
-      `High: ${fmt(high, 4)} | Low: ${fmt(low, 4)} — Watching for breakout…`,
-      "success", 8000
-    );
-    /* Telegram alert: range is now established — notify traders so they can prepare */
-    if (telegramStrategyAutoSend && !_historicalProcessing) {
-      setTimeout(() => sendTelegramNyOpenRangeAlert("RANGE_SET"), CHART_RENDER_DELAY_MS);
-    }
-  }
-}
-
-/**
- * Process a single candle through the NY Open Range strategy phases.
- * Called from processLatestCandle / processAllCandles alongside the main strategy.
- */
-function processNyOpenRangeCandle(idx) {
-  if (!nyOpenRangeEnabled || !nyOpenRange) return;
-  const c = candles[idx];
-
-  /* ---- PHASE: BREAKOUT — looking for candle whose entire body closes outside range ---- */
-  if (nyOpenRangePhase === "BREAKOUT" && !nyOpenRangeBreakout) {
-    if (idx <= nyOpenRange.endIdx) return;
-
-    /* Require the entire candle body (both open AND close) to be outside the
-       range — a wick poking out while the body stays inside does not count. */
-    const bodyHigh = Math.max(c.open, c.close);
-    const bodyLow  = Math.min(c.open, c.close);
-
-    if (bodyLow > nyOpenRange.high) {
-      nyOpenRangeBreakout = { dir: "BULL", candleIdx: idx, level: nyOpenRange.high };
-      nyOpenRangePhase = "RETEST";
-      addLog(`🕤 NY Open Range BULL breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully above high ${fmt(nyOpenRange.high, 4)}`);
-      showToast("NY Range Breakout ▲", `Bullish breakout — waiting for retest…`, "info", 8000);
-      /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
-      if (telegramStrategyAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
-      }
-    } else if (bodyHigh < nyOpenRange.low) {
-      nyOpenRangeBreakout = { dir: "BEAR", candleIdx: idx, level: nyOpenRange.low };
-      nyOpenRangePhase = "RETEST";
-      addLog(`🕤 NY Open Range BEAR breakout at #${idx}, body [${fmt(bodyLow, 4)}–${fmt(bodyHigh, 4)}] fully below low ${fmt(nyOpenRange.low, 4)}`);
-      showToast("NY Range Breakout ▼", `Bearish breakout — waiting for retest…`, "info", 8000);
-      /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
-      if (telegramStrategyAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
-      }
-    }
-    return;
-  }
-
-  /* ---- PHASE: RETEST — candle wicks back into range but does NOT close inside ---- */
-  if (nyOpenRangePhase === "RETEST" && nyOpenRangeBreakout && !nyOpenRangeRetest) {
-    if (idx <= nyOpenRangeBreakout.candleIdx) return;
-
-    const rangeH = nyOpenRange.high;
-    const rangeL = nyOpenRange.low;
-    const dir    = nyOpenRangeBreakout.dir;
-
-    let wicksIntoRange = false;
-    let closedInsideRange = (c.close >= rangeL && c.close <= rangeH);
-
-    if (dir === "BULL") {
-      /* For bull: candle low must dip into the range (between rangeL and rangeH),
-         but close must remain above the range high */
-      wicksIntoRange = (c.low <= rangeH && c.low >= rangeL);
-    } else {
-      /* For bear: candle high must poke into the range (between rangeL and rangeH),
-         but close must remain below the range low */
-      wicksIntoRange = (c.high >= rangeL && c.high <= rangeH);
-    }
-
-    if (wicksIntoRange && !closedInsideRange) {
-      /* Valid retest! */
-      nyOpenRangeRetest = { candleIdx: idx };
-
-      /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-      if (minConfluenceEnabled) {
-        const confGate = checkConfluenceGate(dir, c.close, idx);
-        if (!confGate.pass) {
-          addLog(`⚠ NY Open Range REJECTED — ${confGate.reason}`);
-          nyOpenRangeRetest = null;
-          return;
-        }
-      }
-
-      nyOpenRangePhase = "TRADE";
-
-      /* Build the trade: SL at midpoint, TP at profit-optimized R:R */
-      const midpoint = (rangeH + rangeL) / 2;
-      const entry    = c.close;
-      const sl       = midpoint;
-      const risk     = Math.abs(entry - sl);
-      const _profParams = getStrategyProfitParams();
-
-      if (risk > 0) {
-        const tp = dir === "BULL" ? entry + risk * _profParams.rrLiquiditySweep : entry - risk * _profParams.rrLiquiditySweep;
-        const rr = _profParams.rrLiquiditySweep;
-        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
-
-        /* Push to history for strategy alerts panel */
-        nyOpenRangeHistory.unshift(nyOpenRangeTrade);
-        if (nyOpenRangeHistory.length > NY_OPEN_RANGE_MAX_HISTORY) nyOpenRangeHistory.pop();
-
-        addLog(`🕤 NY Open Range TRADE: ${dir} entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())} (midpoint), TP ${fmtPrice(tp, getActiveSymbol())} (1:2 R:R)`);
-        showToast(
-          `NY Range Entry ${dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:2`,
-          "trade", 12000
-        );
-        playPhaseAlert("TRADE");
-        sendPhaseNotification("TRADE");
-
-        /* Telegram strategy alert */
-        if (telegramStrategyAutoSend && !_historicalProcessing) {
-          setTimeout(() => sendTelegramStrategyAlert(nyOpenRangeTrade), CHART_RENDER_DELAY_MS);
-        }
-
-        renderStrategyAlerts();
-
-        /* Auto-trade: place a Deriv multiplier contract for NY Open Range */
-        if (autoTradeStrategyEnabled && autoTradeNYOpenRange && !_historicalProcessing) {
-          executeAutoTrade({ dir, entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "nyOpenRange" });
-        }
-      }
-    }
-    return;
-  }
-}
-
-/**
- * Reset NY Open Range state for a new session / day.
- */
-function resetNyOpenRange() {
-  nyOpenRange         = null;
-  nyOpenRangeBreakout = null;
-  nyOpenRangeRetest   = null;
-  nyOpenRangeTrade    = null;
-  nyOpenRangePhase    = nyOpenRangeEnabled ? "WAITING" : "IDLE";
-}
-
-/**
- * Monitor the NY Open Range trade on each candle tick.
- * Records WIN when TP is hit, LOSS when SL is hit.
- * Clears the trade (auto-reset) so the range can be re-used if needed.
- */
-function monitorNyOpenRangeTradeOutcome(candle) {
-  if (!nyOpenRangeEnabled || !nyOpenRangeTrade) return;
-  if (nyOpenRangeTrade.result !== "PENDING") return;
-
-  const t = nyOpenRangeTrade;
-
-  /* Track 1R profit level and fire exit alert if price reverses to entry */
-  if (_checkProfitExitAlert(t, candle, "NY Open Range")) {
-    /* no `changed` flag needed here — not an array-based monitor */
-  }
-
-  let result = null;
-
-  if (t.dir === "BULL") {
-    const nySlHit = candle.low <= t.sl, nyTpHit = candle.high >= t.tp;
-    if (nySlHit && nyTpHit)     result = resolveBothHit(t);
-    else if (nySlHit)           result = "LOSS";
-    else if (nyTpHit)           result = "WIN";
-  } else {
-    const nySlHit = candle.high >= t.sl, nyTpHit = candle.low <= t.tp;
-    if (nySlHit && nyTpHit)     result = resolveBothHit(t);
-    else if (nySlHit)           result = "LOSS";
-    else if (nyTpHit)           result = "WIN";
-  }
-
-  if (!result) return;
-
-  t.result = result;
-  if (result === "WIN") nyOpenRangeTradeWins++;
-  else                  nyOpenRangeTradeLosses++;
-
-  const dirLabel = t.dir === "BULL" ? "BUY" : "SELL";
-  const icon = result === "WIN" ? "✅" : "❌";
-  addLog(`🕤 NY Open Range ${icon} ${result} — ${dirLabel} entry ${fmt(t.entry, 4)}, hit ${result === "WIN" ? "TP" : "SL"} @ ${fmt(result === "WIN" ? t.tp : t.sl, 4)} | W:${nyOpenRangeTradeWins} L:${nyOpenRangeTradeLosses}`);
-  showToast(
-    `NY Range ${result}`,
-    `${dirLabel} trade hit ${result === "WIN" ? "TP" : "SL"} — Entry: ${fmt(t.entry, 4)}`,
-    result === "WIN" ? "trade" : "warning", 8000
-  );
-  playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
-
-  /* Update the history entry result so the alerts panel shows the outcome */
-  const histEntry = nyOpenRangeHistory.find(h => h === t);
-  if (histEntry) {
-    histEntry.result = result;
-    /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
-    if (!histEntry._stratOutcomeSent && histEntry._sentViaTelegram === true) {
-      sendStrategyOutcomeTelegram(histEntry);
-    }
-  }
-  renderStrategyAlerts();
-
-  /* Auto-reset so the session can accept a new setup if the trade resolves early */
-  nyOpenRangeTrade = null;
-}
-
-/* ================= SESSION RANGES (Asian / London / NY) ================= */
-
-/**
- * Determine which trading session a candle belongs to based on its UTC hour.
- * Returns an object with boolean flags for each session.
- */
-function getCandleSessionFlags(epochSec) {
-  const d = new Date(epochSec * 1000);
-  const hour = d.getUTCHours();
-  return {
-    asian:  hour >= SESSION_ASIAN.start  && hour < SESSION_ASIAN.end,
-    london: hour >= SESSION_LONDON.start && hour < SESSION_LONDON.end,
-    ny:     hour >= SESSION_NEW_YORK.start && hour < SESSION_NEW_YORK.end
-  };
-}
-
-/**
- * Build session ranges (Asian, London, NY) from candle data.
- * Each range captures the high/low of candles that fall within the session's UTC hours.
- * Only builds ranges for today's date (based on the latest candle).
- */
-function buildSessionRanges() {
-  if (!sessionRangesEnabled || candles.length === 0) return;
-
-  /* Determine "today" from the latest candle */
-  const latestDate = new Date(candles[candles.length - 1].epoch * 1000);
-  const todayUTC = latestDate.toISOString().slice(0, 10); /* YYYY-MM-DD */
-
-  let asianHigh = -Infinity, asianLow = Infinity, asianStart = -1, asianEnd = -1;
-  let londonHigh = -Infinity, londonLow = Infinity, londonStart = -1, londonEnd = -1;
-  let nyHigh = -Infinity, nyLow = Infinity, nyStart = -1, nyEnd = -1;
-
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const d = new Date(c.epoch * 1000);
-    const dateStr = d.toISOString().slice(0, 10);
-    /* Only consider candles from today */
-    if (dateStr !== todayUTC) continue;
-
-    const flags = getCandleSessionFlags(c.epoch);
-
-    if (flags.asian) {
-      if (asianStart < 0) asianStart = i;
-      asianEnd = i;
-      if (c.high > asianHigh) asianHigh = c.high;
-      if (c.low < asianLow)   asianLow = c.low;
-    }
-    if (flags.london) {
-      if (londonStart < 0) londonStart = i;
-      londonEnd = i;
-      if (c.high > londonHigh) londonHigh = c.high;
-      if (c.low < londonLow)   londonLow = c.low;
-    }
-    if (flags.ny) {
-      if (nyStart < 0) nyStart = i;
-      nyEnd = i;
-      if (c.high > nyHigh) nyHigh = c.high;
-      if (c.low < nyLow)   nyLow = c.low;
-    }
-  }
-
-  /* Set ranges (only if we found candles for that session) */
-  sessionRangeAsian  = asianStart  >= 0 && asianHigh  !== -Infinity
-    ? { high: asianHigh,  low: asianLow,  startIdx: asianStart,  endIdx: asianEnd }  : null;
-  sessionRangeLondon = londonStart >= 0 && londonHigh !== -Infinity
-    ? { high: londonHigh, low: londonLow, startIdx: londonStart, endIdx: londonEnd } : null;
-  sessionRangeNY     = nyStart     >= 0 && nyHigh     !== -Infinity
-    ? { high: nyHigh,     low: nyLow,     startIdx: nyStart,     endIdx: nyEnd }     : null;
-
-  /* Determine if Asian range is "tight" (< ATR threshold) */
-  const wasTight = asianRangeTight;
-  if (sessionRangeAsian && atrValue > 0) {
-    const asianSize = sessionRangeAsian.high - sessionRangeAsian.low;
-    asianRangeTight = asianSize < atrValue * ASIAN_TIGHT_ATR_MULT;
-  } else {
-    asianRangeTight = false;
-  }
-
-  /* Send Telegram alert on first detection of tight Asian range */
-  if (asianRangeTight && !wasTight && telegramSessionRangeAutoSend && !_historicalProcessing) {
-    const currentPanelSymbol = _multiPanelProcessing || null;
-    setTimeout(() => sendTelegramSessionRangeAlert("TIGHT_ASIAN", currentPanelSymbol), CHART_RENDER_DELAY_MS);
-  }
-}
-
-/**
- * Detect London session sweeping the Asian range high or low.
- * A "sweep" occurs when a London-session candle's wick exceeds the Asian high or low
- * but the candle body closes back inside the Asian range — a liquidity grab.
- * Also detects a clean break (close outside) as a sweep signal.
- */
-function detectLondonAsianSweep() {
-  if (!sessionRangesEnabled || !sessionRangeAsian || !sessionRangeLondon) return;
-  if (londonSweepSignal) return; /* already detected for this session */
-
-  const aH = sessionRangeAsian.high;
-  const aL = sessionRangeAsian.low;
-
-  /* Scan London candles after Asian range ends */
-  const scanStart = Math.max(sessionRangeLondon.startIdx, sessionRangeAsian.endIdx + 1);
-  const scanEnd   = Math.min(sessionRangeLondon.endIdx, candles.length - 1);
-  if (scanStart > scanEnd) return;  /* no London candles past Asian range yet */
-
-  for (let i = scanStart; i <= scanEnd; i++) {
-    const c = candles[i];
-    /* Check sweep of Asian HIGH — bearish reversal (SELL).
-       A true liquidity grab requires the wick to exceed the Asian high but the
-       candle to close back at or below it (rejection = bearish reversal signal).
-       A clean close above the Asian high is a breakout, not a sweep. */
-    if (c.high > aH && c.close <= aH) {
-      londonSweepSignal = { dir: "HIGH", candleIdx: i, price: c.high };
-
-      /* Compute trade levels: Entry at candle close, SL above the sweep wick,
-         TP based on user-inputted R:R ratio below entry */
-      const entry = c.close;
-      const sl    = c.high;                        /* SL above the sweep wick */
-      const risk  = Math.abs(sl - entry);
-      if (risk > 0) {
-        /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-        if (minConfluenceEnabled) {
-          const confGate = checkConfluenceGate("BEAR", entry, i);
-          if (!confGate.pass) {
-            addLog(`⚠ London Sweep SELL REJECTED — ${confGate.reason}`);
-            londonSweepSignal = null;
-            return;
-          }
-        }
-
-        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
-        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
-        const rr  = userReward / userRisk;
-        const tp  = entry - risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
-
-        /* Push to history for strategy alerts panel */
-        sessionRangeHistory.unshift(sessionRangeTrade);
-        if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
-
-        addLog(`🌍 London Sweep TRADE: SELL entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())}, TP ${fmtPrice(tp, getActiveSymbol())} (1:${fmt(rr, 1)} R:R)`);
-        showToast(
-          "London Sweep ▼ SELL Signal",
-          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:${fmt(rr, 1)}\nSwept Asian high ${fmtPrice(aH, getActiveSymbol())} — bearish reversal`,
-          "trade", 12000
-        );
-
-        /* Auto-trade: place a Deriv multiplier contract for London Sweep SELL */
-        if (autoTradeStrategyEnabled && autoTradeSessionRange && !_historicalProcessing) {
-          executeAutoTrade({ dir: "BEAR", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
-        }
-
-        /* Telegram strategy alert */
-        if (telegramStrategyAutoSend && !_historicalProcessing) {
-          setTimeout(() => sendTelegramStrategyAlert(sessionRangeTrade), CHART_RENDER_DELAY_MS);
-        }
-
-        renderStrategyAlerts();
-      } else {
-        sessionRangeTrade = null;
-        addLog(`🌍 London Sweep: Asian HIGH swept at candle #${i} (high ${fmt(c.high, 4)} > ${fmt(aH, 4)})`);
-        showToast(
-          "London Sweep ▲ Asian High",
-          `Candle #${i} swept Asian high ${fmt(aH, 4)} — potential bearish reversal`,
-          "warning", 8000
-        );
-      }
-      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        const currentPanelSymbol = _multiPanelProcessing || null;
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
-      }
-      return;
-    }
-    /* Check sweep of Asian LOW — bullish reversal (BUY).
-       A true liquidity grab requires the wick to dip below the Asian low but the
-       candle to close back at or above it (rejection = bullish reversal signal).
-       A clean close below the Asian low is a breakout, not a sweep. */
-    if (c.low < aL && c.close >= aL) {
-      londonSweepSignal = { dir: "LOW", candleIdx: i, price: c.low };
-
-      /* Compute trade levels: Entry at candle close, SL below the sweep wick,
-         TP based on user-inputted R:R ratio above entry */
-      const entry = c.close;
-      const sl    = c.low;                         /* SL below the sweep wick */
-      const risk  = Math.abs(entry - sl);
-      if (risk > 0) {
-        /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-        if (minConfluenceEnabled) {
-          const confGate = checkConfluenceGate("BULL", entry, i);
-          if (!confGate.pass) {
-            addLog(`⚠ London Sweep BUY REJECTED — ${confGate.reason}`);
-            londonSweepSignal = null;
-            return;
-          }
-        }
-
-        const userRisk   = parseFloat(UI.riskInput   && UI.riskInput.value)   || 1;
-        const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
-        const rr  = userReward / userRisk;
-        const tp  = entry + risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
-
-        /* Push to history for strategy alerts panel */
-        sessionRangeHistory.unshift(sessionRangeTrade);
-        if (sessionRangeHistory.length > SESSION_RANGE_MAX_HISTORY) sessionRangeHistory.pop();
-
-        addLog(`🌍 London Sweep TRADE: BUY entry ${fmtPrice(entry, getActiveSymbol())}, SL ${fmtPrice(sl, getActiveSymbol())}, TP ${fmtPrice(tp, getActiveSymbol())} (1:${fmt(rr, 1)} R:R)`);
-        showToast(
-          "London Sweep ▲ BUY Signal",
-          `Entry: ${fmtPrice(entry, getActiveSymbol())} | SL: ${fmtPrice(sl, getActiveSymbol())} | TP: ${fmtPrice(tp, getActiveSymbol())} | R:R 1:${fmt(rr, 1)}\nSwept Asian low ${fmtPrice(aL, getActiveSymbol())} — bullish reversal`,
-          "trade", 12000
-        );
-
-        /* Auto-trade: place a Deriv multiplier contract for London Sweep BUY */
-        if (autoTradeStrategyEnabled && autoTradeSessionRange && !_historicalProcessing) {
-          executeAutoTrade({ dir: "BULL", entry, sl, tp, symbol: getActiveSymbol(), source: "strategy", strategyName: "sessionRange" });
-        }
-
-        /* Telegram strategy alert */
-        if (telegramStrategyAutoSend && !_historicalProcessing) {
-          setTimeout(() => sendTelegramStrategyAlert(sessionRangeTrade), CHART_RENDER_DELAY_MS);
-        }
-
-        renderStrategyAlerts();
-      } else {
-        sessionRangeTrade = null;
-        addLog(`🌍 London Sweep: Asian LOW swept at candle #${i} (low ${fmt(c.low, 4)} < ${fmt(aL, 4)})`);
-        showToast(
-          "London Sweep ▼ Asian Low",
-          `Candle #${i} swept Asian low ${fmt(aL, 4)} — potential bullish reversal`,
-          "warning", 8000
-        );
-      }
-      if (telegramSessionRangeAutoSend && !_historicalProcessing) {
-        const currentPanelSymbol = _multiPanelProcessing || null;
-        setTimeout(() => sendTelegramSessionRangeAlert("LONDON_SWEEP", currentPanelSymbol), CHART_RENDER_DELAY_MS);
-      }
-      return;
-    }
-  }
-}
-
-/**
- * Reset all session range state.
- */
-function resetSessionRanges() {
-  sessionRangeAsian   = null;
-  sessionRangeLondon  = null;
-  sessionRangeNY      = null;
-  asianRangeTight     = false;
-  londonSweepSignal   = null;
-  sessionRangeTrade   = null;
-}
-
-/**
- * Monitor session range trade outcome on each candle update.
- * Checks if price has hit SL or TP, records result, sends Telegram
- * outcome notification, and auto-resets so new signals can be detected.
- */
-function monitorSessionRangeTradeOutcome(candle) {
-  if (!sessionRangesEnabled || !sessionRangeTrade) return;
-
-  const srt = sessionRangeTrade;
-
-  /* Track 1R profit level and fire exit alert if price reverses to entry */
-  if (srt.result === "PENDING") {
-    _checkProfitExitAlert(srt, candle, "Session Range");
-  }
-
-  let result = null;
-
-  if (srt.dir === "BULL") {
-    /* BUY trade: SL below entry, TP above entry */
-    const srSlHit = candle.low <= srt.sl;
-    const srTpHit = srt.tp != null && candle.high >= srt.tp;
-    if (srSlHit && srTpHit)     result = resolveBothHit(srt);
-    else if (srSlHit)           result = "LOSS";
-    else if (srTpHit)           result = "WIN";
-  } else {
-    /* SELL trade: SL above entry, TP below entry */
-    const srSlHit = candle.high >= srt.sl;
-    const srTpHit = srt.tp != null && candle.low <= srt.tp;
-    if (srSlHit && srTpHit)     result = resolveBothHit(srt);
-    else if (srSlHit)           result = "LOSS";
-    else if (srTpHit)           result = "WIN";
-  }
-
-  if (!result) return;
-
-  /* Record outcome */
-  if (result === "WIN") sessionRangeTradeWins++;
-  else sessionRangeTradeLosses++;
-
-  srt.result = result;
-
-  const dirLabel = srt.dir === "BULL" ? "BUY" : "SELL";
-  const icon = result === "WIN" ? "✅" : "❌";
-  addLog(`🌍 Session Range ${icon} ${result} — ${dirLabel} entry ${fmt(srt.entry, 4)}, SL ${fmt(srt.sl, 4)}, TP ${fmt(srt.tp, 4)}`);
-  showToast(
-    `Session Range ${result}`,
-    `${dirLabel} trade hit ${result === "WIN" ? "TP" : "SL"} — Entry: ${fmt(srt.entry, 4)}`,
-    result === "WIN" ? "trade" : "warning", 8000
-  );
-  playPhaseAlert(result === "WIN" ? "TRADE" : "RANGE");
-
-  /* Update the history entry and send Telegram outcome */
-  const histEntry = sessionRangeHistory.find(h => h === srt);
-  if (histEntry) {
-    histEntry.result = result;
-    /* Only send via the general strategy channel when the dedicated session-range
-       outcome channel is off — if both are on, the dedicated send below is sufficient
-       and prevents subscribers receiving two identical messages. (Bug #6 fix)
-       Also gated on _sentViaTelegram so historical signals do not send. (Bug #12) */
-    if (!histEntry._stratOutcomeSent && !telegramSessionRangeOutcomeSend && histEntry._sentViaTelegram === true) {
-      sendStrategyOutcomeTelegram(histEntry);
-    }
-  }
-  renderStrategyAlerts();
-
-  /* Send dedicated session range outcome via the session-range Telegram channel */
-  if (telegramSessionRangeOutcomeSend && !_historicalProcessing) {
-    const resolvedTrade = { ...srt, result };
-    const currentPanelSymbol = _multiPanelProcessing || null;
-    setTimeout(() => sendSessionRangeOutcomeTelegram(resolvedTrade, currentPanelSymbol), 100);
-  }
-
-  /* Auto-reset: clear the trade so the session can continue.
-     Keep londonSweepSignal set so detectLondonAsianSweep() won't
-     re-detect the same sweep and loop alerts on every tick.
-     londonSweepSignal is properly cleared at session boundaries
-     via resetSessionRanges(). */
-  sessionRangeTrade = null;
-}
-
-/**
- * Send session range trade outcome (WIN / LOSS) via Telegram.
- * @param {Object} resolvedTrade  — { entry, sl, tp, dir, rr, symbol, result }
- * @param {string|null} panelSymbol — if non-null, identifies multi-panel source
- */
-async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
-  if (!telegramSessionRangeOutcomeSend) return;
-
-  /* Sync credentials from DOM */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  try {
-    const { token, chatId } = getTelegramCredentials();
-    validateTelegramCredentials(token, chatId);
-  } catch (err) {
-    addLog(`📤 Session Range outcome Telegram skipped: ${err.message}`);
-    return;
-  }
-
-  try {
-    const sym = getSymbolLabel(resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "");
-    const activeSym = resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "";
-    const dir = resolvedTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const result = resolvedTrade.result;
-    const icon = result === "WIN" ? "✅" : "❌";
-    const entryStr = resolvedTrade.entry != null ? fmtPrice(resolvedTrade.entry, activeSym) : "--";
-    const slStr = resolvedTrade.sl != null ? fmtPrice(resolvedTrade.sl, activeSym) : "--";
-    const tpStr = resolvedTrade.tp != null ? fmtPrice(resolvedTrade.tp, activeSym) : "--";
-    const rrStr = resolvedTrade.rr != null ? "1:" + fmt(resolvedTrade.rr, 1) : "--";
-    const risk = Math.abs(resolvedTrade.entry - resolvedTrade.sl);
-
-    const lines = [];
-    lines.push(`${icon} <b>Session Range ${result}</b> — ${dir} ${sym}`);
-    lines.push("");
-    lines.push(`<b>🌍 London Sweep Trade</b>`);
-    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
-    lines.push(`<b>🎯 TP:</b> <code>${tpStr}</code>`);
-    lines.push(`<b>R:R:</b> ${rrStr}`);
-    if (risk > 0) {
-      lines.push(`<b>Risk (pips):</b> <code>${fmt(risk, 5)}</code>`);
-    }
-
-    /* Lot size / position sizing based on account amount */
-    if (accountSize > 0 && riskPercent > 0 && resolvedTrade.entry != null && resolvedTrade.sl != null) {
-      const tradeObj = { entry: resolvedTrade.entry, sl: resolvedTrade.sl, tp: resolvedTrade.tp, rr: resolvedTrade.rr || 0, symbol: resolvedTrade.symbol || getActiveSymbol() };
-      const m = calcPositionMetrics(tradeObj);
-      if (m) {
-        lines.push(``);
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
-        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
-        if (resolvedTrade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        if (!m.isSynthetic) {
-          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
-        }
-      }
-    }
-
-    /* Win/loss tally */
-    const totalW = sessionRangeTradeWins;
-    const totalL = sessionRangeTradeLosses;
-    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
-    lines.push("");
-    lines.push(`🌍 <b>Session Range Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
-    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
-
-    await sendTelegramMessage(lines.join("\n"));
-    addLog(`📤 Telegram: Session Range outcome (${result}) sent`);
-  } catch (err) {
-    addLog(`📤 Session Range outcome Telegram error: ${err.message}`);
-  }
-}
-
-/* ================= TELEGRAM INTEGRATION ================= */
-
-/**
- * Shared helper: render drawChart() on a high-res offscreen canvas and
- * return a Promise<Blob>.  Sets up canvas, mocks DPR, swaps UI refs,
- * calls drawChart(), then restores everything.
- */
-function _renderChartToBlob() {
-  return new Promise((resolve, reject) => {
-    const EW = TELEGRAM_EXPORT_WIDTH;
-    const EH = TELEGRAM_EXPORT_HEIGHT;
-
-    const offscreen = document.createElement("canvas");
-    offscreen.width  = EW;
-    offscreen.height = EH;
-    const offCtx = offscreen.getContext("2d");
-    if (!offCtx) return reject(new Error("Canvas context unavailable"));
-
-    /* Override getBoundingClientRect so drawChart() sees the export
-       dimensions rather than 0×0 (the default for an unmounted element). */
-    offscreen.getBoundingClientRect = () => ({
-      x: 0, y: 0, top: 0, left: 0, right: EW, bottom: EH,
-      width: EW, height: EH, toJSON() { return this; }
-    });
-
-    /* Freeze the width/height IDL attributes at EW×EH so that even if
-       drawChart() assigns the same numeric value (which some browsers still
-       treat as a resize+clear), the native setter is never called and the
-       canvas bitmap is not wiped after we have drawn on it.  The context
-       is cleared with ctx.clearRect() inside drawChart() anyway. */
-    try {
-      Object.defineProperty(offscreen, "width",  {
-        get() { return EW; }, set() {}, configurable: true
-      });
-      Object.defineProperty(offscreen, "height", {
-        get() { return EH; }, set() {}, configurable: true
-      });
-    } catch (e) {
-      /* If the browser prevents overriding these IDL attributes the native
-         setter may still run, but drawChart()'s getBoundingClientRect fallback
-         (canvas.width / dpr) ensures the canvas is still sized correctly. */
-      console.warn("_renderChartToBlob: could not freeze canvas dimensions:", e.message);
-    }
-
-    const origCanvas = UI.canvas;
-    const origCtx    = UI.ctx;
-    const origDpr    = window.devicePixelRatio;
-
-    try {
-      Object.defineProperty(window, "devicePixelRatio",
-        { value: 1, writable: true, configurable: true });
-    } catch (e) {
-      /* Non-configurable in some environments — drawChart() handles this via
-         the canvas.width/dpr fallback and getBoundingClientRect mock. */
-      console.warn("_renderChartToBlob: could not mock devicePixelRatio:", e.message);
-    }
-
-    UI.canvas = offscreen;
-    UI.ctx    = offCtx;
-
-    try { drawChart(); } finally {
-      UI.canvas = origCanvas;
-      UI.ctx    = origCtx;
-      try {
-        Object.defineProperty(window, "devicePixelRatio",
-          { value: origDpr, writable: true, configurable: true });
-      } catch { /* ignore restore failure */ }
-    }
-
-    offscreen.toBlob(blob => {
-      if (blob) resolve(blob);
-      else reject(new Error("Failed to capture chart screenshot"));
-    }, "image/png");
-  });
-}
-
-/**
- * Render the full main chart at high resolution on an offscreen canvas
- * and return a PNG Blob — used for crisp Telegram screenshots.
- */
-function captureChartScreenshot() {
-  return _renderChartToBlob();
-}
-
-/**
- * Build a formatted Telegram caption with all trade/setup info.
- * Uses Telegram HTML parse mode for formatting.
- */
-function buildTelegramCaption() {
-  const activeSym = getActiveSymbol() || "";
-  const symbol = UI.symbolSelect
-    ? (UI.symbolSelect.options[UI.symbolSelect.selectedIndex]
-       ? UI.symbolSelect.options[UI.symbolSelect.selectedIndex].text
-       : UI.symbolSelect.value)
-    : "--";
-  const gran = UI.granSelect ? UI.granSelect.value : "--";
-  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
-  const dir = breakout ? breakout.dir : "--";
-  const orderType = getRecommendedOrderType() || "--";
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
-
-  let lines = [];
-  lines.push(`<b>📊 IT Guru Signal</b>`);
-  lines.push(``);
-  lines.push(`<b>Symbol:</b> ${symbol}`);
-  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
-  lines.push(`<b>Phase:</b> ${phase}`);
-  lines.push(`<b>Direction:</b> ${dir === "BULL" ? "🟢 BULL (BUY)" : dir === "BEAR" ? "🔴 BEAR (SELL)" : dir}`);
-  lines.push(`<b>Order Type:</b> ${orderType}`);
-
-  if (trade) {
-    lines.push(``);
-    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(trade.entry, activeSym)}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(trade.sl, activeSym)}</code>`);
-    if (trade.tp != null && !pureTrailingEnabled) {
-      lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(trade.tp, activeSym)}</code>`);
-    }
-    if (trade.rr != null) {
-      lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
-    }
-    if (accountSize > 0 && riskPercent > 0) {
-      const m = calcPositionMetrics(trade);
-      if (m) {
-        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
-        if (trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
-        if (!m.isSynthetic) {
-          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
-        }
-      }
-    }
-    if (trailingSL != null && trailingStopEnabled) {
-      lines.push(`<b>Trailing SL:</b> <code>${fmtPrice(trailingSL, activeSym)}</code>`);
-    }
-  }
-
-  if (openingRange) {
-    lines.push(``);
-    lines.push(`<b>Range High:</b> <code>${fmtPrice(openingRange.high, activeSym)}</code>`);
-    lines.push(`<b>Range Low:</b> <code>${fmtPrice(openingRange.low, activeSym)}</code>`);
-  }
-
-  /* Session Ranges context */
-  if (sessionRangesEnabled && sessionRangeAsian) {
-    lines.push(``);
-    lines.push(`<b>🌍 Session Ranges:</b>`);
-    lines.push(`  Asian: <code>${fmtPrice(sessionRangeAsian.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeAsian.low, activeSym)}</code>${asianRangeTight ? " ⚡TIGHT" : ""}`);
-    if (sessionRangeLondon) {
-      lines.push(`  London: <code>${fmtPrice(sessionRangeLondon.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeLondon.low, activeSym)}</code>`);
-    }
-    if (sessionRangeNY) {
-      lines.push(`  NY: <code>${fmtPrice(sessionRangeNY.high, activeSym)}</code> / <code>${fmtPrice(sessionRangeNY.low, activeSym)}</code>`);
-    }
-    if (londonSweepSignal) {
-      lines.push(`  Sweep: London ${londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${londonSweepSignal.dir} @ <code>${fmtPrice(londonSweepSignal.price, activeSym)}</code>`);
-    }
-  }
-
-  lines.push(``);
-  lines.push(`<b>Confluence:</b> ${confluenceScore}/16`);
-  const regime = adxValue > 0 ? getVolatilityRegime() : "--";
-  lines.push(`<b>Regime:</b> ${regime}`);
-  if (breakout) {
-    const str = getSignalStrength(confluenceScore);
-    lines.push(`<b>Signal:</b> ${str.label}`);
-  }
-
-  /* Active filters summary */
-  const filters = [];
-  if (emaFilterEnabled) filters.push("EMA 8/21");
-  if (htfFilterEnabled) filters.push("HTF Trend");
-  if (atrToleranceEnabled) filters.push("ATR Tol.");
-  if (trailingStopEnabled) filters.push("Trailing SL");
-  if (partialTpEnabled) filters.push("Partial TP");
-  if (falseBreakoutEnabled) filters.push("False BO");
-  if (minRREnabled) filters.push(`Min R:R ${minRRValue}`);
-  if (pureTrailingEnabled) filters.push("Pure Trail");
-  if (rsiFilterEnabled) filters.push("RSI");
-  if (volumeSpikeEnabled) filters.push("Vol. Spike");
-  if (sessionFilterEnabled) filters.push(`Session (${sessionFilterMode})`);
-  if (fibRetestEnabled) filters.push("Fib Retest");
-  if (macdFilterEnabled) filters.push("MACD");
-  if (bbSqueezeFilterEnabled) filters.push("BB Squeeze");
-  if (adxFilterEnabled) filters.push("ADX");
-  if (stochFilterEnabled) filters.push("Stochastic");
-  if (scalpingModeEnabled) filters.push("Scalping");
-  if (liveScalpEnabled) filters.push("Live Scalp Scanner");
-  if (sessionRangesEnabled) filters.push("Session Ranges");
-  if (liquiditySweepEnabled) filters.push("Liquidity Sweep");
-  if (stopLossHuntEnabled) filters.push("Stop Loss Hunt");
-  if (failedPinBarEnabled) filters.push("Failed Pin Bar");
-  if (fibScalpEnabled) filters.push("Fib Golden Zone");
-  if (po3Enabled) filters.push("Power of 3");
-  if (po3_4hEnabled) filters.push("4H PO3");
-  if (breakerBlockEnabled) filters.push("Breaker Block");
-  if (oteGoldenPocketEnabled) filters.push("OTE Golden Pocket");
-  if (orbEnabled) filters.push("ORB");
-  if (crtTbsEnabled) filters.push("CRT+TBS");
-  if (tiktokEnabled) filters.push("TikTok Fib");
-  if (fvgStratEnabled) filters.push("Fair Value Gap");
-  if (mtfTopDownEnabled) filters.push("MTF Top-Down");
-  if (candleInterpEnabled) filters.push("Candle Interp");
-  if (gridScalperMAEnabled) filters.push(`Grid Scalper MA [${gridScalperMAStrategy === "bos" ? "BOS" : gridScalperMAStrategy === "triple_ma" ? "Triple MA" : "Price vs MA"}]`);
-  /* Profit-Direction Constraints */
-  if (minConfluenceEnabled) filters.push(requiredConfluences.length > 0 ? `Required Confluences [${requiredConfluences.join(", ")}]` : `Min Confluence ≥${minConfluenceValue}`);
-  if (doubleRetestEnabled) filters.push("Double Retest");
-  if (confirmBarEnabled) filters.push("Confirm Bar");
-  if (divergenceFilterEnabled) filters.push("Divergence");
-  if (adxHardGateEnabled) filters.push(`ADX Gate (20-${adxMaxThreshold})`);
-  if (breakoutDistEnabled) filters.push(`BO Dist ≤${breakoutDistATR}×ATR`);
-  if (timeDecayEnabled) filters.push(`Time Decay ≤${timeDecayCandles}`);
-  if (consecutiveDirEnabled) filters.push("Consec. Dir");
-  if (vwapFilterEnabled) filters.push("VWAP");
-  if (stochCrossEnabled) filters.push("Stoch Cross");
-  if (rangeSizeEnabled) filters.push(`Range ${rangeSizeMin}-${rangeSizeMax}×ATR`);
-  if (hhhlEnabled) filters.push("HH/HL");
-  if (followThroughEnabled) filters.push("Follow-Through");
-  if (mtfStructureEnabled) filters.push("MTF (EMA200)");
-  if (filters.length > 0) {
-    lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
-  }
-
-  lines.push(``);
-  lines.push(`<i>${ts}</i>`);
-  return lines.join("\n");
-}
-
-/**
- * Read fresh Telegram credentials from the DOM inputs.
- * Falls back to the in-memory variables if DOM unavailable.
- */
-function getTelegramCredentials() {
-  const token = (UI.telegramBotToken ? UI.telegramBotToken.value : telegramBotToken).trim();
-  const chatId = (UI.telegramChatId ? UI.telegramChatId.value : telegramChatId).trim();
-  return { token, chatId };
-}
-
-function withTimeout(promise, timeoutMs, timeoutError) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(timeoutError), timeoutMs);
-    promise.then(
-      value => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      err => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
-}
-
-async function captureTelegramScreenshot(panel = null) {
-  const label = panel ? `panel ${panel.symbol || "chart"}` : "chart";
-  const capturePromise = panel ? capturePanelScreenshot(panel) : captureChartScreenshot();
-  try {
-    return await withTimeout(
-      capturePromise,
-      TELEGRAM_SCREENSHOT_TIMEOUT_MS,
-      new Error("Screenshot timed out")
-    );
-  } catch (err) {
-    addLog(`📤 ${label} screenshot unavailable, sending text-only signal: ${err.message}`);
-    return null;
-  }
-}
-
-function ensureTelegramDeliveryHud() {
-  if (telegramDeliveryHudEl || typeof document === "undefined") return;
-
-  const el = document.createElement("div");
-  const textEl = document.createElement("span");
-  const resetBtn = document.createElement("button");
-  el.id = "telegramDeliveryHud";
-  el.setAttribute("aria-live", "polite");
-  el.style.position = "fixed";
-  el.style.right = "12px";
-  el.style.bottom = "12px";
-  el.style.zIndex = "99999";
-  el.style.padding = "6px 10px";
-  el.style.borderRadius = "10px";
-  el.style.border = "1px solid rgba(148,163,184,0.45)";
-  el.style.background = "rgba(2,6,23,0.82)";
-  el.style.backdropFilter = "blur(6px)";
-  el.style.color = "#e2e8f0";
-  el.style.fontSize = "12px";
-  el.style.fontWeight = "600";
-  el.style.letterSpacing = "0.2px";
-  el.style.pointerEvents = "auto";
-  el.style.display = "flex";
-  el.style.alignItems = "center";
-  el.style.gap = "8px";
-  el.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
-
-  textEl.id = "telegramDeliveryHudText";
-
-  resetBtn.type = "button";
-  resetBtn.textContent = "Reset";
-  resetBtn.title = "Reset Telegram delivery counters";
-  resetBtn.style.pointerEvents = "auto";
-  resetBtn.style.cursor = "pointer";
-  resetBtn.style.border = "1px solid rgba(148,163,184,0.55)";
-  resetBtn.style.background = "rgba(15,23,42,0.9)";
-  resetBtn.style.color = "#cbd5e1";
-  resetBtn.style.borderRadius = "6px";
-  resetBtn.style.padding = "1px 6px";
-  resetBtn.style.fontSize = "11px";
-  resetBtn.style.fontWeight = "700";
-  resetBtn.style.lineHeight = "1.3";
-  resetBtn.addEventListener("click", () => {
-    telegramDeliveryStats.queued = 0;
-    telegramDeliveryStats.sent = 0;
-    telegramDeliveryStats.failed = 0;
-    updateTelegramDeliveryHud();
-    addLog("📤 Telegram delivery counters reset");
-  });
-
-  el.appendChild(textEl);
-  el.appendChild(resetBtn);
-
-  telegramDeliveryHudEl = el;
-  document.body.appendChild(el);
-  updateTelegramDeliveryHud();
-}
-
-function updateTelegramDeliveryHud() {
-  ensureTelegramDeliveryHud();
-  if (!telegramDeliveryHudEl) return;
-  const s = telegramDeliveryStats;
-  const textEl = telegramDeliveryHudEl.querySelector("#telegramDeliveryHudText");
-  if (textEl) {
-    textEl.textContent = `TG Q:${s.queued} | S:${s.sent} | F:${s.failed}`;
-  }
-  telegramDeliveryHudEl.title = "Telegram delivery health: queued, sent, failed";
-}
-
-function recordTelegramDeliveryStat(kind, delta = 1) {
-  if (!Object.prototype.hasOwnProperty.call(telegramDeliveryStats, kind)) return;
-  telegramDeliveryStats[kind] += delta;
-  if (telegramDeliveryStats[kind] < 0) telegramDeliveryStats[kind] = 0;
-  updateTelegramDeliveryHud();
-}
-
-/**
- * Validate Telegram credentials and throw descriptive errors.
- */
-function validateTelegramCredentials(token, chatId) {
-  if (!token || !chatId) {
-    throw new Error("Telegram Bot Token and Chat ID are required");
-  }
-  if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
-    throw new Error("Invalid Bot Token format (expected 123456:ABC-DEF…)");
-  }
-  const ids = chatId.split(",").map(s => s.trim()).filter(Boolean);
-  if (ids.length === 0) {
-    throw new Error("At least one Chat ID is required");
-  }
-  for (const id of ids) {
-    if (!/^-?\d+$/.test(id)) {
-      throw new Error(`Invalid Chat ID format: "${id}" (expected a numeric ID)`);
-    }
-  }
-}
-
-/**
- * Build an Authorization header object for the Telegram proxy.
- * Returns the JWT Bearer token from ITGuruAuth if available.
- */
-function telegramProxyHeaders(extra = {}) {
-  const h = Object.assign({}, extra);
-  if (typeof ITGuruAuth !== "undefined" && ITGuruAuth.getToken()) {
-    h["Authorization"] = "Bearer " + ITGuruAuth.getToken();
-  }
-  return h;
-}
-
-/**
- * Send a photo (Blob) with caption to Telegram via Bot API.
- * Sends to all Chat IDs defined in the settings (comma-separated).
- */
-async function sendTelegramPhoto(blob, caption) {
-  /* Check rate limit before making API call */
-  if (!(await waitForApiCallSlot("telegram", 20000))) {
-    throw new Error("Rate limit exceeded. Please wait before sending another message.");
-  }
-
-  const { token, chatId } = getTelegramCredentials();
-  validateTelegramCredentials(token, chatId);
-
-  const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
-
-  /** Build the base FormData fields for a specific chat */
-  function buildPhotoForm(id) {
-    const f = new FormData();
-    f.append("chat_id", id);
-    f.append("photo", blob, "chart.png");
-    f.append("caption", caption);
-    f.append("parse_mode", "HTML");
-    return f;
-  }
-
-  const errors = [];
-  let lastData = null;
-
-  for (const id of chatIds) {
-    try {
-      /* Try server-side proxy first (avoids CORS), fall back to direct API */
-      let resp;
-      let useDirectFallback = false;
-      try {
-        const form = buildPhotoForm(id);
-        form.append("action", "sendPhoto");
-        form.append("token", token);
-        resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
-        /* If proxy returns 401/403 (auth issue), fall back to direct API */
-        if (resp.status === 401 || resp.status === 403) {
-          useDirectFallback = true;
-        }
-      } catch (_proxyErr) {
-        /* Proxy unreachable — try direct Telegram API as fallback */
-        useDirectFallback = true;
-      }
-      if (useDirectFallback) {
-        resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm(id) });
-      }
-      const data = await safeJson(resp);
-      if (!data.ok) {
-        errors.push(`Chat ${id}: ${data.description || "Telegram API error"}`);
-      } else {
-        lastData = data;
-      }
-    } catch (err) {
-      errors.push(`Chat ${id}: ${err.message}`);
-    }
-  }
-
-  if (errors.length > 0 && lastData === null) {
-    recordTelegramDeliveryStat("failed", 1);
-    throw new Error(`All chats failed — ${errors.join("; ")}`);
-  }
-  recordTelegramDeliveryStat("sent", 1);
-  if (errors.length > 0) {
-    addLog(`📤 Telegram photo: some chats failed — ${errors.join("; ")}`);
-  }
-  return lastData;
-}
-
-/**
- * Send a text-only message to Telegram via Bot API (HTML parse mode).
- * Sends to all Chat IDs defined in the settings (comma-separated).
- */
-async function sendTelegramMessage(text) {
-  /* Check rate limit before making API call */
-  if (!(await waitForApiCallSlot("telegram", 20000))) {
-    throw new Error("Rate limit exceeded. Please wait before sending another message.");
-  }
-
-  const { token, chatId } = getTelegramCredentials();
-  validateTelegramCredentials(token, chatId);
-
-  const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
-
-  const errors = [];
-  let lastData = null;
-
-  for (const id of chatIds) {
-    const payload = { chat_id: id, text, parse_mode: "HTML" };
-
-    try {
-      /* Try server-side proxy first (avoids CORS), fall back to direct API */
-      let resp;
-      let useDirectFallback = false;
-      try {
-        resp = await fetch(TELEGRAM_PROXY_URL, {
-          method: "POST",
-          headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ action: "sendMessage", token, payload })
-        });
-        /* If proxy returns 401/403 (auth issue), fall back to direct API */
-        if (resp.status === 401 || resp.status === 403) {
-          useDirectFallback = true;
-        }
-      } catch (_proxyErr) {
-        useDirectFallback = true;
-      }
-      if (useDirectFallback) {
-        resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-      }
-      const data = await safeJson(resp);
-      if (!data.ok) {
-        errors.push(`Chat ${id}: ${data.description || "Telegram API error"}`);
-      } else {
-        lastData = data;
-      }
-    } catch (err) {
-      errors.push(`Chat ${id}: ${err.message}`);
-    }
-  }
-
-  if (errors.length > 0 && lastData === null) {
-    recordTelegramDeliveryStat("failed", 1);
-    throw new Error(`All chats failed — ${errors.join("; ")}`);
-  }
-  recordTelegramDeliveryStat("sent", 1);
-  if (errors.length > 0) {
-    addLog(`📤 Telegram message: some chats failed — ${errors.join("; ")}`);
-  }
-  return lastData;
-}
-
-/**
- * Send a Telegram alert when a trade hits the 1:1 partial TP level.
- * Applies to both the main breakout strategy and PO3 strategy.
- * Notifies the trader that the 1:1 level has been reached so they can consider
- * closing a portion of the position manually. The main strategy continues to
- * the original TP/SL without any automatic SL adjustment.
- * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
- */
-async function sendPartialTpTelegram(signal, partialLevel) {
-  if (!partialTpEnabled) return;
-  if (!telegramOutcomeSend) return;
-  try {
-    const activeSym = signal.symbol || getActiveSymbol() || "";
-    const sym = getSymbolLabel(activeSym);
-    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
-    const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
-    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
-    const rrStr    = signal.rr    != null ? "1:" + signal.rr.toFixed(1)       : "--";
-    const lvlStr   = partialLevel != null ? fmtPrice(partialLevel, activeSym) : "--";
-
-    const lines = [];
-    lines.push(`🔔 <b>Partial TP Hit — 1:1 Reached</b>`);
-    lines.push(``);
-    lines.push(`<b>Consider closing a portion of your position now to protect profits.</b>`);
-    /* When Tesla 3-6-9 scaling is active, the SL is automatically moved to breakeven
-       at this level.  Inform the trader so they understand the SL change. */
-    const slNote = teslaScalingEnabled
-      ? "SL is being moved to breakeven. Trade continues to full TP."
-      : "Trade continues to full TP with original SL intact.";
-    lines.push(slNote);
-    lines.push(``);
-    lines.push(`${dir} ${sym}`);
-    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
-    lines.push(`<b>🔔 1:1 Level:</b> <code>${lvlStr}</code>`);
-    lines.push(`<b>🎯 Full TP:</b> <code>${tpStr}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
-    lines.push(`<b>R:R:</b> ${rrStr}`);
-    lines.push(``);
-    lines.push(`<i>Monitoring trade for full TP or SL exit…</i>`);
-    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
-
-    await sendTelegramMessage(lines.join("\n"));
-    addLog(`📤 Telegram: partial TP alert (1:1) sent`);
-  } catch (err) {
-    addLog(`📤 Partial TP Telegram error: ${err.message}`);
-  }
-}
-
-/**
- * Send a Telegram alert when price reaches a Tesla 3–6–9 level (T1=3R, T2=6R, T3=9R).
- * Uses the outcome Telegram toggle so no extra setting is needed.
- * @param {object} signal - the pending trade signal
- * @param {string} levelLabel - "T1 (3R)", "T2 (6R)", or "T3 (9R)"
- * @param {number} levelPrice - price at this level
- * @param {string} plan - "conservative" | "aggressive"
- */
-async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
-  if (!teslaScalingEnabled) return;
-  if (!telegramOutcomeSend) return;
-  try {
-    const activeSym = signal.symbol || getActiveSymbol() || "";
-    const sym = getSymbolLabel(activeSym);
-    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
-    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
-    const lvlStr   = fmtPrice(levelPrice, activeSym);
-    const planLabel = plan === "aggressive" ? "Aggressive" : "Conservative";
-
-    /* Determine position action for each level based on the chosen plan */
-    const actions = {
-      "T1 (3R)": plan === "conservative" ? "Close 50% of position" : "Close 25% of position",
-      "T2 (6R)": plan === "conservative" ? "Close 30% of position" : "Close 35% of position",
-      "T3 (9R)": plan === "conservative" ? "Close remaining 20%" : "Close 20% — trail the rest"
-    };
-    const action = actions[levelLabel] || "Review open position";
-
-    const lines = [];
-    lines.push(`⚡ <b>Tesla 3–6–9: ${levelLabel} Reached</b>`);
-    lines.push(``);
-    lines.push(`<b>Plan:</b> ${planLabel}`);
-    lines.push(`<b>Action:</b> ${action}`);
-    lines.push(``);
-    lines.push(`${dir} ${sym}`);
-    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
-    lines.push(`<b>🎯 ${levelLabel} Level:</b> <code>${lvlStr}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
-    lines.push(``);
-    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
-
-    await sendTelegramMessage(lines.join("\n"));
-    addLog(`📤 Telegram: Tesla ${levelLabel} alert sent`);
-  } catch (err) {
-    addLog(`📤 Tesla level Telegram error: ${err.message}`);
-  }
-}
-function isBreakevenSignal(signal) {
-  return !!signal &&
-    signal.result === "LOSS" &&
-    signal.exitPrice != null &&
-    signal.entry != null &&
-    Math.abs(signal.exitPrice - signal.entry) < PRICE_EPSILON &&
-    (signal.partialTpHit === true || signal._breakeven === true);
-}
-async function sendTradeOutcomeTelegram(signal) {
-  if (!telegramOutcomeSend) return;
-  if (signal._outcomeSent) return;
-  /* Set the flag synchronously before the first await so that any re-entrant call
-     (possible because JS is single-threaded but event-loop interleaving can occur
-     between awaits) sees the flag and returns early without sending a duplicate. */
-  signal._outcomeSent = true;
-  try {
-    const sym = getSymbolLabel(signal.symbol || "");
-    const activeSym = signal.symbol || getActiveSymbol() || "";
-    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
-    const result = signal.result;
-
-    /* Detect a breakeven exit: partial TP was captured at 1:1 and the remaining
-       position was stopped exactly at entry (SL moved to breakeven).  Show a
-       dedicated label so traders are not misled into thinking it was a full loss. */
-    const isBreakeven = isBreakevenSignal(signal);
-
-    const icon        = result === "WIN" ? "✅" : (isBreakeven ? "⚖️" : "❌");
-    const resultLabel = result === "WIN" ? "Trade WIN" : (isBreakeven ? "Trade Breakeven" : "Trade LOSS");
-
-    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
-    const exitStr  = signal.exitPrice != null ? fmtPrice(signal.exitPrice, activeSym) : "--";
-    const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
-    const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
-    const rrStr = signal.rr != null ? "1:" + signal.rr.toFixed(1) : "--";
-    const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
-    const pattern = signal.confirmPattern || "--";
-
-    const lines = [];
-    lines.push(`${icon} <b>${resultLabel}</b> — ${dir} ${sym}`);
-    lines.push("");
-    lines.push(`<b>Pattern:</b> ${pattern}`);
-    lines.push(`<b>Entry:</b> ${entryStr}`);
-    lines.push(`<b>Exit:</b> ${exitStr}`);
-    lines.push(`<b>SL:</b> ${slStr}`);
-    lines.push(`<b>TP:</b> ${tpStr}`);
-    lines.push(`<b>R:R:</b> ${rrStr}`);
-    lines.push(`<b>Confluence:</b> ${confScore}`);
-    if (signal.trailingSL != null) {
-      lines.push(`<b>Trailing SL:</b> ${fmtPrice(signal.trailingSL, activeSym)}`);
-    }
-    if (signal.partialTpHit) {
-      lines.push(isBreakeven
-        ? `<b>Partial TP:</b> Hit at 1:1 — partial profits secured; remaining position closed at breakeven`
-        : `<b>Partial TP:</b> Hit at 1:1`);
-    }
-    /* Win/loss tally */
-    const totalW = signalWins;
-    const totalL = signalLosses;
-    const totalB = signalBreakevens;
-    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
-    lines.push("");
-    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L / ${totalB}BE (${wr} win rate)`);
-
-    /* Opposite mode effectiveness from auto-trade history */
-    const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
-    const normTrades = autoTradeHistory.filter(e => !e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
-    if (oppTrades.length > 0 || normTrades.length > 0) {
-      lines.push("");
-      if (normTrades.length > 0) {
-        const nw = normTrades.filter(e => e.result === "WIN").length;
-        const nwr = (nw / normTrades.length * 100).toFixed(1);
-        lines.push(`📈 <b>Normal Trades:</b> ${nw}W / ${normTrades.length - nw}L (${nwr}%)`);
-      }
-      if (oppTrades.length > 0) {
-        const ow = oppTrades.filter(e => e.result === "WIN").length;
-        const owr = (ow / oppTrades.length * 100).toFixed(1);
-        lines.push(`🔄 <b>Opposite Trades:</b> ${ow}W / ${oppTrades.length - ow}L (${owr}%)`);
-      }
-    }
-
-    /* Shadow outcome — what the opposite direction would have done on this trade */
-    if (telegramShadowOutcomeSend) {
-      const shadowResult = invertResult(result);
-      const oppDirLabel  = getOppositeDirLabel(signal.dir);
-      const shadowIcon   = getResultIcon(shadowResult);
-      lines.push("");
-      lines.push(`🔮 <b>Shadow (${oppDirLabel} would've):</b> ${shadowIcon} ${shadowResult}`);
-
-      /* Cumulative shadow stats from auto-trade history */
-      const shadowResolved = autoTradeHistory.filter(e => e.shadowResult === "WIN" || e.shadowResult === "LOSS");
-      if (shadowResolved.length > 0) {
-        const sw  = shadowResolved.filter(e => e.shadowResult === "WIN").length;
-        const swr = (sw / shadowResolved.length * 100).toFixed(1);
-        lines.push(`   (Shadow record: ${sw}W / ${shadowResolved.length - sw}L — ${swr}%)`);
-      }
-    }
-
-    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
-
-    await sendTelegramMessage(lines.join("\n"));
-    addLog(`📤 Telegram: trade outcome (${result}) sent`);
-  } catch (err) {
-    addLog(`📤 Telegram outcome error: ${err.message}`);
-  }
-}
-
-/**
- * Test the Telegram connection by calling getMe and getChat.
- * Shows success/failure in the Telegram status area.
- */
-async function testTelegramConnection() {
-  if (UI.telegramStatus) {
-    UI.telegramStatus.textContent = "Testing connection…";
-    UI.telegramStatus.className = "hint telegram-status";
-  }
-  try {
-    const { token, chatId } = getTelegramCredentials();
-    validateTelegramCredentials(token, chatId);
-
-    /* Verify the bot token — proxy first, direct fallback */
-    let meResp;
-    let meUseDirectFallback = false;
-    try {
-      meResp = await fetch(TELEGRAM_PROXY_URL, {
-        method: "POST",
-        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ action: "getMe", token, payload: {} })
-      });
-      if (meResp.status === 401 || meResp.status === 403) {
-        meUseDirectFallback = true;
-      }
-    } catch (_proxyErr) {
-      meUseDirectFallback = true;
-    }
-    if (meUseDirectFallback) {
-      meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    }
-    const meData = await safeJson(meResp);
-    if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
-
-    /* Verify each Chat ID is reachable — proxy first, direct fallback */
-    const chatIds = chatId.split(",").map(s => s.trim()).filter(Boolean);
-    const chatTitles = [];
-    const chatErrors = [];
-
-    for (const id of chatIds) {
-      try {
-        let chatResp;
-        let chatUseDirectFallback = false;
-        try {
-          chatResp = await fetch(TELEGRAM_PROXY_URL, {
-            method: "POST",
-            headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({ action: "getChat", token, payload: { chat_id: id } })
-          });
-          if (chatResp.status === 401 || chatResp.status === 403) {
-            chatUseDirectFallback = true;
-          }
-        } catch (_proxyErr) {
-          chatUseDirectFallback = true;
-        }
-        if (chatUseDirectFallback) {
-          chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: id })
-          });
-        }
-        const chatData = await safeJson(chatResp);
-        if (!chatData.ok) {
-          chatErrors.push(`${id}: ${chatData.description || "Cannot reach chat"}`);
-        } else {
-          chatTitles.push(chatData.result.title || chatData.result.first_name || id);
-        }
-      } catch (err) {
-        chatErrors.push(`${id}: ${err.message}`);
-      }
-    }
-
-    if (chatTitles.length === 0) {
-      throw new Error(`Cannot reach any chat — ${chatErrors.join("; ")}`);
-    }
-
-    const botName = meData.result.first_name || meData.result.username;
-    const chatsLabel = chatTitles.join(", ");
-    const chatWord = chatTitles.length === 1 ? "Chat" : "Chats";
-    let msg = `✅ Connected! Bot: ${botName} → ${chatWord}: ${chatsLabel}`;
-    if (chatErrors.length > 0) {
-      msg += ` ⚠️ Failed: ${chatErrors.join("; ")}`;
-    }
-    addLog(`📤 ${msg}`);
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = msg;
-      UI.telegramStatus.className = "hint telegram-status telegram-ok";
-    }
-
-    /* Sync variables and persist */
-    telegramBotToken = token;
-    telegramChatId = chatId;
-    saveSettings();
-  } catch (err) {
-    const msg = `❌ ${err.message}`;
-    addLog(`📤 Telegram test: ${err.message}`);
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = msg;
-      UI.telegramStatus.className = "hint telegram-status telegram-err";
-    }
-  }
-  setTimeout(() => {
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "";
-      UI.telegramStatus.className = "hint telegram-status";
-    }
-  }, TELEGRAM_STATUS_CLEAR_MS * 2);         /* longer display for test results */
-}
-
-/**
- * Capture chart + build caption and send to Telegram.
- * Shows status in the signal log and the Telegram status label.
- */
-async function sendTelegramAlert() {
-  /* Sync variables from DOM before sending */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  /* In multi-panel mode, delegate to the panel-specific sender
-     so the chart screenshot and caption always match the focused panel */
-  if (focusedPanelSymbol && multiPanels.has(focusedPanelSymbol)) {
-    return sendPanelTelegramAlert(focusedPanelSymbol);
-  }
-
-  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
-  try {
-    const caption = buildTelegramCaption();
-    const blob = await captureTelegramScreenshot();
-    if (blob) {
-      await sendTelegramPhoto(blob, caption);
-    } else {
-      await sendTelegramMessage(caption);
-    }
-    addLog("📤 Telegram alert sent successfully");
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "✅ Sent!";
-      UI.telegramStatus.className = "hint telegram-status telegram-ok";
-    }
-    /* Persist credentials on success */
-    saveSettings();
-  } catch (err) {
-    addLog(`📤 Telegram error: ${err.message}`);
-    showToast("❌ Telegram Error", err.message, "warning", 6000);
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = `❌ ${err.message}`;
-      UI.telegramStatus.className = "hint telegram-status telegram-err";
-    }
-  }
-  /* Clear status after 5 seconds */
-  setTimeout(() => {
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "";
-      UI.telegramStatus.className = "hint telegram-status";
-    }
-  }, TELEGRAM_STATUS_CLEAR_MS);
-}
-
-/**
- * Send Telegram alert for a specific multi-panel symbol.
- * Activates the panel's state, captures its mini-chart screenshot,
- * builds a caption using the panel's data, and sends to Telegram.
- */
-async function sendPanelTelegramAlert(symbol) {
-  const p = multiPanels.get(symbol);
-  if (!p) return;
-
-  /* Sync credentials from DOM */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  /* Build caption from panel state (without touching globals) */
-  const caption = buildPanelTelegramCaption(p);
-
-  /* Capture screenshot from the panel's mini-chart canvas */
-  const blob = await captureTelegramScreenshot(p);
-
-  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
-  try {
-    if (blob) {
-      await sendTelegramPhoto(blob, caption);
-    } else {
-      await sendTelegramMessage(caption);
-    }
-    addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
-      UI.telegramStatus.className = "hint telegram-status telegram-ok";
-    }
-  } catch (err) {
-    addLog(`📤 [${symbol}] Telegram error: ${err.message}`);
-    showToast("❌ Telegram Error", `${getSymbolLabel(symbol)}: ${err.message}`, "warning", 6000);
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = `❌ ${getSymbolLabel(symbol)}: ${err.message}`;
-      UI.telegramStatus.className = "hint telegram-status telegram-err";
-    }
-  }
-  /* Clear status */
-  setTimeout(() => {
-    if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "";
-      UI.telegramStatus.className = "hint telegram-status";
-    }
-  }, TELEGRAM_STATUS_CLEAR_MS);
-}
-
-/**
- * Build Telegram caption from a panel's saved state (no globals needed).
- */
-function buildPanelTelegramCaption(p) {
-  const symLabel = getSymbolLabel(p.symbol);
-  const gran = UI.granSelect ? UI.granSelect.value : "--";
-  const tfLabel = TIMEFRAME_LABELS[gran] || gran + "s";
-  const dir = p.breakout ? p.breakout.dir : "--";
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
-
-  /* Compute recommended order type from panel state */
-  let orderType = "--";
-  if (p.breakout && p.candles.length > 0) {
-    const currentPrice = p.candles[p.candles.length - 1].close;
-    const entryLevel = p.trade ? p.trade.entry : p.breakout.level;
-    if (p.breakout.dir === "BULL") {
-      orderType = entryLevel > currentPrice ? "BUY STOP" : "BUY LIMIT";
-    } else {
-      orderType = entryLevel < currentPrice ? "SELL STOP" : "SELL LIMIT";
-    }
-  }
-
-  let lines = [];
-  lines.push(`<b>📊 IT Guru Signal</b>`);
-  lines.push(``);
-  lines.push(`<b>Symbol:</b> ${symLabel}`);
-  lines.push(`<b>Timeframe:</b> ${tfLabel}`);
-  lines.push(`<b>Phase:</b> ${p.phase}`);
-  lines.push(`<b>Direction:</b> ${dir === "BULL" ? "🟢 BULL (BUY)" : dir === "BEAR" ? "🔴 BEAR (SELL)" : dir}`);
-  lines.push(`<b>Order Type:</b> ${orderType}`);
-
-  if (p.trade) {
-    lines.push(``);
-    lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(p.trade.entry, p.symbol)}</code>`);
-    lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(p.trade.sl, p.symbol)}</code>`);
-    if (p.trade.tp != null && !p.filters.pureTrailingEnabled) {
-      lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(p.trade.tp, p.symbol)}</code>`);
-    }
-    if (p.trade.rr != null) {
-      lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
-    }
-    if (accountSize > 0 && riskPercent > 0) {
-      const m = calcPositionMetrics(p.trade);
-      if (m) {
-        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
-        if (p.trade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
-        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
-        if (!m.isSynthetic) {
-          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
-        }
-      }
-    }
-    if (p.trailingSL != null && p.filters.trailingStopEnabled) {
-      lines.push(`<b>Trailing SL:</b> <code>${fmtPrice(p.trailingSL, p.symbol)}</code>`);
-    }
-  }
-
-  if (p.openingRange) {
-    lines.push(``);
-    lines.push(`<b>Range High:</b> <code>${fmtPrice(p.openingRange.high, p.symbol)}</code>`);
-    lines.push(`<b>Range Low:</b> <code>${fmtPrice(p.openingRange.low, p.symbol)}</code>`);
-  }
-
-  /* Session Ranges context */
-  if (sessionRangesEnabled && p.sessionRangeAsian) {
-    lines.push(``);
-    lines.push(`<b>🌍 Session Ranges:</b>`);
-    lines.push(`  Asian: <code>${fmtPrice(p.sessionRangeAsian.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeAsian.low, p.symbol)}</code>${p.asianRangeTight ? " ⚡TIGHT" : ""}`);
-    if (p.sessionRangeLondon) {
-      lines.push(`  London: <code>${fmtPrice(p.sessionRangeLondon.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeLondon.low, p.symbol)}</code>`);
-    }
-    if (p.sessionRangeNY) {
-      lines.push(`  NY: <code>${fmtPrice(p.sessionRangeNY.high, p.symbol)}</code> / <code>${fmtPrice(p.sessionRangeNY.low, p.symbol)}</code>`);
-    }
-    if (p.londonSweepSignal) {
-      lines.push(`  Sweep: London ${p.londonSweepSignal.dir === "HIGH" ? "▲" : "▼"} Asian ${p.londonSweepSignal.dir} @ <code>${fmtPrice(p.londonSweepSignal.price, p.symbol)}</code>`);
-    }
-  }
-
-  lines.push(``);
-  lines.push(`<b>Confluence:</b> ${p.confluenceScore}/16`);
-
-  /* Active filters summary from panel's per-symbol settings */
-  const f = p.filters;
-  const filters = [];
-  if (f.emaFilterEnabled) filters.push("EMA 8/21");
-  if (f.htfFilterEnabled) filters.push("HTF Trend");
-  if (f.atrToleranceEnabled) filters.push("ATR Tol.");
-  if (f.trailingStopEnabled) filters.push("Trailing SL");
-  if (f.partialTpEnabled) filters.push("Partial TP");
-  if (f.falseBreakoutEnabled) filters.push("False BO");
-  if (f.minRREnabled) filters.push(`Min R:R ${f.minRRValue}`);
-  if (f.pureTrailingEnabled) filters.push("Pure Trail");
-  if (f.rsiFilterEnabled) filters.push("RSI");
-  if (f.volumeSpikeEnabled) filters.push("Vol. Spike");
-  if (f.sessionFilterEnabled) filters.push(`Session (${f.sessionFilterMode})`);
-  if (f.fibRetestEnabled) filters.push("Fib Retest");
-  if (f.macdFilterEnabled) filters.push("MACD");
-  if (f.bbSqueezeFilterEnabled) filters.push("BB Squeeze");
-  if (f.adxFilterEnabled) filters.push("ADX");
-  if (f.stochFilterEnabled) filters.push("Stochastic");
-  if (f.scalpingModeEnabled) filters.push("Scalping");
-  if (sessionRangesEnabled) filters.push("Session Ranges");
-  /* Profit-Direction Constraints */
-  if (f.minConfluenceEnabled) filters.push((f.requiredConfluences && f.requiredConfluences.length > 0) ? `Required Confluences [${f.requiredConfluences.join(", ")}]` : `Min Confluence ≥${f.minConfluenceValue}`);
-  if (f.doubleRetestEnabled) filters.push("Double Retest");
-  if (f.confirmBarEnabled) filters.push("Confirm Bar");
-  if (f.divergenceFilterEnabled) filters.push("Divergence");
-  if (f.adxHardGateEnabled) filters.push(`ADX Gate (20-${f.adxMaxThreshold})`);
-  if (f.breakoutDistEnabled) filters.push(`BO Dist ≤${f.breakoutDistATR}×ATR`);
-  if (f.timeDecayEnabled) filters.push(`Time Decay ≤${f.timeDecayCandles}`);
-  if (f.consecutiveDirEnabled) filters.push("Consec. Dir");
-  if (f.vwapFilterEnabled) filters.push("VWAP");
-  if (f.stochCrossEnabled) filters.push("Stoch Cross");
-  if (f.rangeSizeEnabled) filters.push(`Range ${f.rangeSizeMin}-${f.rangeSizeMax}×ATR`);
-  if (f.hhhlEnabled) filters.push("HH/HL");
-  if (f.followThroughEnabled) filters.push("Follow-Through");
-  if (f.mtfStructureEnabled) filters.push("MTF (EMA200)");
-  if (filters.length > 0) {
-    lines.push(`<b>Filters:</b> ${filters.join(", ")}`);
-  }
-
-  lines.push(``);
-  lines.push(`<i>${ts}</i>`);
-  return lines.join("\n");
-}
-
-/**
- * Capture a full high-res chart for a multi-symbol panel.
- * Temporarily activates the panel data into globals, renders drawChart()
- * on a 1920×1080 offscreen canvas, then restores the previous state.
- */
-function capturePanelScreenshot(p) {
-  const snap = _snapshotChartGlobals();
-  /* Also snapshot the symbol dropdown so the chart watermark matches this panel */
-  const prevSymbolValue = UI.symbolSelect ? UI.symbolSelect.value : null;
-  activatePanel(p);
-  if (UI.symbolSelect) UI.symbolSelect.value = p.symbol;
-  return _renderChartToBlob().finally(() => {
-    _restoreChartGlobals(snap);
-    if (UI.symbolSelect && prevSymbolValue !== null) UI.symbolSelect.value = prevSymbolValue;
-  });
-}
-
-/* ---- Snapshot / restore globals that activatePanel touches ---- */
-function _snapshotChartGlobals() {
-  return {
-    candles, rangeStartEpoch, openingRange, breakout,
-    retestInfo, indecisionInfo, confirmInfo, trade, phase,
-    monitoringTrade, emaFast, emaSlow, emaHTF,
-    atrValue, atrValues, rsiValues,
-    macdLine, macdSignal, macdHistogram,
-    bbUpper, bbLower, bbMiddle, bbWidth,
-    adxValue, adxDiPlus, adxDiMinus, stochK, stochD,
-    trailingSL, partialTpHit, confluenceScore,
-    signalHistory, signalWins, signalLosses, signalBreakevens,
-    liveScalpHistory, lastScalpCandleIdx, ws,
-    autoResetEnabled, emaFilterEnabled, htfFilterEnabled,
-    atrToleranceEnabled, trailingStopEnabled, partialTpEnabled,
-    falseBreakoutEnabled, minRREnabled, minRRValue, pureTrailingEnabled,
-    rsiFilterEnabled, volumeSpikeEnabled, sessionFilterEnabled,
-    sessionFilterMode, fibRetestEnabled,
-    macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
-    stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
-    nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
-    nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
-    sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
-    sessionRangeNY, asianRangeTight, londonSweepSignal,
-    sessionRangeTrade,
-    sessionRangeTradeWins, sessionRangeTradeLosses
-  };
-}
-function _restoreChartGlobals(s) {
-  candles = s.candles; rangeStartEpoch = s.rangeStartEpoch;
-  openingRange = s.openingRange; breakout = s.breakout;
-  retestInfo = s.retestInfo; indecisionInfo = s.indecisionInfo;
-  confirmInfo = s.confirmInfo; trade = s.trade; phase = s.phase;
-  monitoringTrade = s.monitoringTrade;
-  emaFast = s.emaFast; emaSlow = s.emaSlow; emaHTF = s.emaHTF;
-  atrValue = s.atrValue; atrValues = s.atrValues; rsiValues = s.rsiValues;
-  macdLine = s.macdLine; macdSignal = s.macdSignal; macdHistogram = s.macdHistogram;
-  bbUpper = s.bbUpper; bbLower = s.bbLower; bbMiddle = s.bbMiddle; bbWidth = s.bbWidth;
-  adxValue = s.adxValue; adxDiPlus = s.adxDiPlus; adxDiMinus = s.adxDiMinus;
-  stochK = s.stochK; stochD = s.stochD;
-  trailingSL = s.trailingSL; partialTpHit = s.partialTpHit;
-  confluenceScore = s.confluenceScore;
-  signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses; signalBreakevens = s.signalBreakevens || 0;
-  liveScalpHistory = s.liveScalpHistory; lastScalpCandleIdx = s.lastScalpCandleIdx;
-  ws = s.ws;
-  autoResetEnabled = s.autoResetEnabled; emaFilterEnabled = s.emaFilterEnabled;
-  htfFilterEnabled = s.htfFilterEnabled; atrToleranceEnabled = s.atrToleranceEnabled;
-  trailingStopEnabled = s.trailingStopEnabled; partialTpEnabled = s.partialTpEnabled;
-  falseBreakoutEnabled = s.falseBreakoutEnabled; minRREnabled = s.minRREnabled;
-  minRRValue = s.minRRValue; pureTrailingEnabled = s.pureTrailingEnabled;
-  rsiFilterEnabled = s.rsiFilterEnabled; volumeSpikeEnabled = s.volumeSpikeEnabled;
-  sessionFilterEnabled = s.sessionFilterEnabled; sessionFilterMode = s.sessionFilterMode;
-  fibRetestEnabled = s.fibRetestEnabled;
-  macdFilterEnabled = s.macdFilterEnabled; bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
-  adxFilterEnabled = s.adxFilterEnabled; stochFilterEnabled = s.stochFilterEnabled;
-  scalpingModeEnabled = s.scalpingModeEnabled; nyOpenRangeEnabled = s.nyOpenRangeEnabled;
-  nyOpenRange = s.nyOpenRange; nyOpenRangeBreakout = s.nyOpenRangeBreakout;
-  nyOpenRangeRetest = s.nyOpenRangeRetest; nyOpenRangeTrade = s.nyOpenRangeTrade;
-  nyOpenRangePhase = s.nyOpenRangePhase; RANGE_MINUTES = s.RANGE_MINUTES;
-  sessionRangesEnabled = s.sessionRangesEnabled;
-  sessionRangeAsian = s.sessionRangeAsian; sessionRangeLondon = s.sessionRangeLondon;
-  sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
-  londonSweepSignal = s.londonSweepSignal;
-  sessionRangeTrade = s.sessionRangeTrade;
-  sessionRangeTradeWins = s.sessionRangeTradeWins;
-  sessionRangeTradeLosses = s.sessionRangeTradeLosses;
-}
-
-/* ================= LOCALSTORAGE PERSISTENCE ================= */
-const LS_PREFIX = "itguru_indicator_";
-
-/** Show/hide the MA Period input row based on the selected signal strategy. */
-function _updateGridScalperMAPeriodVisibility() {
-  const row  = document.getElementById("gridScalperMAPeriodRow");
-  const hint = document.getElementById("gridScalperMAPeriodHint");
-  const show = gridScalperMAStrategy === "price_vs_ma";
-  if (row)  row.style.display  = show ? "" : "none";
-  if (hint) hint.style.display = show ? "" : "none";
-}
-
-function _normalizePo3EntryMaxAge(value) {
-  const n = parseInt(value, 10);
-  return n === PO3_ENTRY_MAX_AGE_STRICT ? PO3_ENTRY_MAX_AGE_STRICT : PO3_ENTRY_MAX_AGE_SAFE;
-}
-
-function _syncPo3FreshnessModeUI() {
-  const v = String(po3EntryMaxAge);
-  if (UI.po3FreshnessMode) UI.po3FreshnessMode.value = v;
-  if (UI.po3FreshnessModeQuick) UI.po3FreshnessModeQuick.value = v;
-  if (UI.po3FreshnessBadge) {
-    const strict = po3EntryMaxAge === PO3_ENTRY_MAX_AGE_STRICT;
-    UI.po3FreshnessBadge.textContent = strict ? "STRICT" : "SAFE";
-    UI.po3FreshnessBadge.className = `strat-enable-badge ${strict ? "mode-strict" : "mode-safe"}`;
-    UI.po3FreshnessBadge.title = strict
-      ? "PO3 entry freshness: strict (current-touch candle only)"
-      : "PO3 entry freshness: safe (allows 1-candle lag)";
-  }
-}
-
-function saveSettings() {
-  try {
-    const settings = {
-      appId: APP_ID,
-      symbol: UI.symbolSelect.value,
-      granularity: UI.granSelect.value,
-      risk: UI.riskInput.value,
-      reward: UI.rewardInput.value,
-      rangeDuration: RANGE_MINUTES,
-      touchTolerance: LEVEL_TOUCH_TOLERANCE,
-      dojiRatio: DOJI_BODY_RATIO,
-      lookbackPeriod: SWING_LOOKBACK_PERIOD,
-      soundEnabled,
-      notificationsEnabled,
-      theme: currentTheme,
-      showEma: UI.emaToggle ? UI.emaToggle.checked : false,
-      autoResetEnabled,
-      emaFilterEnabled,
-      htfFilterEnabled,
-      atrToleranceEnabled,
-      trailingStopEnabled,
-      partialTpEnabled,
-      falseBreakoutEnabled,
-      minRREnabled,
-      minRRValue,
-      pureTrailingEnabled,
-      rsiFilterEnabled,
-      volumeSpikeEnabled,
-      sessionFilterEnabled,
-      sessionFilterMode,
-      fibRetestEnabled,
-      macdFilterEnabled,
-      bbSqueezeFilterEnabled,
-      adxFilterEnabled,
-      stochFilterEnabled,
-      scalpingModeEnabled,
-      nyOpenRangeEnabled,
-      sessionRangesEnabled,
-      /* Profit-Direction Constraints */
-      minConfluenceEnabled,
-      minConfluenceValue,
-      requiredConfluences,
-      doubleRetestEnabled,
-      confirmBarEnabled,
-      divergenceFilterEnabled,
-      adxHardGateEnabled,
-      adxMaxThreshold,
-      breakoutDistEnabled,
-      breakoutDistATR,
-      timeDecayEnabled,
-      timeDecayCandles,
-      consecutiveDirEnabled,
-      vwapFilterEnabled,
-      stochCrossEnabled,
-      rangeSizeEnabled,
-      rangeSizeMin,
-      rangeSizeMax,
-      hhhlEnabled,
-      followThroughEnabled,
-      mtfStructureEnabled,
-      autoApplyRecommended,
-      lockTimeframe,
-      lockRR,
-      lockRangeMin,
-      lockIndicatorFilters,
-      liveScalpEnabled,
-      liveScalpMinConf,
-      liquiditySweepEnabled,
-      stopLossHuntEnabled,
-      failedPinBarEnabled,
-      fibScalpEnabled,
-      po3Enabled,
-      po3EntryMaxAge,
-      telegramBotToken: _obfuscate(telegramBotToken),
-      telegramChatId,
-      telegramAutoSend,
-      telegramScalpAutoSend,
-      telegramOutcomeSend,
-      telegramScalpOutcomeSend,
-      telegramSessionRangeAutoSend,
-      telegramSessionRangeOutcomeSend,
-      telegramStrategyAutoSend,
-      telegramStrategyOutcomeSend,
-      telegramShadowOutcomeSend,
-      telegramProfitExitAlertEnabled,
-      accountSize,
-      riskPercent,
-      autoTradeEnabled,
-      autoTradeScalpEnabled,
-      autoTradeStrategyEnabled,
-      autoTradeStake,
-      autoTradeMaxStake,
-      autoTradeSessionTP,
-      autoTradeSessionSL,
-      autoTradeExecutionMode,
-      autoTradeMultiplier,
-      maxConcurrentTrades,
-      mt5SignalApiUrl,
-      mt5StatusApiUrl,
-      mt5MinStopPoints,
-      mt5FreezePoints,
-      mt5LotStep,
-      mt5MinLot,
-      mt5MaxLot,
-      mt5StatusPollingEnabled,
-      autoTradeScalpOpposite,
-      autoTradeStrategyOpposite,
-      autoTradeLiquiditySweep,
-      autoTradeStopLossHunt,
-      autoTradeFailedPinBar,
-      autoTradeFibScalp,
-      autoTradePo3,
-      autoTradeTiktok,
-      autoTradeNYOpenRange,
-      autoTradeSessionRange,
-      gridScalperMAEnabled,
-      gridScalperMAStrategy,
-      gridScalperMAPeriod,
-      autoTradeGridScalperMA,
-      fvgStratEnabled,
-      autoTradeFvgStrat,
-      tiktokEnabled,
-      teslaScalingEnabled,
-      teslaScalingPlan,
-      mtfTopDownEnabled,
-      autoTradeMtfTopDown,
-      candleInterpEnabled,
-      autoTradeCandleInterp,
-      /* Strategy 19: Grid Scalper V2 */
-      gridScalperV2Enabled,
-      autoTradeGridScalperV2,
-      /* Strategy 15 & 16 */
-      po3_4hEnabled,
-      autoTradePo3_4h,
-      breakerBlockEnabled,
-      autoTradeBreakerBlock,
-      /* Strategy 17: OTE Golden Pocket */
-      oteGoldenPocketEnabled,
-      autoTradeOteGoldenPocket,
-      /* Strategy 18: ORB */
-      orbEnabled,
-      autoTradeOrb,
-      orbCandleConfirmation,
-      /* Strategy 20: CRT + TBS */
-      crtTbsEnabled,
-      autoTradeCrtTbs,
-      _crtStrictTbs,
-      /* Feature settings */
-      orderblockEnabled,
-      autoTradeOrderblock,
-      sessionHeatmapEnabled,
-      candleAnnotationsEnabled,
-      volumeProfileEnabled,
-      fibExtensionsEnabled,
-      bosChochEnabled,
-      divergenceVisualEnabled,
-      newsPauseEnabled,
-      newsPauseMinutes,
-      multiRLadderEnabled,
-      adaptiveConfluenceEnabled,
-      scannerEnabled,
-      scannerSymbols: JSON.stringify(scannerSymbols),
-      backtestSpeedMs
-    };
-    localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(settings));
-    /* #13: Asynchronously re-encrypt Telegram token with AES-GCM (v2) after the
-     * synchronous XOR write, upgrading the stored value in the background. */
-    if (telegramBotToken) {
-      _encryptCred(telegramBotToken).then(enc => {
-        try {
-          const raw2 = localStorage.getItem(LS_PREFIX + "settings");
-          if (!raw2) return;
-          const s2 = JSON.parse(raw2);
-          s2.telegramBotToken = enc;
-          localStorage.setItem(LS_PREFIX + "settings", JSON.stringify(s2));
-        } catch {}
-      }).catch(() => {});
-    }
-  } catch (e) {
-    console.warn("Failed to save settings to localStorage:", e.message);
-    addLog("⚠️ Settings could not be saved (storage unavailable)");
-  }
-}
-
-function restoreSettings() {
-  try {
-    const raw = localStorage.getItem(LS_PREFIX + "settings");
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (s.appId != null) {
-      const parsed = parseInt(s.appId, 10);
-      APP_ID = isNaN(parsed) || parsed <= 0 ? 120128 : parsed;
-      updateWsUrl();
-      if (UI.appIdInput) UI.appIdInput.value = APP_ID;
-    }
-    if (s.symbol && UI.symbolSelect) UI.symbolSelect.value = migrateSymbol(s.symbol);
-    if (s.granularity && UI.granSelect) UI.granSelect.value = s.granularity;
-    if (s.risk && UI.riskInput) UI.riskInput.value = s.risk;
-    if (s.reward && UI.rewardInput) UI.rewardInput.value = s.reward;
-    if (s.rangeDuration !== null && s.rangeDuration !== undefined) {
-      RANGE_MINUTES = s.rangeDuration;
-      if (UI.rangeDuration) UI.rangeDuration.value = s.rangeDuration;
-    }
-    if (s.touchTolerance !== null && s.touchTolerance !== undefined) {
-      LEVEL_TOUCH_TOLERANCE = s.touchTolerance;
-      if (UI.touchTolerance) UI.touchTolerance.value = (s.touchTolerance * 100).toFixed(0);
-    }
-    if (s.dojiRatio !== null && s.dojiRatio !== undefined) {
-      DOJI_BODY_RATIO = s.dojiRatio;
-      if (UI.dojiRatio) UI.dojiRatio.value = (s.dojiRatio * 100).toFixed(0);
-    }
-    if (s.lookbackPeriod !== null && s.lookbackPeriod !== undefined) {
-      SWING_LOOKBACK_PERIOD = s.lookbackPeriod;
-      if (UI.lookbackPeriod) UI.lookbackPeriod.value = s.lookbackPeriod;
-    }
-    if (s.soundEnabled != null) soundEnabled = s.soundEnabled;
-    if (s.notificationsEnabled != null) notificationsEnabled = s.notificationsEnabled;
-    if (s.theme === "light") { currentTheme = "light"; document.body.classList.add("light-theme"); }
-    if (s.showEma && UI.emaToggle) UI.emaToggle.checked = true;
-
-    /* Strategy filter toggles */
-    if (s.autoResetEnabled != null) autoResetEnabled = s.autoResetEnabled;
-    if (s.emaFilterEnabled != null) emaFilterEnabled = s.emaFilterEnabled;
-    if (s.htfFilterEnabled != null) htfFilterEnabled = s.htfFilterEnabled;
-    if (s.atrToleranceEnabled != null) atrToleranceEnabled = s.atrToleranceEnabled;
-    if (s.trailingStopEnabled != null) trailingStopEnabled = s.trailingStopEnabled;
-    if (s.partialTpEnabled != null) partialTpEnabled = s.partialTpEnabled;
-    if (s.falseBreakoutEnabled != null) falseBreakoutEnabled = s.falseBreakoutEnabled;
-    if (s.minRREnabled != null) minRREnabled = s.minRREnabled;
-    if (s.minRRValue != null) minRRValue = s.minRRValue;
-    if (s.pureTrailingEnabled != null) pureTrailingEnabled = s.pureTrailingEnabled;
-    if (UI.autoResetToggle) UI.autoResetToggle.checked = autoResetEnabled;
-    if (UI.emaFilterToggle) UI.emaFilterToggle.checked = emaFilterEnabled;
-    if (UI.htfFilterToggle) UI.htfFilterToggle.checked = htfFilterEnabled;
-    if (UI.atrToleranceToggle) UI.atrToleranceToggle.checked = atrToleranceEnabled;
-    if (UI.trailingStopToggle) UI.trailingStopToggle.checked = trailingStopEnabled;
-    if (UI.partialTpToggle) UI.partialTpToggle.checked = partialTpEnabled;
-    if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
-    if (UI.minRRToggle) UI.minRRToggle.checked = minRREnabled;
-    if (UI.minRRInput) UI.minRRInput.value = minRRValue;
-    if (UI.pureTrailingToggle) UI.pureTrailingToggle.checked = pureTrailingEnabled;
-
-    /* Tesla 3–6–9 Scaling Model */
-    if (s.teslaScalingEnabled != null) teslaScalingEnabled = s.teslaScalingEnabled;
-    if (s.teslaScalingPlan != null) teslaScalingPlan = s.teslaScalingPlan;
-    if (UI.teslaScalingToggle) UI.teslaScalingToggle.checked = teslaScalingEnabled;
-    if (UI.teslaScalingPlan) UI.teslaScalingPlan.value = teslaScalingPlan;
-
-    /* New filter toggles */
-    if (s.rsiFilterEnabled != null) rsiFilterEnabled = s.rsiFilterEnabled;
-    if (s.volumeSpikeEnabled != null) volumeSpikeEnabled = s.volumeSpikeEnabled;
-    if (s.sessionFilterEnabled != null) sessionFilterEnabled = s.sessionFilterEnabled;
-    if (s.sessionFilterMode != null) sessionFilterMode = s.sessionFilterMode;
-    if (s.fibRetestEnabled != null) fibRetestEnabled = s.fibRetestEnabled;
-    if (UI.rsiFilterToggle) UI.rsiFilterToggle.checked = rsiFilterEnabled;
-    if (UI.volumeSpikeToggle) UI.volumeSpikeToggle.checked = volumeSpikeEnabled;
-    if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
-    if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
-    if (UI.fibRetestToggle) UI.fibRetestToggle.checked = fibRetestEnabled;
-
-    /* GainzAlgo V2 filter toggles */
-    if (s.macdFilterEnabled != null) macdFilterEnabled = s.macdFilterEnabled;
-    if (s.bbSqueezeFilterEnabled != null) bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
-    if (s.adxFilterEnabled != null) adxFilterEnabled = s.adxFilterEnabled;
-    if (s.stochFilterEnabled != null) stochFilterEnabled = s.stochFilterEnabled;
-    if (UI.macdFilterToggle) UI.macdFilterToggle.checked = macdFilterEnabled;
-    if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
-    if (UI.adxFilterToggle) UI.adxFilterToggle.checked = adxFilterEnabled;
-    if (UI.stochFilterToggle) UI.stochFilterToggle.checked = stochFilterEnabled;
-
-    /* Scalping mode */
-    if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
-    if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
-
-    if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
-    if (UI.nyOpenRangeToggle) UI.nyOpenRangeToggle.checked = nyOpenRangeEnabled;
-
-    /* Session Ranges */
-    if (s.sessionRangesEnabled != null) sessionRangesEnabled = s.sessionRangesEnabled;
-    if (UI.sessionRangesToggle) UI.sessionRangesToggle.checked = sessionRangesEnabled;
-
-    /* Profit-Direction Constraint toggles */
-    if (s.minConfluenceEnabled != null) minConfluenceEnabled = s.minConfluenceEnabled;
-    if (s.minConfluenceValue != null) minConfluenceValue = s.minConfluenceValue;
-    if (Array.isArray(s.requiredConfluences)) requiredConfluences = s.requiredConfluences.filter(f => typeof f === "string");
-    if (s.doubleRetestEnabled != null) doubleRetestEnabled = s.doubleRetestEnabled;
-    if (s.confirmBarEnabled != null) confirmBarEnabled = s.confirmBarEnabled;
-    if (s.divergenceFilterEnabled != null) divergenceFilterEnabled = s.divergenceFilterEnabled;
-    if (s.adxHardGateEnabled != null) adxHardGateEnabled = s.adxHardGateEnabled;
-    if (s.adxMaxThreshold != null) adxMaxThreshold = s.adxMaxThreshold;
-    if (s.breakoutDistEnabled != null) breakoutDistEnabled = s.breakoutDistEnabled;
-    if (s.breakoutDistATR != null) breakoutDistATR = s.breakoutDistATR;
-    if (s.timeDecayEnabled != null) timeDecayEnabled = s.timeDecayEnabled;
-    if (s.timeDecayCandles != null) timeDecayCandles = s.timeDecayCandles;
-    if (s.consecutiveDirEnabled != null) consecutiveDirEnabled = s.consecutiveDirEnabled;
-    if (s.vwapFilterEnabled != null) vwapFilterEnabled = s.vwapFilterEnabled;
-    if (s.stochCrossEnabled != null) stochCrossEnabled = s.stochCrossEnabled;
-    if (s.rangeSizeEnabled != null) rangeSizeEnabled = s.rangeSizeEnabled;
-    if (s.rangeSizeMin != null) rangeSizeMin = s.rangeSizeMin;
-    if (s.rangeSizeMax != null) rangeSizeMax = s.rangeSizeMax;
-    if (s.hhhlEnabled != null) hhhlEnabled = s.hhhlEnabled;
-    if (s.followThroughEnabled != null) followThroughEnabled = s.followThroughEnabled;
-    if (s.mtfStructureEnabled != null) mtfStructureEnabled = s.mtfStructureEnabled;
-    if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
-    if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
-    renderRequiredConfluenceList();
-    if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
-    if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
-    if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
-    if (UI.adxHardGateToggle)      UI.adxHardGateToggle.checked      = adxHardGateEnabled;
-    if (UI.adxMaxInput)            UI.adxMaxInput.value              = adxMaxThreshold;
-    if (UI.breakoutDistToggle)     UI.breakoutDistToggle.checked     = breakoutDistEnabled;
-    if (UI.breakoutDistInput)      UI.breakoutDistInput.value        = breakoutDistATR;
-    if (UI.timeDecayToggle)        UI.timeDecayToggle.checked        = timeDecayEnabled;
-    if (UI.timeDecayInput)         UI.timeDecayInput.value           = timeDecayCandles;
-    if (UI.consecutiveDirToggle)   UI.consecutiveDirToggle.checked   = consecutiveDirEnabled;
-    if (UI.vwapFilterToggle)       UI.vwapFilterToggle.checked       = vwapFilterEnabled;
-    if (UI.stochCrossToggle)       UI.stochCrossToggle.checked       = stochCrossEnabled;
-    if (UI.rangeSizeToggle)        UI.rangeSizeToggle.checked        = rangeSizeEnabled;
-    if (UI.rangeSizeMinInput)      UI.rangeSizeMinInput.value        = rangeSizeMin;
-    if (UI.rangeSizeMaxInput)      UI.rangeSizeMaxInput.value        = rangeSizeMax;
-    if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
-    if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
-    if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
-
-    /* Live Scalp Scanner */
-    if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
-    if (s.liveScalpMinConf != null) liveScalpMinConf = s.liveScalpMinConf;
-    if (UI.liveScalpToggle) UI.liveScalpToggle.checked = liveScalpEnabled;
-    if (UI.liveScalpMinConf) UI.liveScalpMinConf.value = liveScalpMinConf;
-
-    /* Strategy 1: Liquidity Sweep */
-    if (s.liquiditySweepEnabled != null) liquiditySweepEnabled = s.liquiditySweepEnabled;
-    if (UI.liquiditySweepToggle) UI.liquiditySweepToggle.checked = liquiditySweepEnabled;
-
-    /* Strategy 2: Stop Loss Hunt */
-    if (s.stopLossHuntEnabled != null) stopLossHuntEnabled = s.stopLossHuntEnabled;
-    if (UI.stopLossHuntToggle) UI.stopLossHuntToggle.checked = stopLossHuntEnabled;
-
-    /* Strategy 3: Failed Pin Bar */
-    if (s.failedPinBarEnabled != null) failedPinBarEnabled = s.failedPinBarEnabled;
-    if (UI.failedPinBarToggle) UI.failedPinBarToggle.checked = failedPinBarEnabled;
-
-    /* Strategy 4: Fib Golden Zone Scalp */
-    if (s.fibScalpEnabled != null) fibScalpEnabled = s.fibScalpEnabled;
-    if (UI.fibScalpToggle) UI.fibScalpToggle.checked = fibScalpEnabled;
-
-    /* Strategy 5: Power of 3 (ICT) */
-    if (s.po3Enabled != null) po3Enabled = s.po3Enabled;
-    if (s.po3EntryMaxAge != null) po3EntryMaxAge = _normalizePo3EntryMaxAge(s.po3EntryMaxAge);
-    if (UI.po3Toggle) UI.po3Toggle.checked = po3Enabled;
-    _syncPo3FreshnessModeUI();
-
-    /* Strategy 9: Fair Value Gap (FVG) */
-    if (s.fvgStratEnabled != null) fvgStratEnabled = s.fvgStratEnabled;
-    if (UI.fvgStratToggle) UI.fvgStratToggle.checked = fvgStratEnabled;
-    if (s.autoTradeFvgStrat != null) autoTradeFvgStrat = s.autoTradeFvgStrat;
-    if (UI.autoTradeFvgStratToggle) UI.autoTradeFvgStratToggle.checked = autoTradeFvgStrat;
-
-    /* Strategy 11: MTF Top-Down */
-    if (s.mtfTopDownEnabled != null) mtfTopDownEnabled = s.mtfTopDownEnabled;
-    if (UI.mtfTopDownToggle) UI.mtfTopDownToggle.checked = mtfTopDownEnabled;
-    if (s.autoTradeMtfTopDown != null) autoTradeMtfTopDown = s.autoTradeMtfTopDown;
-    if (UI.autoTradeMtfTopDownToggle) UI.autoTradeMtfTopDownToggle.checked = autoTradeMtfTopDown;
-
-    /* Strategy 14: Candlestick Interpretation */
-    if (s.candleInterpEnabled != null) candleInterpEnabled = s.candleInterpEnabled;
-    if (UI.candleInterpToggle) UI.candleInterpToggle.checked = candleInterpEnabled;
-    if (s.autoTradeCandleInterp != null) autoTradeCandleInterp = s.autoTradeCandleInterp;
-    if (UI.autoTradeCandleInterpToggle) UI.autoTradeCandleInterpToggle.checked = autoTradeCandleInterp;
-
-    /* Strategy 13: TikTok Fibonacci */
-    if (s.tiktokEnabled != null) tiktokEnabled = s.tiktokEnabled;
-    if (UI.tiktokToggle) UI.tiktokToggle.checked = tiktokEnabled;
-
-    /* Strategy 19: Grid Scalper V2 */
-    if (s.gridScalperV2Enabled != null) gridScalperV2Enabled = s.gridScalperV2Enabled;
-    if (UI.gridScalperV2Toggle) UI.gridScalperV2Toggle.checked = gridScalperV2Enabled;
-    if (s.autoTradeGridScalperV2 != null) autoTradeGridScalperV2 = s.autoTradeGridScalperV2;
-    if (UI.autoTradeGridScalperV2Toggle) UI.autoTradeGridScalperV2Toggle.checked = autoTradeGridScalperV2;
-
-    /* Strategy 15: 4H PO3 Liquidity Play */
-    if (s.po3_4hEnabled != null) po3_4hEnabled = s.po3_4hEnabled;
-    if (UI.po3_4hToggle) UI.po3_4hToggle.checked = po3_4hEnabled;
-    if (s.autoTradePo3_4h != null) autoTradePo3_4h = s.autoTradePo3_4h;
-    if (UI.autoTradePo3_4hToggle) UI.autoTradePo3_4hToggle.checked = autoTradePo3_4h;
-
-    /* Strategy 16: 1H Accumulation Breaker Block */
-    if (s.breakerBlockEnabled != null) breakerBlockEnabled = s.breakerBlockEnabled;
-    if (UI.breakerBlockToggle) UI.breakerBlockToggle.checked = breakerBlockEnabled;
-    if (s.autoTradeBreakerBlock != null) autoTradeBreakerBlock = s.autoTradeBreakerBlock;
-    if (UI.autoTradeBreakerBlockToggle) UI.autoTradeBreakerBlockToggle.checked = autoTradeBreakerBlock;
-
-    /* Strategy 17: OTE Golden Pocket */
-    if (s.oteGoldenPocketEnabled != null) oteGoldenPocketEnabled = s.oteGoldenPocketEnabled;
-    if (UI.oteGoldenPocketToggle) UI.oteGoldenPocketToggle.checked = oteGoldenPocketEnabled;
-    if (s.autoTradeOteGoldenPocket != null) autoTradeOteGoldenPocket = s.autoTradeOteGoldenPocket;
-    if (UI.autoTradeOteGoldenPocketToggle) UI.autoTradeOteGoldenPocketToggle.checked = autoTradeOteGoldenPocket;
-
-    /* Strategy 18: ORB */
-    if (s.orbEnabled != null) orbEnabled = s.orbEnabled;
-    if (UI.orbToggle) UI.orbToggle.checked = orbEnabled;
-    if (s.autoTradeOrb != null) autoTradeOrb = s.autoTradeOrb;
-    if (UI.autoTradeOrbToggle) UI.autoTradeOrbToggle.checked = autoTradeOrb;
-    if (s.orbCandleConfirmation != null) orbCandleConfirmation = s.orbCandleConfirmation;
-    if (UI.orbCandleConfirmToggle) UI.orbCandleConfirmToggle.checked = orbCandleConfirmation;
-
-    /* Strategy 20: CRT + TBS */
-    if (s.crtTbsEnabled != null) crtTbsEnabled = s.crtTbsEnabled;
-    if (UI.crtTbsToggle) UI.crtTbsToggle.checked = crtTbsEnabled;
-    if (s.autoTradeCrtTbs != null) autoTradeCrtTbs = s.autoTradeCrtTbs;
-    if (UI.autoTradeCrtTbsToggle) UI.autoTradeCrtTbsToggle.checked = autoTradeCrtTbs;
-    if (s._crtStrictTbs != null) _crtStrictTbs = s._crtStrictTbs;
-    if (UI.crtTbsStrictToggle) UI.crtTbsStrictToggle.checked = _crtStrictTbs;
-
-    /* Auto-apply recommended */
-    if (s.autoApplyRecommended != null) autoApplyRecommended = s.autoApplyRecommended;
-    if (UI.autoApplyRecToggle) UI.autoApplyRecToggle.checked = autoApplyRecommended;
-
-    /* Lock toggles */
-    if (s.lockTimeframe != null) lockTimeframe = s.lockTimeframe;
-    if (s.lockRR != null) lockRR = s.lockRR;
-    if (s.lockRangeMin != null) lockRangeMin = s.lockRangeMin;
-    if (s.lockIndicatorFilters != null) lockIndicatorFilters = s.lockIndicatorFilters;
-    if (UI.lockTimeframeToggle) UI.lockTimeframeToggle.checked = lockTimeframe;
-    if (UI.lockRRToggle) UI.lockRRToggle.checked = lockRR;
-    if (UI.lockRangeMinToggle) UI.lockRangeMinToggle.checked = lockRangeMin;
-    if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
-
-    /* Telegram settings */
-    if (s.telegramBotToken != null) {
-      /* #13: Attempt async AES-GCM decryption first; fall back to XOR for v1 */
-      _decryptCred(s.telegramBotToken).then(decrypted => {
-        telegramBotToken = decrypted || _deobfuscate(s.telegramBotToken);
-        if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
-      }).catch(() => {
-        telegramBotToken = _deobfuscate(s.telegramBotToken);
-        if (UI.telegramBotToken) UI.telegramBotToken.value = telegramBotToken;
-      });
-    }
-    if (s.telegramChatId != null) telegramChatId = s.telegramChatId;
-    if (s.telegramAutoSend != null) telegramAutoSend = s.telegramAutoSend;
-    if (s.telegramScalpAutoSend != null) telegramScalpAutoSend = s.telegramScalpAutoSend;
-    if (s.telegramOutcomeSend != null) telegramOutcomeSend = s.telegramOutcomeSend;
-    if (s.telegramScalpOutcomeSend != null) telegramScalpOutcomeSend = s.telegramScalpOutcomeSend;
-    if (s.telegramSessionRangeAutoSend != null) telegramSessionRangeAutoSend = s.telegramSessionRangeAutoSend;
-    if (s.telegramSessionRangeOutcomeSend != null) telegramSessionRangeOutcomeSend = s.telegramSessionRangeOutcomeSend;
-    if (s.telegramStrategyAutoSend != null) telegramStrategyAutoSend = s.telegramStrategyAutoSend;
-    if (s.telegramStrategyOutcomeSend != null) telegramStrategyOutcomeSend = s.telegramStrategyOutcomeSend;
-    if (s.telegramShadowOutcomeSend != null) telegramShadowOutcomeSend = s.telegramShadowOutcomeSend;
-    if (s.telegramProfitExitAlertEnabled != null) telegramProfitExitAlertEnabled = s.telegramProfitExitAlertEnabled;
-    /* #13: bot token UI is populated inside the async _decryptCred().then() above */
-    if (UI.telegramChatId) UI.telegramChatId.value = telegramChatId;
-    if (UI.telegramAutoSendToggle) UI.telegramAutoSendToggle.checked = telegramAutoSend;
-    if (UI.telegramScalpAutoSendToggle) UI.telegramScalpAutoSendToggle.checked = telegramScalpAutoSend;
-    if (UI.telegramOutcomeSendToggle) UI.telegramOutcomeSendToggle.checked = telegramOutcomeSend;
-    if (UI.telegramScalpOutcomeSendToggle) UI.telegramScalpOutcomeSendToggle.checked = telegramScalpOutcomeSend;
-    if (UI.telegramSessionRangeAutoSendToggle) UI.telegramSessionRangeAutoSendToggle.checked = telegramSessionRangeAutoSend;
-    if (UI.telegramSessionRangeOutcomeSendToggle) UI.telegramSessionRangeOutcomeSendToggle.checked = telegramSessionRangeOutcomeSend;
-    if (UI.telegramStrategyAutoSendToggle) UI.telegramStrategyAutoSendToggle.checked = telegramStrategyAutoSend;
-    if (UI.telegramStrategyOutcomeSendToggle) UI.telegramStrategyOutcomeSendToggle.checked = telegramStrategyOutcomeSend;
-    if (UI.telegramShadowOutcomeSendToggle) UI.telegramShadowOutcomeSendToggle.checked = telegramShadowOutcomeSend;
-    if (UI.telegramProfitExitAlertToggle) UI.telegramProfitExitAlertToggle.checked = telegramProfitExitAlertEnabled;
-
-    /* Account sizing */
-    if (s.accountSize != null) accountSize = s.accountSize;
-    if (s.riskPercent != null) riskPercent = s.riskPercent;
-    if (UI.accountSizeInput) UI.accountSizeInput.value = accountSize > 0 ? accountSize : "";
-    if (UI.riskPercentInput) UI.riskPercentInput.value = riskPercent;
-
-    /* Auto-trade */
-    if (s.autoTradeEnabled != null) autoTradeEnabled = s.autoTradeEnabled;
-    if (s.autoTradeScalpEnabled != null) autoTradeScalpEnabled = s.autoTradeScalpEnabled;
-    if (s.autoTradeStrategyEnabled != null) autoTradeStrategyEnabled = s.autoTradeStrategyEnabled;
-    if (s.autoTradeStake != null) autoTradeStake = s.autoTradeStake;
-    if (s.autoTradeMaxStake != null) autoTradeMaxStake = s.autoTradeMaxStake;
-    if (s.autoTradeSessionTP != null) autoTradeSessionTP = s.autoTradeSessionTP;
-    if (s.autoTradeSessionSL != null) autoTradeSessionSL = s.autoTradeSessionSL;
-    if (s.autoTradeExecutionMode === "deriv" || s.autoTradeExecutionMode === "mt5") {
-      autoTradeExecutionMode = s.autoTradeExecutionMode;
-    }
-    /* Initialise dynamic stake from restored base */
-    autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
-    if (s.autoTradeMultiplier != null) autoTradeMultiplier = s.autoTradeMultiplier;
-    if (s.maxConcurrentTrades != null) {
-      maxConcurrentTrades = Math.max(1, Math.min(MAX_CONCURRENT_TRADES_LIMIT, parseInt(s.maxConcurrentTrades, 10) || DEFAULT_MAX_CONCURRENT_TRADES));
-    }
-    if (UI.autoTradeToggle) UI.autoTradeToggle.checked = autoTradeEnabled;
-    if (UI.autoTradeScalpToggle) UI.autoTradeScalpToggle.checked = autoTradeScalpEnabled;
-    if (UI.autoTradeStrategyToggle) UI.autoTradeStrategyToggle.checked = autoTradeStrategyEnabled;
-    if (UI.autoTradeStake) UI.autoTradeStake.value = autoTradeStake;
-    if (UI.autoTradeMaxStake) UI.autoTradeMaxStake.value = autoTradeMaxStake > 0 ? autoTradeMaxStake : "";
-    if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value = autoTradeExecutionMode;
-    if (UI.autoTradeSessionTP) UI.autoTradeSessionTP.value = autoTradeSessionTP > 0 ? autoTradeSessionTP : "";
-    if (UI.autoTradeSessionSL) UI.autoTradeSessionSL.value = autoTradeSessionSL > 0 ? autoTradeSessionSL : "";
-    if (UI.autoTradeMultiplier) UI.autoTradeMultiplier.value = autoTradeMultiplier;
-    if (UI.maxConcurrentTrades) UI.maxConcurrentTrades.value = maxConcurrentTrades;
-    if (s.mt5SignalApiUrl != null) mt5SignalApiUrl = String(s.mt5SignalApiUrl || mt5SignalApiUrl);
-    if (s.mt5StatusApiUrl != null) mt5StatusApiUrl = String(s.mt5StatusApiUrl || mt5StatusApiUrl);
-    if (s.mt5MinStopPoints != null) mt5MinStopPoints = Math.max(0, parseFloat(s.mt5MinStopPoints) || 0);
-    if (s.mt5FreezePoints != null) mt5FreezePoints = Math.max(0, parseFloat(s.mt5FreezePoints) || 0);
-    if (s.mt5LotStep != null) mt5LotStep = Math.max(0.00001, parseFloat(s.mt5LotStep) || 0.01);
-    if (s.mt5MinLot != null) mt5MinLot = Math.max(mt5LotStep, parseFloat(s.mt5MinLot) || mt5LotStep);
-    if (s.mt5MaxLot != null) mt5MaxLot = Math.max(mt5MinLot, parseFloat(s.mt5MaxLot) || mt5MinLot);
-    if (s.mt5StatusPollingEnabled != null) mt5StatusPollingEnabled = !!s.mt5StatusPollingEnabled;
-    if (UI.mt5SignalApiUrl) UI.mt5SignalApiUrl.value = mt5SignalApiUrl;
-    if (UI.mt5StatusApiUrl) UI.mt5StatusApiUrl.value = mt5StatusApiUrl;
-    if (UI.mt5MinStopPoints) UI.mt5MinStopPoints.value = mt5MinStopPoints;
-    if (UI.mt5FreezePoints) UI.mt5FreezePoints.value = mt5FreezePoints;
-    if (UI.mt5LotStep) UI.mt5LotStep.value = mt5LotStep;
-    if (UI.mt5MinLot) UI.mt5MinLot.value = mt5MinLot;
-    if (UI.mt5MaxLot) UI.mt5MaxLot.value = mt5MaxLot;
-    if (UI.mt5StatusPollingToggle) UI.mt5StatusPollingToggle.checked = mt5StatusPollingEnabled;
-    updateAutoTradeCurrentStakeUI();
-    if (s.autoTradeScalpOpposite != null) autoTradeScalpOpposite = s.autoTradeScalpOpposite;
-    if (s.autoTradeStrategyOpposite != null) autoTradeStrategyOpposite = s.autoTradeStrategyOpposite;
-    if (UI.autoTradeScalpOppositeToggle) UI.autoTradeScalpOppositeToggle.checked = autoTradeScalpOpposite;
-    if (UI.autoTradeStrategyOppositeToggle) UI.autoTradeStrategyOppositeToggle.checked = autoTradeStrategyOpposite;
-    /* Per-strategy auto-trade sub-toggles */
-    if (s.autoTradeLiquiditySweep != null) autoTradeLiquiditySweep = s.autoTradeLiquiditySweep;
-    if (s.autoTradeStopLossHunt != null)   autoTradeStopLossHunt   = s.autoTradeStopLossHunt;
-    if (s.autoTradeFailedPinBar != null)   autoTradeFailedPinBar   = s.autoTradeFailedPinBar;
-    if (s.autoTradeFibScalp != null)       autoTradeFibScalp       = s.autoTradeFibScalp;
-    if (s.autoTradePo3 != null)            autoTradePo3            = s.autoTradePo3;
-    if (s.autoTradeTiktok != null)         autoTradeTiktok         = s.autoTradeTiktok;
-    if (s.autoTradeNYOpenRange != null)    autoTradeNYOpenRange    = s.autoTradeNYOpenRange;
-    if (s.autoTradeSessionRange != null)   autoTradeSessionRange   = s.autoTradeSessionRange;
-    if (s.autoTradeGridScalperMA != null)  autoTradeGridScalperMA  = s.autoTradeGridScalperMA;
-    if (UI.autoTradeLiquiditySweepToggle) UI.autoTradeLiquiditySweepToggle.checked = autoTradeLiquiditySweep;
-    if (UI.autoTradeStopLossHuntToggle)   UI.autoTradeStopLossHuntToggle.checked   = autoTradeStopLossHunt;
-    if (UI.autoTradeFailedPinBarToggle)   UI.autoTradeFailedPinBarToggle.checked   = autoTradeFailedPinBar;
-    if (UI.autoTradeFibScalpToggle)       UI.autoTradeFibScalpToggle.checked       = autoTradeFibScalp;
-    if (UI.autoTradePo3Toggle)            UI.autoTradePo3Toggle.checked            = autoTradePo3;
-    if (UI.autoTradeTiktokToggle)         UI.autoTradeTiktokToggle.checked         = autoTradeTiktok;
-    if (UI.autoTradeNYOpenRangeToggle)    UI.autoTradeNYOpenRangeToggle.checked    = autoTradeNYOpenRange;
-    if (UI.autoTradeSessionRangeToggle)   UI.autoTradeSessionRangeToggle.checked   = autoTradeSessionRange;
-    if (UI.autoTradeGridScalperMAToggle)  UI.autoTradeGridScalperMAToggle.checked  = autoTradeGridScalperMA;
-
-    /* Grid Scalper MA strategy */
-    if (s.gridScalperMAEnabled != null)  gridScalperMAEnabled  = s.gridScalperMAEnabled;
-    if (s.gridScalperMAStrategy != null) gridScalperMAStrategy = s.gridScalperMAStrategy;
-    if (s.gridScalperMAPeriod != null)   gridScalperMAPeriod   = Math.max(2, parseInt(s.gridScalperMAPeriod, 10) || 21);
-    if (UI.gridScalperMAToggle)          UI.gridScalperMAToggle.checked          = gridScalperMAEnabled;
-    if (UI.gridScalperMAStrategySelect)  UI.gridScalperMAStrategySelect.value    = gridScalperMAStrategy;
-    if (UI.gridScalperMAPeriodInput)     UI.gridScalperMAPeriodInput.value       = gridScalperMAPeriod;
-    _updateGridScalperMAPeriodVisibility();
-
-    /* Feature settings restore */
-    if (s.orderblockEnabled != null)        orderblockEnabled        = s.orderblockEnabled;
-    if (s.autoTradeOrderblock != null)      autoTradeOrderblock      = s.autoTradeOrderblock;
-    if (s.sessionHeatmapEnabled != null)    sessionHeatmapEnabled    = s.sessionHeatmapEnabled;
-    if (s.candleAnnotationsEnabled != null) candleAnnotationsEnabled = s.candleAnnotationsEnabled;
-    if (s.volumeProfileEnabled != null)     volumeProfileEnabled     = s.volumeProfileEnabled;
-    if (s.fibExtensionsEnabled != null)     fibExtensionsEnabled     = s.fibExtensionsEnabled;
-    if (s.bosChochEnabled != null)          bosChochEnabled          = s.bosChochEnabled;
-    if (s.divergenceVisualEnabled != null)  divergenceVisualEnabled  = s.divergenceVisualEnabled;
-    if (s.newsPauseEnabled != null)         newsPauseEnabled         = s.newsPauseEnabled;
-    if (s.newsPauseMinutes != null)         newsPauseMinutes         = s.newsPauseMinutes;
-    if (s.multiRLadderEnabled != null)      multiRLadderEnabled      = s.multiRLadderEnabled;
-    if (s.adaptiveConfluenceEnabled != null) adaptiveConfluenceEnabled = s.adaptiveConfluenceEnabled;
-    if (s.scannerEnabled != null)           scannerEnabled           = s.scannerEnabled;
-    if (s.scannerSymbols != null) {
-      try { const arr = JSON.parse(s.scannerSymbols); if (Array.isArray(arr)) scannerSymbols = arr.map(migrateSymbol); } catch(e) {}
-    }
-    if (s.backtestSpeedMs != null) backtestSpeedMs = Math.max(BACKTEST_MIN_SPEED_MS, Math.min(BACKTEST_MAX_SPEED_MS, parseInt(s.backtestSpeedMs,10) || BACKTEST_DEFAULT_SPEED_MS));
-    if (UI.orderblockToggle)          UI.orderblockToggle.checked          = orderblockEnabled;
-    if (UI.autoTradeOrderblockToggle) UI.autoTradeOrderblockToggle.checked = autoTradeOrderblock;
-    if (UI.sessionHeatmapToggle)      UI.sessionHeatmapToggle.checked      = sessionHeatmapEnabled;
-    if (UI.candleAnnotationsToggle)   UI.candleAnnotationsToggle.checked   = candleAnnotationsEnabled;
-    if (UI.volumeProfileToggle)       UI.volumeProfileToggle.checked       = volumeProfileEnabled;
-    if (UI.fibExtensionsToggle)       UI.fibExtensionsToggle.checked       = fibExtensionsEnabled;
-    if (UI.bosChochToggle)            UI.bosChochToggle.checked            = bosChochEnabled;
-    if (UI.divergenceVisualToggle)    UI.divergenceVisualToggle.checked    = divergenceVisualEnabled;
-    if (UI.newsPauseToggle)           UI.newsPauseToggle.checked           = newsPauseEnabled;
-    if (UI.newsPauseMinutesInput)     UI.newsPauseMinutesInput.value       = newsPauseMinutes;
-    if (UI.multiRLadderToggle)        UI.multiRLadderToggle.checked        = multiRLadderEnabled;
-    if (UI.adaptiveConfluenceToggle)  UI.adaptiveConfluenceToggle.checked  = adaptiveConfluenceEnabled;
-    if (UI.scannerToggle)             UI.scannerToggle.checked             = scannerEnabled;
-    if (UI.scannerSymbolPicker) {
-      const symSet = new Set(scannerSymbols);
-      UI.scannerSymbolPicker.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = symSet.has(cb.dataset.symbol);
-      });
-      updateScannerSymbolCount();
-    }
-    if (UI.backtestSpeedInput)        UI.backtestSpeedInput.value          = backtestSpeedMs;
-
-    /* Restore auto-trade history */
-    restoreAutoTradeHistory();
-    updateAutoTradeBalanceVisibility();
-    updateStrategyBadges();
-    /* Refresh Grid Scalper MA Opposite Mode stats after restoring history */
-    renderGridScalperMAOppositeStats();
-  } catch (e) { /* storage not available */ }
-}
-
-function persistSignalLog() {
-  try {
-    const items = [];
-    if (UI.signalLog) {
-      for (let i = 0; i < Math.min(UI.signalLog.children.length, 50); i++) {
-        items.push(UI.signalLog.children[i].textContent);
-      }
-    }
-    localStorage.setItem(LS_PREFIX + "signalLog", JSON.stringify(items));
-  } catch (e) {
-    console.warn("Failed to persist signal log:", e.message);
-  }
-}
-
-function restoreSignalLog() {
-  try {
-    const raw = localStorage.getItem(LS_PREFIX + "signalLog");
-    if (!raw || !UI.signalLog) return;
-    const items = JSON.parse(raw);
-    if (Array.isArray(items)) {
-      items.reverse().forEach(text => {
-        const li = document.createElement("li");
-        li.textContent = text;
-        UI.signalLog.prepend(li);
-      });
-    }
-  } catch (e) {
-    console.warn("Failed to restore signal log:", e.message);
-  }
-}
-
-function persistSignalHistory() {
-  try {
-    /* Strip chartImage data URLs to avoid exceeding localStorage quota */
-    const stripped = signalHistory.slice(-50).map(s => {
-      if (!s || !s.chartImage) return s;
-      const copy = Object.assign({}, s);
-      delete copy.chartImage;
-      return copy;
-    });
-    localStorage.setItem(LS_PREFIX + "signalHistory", JSON.stringify(stripped));
-  } catch (e) {
-    console.warn("Failed to persist signal history:", e.message);
-  }
-}
-
-function restoreSignalHistory() {
-  try {
-    const raw = localStorage.getItem(LS_PREFIX + "signalHistory");
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      /* Mark any PENDING signals from the previous session as EXPIRED.
-         They cannot be monitored anymore (monitoringTrade is never persisted),
-         so keeping them as PENDING would pollute the Live Signals banner and
-         cause monitorTradeOutcome to resolve the wrong signal for the new trade. */
-      signalHistory = parsed.map(s =>
-        (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
-      );
-      signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
-      signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
-      signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
-      updateStatsUI();
-    }
-  } catch (e) {
-    console.warn("Failed to restore signal history:", e.message);
-  }
-}
-
-/* ================= STATS ================= */
-function updateStatsUI() {
-  /* For focused-panel-specific stats, skip non-focused panels */
-  const isFocusedOrSingle = !_multiPanelProcessing || _multiPanelProcessing === focusedPanelSymbol;
-
-  if (isFocusedOrSingle) {
-    if (UI.signalWins) UI.signalWins.textContent = signalWins;
-    if (UI.signalLosses) UI.signalLosses.textContent = signalLosses;
-    if (UI.signalBreakevens) UI.signalBreakevens.textContent = signalBreakevens;
-    const total = signalWins + signalLosses;
-    if (UI.signalWinRate) UI.signalWinRate.textContent = total > 0 ? (signalWins / total * 100).toFixed(1) + "%" : "0%";
-    updateStrategyWinRatesUI();
-  }
-
-  /* Always update aggregated signal count and banners (across all panels) */
-  const allSignals = getAggregatedSignalHistory();
-  if (UI.signalCount) UI.signalCount.textContent = allSignals.length;
-  updateScalpStatsUI();
-  renderSignalBanner();
-  renderScalpTickerBanner();
-  renderStrategyTickerBanner();
-
-  /* Feature 3: Equity curve */
-  drawEquityCurve();
-
-  /* Feature 16: P&L breakdown */
-  renderPLBreakdown();
-
-  /* Feature 13: Adaptive confluence */
-  if (adaptiveConfluenceEnabled) renderAdaptiveConfluenceTable();
-
-  /* Feature 8: Scanner */
-  if (scannerEnabled) updateScannerUI();
-}
-
-/**
- * Render the per-strategy win rate grid in the Stats panel.
- * Shows each active strategy's individual W / L / win-rate.
- */
-function updateStrategyWinRatesUI() {
-  const rows = [
-    { id: "stratWR_breakout",       history: signalHistory,          label: "🔲 Breakout" },
-    { id: "stratWR_liquiditySweep", history: liquiditySweepHistory,  label: "🌊 Liq. Sweep" },
-    { id: "stratWR_stopLossHunt",   history: stopLossHuntHistory,    label: "🎯 SL Hunt" },
-    { id: "stratWR_failedPinBar",   history: failedPinBarHistory,    label: "📌 Failed Pin Bar" },
-    { id: "stratWR_fibScalp",       history: fibScalpHistory,        label: "📐 Fib Golden" },
-    { id: "stratWR_po3",            history: po3History,             label: "⚡ Power of 3" },
-    { id: "stratWR_nyOpenRange",    history: nyOpenRangeHistory,     label: "🕤 NY Open" },
-    { id: "stratWR_sessionRange",   history: sessionRangeHistory,    label: "🌍 Session Rng" },
-    { id: "stratWR_gridScalper",    history: gridScalperMAHistory,   label: "🔲 Grid Scalper" },
-    { id: "stratWR_fvgStrat",       history: fvgStratHistory,        label: "🎯 FVG" },
-    { id: "stratWR_liveScalp",      history: liveScalpHistory,       label: "⚡ Live Scalp" },
-    { id: "stratWR_mtfTopDown",     history: mtfTopDownHistory,      label: "⏱ MTF Top-Down" },
-    { id: "stratWR_candleInterp",   history: candleInterpHistory,    label: "🕯 Candle Interp" },
-    { id: "stratWR_orderblock",     history: orderblockHistory,      label: "🏦 Orderblock" },
-    { id: "stratWR_tiktok",         history: tiktokHistory,          label: "📈 TikTok Fib" },
-    { id: "stratWR_po3_4h",         history: po3_4hHistory,          label: "🕓 4H PO3" },
-    { id: "stratWR_breakerBlock",   history: breakerBlockHistory,    label: "🧱 Breaker Block" },
-    { id: "stratWR_oteGoldenPocket", history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" },
-    { id: "stratWR_crtTbs",          history: crtTbsHistory,           label: "🐢 CRT+TBS" }
-  ];
-  for (const r of rows) {
-    const el = document.getElementById(r.id);
-    if (!el) continue;
-    const wins   = r.history.filter(s => s && s.result === "WIN").length;
-    const losses = r.history.filter(s => s && s.result === "LOSS").length;
-    const total  = wins + losses;
-    if (total === 0) { el.innerHTML = ""; el.style.display = "none"; continue; }
-    el.style.display = "";
-    const rate = (wins / total * 100).toFixed(1) + "%";
-    el.innerHTML = `<span class="strat-wr-name">${r.label}</span>`
-      + `<span class="strat-wr-wins">${wins}</span>`
-      + `<span class="strat-wr-losses">${losses}</span>`
-      + `<span class="strat-wr-rate">${rate}</span>`;
-  }
-}
-
-
-/* ---- Switch sidebar to a specific tab programmatically ---- */
-function switchSidebarTab(tabId) {
-  const tabs = document.querySelectorAll(".sidebar-tab");
-  const panes = document.querySelectorAll(".tab-pane");
-  tabs.forEach(t => { t.classList.remove("active"); t.setAttribute("aria-selected", "false"); });
-  panes.forEach(p => p.classList.remove("active"));
-  const targetTab = document.querySelector(`.sidebar-tab[data-tab="${tabId}"]`);
-  const targetPane = document.getElementById(tabId);
-  if (targetTab) { targetTab.classList.add("active"); targetTab.setAttribute("aria-selected", "true"); }
-  if (targetPane) targetPane.classList.add("active");
-
-  /* On mobile, ensure the panel content is open */
-  const panelContent = document.getElementById("panelContent");
-  if (panelContent && !panelContent.classList.contains("panel-open")) {
-    panelContent.classList.add("panel-open");
-  }
-}
-
-/* ---- Scroll to chart view (used by banner card clicks) ---- */
-function scrollToChartView() {
-  /* On mobile, close the sidebar panel so the chart is visible */
-  const panelContent = document.getElementById("panelContent");
-  if (panelContent && panelContent.classList.contains("panel-open")) {
-    panelContent.classList.remove("panel-open");
-  }
-
-  /* Scroll the chart canvas into view, respecting reduced-motion preference */
-  const chart = document.getElementById("mainChart");
-  if (chart) {
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    chart.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center" });
-  }
-}
-
-/* ---- Handle signal card click from banner ---- */
-function toSelectedSignalOverlay(signal) {
-  if (!signal) return null;
-  const entry = Number(signal.entry);
-  const sl = Number(signal.sl);
-  if (!Number.isFinite(entry) || !Number.isFinite(sl)) return null;
-  const tp = signal.tp === null || signal.tp === undefined ? null : Number(signal.tp);
-  return {
-    symbol: signal.symbol || getActiveSymbol(),
-    dir: signal.dir === "BEAR" ? "BEAR" : "BULL",
-    entry,
-    sl,
-    tp: Number.isFinite(tp) ? tp : null,
-  };
-}
-
-function handleSignalCardClick(signal) {
-  /* If multi-symbol, focus the panel for this signal's symbol */
-  if (multiPanels.size > 0 && signal.symbol && multiPanels.has(signal.symbol)) {
-    focusPanel(signal.symbol);
-  }
-  selectedSignalOverlay = toSelectedSignalOverlay(signal);
-  drawChart();
-  /* Scroll to chart view so the user can see the signal on the chart */
-  scrollToChartView();
-}
-
-/* ---- Handle scalp card click from banner ---- */
-function handleScalpCardClick(scalp) {
-  const sym = scalp.symbol || getActiveSymbol();
-  /* If multi-symbol, focus the panel for this scalp's symbol */
-  if (multiPanels.size > 0 && sym && multiPanels.has(sym)) {
-    focusPanel(sym);
-  }
-  /* Scroll to chart view so the user can see the scalp on the chart */
-  scrollToChartView();
-}
-
-/* ---- Live Signal Ticker Banner ---- */
-function renderSignalBanner() {
-  if (!UI.signalBannerTrack) return;
-  UI.signalBannerTrack.innerHTML = "";
-
-  /* Aggregate signals from ALL panels (multi-symbol) or global (single) */
-  const allSignals = getAggregatedSignalHistory().filter(s => s && s.result !== "EXPIRED");
-
-  if (allSignals.length === 0) {
-    const empty = document.createElement("span");
-    empty.className = "signal-banner-empty";
-    empty.textContent = "No signals yet — waiting for breakout setups…";
-    UI.signalBannerTrack.appendChild(empty);
-    return;
-  }
-
-  /* Newest first: multi-panel aggregated list is already sorted newest-first;
-     single-symbol signalHistory is stored oldest-first so we reverse it */
-  const sorted = multiPanels.size > 0 ? allSignals : allSignals.slice().reverse();
-  const signals = sorted.slice(0, BANNER_DISPLAY_MAX);
-  for (const s of signals) {
-    const card = document.createElement("div");
-    const resultLower = (s.result || "PENDING").toLowerCase();
-    card.className = "signal-card" + (resultLower === "win" ? " signal-card-win" : resultLower === "loss" ? " signal-card-loss" : resultLower === "confirmed" ? " signal-card-confirmed" : "");
-
-    const isBull = s.dir === "BULL";
-    const dirLabel = isBull ? "▲" : "▼";
-    const dirClass = isBull ? "bull" : "bear";
-    const t = new Date(s.time);
-    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const sym = s.symbol || "--";
-    const isConfirmed = resultLower === "confirmed";
-    const entryStr = s.entry != null ? fmtPrice(s.entry, s.symbol) : "--";
-    const slStr = s.sl != null ? fmtPrice(s.sl, s.symbol) : "--";
-    const tpStr = s.tp != null ? fmtPrice(s.tp, s.symbol) : "--";
-    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
-    const confStr = s.confluenceScore != null ? s.confluenceScore + "/16" : "";
-    const patternStr = s.confirmPattern || "";
-
-    card.innerHTML =
-      `<span class="signal-card-dir ${dirClass}">${dirLabel}</span>` +
-      `<span class="signal-card-symbol">${sym}</span>` +
-      (isConfirmed && patternStr
-        ? `<span class="signal-card-pattern">${patternStr}</span>`
-        : `<span class="signal-card-price">@ ${entryStr}</span>`) +
-      (isConfirmed ? "" : `<span class="signal-card-levels">SL ${slStr} · TP ${tpStr}</span>`) +
-      (isConfirmed ? "" : `<span class="signal-card-sep">·</span><span class="signal-card-rr">${rrStr}</span>`) +
-      (confStr ? `<span class="signal-card-conf">⚡${confStr}</span>` : "") +
-      `<span class="signal-card-time">${ts}</span>` +
-      `<span class="signal-card-result ${resultLower}">${s.result || "PENDING"}</span>`;
-
-    /* Feature 12: Signal note field — build programmatically (no innerHTML with user data) */
-    const noteId = `sig_${s.time}_${sym}`;
-    const existingNote = getSignalNote(noteId);
-    const noteEl = document.createElement("div");
-    noteEl.className = "signal-note-row";
-    const noteInput = document.createElement("input");
-    noteInput.type = "text";
-    noteInput.className = "signal-note-input";
-    noteInput.placeholder = "Add note…";
-    noteInput.value = existingNote;
-    noteInput.dataset.noteId = noteId;
-    noteInput.title = "Trade journal note for this signal";
-    noteInput.addEventListener("change", (e) => { saveSignalNote(noteId, e.target.value); });
-    noteEl.appendChild(noteInput);
-
-    card.title = isConfirmed
-      ? `${isBull ? "BUY" : "SELL"} ${sym} — ${patternStr} confirmed\nAwaiting trade build…`
-      : `Click to view details · ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConf: ${confStr || "N/A"}\nResult: ${s.result || "PENDING"}`;
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} signal details`);
-
-    /* Clickable — focuses the panel and switches sidebar to State tab */
-    card.addEventListener("click", () => handleSignalCardClick(s));
-    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSignalCardClick(s); } });
-
-    card.appendChild(noteEl);
-    UI.signalBannerTrack.appendChild(card);
-  }
-
-  /* Auto-scroll to show the newest signal (leftmost) */
-  UI.signalBannerTrack.scrollLeft = 0;
-}
-
-/* ---- Live Scalp Ticker Banner ---- */
-function renderScalpTickerBanner() {
-  if (!UI.scalpTickerTrack) return;
-  UI.scalpTickerTrack.innerHTML = "";
-
-  /* Aggregate scalp signals from ALL panels (multi-symbol) or global (single) */
-  const allScalps = getAggregatedScalpHistory();
-
-  if (allScalps.length === 0) {
-    const empty = document.createElement("span");
-    empty.className = "scalp-ticker-empty";
-    empty.textContent = "No scalp signals yet — scanner active…";
-    UI.scalpTickerTrack.appendChild(empty);
-    return;
-  }
-
-  /* Render newest first (aggregated list is already newest-first) */
-  const scalpLimit = Math.min(allScalps.length, BANNER_DISPLAY_MAX);
-  for (let i = 0; i < scalpLimit; i++) {
-    const s = allScalps[i];
-    const card = document.createElement("div");
-    const isBull = s.dir === "BULL";
-    const resultLower = (s.result || "PENDING").toLowerCase();
-    card.className = `scalp-card ${isBull ? "scalp-card-bull" : "scalp-card-bear"}${i === 0 ? " scalp-card-new" : ""}${resultLower === "win" ? " scalp-card-win" : resultLower === "loss" ? " scalp-card-loss" : ""}`;
-
-    const dirLabel = isBull ? "▲" : "▼";
-    const dirClass = isBull ? "bull" : "bear";
-    const t = new Date(s.epoch * 1000);
-    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const sym = s.symbol || getActiveSymbol() || "--";
-    const entryStr = fmtPrice(s.entry, s.symbol);
-    const slStr = fmtPrice(s.sl, s.symbol);
-    const tpStr = fmtPrice(s.tp, s.symbol);
-    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
-    const reasonsStr = s.reasons.slice(0, 2).join(" · ");
-
-    const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
-    card.appendChild(mkSpan("scalp-card-dir " + dirClass, dirLabel));
-    card.appendChild(mkSpan("scalp-card-symbol", sym));
-    card.appendChild(mkSpan("scalp-card-price", "@ " + entryStr));
-    card.appendChild(mkSpan("scalp-card-levels", "SL " + slStr + " · TP " + tpStr));
-    card.appendChild(mkSpan("scalp-card-sep", "·"));
-    card.appendChild(mkSpan("scalp-card-rr", rrStr));
-    card.appendChild(mkSpan("scalp-card-conf", s.conf + "/7"));
-    card.appendChild(mkSpan("scalp-card-time", ts));
-    card.appendChild(mkSpan("scalp-card-result " + resultLower, s.result || "PENDING"));
-    if (reasonsStr) card.appendChild(mkSpan("scalp-card-reasons", reasonsStr));
-
-    card.title = `Click to view details · ⚡ SCALP ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}\nConfluence: ${s.conf}/7\nResult: ${s.result || "PENDING"}\n${s.reasons.join(", ")}`;
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} scalp details`);
-
-    /* Clickable — focuses the panel and switches sidebar to State tab */
-    card.addEventListener("click", () => handleScalpCardClick(s));
-    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleScalpCardClick(s); } });
-
-    UI.scalpTickerTrack.appendChild(card);
-  }
-
-  /* Auto-scroll to show the newest scalp (leftmost) */
-  UI.scalpTickerTrack.scrollLeft = 0;
-}
-
-/* ---- Handle strategy card click from banner ---- */
-function handleStrategyCardClick(signal) {
-  const sym = signal.symbol || getActiveSymbol();
-  /* If multi-symbol, focus the panel for this signal's symbol */
-  if (multiPanels.size > 0 && sym && multiPanels.has(sym)) {
-    focusPanel(sym);
-  }
-  /* Scroll to chart view so the user can see the signal on the chart */
-  scrollToChartView();
-}
-
-/* ---- Aggregate strategy signals from ALL panels (+ single-mode globals) ---- */
-function getAggregatedStrategyHistory() {
-  const histories = [
-    { history: liquiditySweepHistory, label: "🌊 Liquidity Sweep" },
-    { history: stopLossHuntHistory,   label: "🎯 Stop Loss Hunt" },
-    { history: failedPinBarHistory,   label: "📌 Failed Pin Bar" },
-    { history: fibScalpHistory,       label: "📐 Fib Golden Zone" },
-    { history: po3History,            label: "⚡ Power of 3" },
-    { history: nyOpenRangeHistory,    label: "🕤 NY Open Range" },
-    { history: sessionRangeHistory,   label: "🌍 Session Range" },
-    { history: gridScalperMAHistory,  label: "🔲 Grid Scalper MA" },
-    { history: fvgStratHistory,       label: "🎯 Fair Value Gap" },
-    { history: mtfTopDownHistory,     label: "⏱ MTF Top-Down" },
-    { history: candleInterpHistory,   label: "🕯 Candle Interp" },
-    { history: orderblockHistory,     label: "🏦 Orderblock" },
-    { history: tiktokHistory,          label: "📈 TikTok Fib" },
-    { history: po3_4hHistory,          label: "🕓 4H PO3" },
-    { history: breakerBlockHistory,    label: "🧱 Breaker Block" },
-    { history: oteGoldenPocketHistory, label: "🎯 OTE Golden Pocket" }
-  ];
-
-  if (multiPanels.size === 0) {
-    /* Single-symbol mode: merge global strategy histories */
-    const all = [];
-    for (const { history, label } of histories) {
-      for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
-    }
-    all.sort((a, b) => (b.epoch || 0) - (a.epoch || 0));
-    return all;
-  }
-
-  /* Multi-symbol mode: aggregate from all panels */
-  const all = [];
-  for (const p of multiPanels.values()) {
-    const panelHistories = [
-      { history: p.liquiditySweepHistory  || [], label: "🌊 Liquidity Sweep" },
-      { history: p.stopLossHuntHistory    || [], label: "🎯 Stop Loss Hunt" },
-      { history: p.failedPinBarHistory    || [], label: "📌 Failed Pin Bar" },
-      { history: p.fibScalpHistory        || [], label: "📐 Fib Golden Zone" },
-      { history: p.po3History             || [], label: "⚡ Power of 3" },
-      { history: p.nyOpenRangeHistory     || [], label: "🕤 NY Open Range" },
-      { history: p.sessionRangeHistory    || [], label: "🌍 Session Range" },
-      { history: p.gridScalperMAHistory   || [], label: "🔲 Grid Scalper MA" },
-      { history: p.fvgStratHistory        || [], label: "🎯 Fair Value Gap" },
-      { history: p.mtfTopDownHistory      || [], label: "⏱ MTF Top-Down" },
-      { history: p.candleInterpHistory    || [], label: "🕯 Candle Interp" },
-      { history: p.orderblockHistory      || [], label: "🏦 Orderblock" },
-      { history: p.tiktokHistory          || [], label: "📈 TikTok Fib" },
-      { history: p.po3_4hHistory          || [], label: "🕓 4H PO3" },
-      { history: p.breakerBlockHistory    || [], label: "🧱 Breaker Block" },
-      { history: p.oteGoldenPocketHistory || [], label: "🎯 OTE Golden Pocket" }
-    ];
-    for (const { history, label } of panelHistories) {
-      for (const s of history) all.push(Object.assign({}, s, { _stratLabel: label }));
-    }
-  }
-  all.sort((a, b) => (b.epoch || 0) - (a.epoch || 0));
-  return all;
-}
-
-/* ---- Live Strategies Ticker Banner ---- */
-function renderStrategyTickerBanner() {
-  if (!UI.strategyTickerTrack) return;
-  UI.strategyTickerTrack.innerHTML = "";
-
-  const allStrategies = getAggregatedStrategyHistory();
-
-  if (allStrategies.length === 0) {
-    const empty = document.createElement("span");
-    empty.className = "strategy-ticker-empty";
-    empty.textContent = "No strategy signals yet — scanners active…";
-    UI.strategyTickerTrack.appendChild(empty);
-    return;
-  }
-
-  /* Render newest first (aggregated list is already newest-first) */
-  const stratLimit = Math.min(allStrategies.length, BANNER_DISPLAY_MAX);
-  for (let i = 0; i < stratLimit; i++) {
-    const s = allStrategies[i];
-    const card = document.createElement("div");
-    const isBull = s.dir === "BULL";
-    const resultLower = (s.result || "PENDING").toLowerCase();
-    card.className = `strategy-card ${isBull ? "strategy-card-bull" : "strategy-card-bear"}${i === 0 ? " strategy-card-new" : ""}${resultLower === "win" ? " strategy-card-win" : resultLower === "loss" ? " strategy-card-loss" : resultLower === "expired" ? " strategy-card-expired" : ""}`;
-
-    const dirLabel = isBull ? "▲" : "▼";
-    const dirClass = isBull ? "bull" : "bear";
-    const t = new Date(s.epoch * 1000);
-    const ts = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const sym = s.symbol || getActiveSymbol() || "--";
-    const entryStr = fmtPrice(s.entry, s.symbol);
-    const slStr = fmtPrice(s.sl, s.symbol);
-    const tpStr = fmtPrice(s.tp, s.symbol);
-    const rrStr = s.rr != null ? "1:" + s.rr.toFixed(1) : "--";
-    const typeLabel = s._stratLabel || s.type || "--";
-
-    const mkSpan = (cls, txt) => { const el = document.createElement("span"); el.className = cls; el.textContent = txt; return el; };
-    card.appendChild(mkSpan("strategy-card-dir " + dirClass, dirLabel));
-    card.appendChild(mkSpan("strategy-card-symbol", sym));
-    card.appendChild(mkSpan("strategy-card-type", typeLabel));
-    card.appendChild(mkSpan("strategy-card-price", "@ " + entryStr));
-    card.appendChild(mkSpan("strategy-card-levels", "SL " + slStr + " · TP " + tpStr));
-    card.appendChild(mkSpan("strategy-card-sep", "·"));
-    card.appendChild(mkSpan("strategy-card-rr", rrStr));
-    /* Confluence score badge */
-    if (Number.isFinite(s.confluenceScore)) {
-      card.appendChild(mkSpan("strategy-card-confluence", `C:${s.confluenceScore}/16`));
-    }
-    card.appendChild(mkSpan("strategy-card-time", ts));
-    card.appendChild(mkSpan("strategy-card-result " + resultLower, s.result || "PENDING"));
-
-    const confStr = Number.isFinite(s.confluenceScore) ? `\nConfluence: ${s.confluenceScore}/16` : "";
-    card.title = `Click to view details · ${typeLabel} ${isBull ? "BUY" : "SELL"} ${sym} @ ${entryStr}\nSL: ${slStr}  TP: ${tpStr}  R:R ${rrStr}${confStr}\nResult: ${s.result || "PENDING"}`;
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `View ${isBull ? "BUY" : "SELL"} ${sym} ${typeLabel} details`);
-
-    /* Clickable — focuses the panel and scrolls to chart */
-    card.addEventListener("click", () => handleStrategyCardClick(s));
-    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleStrategyCardClick(s); } });
-
-    UI.strategyTickerTrack.appendChild(card);
-  }
-
-  /* Auto-scroll to show the newest signal (leftmost) */
-  UI.strategyTickerTrack.scrollLeft = 0;
-}
-
-/* ---- Live Scalp Stats ---- */
-function updateScalpStatsUI() {
-  /* Scalp stats now use aggregated data from all panels — no panel-focus guard needed */
-
-  const h = getAggregatedScalpHistory();  /* newest-first, aggregated across all panels */
-  const total = h.length;
-  const wins  = h.filter(s => s.result === "WIN").length;
-  const losses = h.filter(s => s.result === "LOSS").length;
-  const resolved = wins + losses;
-  const winRate = resolved > 0 ? (wins / resolved * 100).toFixed(1) + "%" : "0%";
-  const bulls = h.filter(s => s.dir === "BULL").length;
-  const bears = h.filter(s => s.dir === "BEAR").length;
-  const avgConf = total > 0 ? (h.reduce((sum, s) => sum + s.conf, 0) / total).toFixed(1) : "0";
-  const bestConf = total > 0 ? Math.max(...h.map(s => s.conf)) : 0;
-  const lastTime = total > 0 ? new Date(h[0].epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--";
-
-  if (UI.scalpStatsTotal)    UI.scalpStatsTotal.textContent    = total;
-  if (UI.scalpStatsWins)     UI.scalpStatsWins.textContent     = wins;
-  if (UI.scalpStatsLosses)   UI.scalpStatsLosses.textContent   = losses;
-  if (UI.scalpStatsWinRate)  UI.scalpStatsWinRate.textContent  = winRate;
-  if (UI.scalpStatsBull)     UI.scalpStatsBull.textContent     = bulls;
-  if (UI.scalpStatsBear)     UI.scalpStatsBear.textContent     = bears;
-  if (UI.scalpStatsAvgConf)  UI.scalpStatsAvgConf.textContent  = avgConf + "/7";
-  if (UI.scalpStatsBestConf) UI.scalpStatsBestConf.textContent = bestConf + "/7";
-  if (UI.scalpStatsLastTime) UI.scalpStatsLastTime.textContent = lastTime;
-}
-
-/* ================= EXPORT ================= */
-/* #23: Guard against double-triggers (user double-clicking an export button) */
-let _isExporting = false;
-
-function exportSignalsCSV() {
-  if (_isExporting) return;
-  const allSignals = getAggregatedSignalHistory();
-  if (allSignals.length === 0) { alert("No signals to export."); return; }
-  _isExporting = true;
-  /* Disable both export buttons while running */
-  const csvBtn = document.getElementById("exportCSVBtn");
-  const pdfBtn = document.getElementById("exportPDFBtn");
-  const origCsvText = csvBtn ? csvBtn.textContent : null;
-  if (csvBtn) { csvBtn.disabled = true; csvBtn.textContent = "Exporting…"; }
-  if (pdfBtn) pdfBtn.disabled = true;
-  try {
-    const headers = ["time", "symbol", "dir", "entry", "sl", "tp", "rr", "result", "lotSize", "pipsAtRisk", "stake", "emaAligned", "htfTrend", "breakoutStrength", "partialTpHit", "trailingSL", "confluenceScore", "srConfluence", "confirmPattern", "rsiAtRetest", "volumeSpike", "session", "fibLevel", "macdHist", "bbSqueeze", "adx", "stochK", "volatilityRegime", "scalpingMode", "note"];
-    const rows = allSignals.map(s => {
-      const noteId = `sig_${s.time}_${s.symbol || ""}`;
-      const note = getSignalNote(noteId) || "";
-      return headers.map(h => h === "note" ? `"${note.replace(/"/g, '""')}"` : `"${s[h] ?? ""}"`).join(",");
-    });
-    const csv = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `indicator_signals_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } finally {
-    _isExporting = false;
-    if (csvBtn) { csvBtn.disabled = false; if (origCsvText) csvBtn.textContent = origCsvText; }
-    if (pdfBtn) pdfBtn.disabled = false;
-  }
-}
-
-/* ================= PDF EXPORT (with chart screenshots) ================= */
-function exportSignalsPDF() {
-  if (_isExporting) return;
-  const allSignals = getAggregatedSignalHistory();
-  if (allSignals.length === 0) { alert("No signals to export."); return; }
-  if (typeof window.jspdf === "undefined") { alert("PDF library not loaded. Please check your connection."); return; }
-
-  _isExporting = true;
-  const csvBtn = document.getElementById("exportCSVBtn");
-  const pdfBtn = document.getElementById("exportPDFBtn");
-  const origPdfText = pdfBtn ? pdfBtn.textContent : null;
-  if (csvBtn) csvBtn.disabled = true;
-  if (pdfBtn) { pdfBtn.disabled = true; pdfBtn.textContent = "Generating…"; }
-
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 10;
-
-  allSignals.forEach((sig, idx) => {
-    if (idx > 0) doc.addPage("a4", "landscape");
-
-    /* ---- Header ---- */
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, pageW, 18, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.setTextColor(255, 255, 255);
-    doc.text(`Signal ${idx + 1} / ${allSignals.length}`, margin, 12);
-    doc.setFontSize(10);
-    doc.text(`IT Guru – Breakout Retest Indicator`, pageW - margin, 12, { align: "right" });
-
-    /* ---- Chart screenshot ---- */
-    let chartBottom = 24;
-    if (sig.chartImage) {
-      try {
-        const chartW = pageW - margin * 2;
-        const chartH = (pageH - 70);
-        doc.addImage(sig.chartImage, "PNG", margin, 22, chartW, chartH);
-        chartBottom = 22 + chartH + 4;
-      } catch (e) {
-        doc.setFontSize(9);
-        doc.setTextColor(150, 150, 150);
-        doc.text("(Chart screenshot not available)", margin, 32);
-        chartBottom = 38;
-      }
-    } else {
-      doc.setFontSize(9);
-      doc.setTextColor(150, 150, 150);
-      doc.text("(No chart captured for this signal)", margin, 32);
-      chartBottom = 38;
-    }
-
-    /* ---- Trade details table ---- */
-    const detailY = Math.min(chartBottom, pageH - 40);
-    doc.setFillColor(30, 41, 59);
-    doc.rect(margin, detailY, pageW - margin * 2, 30, "F");
-
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    const fields = [
-      ["Time", sig.time || "--"],
-      ["Symbol", sig.symbol || "--"],
-      ["Dir", sig.dir || "--"],
-      ["Entry", sig.entry ?? "--"],
-      ["SL", sig.sl ?? "--"],
-      ["TP", sig.tp ?? "--"],
-      ["R:R", sig.rr ?? "--"],
-      ["Result", sig.result || "--"],
-      ["Confluence", sig.confluenceScore ?? "--"],
-      ["Pattern", sig.confirmPattern || "--"]
-    ];
-
-    const colW = (pageW - margin * 2) / fields.length;
-    fields.forEach(([label, val], i) => {
-      const x = margin + i * colW + 2;
-      doc.setTextColor(148, 163, 184);
-      doc.text(label, x, detailY + 8);
-      doc.setFont("helvetica", "normal");
-      const resultColor = String(val) === "WIN" ? [34, 197, 94] : String(val) === "LOSS" ? [239, 68, 68] : [255, 255, 255];
-      doc.setTextColor(...resultColor);
-      doc.text(String(val), x, detailY + 15);
-      doc.setFont("helvetica", "bold");
-    });
-
-    /* Second row of details */
-    const row2Fields = [
-      ["EMA", sig.emaAligned ?? "--"],
-      ["HTF", sig.htfTrend || "--"],
-      ["Strength", sig.breakoutStrength || "--"],
-      ["RSI", sig.rsiAtRetest ?? "--"],
-      ["Vol Spike", sig.volumeSpike ?? "--"],
-      ["Session", sig.session || "--"],
-      ["Fib", sig.fibLevel || "--"],
-      ["S/R Conf", sig.srConfluence ?? "--"],
-      ["Partial TP", sig.partialTpHit ?? "--"],
-      ["Trail SL", sig.trailingSL ?? "--"]
-    ];
-    row2Fields.forEach(([label, val], i) => {
-      const x = margin + i * colW + 2;
-      doc.setTextColor(148, 163, 184);
-      doc.text(label, x, detailY + 22);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(255, 255, 255);
-      doc.text(String(val), x, detailY + 28);
-      doc.setFont("helvetica", "bold");
-    });
-  });
-
-  doc.save(`indicator_signals_${new Date().toISOString().slice(0, 10)}.pdf`);
-  /* #23: Re-enable export buttons */
-  _isExporting = false;
-  if (csvBtn) csvBtn.disabled = false;
-  if (pdfBtn) { pdfBtn.disabled = false; if (origPdfText) pdfBtn.textContent = origPdfText; }
-}
-
-/* ================= THEME ================= */
-function toggleTheme() {
-  currentTheme = currentTheme === "dark" ? "light" : "dark";
-  document.body.classList.toggle("light-theme", currentTheme === "light");
-  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
-  saveSettings();
-  drawChart();
-}
-
-function initTheme() {
-  if (currentTheme === "light") {
-    document.body.classList.add("light-theme");
-  }
-  if (UI.themeToggleBtn) UI.themeToggleBtn.textContent = currentTheme === "dark" ? "☀️ Light" : "🌙 Dark";
-}
-
-/* ================= STREAM MODE ================= */
-/** Apply or remove stream-mode visuals based on the current `streamMode` flag. */
-function applyStreamMode() {
-  document.body.classList.toggle("stream-mode", streamMode);
-  if (UI.streamModeBtn) {
-    UI.streamModeBtn.textContent = streamMode ? "🔴 LIVE" : "🎥";
-    UI.streamModeBtn.title       = streamMode
-      ? "Stream Mode ON – click to disable (Alt+S)"
-      : "Stream Mode – hide sensitive info (Alt+S)";
-    UI.streamModeBtn.classList.toggle("stream-active", streamMode);
-  }
-  /* Refresh account badge tooltip so loginid/balance appear or disappear immediately */
-  if (_lastAuthorizeAcct) updateAccountBadge(_lastAuthorizeAcct);
-}
-
-function toggleStreamMode() {
-  streamMode = !streamMode;
-  localStorage.setItem(STREAM_MODE_KEY, JSON.stringify(streamMode));
-  applyStreamMode();
-}
-
-/* ================= KEYBOARD SHORTCUTS ================= */
-function initKeyboardShortcuts() {
-  document.addEventListener("keydown", (e) => {
-    if (e.altKey && e.key === "c") { e.preventDefault(); connect(); }
-    if (e.altKey && e.key === "d") { e.preventDefault(); disconnect(); }
-    if (e.altKey && e.key === "t") { e.preventDefault(); toggleTheme(); }
-    if (e.altKey && e.key === "e") { e.preventDefault(); exportSignalsCSV(); }
-    if (e.altKey && e.key === "p") { e.preventDefault(); exportSignalsPDF(); }
-    if (e.altKey && e.key === "r") { e.preventDefault(); if (confirm("Reset session? This clears all signals, stats, and log.")) resetSession(); }
-    if (e.altKey && e.key === "n") {
-      e.preventDefault();
-      notificationsEnabled = !notificationsEnabled;
-      if (notificationsEnabled) requestNotificationPermission();
-      if (UI.notifToggleBtn) UI.notifToggleBtn.textContent = notificationsEnabled ? "🔔 Notif ON" : "🔕 Notif OFF";
-      saveSettings();
-    }
-    if (e.altKey && e.key === "s") { e.preventDefault(); toggleStreamMode(); }
-    /* #24: Shift+A — toggle auto-trade (breakout) on/off with toast confirmation */
-    if (e.shiftKey && e.key === "A") {
-      e.preventDefault();
-      autoTradeEnabled = !autoTradeEnabled;
-      if (UI.autoTradeToggle) UI.autoTradeToggle.checked = autoTradeEnabled;
-      saveSettings();
-      const state = autoTradeEnabled ? "🤖 Auto-Trade ENABLED" : "⏸ Auto-Trade DISABLED";
-      const type  = autoTradeEnabled ? "trade" : "warning";
-      showToast(state, autoTradeEnabled
-        ? "Auto-trade is now active. Signals will place trades automatically."
-        : "Auto-trade paused. Signals will still appear but won't place trades.",
-        type, 4000);
-      addLog(`${state} (Shift+A)`);
-    }
-  });
-}
-
-/* Granularity → human-readable label map (used for display + recommended settings) */
-const GRAN_LABELS = { 60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min", 1800: "30 min", 3600: "1 hour", 7200: "2 hours", 14400: "4 hours", 28800: "8 hours", 86400: "1 day" };
-
-/** Formats a duration in minutes into a consistent human-readable label (e.g. "10 min", "1 hour", "8 hours"). */
-function formatMinutes(m) {
-  if (m < 60) return m + " min";
-  const h = m / 60;
-  if (Number.isInteger(h)) return h === 1 ? "1 hour" : h + " hours";
-  const wh = Math.floor(h);
-  const rm = m % 60;
-  return (wh === 1 ? "1 hour" : wh + " hours") + " " + rm + " min";
-}
-
-/* Session filter mode → display label map */
-const SESSION_MODE_LABELS = {
-  london_ny: "London+NY ✅",
-  london:    "London ✅",
-  new_york:  "NY ✅",
-  overlap:   "Overlap ✅",
-  asian:     "Asian ✅"
+const GRID_SCALPER_V2_MAX_DURATION = 180; /* reserved compatibility constant */
+const GRID_SCALPER_V2_DEFAULTS = Object.freeze({
+  lotSize: 0.15,
+  atrPeriod: 14,
+  rsiPeriod: 14,
+  emaFastPeriod: 50,
+  emaSlowPeriod: 200,
+  gridAtrMultiplier: 1.4,
+  minGridDistance: 0.4,
+  maxGridDistance: 3.5,
+  maxGridLevels: 3,
+  stopMode: "atr",
+  atrStopMultiplier: 2,
+  stopSwingLookback: 30,
+  breakEvenTriggerR: 1,
+  breakEvenBufferAtr: 0.1,
+  tp1Share: 0.3,
+  tp2Share: 0.3,
+  tp3Share: 0.4,
+  tp1RR: 1,
+  tp2RR: 1.5,
+  tp3RR: 2.2,
+  confidenceThreshold: 70,
+  entryScoreThreshold: 65,
+  adxDisableThreshold: 25,
+  regimeVolatileAtrRatio: 1.6,
+  regimeQuietAtrRatio: 0.75,
+  regimeTrendSpreadAtr: 0.6,
+  exhaustionLookbackBars: 8,
+  supportResistanceBufferAtr: 0.75,
+  performanceLookback: 50,
+  minWinRatePct: 45,
+  minProfitFactor: 1.05,
+  maxAverageDrawdownR: 1.6,
+  dailyDrawdownLimitPct: 3,
+  consecutiveLossLimit: 3,
+  maxTradeLoss: 40,
+  maxDurationBars: 240,
+  backtestSymbols: "R_10,R_25,R_50,R_75,R_100"
+});
+let gridScalperV2Settings = { ...GRID_SCALPER_V2_DEFAULTS };
+let gridScalperV2StatusMessage = "";
+let gridScalperV2DailyState = {
+  dayKey: null,
+  baselineBalance: null,
+  consecutiveLosses: 0,
+  halted: false,
+  haltReason: ""
 };
+let gridScalperV2SymbolPerformance = {};
+let gridScalperV2SymbolDisableMap = {};
+let gridScalperV2BacktestReport = null;
 
-/* ================= SYMBOL NAVIGATION ================= */
-function cycleSymbol(dir) {
-  if (!UI.symbolSelect) return;
-  const opts = Array.from(UI.symbolSelect.options);
-  const currentIdx = UI.symbolSelect.selectedIndex;
-  let newIdx = currentIdx + dir;
-  if (newIdx < 0) newIdx = opts.length - 1;
-  if (newIdx >= opts.length) newIdx = 0;
-  UI.symbolSelect.selectedIndex = newIdx;
-  updateCurrentSymbolLabel();
-  applyRecommendedSettings();
-  saveSettings();
-  debouncedReconnect();
+/**
+ * Grid Scalper V2 – Enhanced ranging-only grid engine with trend, volatility,
+ * confidence, and drawdown controls.
+ */
+function gridV2_clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function updateCurrentSymbolLabel() {
-  if (!UI.currentSymbolLabel || !UI.symbolSelect) return;
-  const opt = UI.symbolSelect.options[UI.symbolSelect.selectedIndex];
-  UI.currentSymbolLabel.textContent = opt ? opt.text : "--";
+function gridV2_toNumber(value, fallback, min, max) {
+  let n = parseFloat(value);
+  if (!Number.isFinite(n)) n = fallback;
+  if (Number.isFinite(min)) n = Math.max(min, n);
+  if (Number.isFinite(max)) n = Math.min(max, n);
+  return n;
 }
 
-/* ================= RECOMMENDED SETTINGS (DYNAMIC PER MARKET TYPE) ================= */
-function setRecBadge(el, isActive, matchesRec, onLabel, offLabel) {
-  if (!el) return;
-  el.textContent = isActive ? (onLabel || "ON ✅") : (offLabel || "OFF");
-  if (isActive && matchesRec) {
-    el.className = "status-badge bull rec-badge-active";
-  } else if (isActive && !matchesRec) {
-    el.className = "status-badge warning rec-badge-active";
+function normalizeGridScalperV2Settings() {
+  const s = Object.assign({}, GRID_SCALPER_V2_DEFAULTS, gridScalperV2Settings || {});
+  s.lotSize = gridV2_toNumber(s.lotSize, GRID_SCALPER_V2_DEFAULTS.lotSize, 0.01, 100);
+  s.atrPeriod = Math.round(gridV2_toNumber(s.atrPeriod, GRID_SCALPER_V2_DEFAULTS.atrPeriod, 5, 50));
+  s.rsiPeriod = Math.round(gridV2_toNumber(s.rsiPeriod, GRID_SCALPER_V2_DEFAULTS.rsiPeriod, 5, 50));
+  s.emaFastPeriod = Math.round(gridV2_toNumber(s.emaFastPeriod, GRID_SCALPER_V2_DEFAULTS.emaFastPeriod, 10, 100));
+  s.emaSlowPeriod = Math.round(gridV2_toNumber(s.emaSlowPeriod, GRID_SCALPER_V2_DEFAULTS.emaSlowPeriod, 50, 400));
+  if (s.emaSlowPeriod <= s.emaFastPeriod) s.emaSlowPeriod = s.emaFastPeriod + 50;
+  s.gridAtrMultiplier = gridV2_toNumber(s.gridAtrMultiplier, GRID_SCALPER_V2_DEFAULTS.gridAtrMultiplier, 0.2, 10);
+  s.minGridDistance = gridV2_toNumber(s.minGridDistance, GRID_SCALPER_V2_DEFAULTS.minGridDistance, 0.00001, 1000000);
+  s.maxGridDistance = gridV2_toNumber(s.maxGridDistance, GRID_SCALPER_V2_DEFAULTS.maxGridDistance, s.minGridDistance, 1000000);
+  s.maxGridLevels = Math.round(gridV2_toNumber(s.maxGridLevels, GRID_SCALPER_V2_DEFAULTS.maxGridLevels, 1, 10));
+  s.stopMode = (s.stopMode === "swing") ? "swing" : "atr";
+  s.atrStopMultiplier = gridV2_toNumber(s.atrStopMultiplier, GRID_SCALPER_V2_DEFAULTS.atrStopMultiplier, 0.5, 10);
+  s.stopSwingLookback = Math.round(gridV2_toNumber(s.stopSwingLookback, GRID_SCALPER_V2_DEFAULTS.stopSwingLookback, 5, 200));
+  s.breakEvenTriggerR = gridV2_toNumber(s.breakEvenTriggerR, GRID_SCALPER_V2_DEFAULTS.breakEvenTriggerR, 0.25, 5);
+  s.breakEvenBufferAtr = gridV2_toNumber(s.breakEvenBufferAtr, GRID_SCALPER_V2_DEFAULTS.breakEvenBufferAtr, 0, 2);
+  s.tp1Share = gridV2_toNumber(s.tp1Share, GRID_SCALPER_V2_DEFAULTS.tp1Share, 0, 1);
+  s.tp2Share = gridV2_toNumber(s.tp2Share, GRID_SCALPER_V2_DEFAULTS.tp2Share, 0, 1);
+  s.tp3Share = gridV2_toNumber(s.tp3Share, GRID_SCALPER_V2_DEFAULTS.tp3Share, 0, 1);
+  const totalShare = s.tp1Share + s.tp2Share + s.tp3Share;
+  if (totalShare <= 0) {
+    s.tp1Share = GRID_SCALPER_V2_DEFAULTS.tp1Share;
+    s.tp2Share = GRID_SCALPER_V2_DEFAULTS.tp2Share;
+    s.tp3Share = GRID_SCALPER_V2_DEFAULTS.tp3Share;
   } else {
-    el.className = "status-badge disabled rec-badge-active";
+    s.tp1Share /= totalShare;
+    s.tp2Share /= totalShare;
+    s.tp3Share /= totalShare;
   }
+  s.tp1RR = gridV2_toNumber(s.tp1RR, GRID_SCALPER_V2_DEFAULTS.tp1RR, 0.5, 10);
+  s.tp2RR = gridV2_toNumber(s.tp2RR, GRID_SCALPER_V2_DEFAULTS.tp2RR, Math.max(s.tp1RR, 0.5), 12);
+  s.tp3RR = gridV2_toNumber(s.tp3RR, GRID_SCALPER_V2_DEFAULTS.tp3RR, Math.max(s.tp2RR, 0.75), 15);
+  s.confidenceThreshold = Math.round(gridV2_toNumber(s.confidenceThreshold, GRID_SCALPER_V2_DEFAULTS.confidenceThreshold, 0, 100));
+  s.entryScoreThreshold = Math.round(gridV2_toNumber(s.entryScoreThreshold, GRID_SCALPER_V2_DEFAULTS.entryScoreThreshold, 0, 100));
+  s.adxDisableThreshold = gridV2_toNumber(s.adxDisableThreshold, GRID_SCALPER_V2_DEFAULTS.adxDisableThreshold, 10, 60);
+  s.regimeVolatileAtrRatio = gridV2_toNumber(s.regimeVolatileAtrRatio, GRID_SCALPER_V2_DEFAULTS.regimeVolatileAtrRatio, 1, 5);
+  s.regimeQuietAtrRatio = gridV2_toNumber(s.regimeQuietAtrRatio, GRID_SCALPER_V2_DEFAULTS.regimeQuietAtrRatio, 0.1, 1);
+  s.regimeTrendSpreadAtr = gridV2_toNumber(s.regimeTrendSpreadAtr, GRID_SCALPER_V2_DEFAULTS.regimeTrendSpreadAtr, 0.1, 5);
+  s.exhaustionLookbackBars = Math.round(gridV2_toNumber(s.exhaustionLookbackBars, GRID_SCALPER_V2_DEFAULTS.exhaustionLookbackBars, 3, 30));
+  s.supportResistanceBufferAtr = gridV2_toNumber(s.supportResistanceBufferAtr, GRID_SCALPER_V2_DEFAULTS.supportResistanceBufferAtr, 0.1, 5);
+  s.performanceLookback = Math.round(gridV2_toNumber(s.performanceLookback, GRID_SCALPER_V2_DEFAULTS.performanceLookback, 10, 200));
+  s.minWinRatePct = Math.round(gridV2_toNumber(s.minWinRatePct, GRID_SCALPER_V2_DEFAULTS.minWinRatePct, 0, 100));
+  s.minProfitFactor = gridV2_toNumber(s.minProfitFactor, GRID_SCALPER_V2_DEFAULTS.minProfitFactor, 0.1, 10);
+  s.maxAverageDrawdownR = gridV2_toNumber(s.maxAverageDrawdownR, GRID_SCALPER_V2_DEFAULTS.maxAverageDrawdownR, 0.1, 10);
+  s.dailyDrawdownLimitPct = gridV2_toNumber(s.dailyDrawdownLimitPct, GRID_SCALPER_V2_DEFAULTS.dailyDrawdownLimitPct, 0.1, 25);
+  s.consecutiveLossLimit = Math.round(gridV2_toNumber(s.consecutiveLossLimit, GRID_SCALPER_V2_DEFAULTS.consecutiveLossLimit, 1, 20));
+  s.maxTradeLoss = gridV2_toNumber(s.maxTradeLoss, GRID_SCALPER_V2_DEFAULTS.maxTradeLoss, 1, 100000);
+  s.maxDurationBars = Math.round(gridV2_toNumber(s.maxDurationBars, GRID_SCALPER_V2_DEFAULTS.maxDurationBars, 10, 1000));
+  s.backtestSymbols = String(s.backtestSymbols || GRID_SCALPER_V2_DEFAULTS.backtestSymbols);
+  gridScalperV2Settings = s;
+  return s;
 }
 
-function setRecRecBadge(el, text, cssClass) {
-  if (!el) return;
-  el.textContent = text;
-  el.className = cssClass || "status-badge bull rec-badge-rec";
+function applyGridScalperV2SettingsToUI() {
+  const s = normalizeGridScalperV2Settings();
+  if (UI.gridScalperV2AtrMultiplierInput) UI.gridScalperV2AtrMultiplierInput.value = s.gridAtrMultiplier;
+  if (UI.gridScalperV2MinGridInput) UI.gridScalperV2MinGridInput.value = s.minGridDistance;
+  if (UI.gridScalperV2MaxGridInput) UI.gridScalperV2MaxGridInput.value = s.maxGridDistance;
+  if (UI.gridScalperV2MaxLevelsInput) UI.gridScalperV2MaxLevelsInput.value = s.maxGridLevels;
+  if (UI.gridScalperV2StopMode) UI.gridScalperV2StopMode.value = s.stopMode;
+  if (UI.gridScalperV2AtrStopInput) UI.gridScalperV2AtrStopInput.value = s.atrStopMultiplier;
+  if (UI.gridScalperV2BreakEvenInput) UI.gridScalperV2BreakEvenInput.value = s.breakEvenTriggerR;
+  if (UI.gridScalperV2BreakEvenBufferInput) UI.gridScalperV2BreakEvenBufferInput.value = s.breakEvenBufferAtr;
+  if (UI.gridScalperV2ConfidenceInput) UI.gridScalperV2ConfidenceInput.value = s.confidenceThreshold;
+  if (UI.gridScalperV2EntryScoreInput) UI.gridScalperV2EntryScoreInput.value = s.entryScoreThreshold;
+  if (UI.gridScalperV2DailyDDInput) UI.gridScalperV2DailyDDInput.value = s.dailyDrawdownLimitPct;
+  if (UI.gridScalperV2ConsecutiveLossInput) UI.gridScalperV2ConsecutiveLossInput.value = s.consecutiveLossLimit;
+  if (UI.gridScalperV2Tp1ShareInput) UI.gridScalperV2Tp1ShareInput.value = Math.round(s.tp1Share * 100);
+  if (UI.gridScalperV2Tp2ShareInput) UI.gridScalperV2Tp2ShareInput.value = Math.round(s.tp2Share * 100);
+  if (UI.gridScalperV2Tp3ShareInput) UI.gridScalperV2Tp3ShareInput.value = Math.round(s.tp3Share * 100);
 }
 
-/**
- * Returns market-type-specific recommended settings.
- * Each market type has different optimal configurations derived from the MD-file strategies.
- */
-function getMarketRecommendations(symbol) {
-  const sym = symbol || _multiPanelProcessing || (UI.symbolSelect ? UI.symbolSelect.value : "");
-  const mtype = getMarketType(sym);
-  switch (mtype) {
-    case "boom":
-      return {
-        label: "📈 Boom Index — Spike Up Strategy",
-        timeframe: { text: "1 min", gran: 60 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "10 min", minutes: 10 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: false,
-        signals: [
-          "Pin bar rejection after upward spike (shooting star = exhaustion)",
-          "Engulfing pattern after spike for power shift confirmation",
-          "Inside bar false breakout (stop-hunt trap detection)",
-          "Only BULL breakouts — spikes are upward on Boom",
-          "Wider trailing stop (2× ATR) to ride spike momentum",
-          "MACD histogram confirms spike momentum direction",
-          "BB squeeze detects compression before spike expansion"
-        ],
-        hint: "Boom indices spike upward — trade ONLY in the spike direction (BULL). "
-            + "Pin bar rejections after spikes signal exhaustion. "
-            + "Inside bar false breakouts detect stop-hunts common on Boom. "
-            + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
-            + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
-            + "MACD histogram alignment confirms spike direction momentum. "
-            + "Bollinger Band squeeze detects compression before spike expansion. "
-            + "ADX confirms trending environment for spike follow-through. "
-            + "Stochastic disabled — unreliable in rapid spike markets. "
-            + "Session filter disabled — synthetic markets run 24/7."
-      };
-    case "crash":
-      return {
-        label: "📉 Crash Index — Spike Down Strategy",
-        timeframe: { text: "1 min", gran: 60 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "10 min", minutes: 10 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Strong (2× mult for spike confirmation)" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: false,
-        signals: [
-          "Pin bar rejection after downward spike (hammer = exhaustion)",
-          "Engulfing pattern after spike for power shift confirmation",
-          "Inside bar false breakout (stop-hunt trap detection)",
-          "Only BEAR breakouts — spikes are downward on Crash",
-          "Wider trailing stop (2× ATR) to ride spike momentum",
-          "MACD histogram confirms spike momentum direction",
-          "BB squeeze detects compression before spike expansion"
-        ],
-        hint: "Crash indices spike downward — trade ONLY in the spike direction (BEAR). "
-            + "Pin bar rejections after spikes signal exhaustion. "
-            + "Inside bar false breakouts detect stop-hunts common on Crash. "
-            + "Use wider trailing stop (2× ATR) to capture extended spike momentum. "
-            + "Volume spike filter with higher multiplier confirms genuine spikes vs noise. "
-            + "MACD histogram alignment confirms spike direction momentum. "
-            + "Bollinger Band squeeze detects compression before spike expansion. "
-            + "ADX confirms trending environment for spike follow-through. "
-            + "Stochastic disabled — unreliable in rapid spike markets. "
-            + "Session filter disabled — synthetic markets run 24/7."
-      };
-    case "jump":
-      return {
-        label: "🦘 Jump Index — Gap & Impulse Strategy",
-        timeframe: { text: "5–15 min", gran: 300 },
-        rr: { text: "1:3+", minRR: 3 },
-        range: { text: "15 min", minutes: 15 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Extra wide (2.5× ATR for jump volatility)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:3 ✅" },
-        rsi: false,
-        volSpike: { rec: false, note: "Jumps are inherently volatile" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: false,
-        bbSqueeze: true,
-        adx: false,
-        stoch: false,
-        signals: [
-          "Supply/Demand zone detection — jumps create powerful S&D zones",
-          "Momentum impulse continuation after jump candle",
-          "Gap-fill retest back to jump origin level",
-          "Both BULL and BEAR breakouts — jumps go either direction",
-          "Fibonacci 50%/61% retracement of jump range",
-          "BB squeeze detects compression before jump release"
-        ],
-        hint: "Jump indices produce sudden price jumps in either direction. "
-            + "5-minute timeframe recommended — smooths out chop between jumps for cleaner signals. "
-            + "Jumps create strong supply/demand zones where price departed rapidly — "
-            + "wait for price to return to these zones for high-probability entries. "
-            + "Momentum impulse detection confirms continuation after a jump. "
-            + "Extra-wide trailing stop (2.5× ATR) survives jump volatility. "
-            + "RSI and volume spike filters disabled — jumps break normal readings. "
-            + "Bollinger Band squeeze detects compression before jump release. "
-            + "MACD, ADX, and Stochastic disabled — jumps are too erratic for lagging indicators. "
-            + "Higher R:R target (1:3+) compensates for the erratic price action."
-      };
-    case "step":
-      return {
-        label: "🪜 Step Index — Trendline & MA Bounce Strategy",
-        timeframe: { text: "5 min", gran: 300 },
-        rr: { text: "1:2", minRR: 2 },
-        range: { text: "20 min", minutes: 20 },
-        ema: true,
-        htf: true,
-        atr: false,
-        trailing: { rec: true, note: "Tight (1× ATR for small moves)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: false, note: "Fixed steps — range is uniform" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Trendline 3rd-touch entry — price respects trendlines cleanly",
-          "EMA 8/21 dynamic S/R bounce for pullback entries",
-          "Step momentum run detection (5+ consecutive steps)",
-          "Inside bar pattern (consolidation before next run)",
-          "Tight tolerances for precise level detection",
-          "MACD confirms clean trend direction",
-          "Stochastic pullback entries at S/R bounces"
-        ],
-        hint: "Step Index moves in fixed increments — the cleanest price action. "
-            + "Trendline 3rd-touch strategy works best: draw trendline on 2 swing lows "
-            + "(uptrend) or highs (downtrend), enter on touch 3+. "
-            + "EMA 8/21 act as dynamic support/resistance for pullback entries. "
-            + "Step momentum runs (5+ consecutive steps) confirm strong trends. "
-            + "Volume spike filter disabled — fixed-step moves have uniform range. "
-            + "Longer opening range (20 min) captures the orderly structure. "
-            + "Tight trailing stop (1× ATR) suits the small, precise movements. "
-            + "All V2 indicators work well — clean step action produces reliable MACD, "
-            + "BB squeeze, ADX trending, and Stochastic pullback signals."
-      };
-    case "dailyreset":
-      return {
-        label: "📅 Daily Reset — Trend Follow Strategy",
-        timeframe: { text: "15 min–1 hour", gran: 900 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "45 min", minutes: 45 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Standard (1.5× ATR)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Confirms genuine breakout vs noise" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Bull Market trends upward, Bear Market trends downward — resets daily",
-          "Trade in the natural direction: BULL for Bull Market, BEAR for Bear Market",
-          "EMA alignment confirms daily trend direction",
-          "MACD histogram confirms momentum in the trending direction",
-          "ADX confirms trending environment",
-          "Pullback entries using pin bar / engulfing at EMA support"
-        ],
-        hint: "Daily Reset indices trend in one direction and reset daily. "
-            + "Bull Market trends upward, Bear Market trends downward. "
-            + "Trade in the natural trend direction for highest probability. "
-            + "15-minute timeframe recommended — intraday TFs (15M–1H) make sense since holding overnight is meaningless. "
-            + "EMA alignment and ADX confirm the trending regime. "
-            + "Use pullback entries at EMA support/resistance. "
-            + "All standard indicators work well in these smooth trending conditions."
-      };
-    case "dex":
-      return {
-        label: "📰 DEX Index — News Spike Strategy",
-        timeframe: { text: "5–15 min", gran: 300 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "15 min", minutes: 15 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Wide (2× ATR for spike momentum)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Strong (1.8× mult for spike confirmation)" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: false,
-        signals: [
-          "DEX UP variants spike upward, DEX DN variants spike downward",
-          "Spike-aware: uses same logic as Boom/Crash for spike detection",
-          "Pin bar rejection after spike signals exhaustion",
-          "Engulfing pattern after spike for power shift confirmation",
-          "Volume spike filter confirms genuine spikes vs small noise",
-          "BB squeeze detects compression before spike expansion"
-        ],
-        hint: "DEX indices simulate news-event spikes. UP variants spike upward, DN variants spike downward. "
-            + "5-minute timeframe recommended — balances signal quality for directional spike detection. "
-            + "Similar to Boom/Crash but with news-event-like frequency. "
-            + "Trade in the spike direction for highest probability. "
-            + "Wide trailing stop (2× ATR) captures extended spike momentum. "
-            + "Strong volume spike filter separates real spikes from noise. "
-            + "Stochastic disabled — unreliable in rapid spike markets. "
-            + "Session filter disabled — synthetic markets run 24/7."
-      };
-    case "driftswitch":
-      return {
-        label: "🔄 Drift Switch — Regime Trend Strategy",
-        timeframe: { text: "5 min", gran: 300 },
-        rr: { text: "1:2", minRR: 2 },
-        range: { text: "15 min", minutes: 15 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "Standard (1.5× ATR)" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: false, note: "Smooth regime shifts — volume not meaningful" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Regime switches between bullish, bearish, and sideways every 10/20/30 min",
-          "EMA crossover confirms regime change direction",
-          "ADX rising confirms new trending regime has started",
-          "MACD histogram shift confirms momentum change",
-          "Pin bar at regime transition marks reversal entry",
-          "All indicators work well within a stable regime"
-        ],
-        hint: "Drift Switch indices alternate between bullish, bearish, and sideways regimes "
-            + "at regular intervals (10, 20, or 30 minutes depending on DSI variant). "
-            + "EMA crossovers are highly reliable here — they confirm regime direction. "
-            + "ADX confirms when a new trending regime has started (rising ADX). "
-            + "MACD histogram shifts align with regime changes. "
-            + "Trade in the direction of the current regime — avoid sideways regimes. "
-            + "Volume spike filter disabled — regime transitions are smooth, not spiked. "
-            + "All standard indicators produce reliable signals within a stable regime."
-      };
-    case "volatility": {
-      /* Split: Volatility 1s (1HZ*) vs Standard (R_*) */
-      const isVol1s = /^1HZ/i.test(sym);
-      if (isVol1s) {
-        return {
-          label: "⚡ Volatility (1s) — Fast Breakout Strategy",
-          timeframe: { text: "1–5 min", gran: 60 },
-          rr: { text: "1:2", minRR: 2 },
-          range: { text: "10 min", minutes: 10 },
-          ema: true,
-          htf: true,
-          atr: true,
-          trailing: { rec: true, note: "1.5× ATR standard" },
-          partialTp: true,
-          falseBreakout: true,
-          minRR: { rec: true, value: "1:2 ✅" },
-          rsi: true,
-          volSpike: { rec: true, note: "Standard 1.5× average range" },
-          session: { rec: false, note: "24/7 synthetic" },
-          fib: true,
-          macd: true,
-          bbSqueeze: true,
-          adx: true,
-          stoch: true,
-          signals: [
-            "Opening range breakout with conviction on 1-minute candles",
-            "Retest + indecision + engulfing confirmation",
-            "Pin bar and morning/evening star at retest",
-            "Inside bar breakout for clean continuation",
-            "Fast tick-based action — 1M candles capture rapid movements",
-            "MACD momentum confirmation at breakout",
-            "BB squeeze preceding breakout for volatility expansion"
-          ],
-          hint: "Volatility 1s indices generate candles every second — 1-minute timeframe is recommended "
-              + "for capturing rapid price movements without excessive noise. "
-              + "Short opening range (10 min) adapts to fast-forming consolidation. "
-              + "All standard filters apply — EMA, HTF, ATR tolerance, trailing stop. "
-              + "Session filter disabled — synthetic markets run 24/7. "
-              + "Confluence score (0-16) gauges overall setup quality."
-        };
-      }
-      /* Volatility Standard (legacy R_ symbols — deprecated by Deriv API) */
-      return {
-        label: "⚡ Volatility (Standard) — Breakout Strategy",
-        timeframe: { text: "5–15 min", gran: 300 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "15 min", minutes: 15 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "1.5× ATR standard" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Standard 1.5× average range" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Opening range breakout with conviction on 5-minute candles",
-          "Retest + indecision + engulfing confirmation",
-          "Pin bar and morning/evening star at retest",
-          "Inside bar breakout for clean continuation",
-          "S/R confluence and Fibonacci retracement alignment",
-          "MACD momentum confirmation at breakout",
-          "BB squeeze preceding breakout for volatility expansion"
-        ],
-        hint: "Standard Volatility indices move slower than 1s variants — 5-minute timeframe "
-            + "gives cleaner breakout signals with less noise. "
-            + "15-minute opening range captures orderly consolidation structure. "
-            + "All standard filters apply — EMA, HTF, ATR tolerance, trailing stop. "
-            + "Session filter disabled — synthetic markets run 24/7. "
-            + "Confluence score (0-16) gauges overall setup quality."
-      };
-    }
-    case "forex": {
-      /* Split: Forex Majors vs Crosses vs Exotics */
-      const IS_FOREX_EXOTIC = /frxUSD(MXN|NOK|SEK|SGD|ZAR|PLN|TRY|HKD)/i;
-      const IS_FOREX_MAJOR  = /frx(EURUSD|GBPUSD|USDJPY|USDCHF|AUDUSD|USDCAD|NZDUSD)/i;
-      if (IS_FOREX_EXOTIC.test(sym)) {
-        return {
-          label: "🌍 Forex Exotic — Daily Price Action Strategy",
-          timeframe: { text: "4 hours", gran: 14400 },
-          rr: { text: "1:3+", minRR: 3 },
-          range: { text: "8 hours (2 candles)", minutes: 480 },
-          ema: true,
-          htf: true,
-          atr: true,
-          trailing: { rec: true, note: "Wide (2× ATR for exotic volatility)" },
-          partialTp: true,
-          falseBreakout: true,
-          minRR: { rec: true, value: "1:3 ✅" },
-          rsi: true,
-          volSpike: { rec: true, note: "Standard 1.5× average range" },
-          session: { rec: true, note: "London+NY ✅" },
-          fib: true,
-          macd: true,
-          bbSqueeze: true,
-          adx: true,
-          stoch: false,
-          signals: [
-            "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
-            "Engulfing pattern at support/resistance for power shift",
-            "Inside bar breakout at key level for continuation",
-            "Top-down analysis: Weekly → Daily → 4H for entry",
-            "S/R confluence and Fibonacci retracement alignment",
-            "London+NY session filter — highest liquidity reduces exotic spread impact",
-            "Higher R:R target (1:3+) compensates for wider exotic spreads"
-          ],
-          hint: "Exotic forex pairs have much wider spreads — the MD strategies warn to focus on low-spread pairs. "
-              + "If trading exotics, use 4H timeframe minimum to reduce spread impact per trade. "
-              + "MD: 'Price action works on bigger time frames — trading on the 5-minute chart will lose you money.' "
-              + "Top-down analysis required: Weekly chart for major S/R → Daily for structure → 4H for entries. "
-              + "Higher R:R target (1:3+) ensures potential profit outweighs the wider spread cost. "
-              + "Wide trailing stop (2× ATR) accommodates exotic pair volatility. "
-              + "London+NY session filter is critical — exotic spreads widen dramatically outside peak hours. "
-              + "Stochastic disabled — less reliable on exotic pairs due to erratic movements."
-        };
-      }
-      if (IS_FOREX_MAJOR.test(sym)) {
-        return {
-          label: "💱 Forex Major — 4H Price Action Strategy",
-          timeframe: { text: "4 hours", gran: 14400 },
-          rr: { text: "1:2–1:3", minRR: 2 },
-          range: { text: "8 hours (2 candles)", minutes: 480 },
-          ema: true,
-          htf: true,
-          atr: true,
-          trailing: { rec: true, note: "1.5× ATR standard" },
-          partialTp: true,
-          falseBreakout: true,
-          minRR: { rec: true, value: "1:2 ✅" },
-          rsi: true,
-          volSpike: { rec: true, note: "Standard 1.5× average range" },
-          session: { rec: true, note: "London+NY ✅" },
-          fib: true,
-          macd: true,
-          bbSqueeze: true,
-          adx: true,
-          stoch: true,
-          signals: [
-            "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
-            "Engulfing pattern with trend at MA bounce — MD: '21 and 8 SMA on Daily and 4H'",
-            "Inside bar breakout at key level — MD: 'Daily and 4H, not 5-minute'",
-            "Top-down analysis: Weekly → Daily → 4H for entry",
-            "Supply/demand zones — MD: 'Daily and 4H zones are most powerful'",
-            "Trendline 3rd-touch entry — MD: '4H and Daily time frames only'",
-            "Fibonacci retracement confluence at key levels"
-          ],
-          hint: "MD Strategy: 'Primary time frames for price action: 1H, 4H, and Daily.' "
-              + "MD: 'Price action works on bigger time frames. Trading pin bars on the 5-minute chart will lose you money.' "
-              + "4H recommended for entry signals — pin bars, engulfing bars, inside bars all require 4H minimum per MD. "
-              + "Top-down analysis: start with Weekly chart for major S/R, move to Daily for structure, 4H for entries. "
-              + "MD: '4H and Daily time frames only — never use smaller time frames' for trendlines. "
-              + "Focus on EUR/USD and GBP/USD — MD specifically recommends these for lower spreads. "
-              + "London+NY session filter ensures trading during highest-liquidity hours. "
-              + "MD: 'If you trade price action based on a single time frame, you will end up losing your entire account.'"
-        };
-      }
-      /* Forex Crosses (EUR/GBP, EUR/JPY, GBP/JPY, etc.) */
-      return {
-        label: "💱 Forex Cross — 4H Price Action Strategy",
-        timeframe: { text: "4 hours", gran: 14400 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "8 hours (2 candles)", minutes: 480 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "1.5× ATR standard" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Standard 1.5× average range" },
-        session: { rec: true, note: "London+NY ✅" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
-          "Engulfing pattern with trend at MA bounce — MD: '21 and 8 SMA on Daily and 4H'",
-          "Inside bar breakout at key level — MD: 'Daily and 4H, not 5-minute'",
-          "Top-down analysis: Weekly → Daily → 4H for entry",
-          "Trendline 3rd-touch entry — MD: '4H and Daily time frames only'",
-          "S/R confluence and Fibonacci retracement alignment",
-          "Cross pairs have wider spreads than majors — 4H reduces noise impact"
-        ],
-        hint: "Forex cross pairs follow the same MD price action rules as majors. "
-            + "MD: 'Primary time frames for price action: 1H, 4H, and Daily.' "
-            + "4H recommended — same rules apply: pin bars, engulfing, inside bars require 4H minimum. "
-            + "Cross pairs have slightly wider spreads than majors — bigger timeframe reduces spread impact. "
-            + "Top-down analysis required: Weekly → Daily → 4H for entries. "
-            + "London+NY session filter ensures best liquidity. "
-            + "All standard indicators work well on 4H cross pair charts."
-      };
-    }
-    case "commodity": {
-      /* Sub-branch: all XAUUSD variants (frxXAUUSD, XAUUSDmicro, XAUUSD.s) */
-      const IS_GOLD = /^(frxXAUUSD|XAUUSD)/i.test(sym);
-      if (IS_GOLD) {
-        const isMicro = /micro/i.test(sym);
-        return {
-          label: isMicro ? "🥇 Gold Micro — 1H Session Scalp Strategy" : "🥇 Gold Spot — 1H Session Strategy",
-          timeframe: { text: "1 hour", gran: 3600 },
-          rr: { text: "1:2–1:3", minRR: 2 },
-          range: { text: "4 hours (1 candle)", minutes: 240 },
-          ema: true,
-          htf: true,
-          atr: true,
-          trailing: { rec: true, note: "Standard (1.5× ATR)" },
-          partialTp: true,
-          falseBreakout: true,
-          minRR: { rec: true, value: "1:2 ✅" },
-          rsi: true,
-          volSpike: { rec: true, note: "Standard 1.5× average range" },
-          session: { rec: true, note: "London+NY ✅" },
-          fib: true,
-          macd: true,
-          bbSqueeze: true,
-          adx: true,
-          stoch: false,
-          signals: [
-            "Pin bar rejection at key S/R on 1H chart — reference Daily for major zones",
-            "Engulfing pattern at supply/demand zone for power shift",
-            "London and NY session breakouts — highest gold liquidity windows",
-            "Supply/demand zones — gold respects Daily and 4H zones powerfully",
-            "Fibonacci 50%/61% retracement of London session range",
-            "MACD momentum confirmation at breakout",
-            isMicro
-              ? "Micro contract (10 oz/lot) — reduced risk per pip, ideal for tighter SL placements"
-              : "Spot contract (100 oz/lot) — standard gold risk/lot sizing applies"
-          ],
-          hint: (isMicro
-            ? "XAUUSDmicro is a micro gold contract (10 oz/lot vs standard 100 oz/lot). "
-              + "Smaller lot size allows more precise position sizing with lower margin. "
-            : "XAUUSD.s is spot gold (100 oz/lot) — identical analysis to standard XAU/USD. ")
-            + "1H timeframe balances gold's intraday volatility with clean signal formation. "
-            + "Gold is strongly driven by London and NY sessions — enable the session filter. "
-            + "Supply/demand zones from Daily/4H charts are highly respected by gold price. "
-            + "Fibonacci retracements work well on gold's structured London/NY session swings. "
-            + "MACD and ADX confirm trend direction before entry. "
-            + "Stochastic disabled — gold's sharp momentum moves make it unreliable. "
-            + "London+NY session filter is essential — gold spreads widen sharply outside peak hours."
-        };
-      }
-      return {
-        label: "🥇 Commodity — 4H Breakout Strategy",
-        timeframe: { text: "4 hours", gran: 14400 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "8 hours (2 candles)", minutes: 480 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "1.5× ATR standard" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Standard 1.5× average range" },
-        session: { rec: true, note: "London+NY ✅" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Pin bar rejection at key S/R on 4H chart — MD: 'only 4H or Daily'",
-          "Engulfing pattern at support/resistance for power shift",
-          "Inside bar breakout at key level for continuation",
-          "Top-down analysis: Weekly → Daily → 4H for entry",
-          "Supply/demand zones — MD: 'Daily and 4H zones are most powerful'",
-          "S/R confluence and Fibonacci retracement alignment",
-          "MACD momentum confirmation at breakout"
-        ],
-        hint: "Commodities (Gold, Silver, Platinum, Palladium) have high volatility — "
-            + "the MD strategies recommend bigger timeframes to reduce noise. "
-            + "MD: 'Price action works on bigger time frames.' "
-            + "4H recommended for entry signals — same price action rules as forex. "
-            + "Top-down analysis: Weekly chart for major S/R → Daily for structure → 4H for entries. "
-            + "London+NY session filter essential — commodity spreads widen outside peak hours. "
-            + "All standard indicators work well on 4H commodity charts."
-      };
-    }
-    default:
-      return {
-        label: "⚡ Breakout Strategy",
-        timeframe: { text: "5 min", gran: 300 },
-        rr: { text: "1:2–1:3", minRR: 2 },
-        range: { text: "15 min", minutes: 15 },
-        ema: true,
-        htf: true,
-        atr: true,
-        trailing: { rec: true, note: "1.5× ATR standard" },
-        partialTp: true,
-        falseBreakout: true,
-        minRR: { rec: true, value: "1:2 ✅" },
-        rsi: true,
-        volSpike: { rec: true, note: "Standard 1.5× average range" },
-        session: { rec: false, note: "24/7 synthetic" },
-        fib: true,
-        macd: true,
-        bbSqueeze: true,
-        adx: true,
-        stoch: true,
-        signals: [
-          "Opening range breakout with conviction",
-          "Retest + indecision + engulfing confirmation",
-          "Pin bar and morning/evening star at retest",
-          "Inside bar breakout for clean continuation",
-          "S/R confluence and Fibonacci retracement alignment",
-          "MACD momentum confirmation at breakout",
-          "BB squeeze preceding breakout for volatility expansion"
-        ],
-        hint: "Standard breakout strategy — EMA 8/21 + HTF (EMA 100) filters remove counter-trend noise. "
-            + "ATR tolerance adapts retest detection to volatility. "
-            + "Trailing stop locks in profits on extended moves. "
-            + "Partial TP at 1:1 alerts to consider securing gains — trade continues to full TP. "
-            + "False breakout filter prevents entering on fake-outs. "
-            + "Min R:R gate ensures every trade has at least 1:2 risk-reward. "
-            + "Confluence score (0-16) gauges overall setup quality."
-      };
-  }
-}
-
-function updateRecommendedSettings() {
-  const rec = getMarketRecommendations();
-
-  /* Update market type label */
-  if (UI.recMarketLabel) {
-    UI.recMarketLabel.textContent = rec.label;
-  }
-
-  /* Update market type badge in status bar */
-  if (UI.marketTypeBadge) {
-    const tuning = getMarketTuning();
-    UI.marketTypeBadge.textContent = tuning.label;
-    const badgeClasses = {
-      boom: "status-badge bull",
-      crash: "status-badge bear",
-      jump: "status-badge warning",
-      step: "status-badge enabled",
-      rangebreak: "status-badge enabled",
-      dailyreset: "status-badge enabled",
-      dex: "status-badge warning",
-      driftswitch: "status-badge enabled"
-    };
-    UI.marketTypeBadge.className = "chip-value " + (badgeClasses[getMarketType()] || "env-label");
-  }
-
-  /* ---- Dynamic "Rec" column ---- */
-  setRecRecBadge(UI.recRec_timeframe, rec.timeframe.text, "status-badge warning rec-badge-rec");
-  setRecRecBadge(UI.recRec_rr, rec.rr.text, "status-badge warning rec-badge-rec");
-  setRecRecBadge(UI.recRec_range, rec.range.text, "status-badge warning rec-badge-rec");
-  setRecRecBadge(UI.recRec_ema, rec.ema ? "ON ✅" : "OFF", rec.ema ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_htf, rec.htf ? "ON ✅" : "OFF", rec.htf ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_atr, rec.atr ? "ON ✅" : "OFF", rec.atr ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_trailing, rec.trailing.rec ? "ON ✅" : "OFF", rec.trailing.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_partialTp, rec.partialTp ? "ON ✅" : "OFF", rec.partialTp ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_falseBreakout, rec.falseBreakout ? "ON ✅" : "OFF", rec.falseBreakout ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_minRR, rec.minRR.value, rec.minRR.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_rsiFilter, rec.rsi ? "ON ✅" : "OFF", rec.rsi ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_volSpike, rec.volSpike.rec ? "ON ✅" : "OFF", rec.volSpike.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_session, rec.session.rec ? rec.session.note : "OFF", rec.session.rec ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_fib, rec.fib ? "ON ✅" : "OFF", rec.fib ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_macd, rec.macd ? "ON ✅" : "OFF", rec.macd ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_bbSqueeze, rec.bbSqueeze ? "ON ✅" : "OFF", rec.bbSqueeze ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_adx, rec.adx ? "ON ✅" : "OFF", rec.adx ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-  setRecRecBadge(UI.recRec_stoch, rec.stoch ? "ON ✅" : "OFF", rec.stoch ? "status-badge bull rec-badge-rec" : "status-badge disabled rec-badge-rec");
-
-  /* ---- Dynamic "Active" column ---- */
-  /* Timeframe: compare against market-type recommendation */
-  if (UI.recActive_timeframe && UI.granSelect) {
-    const gran = parseInt(UI.granSelect.value, 10);
-    UI.recActive_timeframe.textContent = GRAN_LABELS[gran] || formatMinutes(Math.round(gran / 60));
-    if (gran === rec.timeframe.gran) {
-      UI.recActive_timeframe.className = "status-badge bull rec-badge-active";
-    } else {
-      UI.recActive_timeframe.className = "status-badge warning rec-badge-active";
-    }
-  }
-
-  /* R:R: compare against market-type recommendation */
-  if (UI.recActive_rr && UI.riskInput && UI.rewardInput) {
-    const risk   = parseFloat(UI.riskInput.value)   || 1;
-    const reward = parseFloat(UI.rewardInput.value) || 1;
-    const rr = reward / risk;
-    UI.recActive_rr.textContent = `1:${reward}`;
-    if (rr >= rec.rr.minRR) {
-      UI.recActive_rr.className = "status-badge bull rec-badge-active";
-    } else {
-      UI.recActive_rr.className = "status-badge warning rec-badge-active";
-    }
-  }
-
-  /* Opening Range: compare against market-type recommendation */
-  if (UI.recActive_range && UI.rangeDuration) {
-    const rm = parseInt(UI.rangeDuration.value, 10) || RANGE_MINUTES;
-    UI.recActive_range.textContent = formatMinutes(rm);
-    if (rm === rec.range.minutes) {
-      UI.recActive_range.className = "status-badge bull rec-badge-active";
-    } else {
-      UI.recActive_range.className = "status-badge warning rec-badge-active";
-    }
-  }
-
-  /* Boolean toggle filters — compare against market-type-specific recommendations */
-  setRecBadge(UI.recActive_ema,           emaFilterEnabled,     rec.ema);
-  setRecBadge(UI.recActive_htf,           htfFilterEnabled,     rec.htf);
-  setRecBadge(UI.recActive_atr,           atrToleranceEnabled,  rec.atr);
-  setRecBadge(UI.recActive_trailing,      trailingStopEnabled,  rec.trailing.rec);
-  setRecBadge(UI.recActive_partialTp,     partialTpEnabled,     rec.partialTp);
-  setRecBadge(UI.recActive_falseBreakout, falseBreakoutEnabled, rec.falseBreakout);
-  setRecBadge(UI.recActive_rsiFilter,     rsiFilterEnabled,     rec.rsi);
-  setRecBadge(UI.recActive_volSpike,      volumeSpikeEnabled,   rec.volSpike.rec);
-  setRecBadge(UI.recActive_fib,           fibRetestEnabled,     rec.fib);
-  setRecBadge(UI.recActive_macd,          macdFilterEnabled,    rec.macd);
-  setRecBadge(UI.recActive_bbSqueeze,     bbSqueezeFilterEnabled, rec.bbSqueeze);
-  setRecBadge(UI.recActive_adx,           adxFilterEnabled,     rec.adx);
-  setRecBadge(UI.recActive_stoch,         stochFilterEnabled,   rec.stoch);
-
-  /* Min R:R: market-type-aware */
-  if (UI.recActive_minRR) {
-    const on = minRREnabled;
-    const val = minRRValue;
-    if (on) {
-      UI.recActive_minRR.textContent = `1:${val} ✅`;
-      UI.recActive_minRR.className = val >= rec.rr.minRR ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active";
-    } else {
-      UI.recActive_minRR.textContent = "OFF";
-      UI.recActive_minRR.className = "status-badge disabled rec-badge-active";
-    }
-  }
-
-  /* Session filter: market-type-aware */
-  if (UI.recActive_session) {
-    if (sessionFilterEnabled) {
-      UI.recActive_session.textContent = SESSION_MODE_LABELS[sessionFilterMode] || sessionFilterMode;
-      UI.recActive_session.className = rec.session.rec
-        ? (sessionFilterMode === "london_ny" ? "status-badge bull rec-badge-active" : "status-badge warning rec-badge-active")
-        : "status-badge warning rec-badge-active";
-    } else {
-      UI.recActive_session.textContent = "OFF";
-      /* If rec says OFF (synthetic 24/7), then OFF is correct → green */
-      UI.recActive_session.className = rec.session.rec ? "status-badge disabled rec-badge-active" : "status-badge bull rec-badge-active";
-    }
-  }
-
-  /* ---- Key Signals panel ---- */
-  if (UI.recMarketSignals && UI.recSignalsList) {
-    UI.recMarketSignals.style.display = "block";
-    UI.recSignalsList.innerHTML = "";
-    for (const sig of rec.signals) {
-      const li = document.createElement("li");
-      li.textContent = sig;
-      UI.recSignalsList.appendChild(li);
-    }
-  }
-
-  /* ---- Hint text ---- */
-  if (UI.recHintText) {
-    UI.recHintText.textContent = "";
-    const strong = document.createElement("strong");
-    strong.textContent = "Why:";
-    UI.recHintText.appendChild(strong);
-    UI.recHintText.appendChild(document.createTextNode(" " + rec.hint));
-  }
-}
-
-/**
- * Applies the market-type-specific recommended settings to all strategy filters,
- * timeframe, R:R, opening range, session mode, and min R:R value.
- * Called automatically when auto-apply is enabled and the symbol changes.
- */
-function applyRecommendedSettings() {
-  const rec = getMarketRecommendations();
-
-  /* Timeframe — skip if locked */
-  if (!lockTimeframe && UI.granSelect) UI.granSelect.value = rec.timeframe.gran;
-
-  /* R:R — set reward to recommended minRR (risk stays at 1) — skip if locked */
-  if (!lockRR && UI.rewardInput) UI.rewardInput.value = rec.rr.minRR;
-
-  /* Opening range — skip if locked */
-  if (!lockRangeMin) {
-    RANGE_MINUTES = rec.range.minutes;
-    if (UI.rangeDuration) UI.rangeDuration.value = rec.range.minutes;
-  }
-
-  /* Boolean strategy filter toggles — skip if filters are locked (keep user's disabled state) */
-  if (!lockIndicatorFilters) {
-    emaFilterEnabled     = rec.ema;
-    htfFilterEnabled     = rec.htf;
-    atrToleranceEnabled  = rec.atr;
-    trailingStopEnabled  = rec.trailing.rec;
-    partialTpEnabled     = rec.partialTp;
-    falseBreakoutEnabled = rec.falseBreakout;
-    rsiFilterEnabled     = rec.rsi;
-    volumeSpikeEnabled   = rec.volSpike.rec;
-    fibRetestEnabled     = rec.fib;
-    sessionFilterEnabled = rec.session.rec;
-
-    /* GainzAlgo V2 filter toggles */
-    macdFilterEnabled      = rec.macd;
-    bbSqueezeFilterEnabled = rec.bbSqueeze;
-    adxFilterEnabled       = rec.adx;
-    stochFilterEnabled     = rec.stoch;
-
-    /* Min R:R — skip value update if R:R is locked */
-    minRREnabled = rec.minRR.rec;
-    if (!lockRR) minRRValue = rec.rr.minRR;
-
-    /* Session mode — if recommended, default to london_ny for forex/commodity */
-    if (rec.session.rec) {
-      sessionFilterMode = "london_ny";
-      if (UI.sessionFilterMode) UI.sessionFilterMode.value = sessionFilterMode;
-    }
-
-    /* Sync UI checkboxes */
-    if (UI.emaFilterToggle)     UI.emaFilterToggle.checked     = emaFilterEnabled;
-    if (UI.htfFilterToggle)     UI.htfFilterToggle.checked     = htfFilterEnabled;
-    if (UI.atrToleranceToggle)  UI.atrToleranceToggle.checked  = atrToleranceEnabled;
-    if (UI.trailingStopToggle)  UI.trailingStopToggle.checked  = trailingStopEnabled;
-    if (UI.partialTpToggle)     UI.partialTpToggle.checked     = partialTpEnabled;
-    if (UI.falseBreakoutToggle) UI.falseBreakoutToggle.checked = falseBreakoutEnabled;
-    if (UI.minRRToggle)         UI.minRRToggle.checked         = minRREnabled;
-    if (UI.minRRInput)          UI.minRRInput.value            = minRRValue;
-    if (UI.rsiFilterToggle)     UI.rsiFilterToggle.checked     = rsiFilterEnabled;
-    if (UI.volumeSpikeToggle)   UI.volumeSpikeToggle.checked   = volumeSpikeEnabled;
-    if (UI.sessionFilterToggle) UI.sessionFilterToggle.checked = sessionFilterEnabled;
-    if (UI.fibRetestToggle)     UI.fibRetestToggle.checked     = fibRetestEnabled;
-    if (UI.macdFilterToggle)      UI.macdFilterToggle.checked      = macdFilterEnabled;
-    if (UI.bbSqueezeFilterToggle) UI.bbSqueezeFilterToggle.checked = bbSqueezeFilterEnabled;
-    if (UI.adxFilterToggle)       UI.adxFilterToggle.checked       = adxFilterEnabled;
-    if (UI.stochFilterToggle)     UI.stochFilterToggle.checked     = stochFilterEnabled;
-  } else {
-    /* Filters are locked — only update the R/R value (not state) if R/R isn't also locked */
-    if (!lockRR) minRRValue = rec.rr.minRR;
-    if (UI.minRRInput) UI.minRRInput.value = minRRValue;
-  }
-
-  /* Persist + refresh UI */
-  saveSettings();
-  updateRecommendedSettings();
-  updateStateUI();
-}
-
-/* ================= INDICATOR STATE ================= */
-function resetIndicator() {
-  candles = [];
-  rangeStartEpoch = null;
-  openingRange = null;
-  breakout = null;
-  retestInfo = null;
-  indecisionInfo = null;
-  confirmInfo = null;
-  trade = null;
-  monitoringTrade = false;
-  /* Note: do NOT clear per-symbol autoTradeSlots here — resetIndicator is
-     called during reconnect, and we need pending contract IDs to survive
-     so we can re-subscribe after re-authorization. */
-  emaFast = [];
-  emaSlow = [];
-  emaHTF  = [];
-  atrValue  = 0;
-  atrValues = [];
-  _atrPrev = 0; _atrCandleCount = 0;  /* #4/#10: reset incremental ATR cache */
-  rsiValues = [];
-  macdLine = []; macdSignal = []; macdHistogram = [];
-  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];  /* #11 */
-  adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
-  stochK = []; stochD = [];
-  emaMTF = []; vwapValues = [];
-  retestCount = 0;
-  trailingSL   = null;
-  partialTpHit = false;
-  teslaT1Hit = false;
-  teslaT2Hit = false;
-  teslaT3Hit = false;
-  teslaBEHit = false;
-  resetNyOpenRange();
-  setPhase("WAITING");
-  updateStateUI();
-}
-
-/**
- * Full session reset: clears all indicator state, signal history, stats,
- * signal log, and persisted session data. Keeps settings/filters intact.
- * Use when the user wants to start fresh without changing symbol/timeframe.
- */
-function resetSession() {
-  /* Reset core indicator state */
-  resetIndicator();
-
-  /* Clear signal history & stats */
-  signalHistory = [];
-  signalWins = 0;
-  signalLosses = 0;
-  signalBreakevens = 0;
-  updateStatsUI();
-
-  /* Clear live scalp history */
-  liveScalpHistory = [];
-  lastScalpCandleIdx = -999;
-  renderScalpAlerts();
-  updateScalpStatsUI();
-  renderScalpTickerBanner();
-  renderStrategyTickerBanner();
-  if (UI.scalpAlertBanner) UI.scalpAlertBanner.classList.remove("scalp-banner-show");
-
-  /* Clear session range trade stats */
-  sessionRangeTradeWins = 0;
-  sessionRangeTradeLosses = 0;
-
-  /* Clear signal log UI */
-  if (UI.signalLog) UI.signalLog.innerHTML = "";
-
-  /* Clear status bar win rate */
-  const statusBarWR = document.getElementById("statusBarWinRate");
-  if (statusBarWR) statusBarWR.textContent = "0%";
-
-  /* Clear persisted session data (keep settings) */
-  try {
-    localStorage.removeItem(LS_PREFIX + "signalLog");
-    localStorage.removeItem(LS_PREFIX + "signalHistory");
-    localStorage.removeItem(LS_PREFIX + "autoTradeHistory");
-    localStorage.removeItem(LS_PREFIX + "autoTradePL");
-  } catch (e) { /* storage not available */ }
-
-  /* Reset auto-trade history */
-  autoTradeHistory = [];
-  autoTradePL = 0;
-  /* Reset dynamic stake management state */
-  autoTradeCurrentStake = Math.max(MIN_AUTO_TRADE_STAKE, parseFloat(autoTradeStake) || 1);
-  autoTradeWinStreak = 0;
-  autoTradeLossCount = 0;
-  autoTradeHalted = false;
-  symbolTradeTimestamps.clear();
-  strategyTradeTimestamps.clear();
-  symbolCooldownUntil.clear();
-  for (const k of Object.keys(strategyRegimePausedUntil)) delete strategyRegimePausedUntil[k];
-  updateAutoTradeCurrentStakeUI();
-  /* Reset session start balance so P/L recalculates from this point */
-  sessionStartBalance = autoTradeBalance;
-  autoTradeDailyDateKey = getUtcDateKey();
-  autoTradeDailyStartBalance = autoTradeBalance;
-  autoTradeDailyPeakBalance  = autoTradeBalance;
-  renderAutoTradeHistory();
-  updateAutoTradePLUI();
-
-  /* Redraw chart (cleared state) */
-  drawChart();
-
-  addLog("Session reset — all stats and signals cleared.");
-}
-
-function updateStateUI() {
-  /* Skip main sidebar updates when processing a non-focused multi-panel */
-  if (_multiPanelProcessing && _multiPanelProcessing !== focusedPanelSymbol) return;
-
-  if (UI.candleCount) UI.candleCount.textContent = candles.length;
-  if (UI.rangeHigh)   UI.rangeHigh.textContent   = openingRange ? fmt(openingRange.high, 4) : "--";
-  if (UI.rangeLow)    UI.rangeLow.textContent     = openingRange ? fmt(openingRange.low, 4) : "--";
-
-  if (UI.breakoutDir) {
-    if (breakout) {
-      UI.breakoutDir.textContent = breakout.dir;
-      UI.breakoutDir.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
-    } else {
-      UI.breakoutDir.textContent = "NONE";
-      UI.breakoutDir.className = "status-badge disabled";
-    }
-  }
-
-  if (UI.retestStatus) UI.retestStatus.textContent  = retestInfo  ? `Candle #${retestInfo.candleIdx}` : "--";
-  if (UI.confirmStatus) UI.confirmStatus.textContent = confirmInfo ? `Candle #${confirmInfo.candleIdx}` : "--";
-
-  /* Next Action: recommended order type based on trade type */
-  if (UI.nextAction) {
-    const orderType = getRecommendedOrderType();
-    if (orderType) {
-      UI.nextAction.textContent = orderType;
-      UI.nextAction.className = "status-badge " + (breakout.dir === "BULL" ? "bull" : "bear");
-    } else {
-      UI.nextAction.textContent = "--";
-      UI.nextAction.className = "status-badge disabled";
-    }
-  }
-
-  /* EMA filter status */
-  if (UI.emaFilterStatus) {
-    if (!emaFilterEnabled) {
-      UI.emaFilterStatus.textContent = "OFF";
-      UI.emaFilterStatus.className = "env-label";
-    } else if (breakout) {
-      const aligned = isEmaAligned(breakout.dir);
-      UI.emaFilterStatus.textContent = aligned ? "ALIGNED ✅" : "BLOCKED ❌";
-      UI.emaFilterStatus.className = "status-badge " + (aligned ? "bull" : "bear");
-    } else {
-      UI.emaFilterStatus.textContent = "WAITING";
-      UI.emaFilterStatus.className = "env-label";
-    }
-  }
-
-  /* HTF Trend */
-  if (UI.htfTrend) {
-    const trend = getHTFTrend();
-    UI.htfTrend.textContent = trend;
-    UI.htfTrend.className = "status-badge " + ({
-      BULL: "bull", BEAR: "bear", FLAT: "disabled"
-    }[trend] || "disabled");
-  }
-
-  /* ATR display */
-  if (UI.atrDisplay) {
-    UI.atrDisplay.textContent = atrValue > 0 ? fmt(atrValue, 4) : "--";
-  }
-
-  /* Breakout strength */
-  if (UI.breakoutStrength) {
-    if (breakout && breakout.candleIdx < candles.length && atrValue > 0) {
-      const bc = candles[breakout.candleIdx];
-      const candleRange = bc.high - bc.low;
-      const bodySize = Math.abs(bc.close - bc.open);
-      const strong = candleRange >= atrValue * 0.8 && bodySize >= candleRange * 0.6;
-      UI.breakoutStrength.textContent = strong ? "STRONG" : "WEAK";
-      UI.breakoutStrength.className = "status-badge " + (strong ? "bull" : "warning");
-    } else {
-      UI.breakoutStrength.textContent = "--";
-      UI.breakoutStrength.className = "env-label";
-    }
-  }
-
-  /* Confluence score */
-  if (UI.confluenceDisplay) {
-    if (breakout) {
-      confluenceScore = computeConfluenceScore();
-      const strength = getSignalStrength(confluenceScore);
-      UI.confluenceDisplay.textContent = `${confluenceScore} / 16`;
-      UI.confluenceDisplay.className = "status-badge " + strength.cls;
-    } else {
-      confluenceScore = 0;
-      UI.confluenceDisplay.textContent = "--";
-      UI.confluenceDisplay.className = "env-label";
-    }
-  }
-
-  /* S/R Confluence */
-  if (UI.srConfluenceDisplay) {
-    if (breakout) {
-      const hasSR = hasSRConfluence(breakout.level);
-      UI.srConfluenceDisplay.textContent = hasSR ? "YES ✅" : "NO";
-      UI.srConfluenceDisplay.className = "status-badge " + (hasSR ? "bull" : "disabled");
-    } else {
-      UI.srConfluenceDisplay.textContent = "--";
-      UI.srConfluenceDisplay.className = "env-label";
-    }
-  }
-
-  /* RSI display */
-  if (UI.rsiDisplay) {
-    const rsi = getCurrentRSI();
-    if (rsi != null) {
-      UI.rsiDisplay.textContent = fmt(rsi, 1);
-      if (rsi <= 30) UI.rsiDisplay.className = "status-badge bull";
-      else if (rsi >= 70) UI.rsiDisplay.className = "status-badge bear";
-      else UI.rsiDisplay.className = "env-label";
-    } else {
-      UI.rsiDisplay.textContent = "--";
-      UI.rsiDisplay.className = "env-label";
-    }
-  }
-
-  /* Volume spike display */
-  if (UI.volumeSpikeDisplay) {
-    if (breakout && breakout.candleIdx < candles.length) {
-      const spike = hasVolumeSpikeOnBreakout(breakout.candleIdx);
-      UI.volumeSpikeDisplay.textContent = spike ? "YES ✅" : "NO";
-      UI.volumeSpikeDisplay.className = "status-badge " + (spike ? "bull" : "disabled");
-    } else {
-      UI.volumeSpikeDisplay.textContent = "--";
-      UI.volumeSpikeDisplay.className = "env-label";
-    }
-  }
-
-  /* Session display */
-  if (UI.sessionDisplay) {
-    const sessionName = getActiveSessionName();
-    const inSession = isWithinActiveSession();
-    UI.sessionDisplay.textContent = sessionName + (sessionFilterEnabled ? (inSession ? " ✅" : " ❌") : "");
-    UI.sessionDisplay.className = sessionFilterEnabled
-      ? ("status-badge " + (inSession ? "bull" : "bear"))
-      : "env-label";
-  }
-
-  /* Session Ranges display */
-  if (UI.sessionRangeAsianDisplay) {
-    if (sessionRangesEnabled && sessionRangeAsian) {
-      UI.sessionRangeAsianDisplay.textContent = `H:${fmt(sessionRangeAsian.high, 4)} L:${fmt(sessionRangeAsian.low, 4)}`;
-      UI.sessionRangeAsianDisplay.className = "status-badge disabled";
-    } else {
-      UI.sessionRangeAsianDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
-      UI.sessionRangeAsianDisplay.className = "env-label";
-    }
-  }
-  if (UI.asianTightDisplay) {
-    if (sessionRangesEnabled && sessionRangeAsian) {
-      UI.asianTightDisplay.textContent = asianRangeTight ? "TIGHT ⚡" : "WIDE";
-      UI.asianTightDisplay.className = "status-badge " + (asianRangeTight ? "warning" : "disabled");
-    } else {
-      UI.asianTightDisplay.textContent = "--";
-      UI.asianTightDisplay.className = "env-label";
-    }
-  }
-  if (UI.sessionRangeLondonDisplay) {
-    if (sessionRangesEnabled && sessionRangeLondon) {
-      UI.sessionRangeLondonDisplay.textContent = `H:${fmt(sessionRangeLondon.high, 4)} L:${fmt(sessionRangeLondon.low, 4)}`;
-      UI.sessionRangeLondonDisplay.className = "status-badge disabled";
-    } else {
-      UI.sessionRangeLondonDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
-      UI.sessionRangeLondonDisplay.className = "env-label";
-    }
-  }
-  if (UI.sessionRangeNYDisplay) {
-    if (sessionRangesEnabled && sessionRangeNY) {
-      UI.sessionRangeNYDisplay.textContent = `H:${fmt(sessionRangeNY.high, 4)} L:${fmt(sessionRangeNY.low, 4)}`;
-      UI.sessionRangeNYDisplay.className = "status-badge disabled";
-    } else {
-      UI.sessionRangeNYDisplay.textContent = sessionRangesEnabled ? "WAITING" : "OFF";
-      UI.sessionRangeNYDisplay.className = "env-label";
-    }
-  }
-  if (UI.londonSweepDisplay) {
-    if (sessionRangesEnabled && londonSweepSignal) {
-      const sweepLabel = londonSweepSignal.dir === "HIGH"
-        ? `SWEPT HIGH ▲ @${fmt(londonSweepSignal.price, 4)}`
-        : `SWEPT LOW ▼ @${fmt(londonSweepSignal.price, 4)}`;
-      UI.londonSweepDisplay.textContent = sweepLabel;
-      UI.londonSweepDisplay.className = "status-badge " + (londonSweepSignal.dir === "HIGH" ? "bear" : "bull");
-    } else {
-      UI.londonSweepDisplay.textContent = sessionRangesEnabled ? "NONE" : "OFF";
-      UI.londonSweepDisplay.className = "env-label";
-    }
-  }
-
-  /* Session Range Trade levels display (Entry / SL / TP / R:R) */
-  if (UI.sessionRangeTradeDisplay) {
-    if (sessionRangesEnabled && sessionRangeTrade) {
-      const dirLabel = sessionRangeTrade.dir === "BULL" ? "▲ BUY" : "▼ SELL";
-      UI.sessionRangeTradeDisplay.textContent = dirLabel;
-      UI.sessionRangeTradeDisplay.className = "status-badge " + (sessionRangeTrade.dir === "BULL" ? "bull" : "bear");
-    } else {
-      UI.sessionRangeTradeDisplay.textContent = sessionRangesEnabled ? "NONE" : "OFF";
-      UI.sessionRangeTradeDisplay.className = "env-label";
-    }
-  }
-  if (UI.sessionRangeEntryDisplay) {
-    UI.sessionRangeEntryDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmtPrice(sessionRangeTrade.entry, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
-    UI.sessionRangeEntryDisplay.className = sessionRangeTrade ? "status-badge disabled" : "env-label";
-  }
-  if (UI.sessionRangeSLDisplay) {
-    UI.sessionRangeSLDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmtPrice(sessionRangeTrade.sl, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
-    UI.sessionRangeSLDisplay.className = sessionRangeTrade ? "status-badge bear" : "env-label";
-  }
-  if (UI.sessionRangeTPDisplay) {
-    UI.sessionRangeTPDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? fmtPrice(sessionRangeTrade.tp, sessionRangeTrade.symbol || getActiveSymbol()) : "--";
-    UI.sessionRangeTPDisplay.className = sessionRangeTrade ? "status-badge bull" : "env-label";
-  }
-  if (UI.sessionRangeRRDisplay) {
-    UI.sessionRangeRRDisplay.textContent = sessionRangesEnabled && sessionRangeTrade
-      ? `1:${fmt(sessionRangeTrade.rr, 1)}` : "--";
-    UI.sessionRangeRRDisplay.className = sessionRangeTrade ? "status-badge disabled" : "env-label";
-  }
-
-  /* Fibonacci retest display */
-  if (UI.fibRetestDisplay) {
-    if (breakout) {
-      const fibResult = getFibRetestLevel(breakout.level);
-      if (fibResult) {
-        UI.fibRetestDisplay.textContent = `${(fibResult.ratio * 100).toFixed(1)}% ✅`;
-        UI.fibRetestDisplay.className = "status-badge bull";
-      } else {
-        UI.fibRetestDisplay.textContent = "NO";
-        UI.fibRetestDisplay.className = "status-badge disabled";
-      }
-    } else {
-      UI.fibRetestDisplay.textContent = "--";
-      UI.fibRetestDisplay.className = "env-label";
-    }
-  }
-
-  /* MACD display */
-  if (UI.macdDisplay) {
-    const hist = getCurrentMACD();
-    if (hist != null) {
-      UI.macdDisplay.textContent = fmt(hist, 5);
-      UI.macdDisplay.className = "status-badge " + (hist > 0 ? "bull" : hist < 0 ? "bear" : "disabled");
-    } else {
-      UI.macdDisplay.textContent = "--";
-      UI.macdDisplay.className = "env-label";
-    }
-  }
-
-  /* Bollinger Bands squeeze display */
-  if (UI.bbSqueezeDisplay) {
-    if (bbWidth.length > 0 && bbWidth[bbWidth.length - 1] != null) {
-      const squeeze = isBBSqueeze();
-      UI.bbSqueezeDisplay.textContent = squeeze ? "SQUEEZE ⚡" : "NORMAL";
-      UI.bbSqueezeDisplay.className = "status-badge " + (squeeze ? "warning" : "disabled");
-    } else {
-      UI.bbSqueezeDisplay.textContent = "--";
-      UI.bbSqueezeDisplay.className = "env-label";
-    }
-  }
-
-  /* ADX display */
-  if (UI.adxDisplay) {
-    if (adxValue > 0) {
-      const regime = getVolatilityRegime();
-      UI.adxDisplay.textContent = `${fmt(adxValue, 1)} (${regime})`;
-      UI.adxDisplay.className = "status-badge " + (regime === "TRENDING" ? "bull" : regime === "RANGING" ? "bear" : "warning");
-    } else {
-      UI.adxDisplay.textContent = "--";
-      UI.adxDisplay.className = "env-label";
-    }
-  }
-
-  /* Stochastic display */
-  if (UI.stochDisplay) {
-    const k = getCurrentStoch();
-    if (k != null) {
-      UI.stochDisplay.textContent = fmt(k, 1);
-      if (k <= STOCH_OVERSOLD) UI.stochDisplay.className = "status-badge bull";
-      else if (k >= STOCH_OVERBOUGHT) UI.stochDisplay.className = "status-badge bear";
-      else UI.stochDisplay.className = "env-label";
-    } else {
-      UI.stochDisplay.textContent = "--";
-      UI.stochDisplay.className = "env-label";
-    }
-  }
-
-  /* Volatility Regime */
-  if (UI.volatilityRegime) {
-    if (adxValue > 0) {
-      const regime = getVolatilityRegime();
-      UI.volatilityRegime.textContent = regime;
-      UI.volatilityRegime.className = "status-badge " + (regime === "TRENDING" ? "bull" : regime === "RANGING" ? "bear" : "warning");
-    } else {
-      UI.volatilityRegime.textContent = "--";
-      UI.volatilityRegime.className = "env-label";
-    }
-  }
-
-  /* Signal Strength Gauge */
-  if (UI.signalStrengthGauge && UI.signalStrengthLabel) {
-    if (breakout) {
-      const str = getSignalStrength(confluenceScore);
-      UI.signalStrengthLabel.textContent = str.label;
-      UI.signalStrengthLabel.className = "status-badge " + str.cls;
-      UI.signalStrengthGauge.style.width = str.pct + "%";
-      UI.signalStrengthGauge.className = "gauge-fill gauge-" + str.cls;
-    } else {
-      UI.signalStrengthLabel.textContent = "--";
-      UI.signalStrengthLabel.className = "env-label";
-      UI.signalStrengthGauge.style.width = "0%";
-      UI.signalStrengthGauge.className = "gauge-fill";
-    }
-  }
-
-  /* Trailing SL */
-  if (UI.trailingSLDisplay) {
-    UI.trailingSLDisplay.textContent = trailingSL != null ? fmt(trailingSL, 4) : "--";
-  }
-
-  /* Partial TP */
-  if (UI.partialTpDisplay) {
-    if (!partialTpEnabled) {
-      UI.partialTpDisplay.textContent = "OFF";
-    } else {
-      UI.partialTpDisplay.textContent = partialTpHit ? "HIT ✅" : "--";
-    }
-  }
-
-  if (trade) {
-    const activeSym = getActiveSymbol();
-    if (UI.entryPrice) UI.entryPrice.textContent = fmtPrice(trade.entry, activeSym);
-    if (UI.slPrice) UI.slPrice.textContent    = fmtPrice(trade.sl, activeSym);
-    if (UI.tpPrice) UI.tpPrice.textContent    = trade.tp != null ? fmtPrice(trade.tp, activeSym) : "TRAILING";
-    if (UI.rrDisplay) UI.rrDisplay.textContent  = `1 : ${fmt(trade.rr, 1)}`;
-
-    /* Account-based $ Risk / $ Reward / Position Size */
-    const m = calcPositionMetrics(trade);
-    const acctActive = m != null;
-    if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = acctActive ? "" : "none";
-    if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = acctActive ? "" : "none";
-    if (UI.positionSizeCard) UI.positionSizeCard.style.display = acctActive ? "" : "none";
-    if (UI.pipsCard) UI.pipsCard.style.display = (acctActive && !m.isSynthetic) ? "" : "none";
-    if (acctActive) {
-      if (UI.dollarRisk) UI.dollarRisk.textContent = `$${fmt(m.dollarRisk, 2)}`;
-      if (UI.dollarReward) UI.dollarReward.textContent = trade.tp != null ? `$${fmt(m.dollarReward, 2)}` : "TRAILING";
-      /* Always show Lot Size (MT5) */
-      if (UI.positionSizeLabel) UI.positionSizeLabel.textContent = "Lot Size";
-      if (UI.positionSize) {
-        UI.positionSize.textContent = fmt(m.lotSize, 2);
-      }
-      if (!m.isSynthetic && UI.pipsValue) {
-        UI.pipsValue.textContent = `${fmt(m.pips, 1)} pips`;
-      }
-    }
-  } else {
-    if (UI.entryPrice) UI.entryPrice.textContent = "--";
-    if (UI.slPrice) UI.slPrice.textContent    = "--";
-    if (UI.tpPrice) UI.tpPrice.textContent    = "--";
-    if (UI.rrDisplay) UI.rrDisplay.textContent  = "--";
-    /* Hide account cards when no trade */
-    if (UI.dollarRiskCard) UI.dollarRiskCard.style.display = "none";
-    if (UI.dollarRewardCard) UI.dollarRewardCard.style.display = "none";
-    if (UI.positionSizeCard) UI.positionSizeCard.style.display = "none";
-    if (UI.pipsCard) UI.pipsCard.style.display = "none";
-    if (UI.dollarRisk) UI.dollarRisk.textContent = "--";
-    if (UI.dollarReward) UI.dollarReward.textContent = "--";
-    if (UI.positionSize) UI.positionSize.textContent = "--";
-    if (UI.pipsValue) UI.pipsValue.textContent = "--";
-  }
-
-  /* Update recommended settings active state */
-  updateRecommendedSettings();
-}
-
-/* ================= CONNECTION UPTIME ================= */
-function startUptimeTimer() {
-  connectTime = Date.now();
-  if (uptimeInterval) clearInterval(uptimeInterval);
-  uptimeInterval = setInterval(updateUptime, 1000);
-  updateUptime();
-}
-
-function stopUptimeTimer() {
-  connectTime = null;
-  if (uptimeInterval) clearInterval(uptimeInterval);
-  uptimeInterval = null;
-  if (UI.uptimeDisplay) UI.uptimeDisplay.textContent = "--";
-}
-
-function updateUptime() {
-  if (!connectTime || !UI.uptimeDisplay) return;
-  const elapsed = Math.floor((Date.now() - connectTime) / 1000);
-  const m = Math.floor(elapsed / 60);
-  const s = elapsed % 60;
-  UI.uptimeDisplay.textContent = `${m}m ${s.toString().padStart(2, "0")}s`;
-}
-
-/* ================= CANDLE COUNTDOWN TIMER ================= */
-function startCandleCountdown() {
-  stopCandleCountdown();
-  candleCountdownInterval = setInterval(updateCandleCountdown, 1000);
-  updateCandleCountdown();
-}
-
-function stopCandleCountdown() {
-  if (candleCountdownInterval) {
-    clearInterval(candleCountdownInterval);
-    candleCountdownInterval = null;
-  }
-  if (UI.candleCountdown) {
-    UI.candleCountdown.textContent = "--";
-    UI.candleCountdown.className = "countdown-badge";
-  }
-}
-
-function updateCandleCountdown() {
-  if (!UI.candleCountdown || candles.length === 0) return;
-
-  const gran = parseInt(UI.granSelect.value, 10);
-  const lastCandle = candles[candles.length - 1];
-  const candleEndEpoch = lastCandle.epoch + gran;
-  const nowEpoch = Math.floor(Date.now() / 1000);
-  const remaining = candleEndEpoch - nowEpoch;
-
-  if (remaining <= 0) {
-    UI.candleCountdown.textContent = "0s";
-    UI.candleCountdown.className = "countdown-badge countdown-urgent";
-    return;
-  }
-
-  const hrs = Math.floor(remaining / 3600);
-  const min = Math.floor((remaining % 3600) / 60);
-  const sec = remaining % 60;
-
-  if (hrs > 0) {
-    UI.candleCountdown.textContent = `${hrs}h ${min.toString().padStart(2, "0")}m ${sec.toString().padStart(2, "0")}s`;
-  } else if (min > 0) {
-    UI.candleCountdown.textContent = `${min}m ${sec.toString().padStart(2, "0")}s`;
-  } else {
-    UI.candleCountdown.textContent = `${sec}s`;
-  }
-
-  /* Add urgent class when under 10 seconds */
-  UI.candleCountdown.className = remaining <= 10
-    ? "countdown-badge countdown-urgent"
-    : "countdown-badge";
-}
-
-/* ================= PING / KEEPALIVE ================= */
-function startPing() {
-  stopPing();
-  pingTimer = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ ping: 1 }));
-    }
-    /* Keep the authenticated trading connection alive too */
-    if (authWs && authWs.readyState === WebSocket.OPEN) {
-      authWs.send(JSON.stringify({ ping: 1 }));
-    }
-  }, PING_INTERVAL_MS);
-}
-
-function stopPing() {
-  if (pingTimer) {
-    clearInterval(pingTimer);
-    pingTimer = null;
-  }
-}
-
-/* ================= STREAM WATCHDOG ================= */
-/**
- * Start a watchdog that monitors the main WS for data stalls.
- * If no OHLC data arrives within WATCHDOG_TIMEOUT_MS the connection is
- * torn down and auto-reconnect kicks in, preventing the need to manually
- * stop/play after extended monitoring sessions.
- */
-function startWatchdog() {
-  stopWatchdog();
-  lastDataTimestamp = Date.now();
-  watchdogTimer = setInterval(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const elapsed = Date.now() - lastDataTimestamp;
-    if (elapsed >= WATCHDOG_TIMEOUT_MS) {
-      addLog(`⚠️ Watchdog: No market data for ${Math.round(elapsed / 1000)}s — forcing reconnect`);
-      showToast("Stream Stall Detected", "No data received — reconnecting…", "warning", TOAST_WARNING_DURATION_MS);
-      intentionalClose = false;
-      ws.close();
-    }
-  }, 30000); /* check every 30s */
-}
-
-function stopWatchdog() {
-  if (watchdogTimer) {
-    clearInterval(watchdogTimer);
-    watchdogTimer = null;
-  }
-}
-
-/** Reset the watchdog timestamp (called whenever real data arrives). */
-function feedWatchdog() {
-  lastDataTimestamp = Date.now();
-}
-
-/**
- * Start a per-panel watchdog. If no OHLC arrives within WATCHDOG_TIMEOUT_MS
- * force-close the panel WS so it auto-reconnects.
- */
-function startPanelWatchdog(p) {
-  stopPanelWatchdog(p);
-  p._lastDataTs = Date.now();
-  p._watchdogTimer = setInterval(() => {
-    if (!p.ws || p.ws.readyState !== WebSocket.OPEN) return;
-    const elapsed = Date.now() - p._lastDataTs;
-    if (elapsed >= WATCHDOG_TIMEOUT_MS) {
-      addLog(`⚠️ [Multi] ${p.symbol} Watchdog: No data for ${Math.round(elapsed / 1000)}s — forcing reconnect`);
-      p.intentionalClose = false;
-      p.ws.close();
-    }
-  }, 30000);
-}
-
-function stopPanelWatchdog(p) {
-  if (p._watchdogTimer) {
-    clearInterval(p._watchdogTimer);
-    p._watchdogTimer = null;
-  }
-}
-
-/* ================= PENDING SIGNAL RECONNECT PERSISTENCE ================= */
-/**
- * After a watchdog reconnect, the candles array is rebuilt from scratch (only
- * the latest ~100 candles).  Any PENDING strategy signals from before the
- * reconnect still hold candleIdx values referencing the OLD candle array.
- * When the monitor functions compute `elapsed = (candles.length-1) - s.candleIdx`
- * those stale indices produce negative or enormous values → the signals get
- * EXPIRED prematurely and the win/loss outcome (+ Telegram notification) is lost.
- *
- * This function re-maps candleIdx on every PENDING signal by matching the
- * signal's epoch to the closest candle in the NEW array.  Signals whose epoch
- * is older than all available candles are kept with candleIdx = 0 (oldest) so
- * the timeout mechanism can still expire them naturally rather than immediately.
- *
- * For breakout signals (signalHistory), if a PENDING signal exists we also
- * restore `trade` and `monitoringTrade` so that monitorTradeOutcome() can
- * continue tracking SL/TP hit on incoming ticks.
- */
-function remapPendingSignalIndices() {
-  if (!candles || candles.length === 0) return;
-
-  /* Build epoch→index lookup from the new candle array */
-  const epochToIdx = new Map();
-  for (let i = 0; i < candles.length; i++) {
-    epochToIdx.set(candles[i].epoch, i);
-  }
-
-  /** Find the best matching candleIdx for a given epoch */
-  function findIdx(epoch) {
-    if (epochToIdx.has(epoch)) return epochToIdx.get(epoch);
-    /* Epoch not in new array — find the closest candle by binary search */
-    let lo = 0, hi = candles.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (candles[mid].epoch < epoch) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  }
-
-  /* Remap all strategy history arrays */
-  const allHistories = [
-    liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
-    fibScalpHistory, po3History, gridScalperMAHistory, gridScalperV2History,
-    liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory,
-    tiktokHistory, orderblockHistory, fvgStratHistory, candleInterpHistory,
-    po3_4hHistory, breakerBlockHistory, oteGoldenPocketHistory
-  ];
-  let remapped = 0;
-  for (const hist of allHistories) {
-    if (!hist) continue;
-    for (const s of hist) {
-      if (!s || s.result !== "PENDING") continue;
-      if (s.epoch == null) continue;
-      const newIdx = findIdx(s.epoch);
-      if (newIdx !== s.candleIdx) {
-        s.candleIdx = newIdx;
-        remapped++;
-      }
-    }
-  }
-
-  /* Remap breakout signalHistory PENDING entries and restore trade monitoring.
-     Breakout signals may have `epoch` (numeric) or `time` (ISO string) — handle both. */
-  const pendingBreakout = signalHistory.findLast(s => s && s.result === "PENDING");
-  if (pendingBreakout) {
-    let bkEpoch = pendingBreakout.epoch;
-    if (bkEpoch == null && pendingBreakout.time) {
-      bkEpoch = Math.floor(new Date(pendingBreakout.time).getTime() / 1000);
-    }
-    if (bkEpoch != null) {
-      pendingBreakout.candleIdx = findIdx(bkEpoch);
-    }
-    /* Restore trade state so monitorTradeOutcome() can continue tracking */
-    if (!trade && !monitoringTrade) {
-      trade = {
-        entry: pendingBreakout.entry,
-        sl:    pendingBreakout.sl,
-        tp:    pendingBreakout.tp,
-        dir:   pendingBreakout.dir,
-        symbol: pendingBreakout.symbol,
-        outcomeStartIdx: pendingBreakout.candleIdx || 0
-      };
-      monitoringTrade = true;
-      addLog(`🔄 Restored pending breakout trade monitoring after reconnect (${pendingBreakout.dir} @ ${fmt(pendingBreakout.entry, 4)})`);
-    }
-    remapped++;
-  }
-
-  /* Remap NY Open Range and Session Range pending trades (saved before reconnect) */
-  if (_reconnectSavedNyTrade && _reconnectSavedNyTrade.result === "PENDING" && _reconnectSavedNyTrade.epoch != null) {
-    nyOpenRangeTrade = _reconnectSavedNyTrade;
-    nyOpenRangeTrade.candleIdx = findIdx(nyOpenRangeTrade.epoch);
-    _reconnectSavedNyTrade = null;
-    remapped++;
-    addLog(`🔄 Restored pending NY Open Range trade after reconnect`);
-  }
-  if (_reconnectSavedSessionTrade && _reconnectSavedSessionTrade.result === "PENDING" && _reconnectSavedSessionTrade.epoch != null) {
-    sessionRangeTrade = _reconnectSavedSessionTrade;
-    sessionRangeTrade.candleIdx = findIdx(sessionRangeTrade.epoch);
-    _reconnectSavedSessionTrade = null;
-    remapped++;
-    addLog(`🔄 Restored pending Session Range trade after reconnect`);
-  }
-
-  if (remapped > 0) {
-    addLog(`🔄 Reconnect: remapped ${remapped} pending signal(s) to new candle indices`);
-  }
-
-  /* Clamp per-strategy cooldown trackers that still reference the OLD (longer)
-     candle array.  Left unclamped, `idx - last*Idx` goes negative and blocks
-     new signals until the new array grows past the stale index; clamping to
-     the latest candle keeps the normal cooldown behaviour after a reconnect
-     (and prevents an instant duplicate re-fire of the just-preserved signal). */
-  const _maxIdx = candles.length - 1;
-  if (lastScalpCandleIdx      > _maxIdx) lastScalpCandleIdx      = _maxIdx;
-  if (lastLiquiditySweepIdx   > _maxIdx) lastLiquiditySweepIdx   = _maxIdx;
-  if (lastStopLossHuntIdx     > _maxIdx) lastStopLossHuntIdx     = _maxIdx;
-  if (lastFailedPinBarIdx     > _maxIdx) lastFailedPinBarIdx     = _maxIdx;
-  if (lastFibScalpIdx         > _maxIdx) lastFibScalpIdx         = _maxIdx;
-  if (lastPo3Idx              > _maxIdx) lastPo3Idx              = _maxIdx;
-  if (lastGridScalperMAIdx    > _maxIdx) lastGridScalperMAIdx    = _maxIdx;
-  if (lastGridScalperV2Idx    > _maxIdx) lastGridScalperV2Idx    = _maxIdx;
-  if (lastFvgStratIdx         > _maxIdx) lastFvgStratIdx         = _maxIdx;
-  if (lastMtfTopDownIdx       > _maxIdx) lastMtfTopDownIdx       = _maxIdx;
-  if (lastCandleInterpIdx     > _maxIdx) lastCandleInterpIdx     = _maxIdx;
-  if (lastOrderblockIdx       > _maxIdx) lastOrderblockIdx       = _maxIdx;
-  if (lastTiktokIdx           > _maxIdx) lastTiktokIdx           = _maxIdx;
-  if (lastPo3_4hIdx           > _maxIdx) lastPo3_4hIdx           = _maxIdx;
-  if (lastBreakerBlockIdx     > _maxIdx) lastBreakerBlockIdx     = _maxIdx;
-  if (lastOteGoldenPocketIdx  > _maxIdx) lastOteGoldenPocketIdx  = _maxIdx;
-}
-
-/* ================= ACCOUNT / AUTH HELPERS ================= */
-
-/** Send a candles subscription request on a WebSocket */
-function subscribeCandles(socket, symbol, gran) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({
-    ticks_history: symbol,
-    adjust_start_time: 1,
-    count: 100,
-    end: "latest",
-    granularity: gran,
-    style: "candles",
-    subscribe: 1
-  }));
-}
-
-/** Update the account type badge in the status bar */
-function updateAccountBadge(acct) {
-  if (!UI.accountTypeBadge) return;
-  if (acct) _lastAuthorizeAcct = acct;
-  if (!acct) {
-    UI.accountTypeBadge.textContent = "NO AUTH";
-    UI.accountTypeBadge.className = "status-badge disabled";
-    UI.accountTypeBadge.title = "Not authorized – using public data feed";
-    return;
-  }
-  const isReal = !acct.is_virtual;
-  UI.accountTypeBadge.textContent = isReal ? `REAL (${acct.currency})` : `DEMO (${acct.currency})`;
-  UI.accountTypeBadge.className = isReal ? "status-badge enabled" : "status-badge caution";
-  UI.accountTypeBadge.title = streamMode
-    ? "Account authorized"
-    : `${acct.loginid} – Balance: ${acct.currency} ${acct.balance}`;
-}
-
-/* ================= WEBSOCKET ================= */
-
-/** Update the public feed status bar below the nav */
-function updateFeedStatusBar(state) {
-  const indicator = document.getElementById("feedStatusIndicator");
-  const text = document.getElementById("feedStatusText");
-  const btn  = document.getElementById("startPublicFeedBtn");
-  if (!indicator || !text) return;
-  if (state === "connected") {
-    indicator.textContent = "🟢";
-    text.textContent = "Connected to public market feed.";
-    text.style.color = "#22c55e";
-    if (btn) { btn.disabled = true; btn.textContent = "📡 Feed Connected"; }
-  } else if (state === "connecting") {
-    indicator.textContent = "🟡";
-    text.textContent = "Connecting to public market feed…";
-    text.style.color = "#f59e0b";
-    if (btn) { btn.disabled = true; btn.textContent = "📡 Connecting…"; }
-  } else if (state === "reconnecting") {
-    indicator.textContent = "🟡";
-    text.textContent = "Reconnecting to public market feed…";
-    text.style.color = "#f59e0b";
-    if (btn) { btn.disabled = true; btn.textContent = "📡 Reconnecting…"; }
-  } else {
-    indicator.textContent = "🔴";
-    text.textContent = "Public market feed is offline. Click Start Public Market Feed to enable live charts and indicators.";
-    text.style.color = "#94a3b8";
-    if (btn) { btn.disabled = false; btn.textContent = "📡 Start Public Market Feed"; }
-  }
-}
-
-function connect() {
-  if (ws && ws.readyState <= 1) return;
-  intentionalClose = false;
-
-  /* Preserve pending signal state across reconnect so win/loss outcomes are not lost.
-     resetIndicator() and processAllCandles() clear trade/monitoringTrade/nyOpenRangeTrade/
-     sessionRangeTrade but we need them to survive so monitoring can resume after candles reload. */
-  _reconnectSavedNyTrade = (nyOpenRangeTrade && nyOpenRangeTrade.result === "PENDING") ? Object.assign({}, nyOpenRangeTrade) : null;
-  _reconnectSavedSessionTrade = (sessionRangeTrade && sessionRangeTrade.result === "PENDING") ? Object.assign({}, sessionRangeTrade) : null;
-
-  reconnectAttempts = 0;
-  resetIndicator();
-
-  const symbol = resolveFeedSymbol(UI.symbolSelect.value);
-  if (symbol !== UI.symbolSelect.value) UI.symbolSelect.value = symbol;
-  const gran   = parseInt(UI.granSelect.value, 10);
-  addLog(`📈 Selected symbol: ${symbol} (${getMarketType(symbol)} market, ${STEP_INDEX_LABELS[symbol] || getSymbolLabel(symbol)}), granularity ${gran}s`);
-
-  /* ── Deriv API feed — supports ticks_history (OHLC candles) without authorization ── */
-  updateFeedStatusBar("connecting");
-  ws = new WebSocket(PUBLIC_WS_URL);
-  const thisWs = ws; /* capture reference to detect stale handlers */
-
-  ws.onopen = () => {
-    if (thisWs !== ws) return; /* stale connection */
-    UI.wsStatus.textContent = "CONNECTED";
-    UI.wsStatus.className = "status-badge enabled";
-    UI.connectBtn.disabled = true;
-    UI.disconnectBtn.disabled = false;
-    updateFeedStatusBar("connected");
-    reconnectAttempts = 0;
-    startUptimeTimer();
-    startPing();
-    startWatchdog();
-
-    /* Start NY Open Range timer if enabled */
-    if (nyOpenRangeEnabled) startNyOpenRangeTimer();
-
-    /* Subscribe to market data directly — no auth required on the public feed */
-    addLog(`Connected to public feed – subscribing to ${symbol} (${gran}s candles)`);
-    subscribeCandles(thisWs, symbol, gran);
-
-    /* Validate symbol against the API's active_symbols list.
-       This runs in parallel — if the symbol turns out to be invalid the error
-       handler below will surface it, but this also lets us cache the valid
-       set so the UI can warn early on future switches. */
-    if (thisWs.readyState === WebSocket.OPEN) {
-      thisWs.send(JSON.stringify({ active_symbols: "brief", product_type: "basic" }));
-    }
-
-    /* Also open the authenticated trading connection if a token is set */
-    connectAuthWs(symbol);
-  };
-
-  ws.onmessage = (evt) => {
-    if (thisWs !== ws) return; /* stale connection */
-    const msg = JSON.parse(evt.data);
-
-    /* Ignore ping/pong responses */
-    if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
-
-    if (msg.error) {
-      const sym = (msg.echo_req && (msg.echo_req.ticks_history || msg.echo_req.ticks)) || "";
-      if (sym) {
-        addLog(`⚠️ Feed error for "${sym}": ${msg.error.message} (code: ${msg.error.code || "unknown"})`);
-        showToast("Symbol Error", `"${sym}" — ${msg.error.message}. Check symbol code.`, "warning", 8000);
-      } else {
-        addLog("Feed error: " + msg.error.message);
-      }
-      return;
-    }
-
-    /* Handle active_symbols response — rebuild the symbol dropdown dynamically */
-    if (msg.msg_type === "active_symbols" && msg.active_symbols) {
-      const validSet = new Set(msg.active_symbols.map(s => s.symbol));
-      _cachedActiveSymbols = validSet;
-      const currentSym = UI.symbolSelect ? UI.symbolSelect.value : symbol;
-      if (!validSet.has(currentSym)) {
-        addLog(`⚠️ Symbol "${currentSym}" is NOT in the active_symbols list — chart may not receive data.`);
-        showToast("Invalid Symbol", `"${currentSym}" is not available on Deriv. Select a different symbol.`, "warning", 10000);
-      } else {
-        addLog(`✅ Symbol "${currentSym}" verified against active_symbols`);
-      }
-
-      /* Dynamically rebuild the <select> from the API response so that the
-         symbol list always reflects what Deriv actually offers. Symbols are
-         grouped by submarket_display_name within each market. */
-      if (UI.symbolSelect) {
-        /* Build grouped structure: market → submarket → [assets] */
-        const grouped = new Map();
-        for (const asset of msg.active_symbols) {
-          const marketKey = asset.market_display_name || asset.market || "Other";
-          const subKey    = asset.submarket_display_name || asset.submarket || marketKey;
-          if (!grouped.has(marketKey)) grouped.set(marketKey, new Map());
-          const subs = grouped.get(marketKey);
-          if (!subs.has(subKey)) subs.set(subKey, []);
-          subs.get(subKey).push(asset);
-        }
-
-        /* Sort assets within each group alphabetically by display_name */
-        for (const [, subs] of grouped) {
-          for (const [, assets] of subs) {
-            assets.sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-          }
-        }
-
-        /* Clear old options and rebuild (sort markets & submarkets alphabetically) */
-        UI.symbolSelect.innerHTML = "";
-        const sortedMarkets = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-        for (const [market, subs] of sortedMarkets) {
-          const sortedSubs = Array.from(subs.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-          for (const [sub, assets] of sortedSubs) {
-            const label = market === sub ? market : `${market} — ${sub}`;
-            const optgroup = document.createElement("optgroup");
-            optgroup.label = label;
-            for (const asset of assets) {
-              const opt = document.createElement("option");
-              opt.value = asset.symbol;
-              opt.textContent = asset.display_name || asset.symbol;
-              optgroup.appendChild(opt);
-            }
-            UI.symbolSelect.appendChild(optgroup);
-          }
-        }
-
-        /* Restore previous selection if it still exists; otherwise keep the first option */
-        if (validSet.has(currentSym)) {
-          UI.symbolSelect.value = currentSym;
-        }
-        updateCurrentSymbolLabel();
-        addLog(`📋 Symbol list refreshed — ${msg.active_symbols.length} symbols loaded from API`);
-      }
-      return;
-    }
-
-    /* Historical batch */
-    if (msg.candles) {
-      feedWatchdog();
-      candles = msg.candles.map(c => ({
-        open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
-      }));
-      if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
-      if (candles.length > 0) {
-        addLog(`📊 ${symbol}: received ${candles.length} historical candles (first ${fmt(candles[0].close, 2)} @ ${candles[0].epoch}, last ${fmt(candles[candles.length - 1].close, 2)} @ ${candles[candles.length - 1].epoch})`);
-      } else {
-        addLog(`⚠️ ${symbol}: historical candle request returned 0 candles — no data to compute indicators`);
-      }
-      computeEMAs();
-      processAllCandles();
-      logIndicatorSnapshot(symbol);
-      /* After reconnect, remap any surviving PENDING signals to the new candle
-         indices so their outcome (WIN/LOSS) can still be tracked and sent via Telegram. */
-      remapPendingSignalIndices();
-      drawChart();
-      startCandleCountdown();
-    }
-
-    /* Streaming OHLC — use else-if so the historical batch's numeric ohlc flag
-       (ohlc: 1) does not accidentally enter this branch. */
-    else if (msg.ohlc && typeof msg.ohlc === "object") {
-      feedWatchdog();
-      const o = msg.ohlc;
-      const c = {
-        open: +o.open, high: +o.high, low: +o.low, close: +o.close, epoch: +o.open_time
-      };
-      const hadPrev = candles.length > 0;
-      const sameEpoch = hadPrev && candles[candles.length - 1].epoch === c.epoch;
-      const closedCandle = (!sameEpoch && hadPrev) ? candles[candles.length - 1] : null;
-
-      if (candleCloseOnlyEnabled && closedCandle) {
-        computeEMAs();
-        computeATR();
-        computeRSI();
-        computeMACD();
-        computeBollingerBands();
-        computeADX();
-        computeStochastic();
-        computeEMA200();
-        computeVWAP();
-        processLatestCandle();
-        processLiveScalp();
-        processCustomStrategies();
-        monitorTradeOutcome(closedCandle);
-        monitorScalpOutcomes(closedCandle);
-        monitorCustomStrategyOutcomes(closedCandle);
-        monitorSessionRangeTradeOutcome(closedCandle);
-        monitorNyOpenRangeTradeOutcome(closedCandle);
-      }
-
-      if (sameEpoch) {
-        candles[candles.length - 1] = c;
-      } else {
-        candles.push(c);
-        if (candles.length > MAX_CANDLE_HISTORY) {
-          const removed = candles.length - MAX_CANDLE_HISTORY;
-          candles = candles.slice(removed);
-          adjustIndicesAfterSlice(removed);
-        }
-      }
-
-      if (!rangeStartEpoch && candles.length > 0) rangeStartEpoch = candles[0].epoch;
-
-      if (UI.livePrice) UI.livePrice.textContent = fmt(c.close, 4);
-
-      computeEMAs();
-      computeATR();
-      computeRSI();
-      computeMACD();
-      computeBollingerBands();
-      computeADX();
-      computeStochastic();
-      computeEMA200();
-      computeVWAP();
-      if (!sameEpoch && getMarketType(symbol) === "step") {
-        logIndicatorSnapshot(symbol);
-      }
-      if (!candleCloseOnlyEnabled) {
-        processLatestCandle();
-        processLiveScalp();
-        processCustomStrategies();
-        monitorTradeOutcome(c);
-        monitorScalpOutcomes(c);
-        monitorCustomStrategyOutcomes(c);
-        monitorSessionRangeTradeOutcome(c);
-        monitorNyOpenRangeTradeOutcome(c);
-      }
-      /* Feature 5: update BOS/ChoCH markers on each new candle */
-      if (bosChochEnabled) detectBosChoch();
-      drawChart();
-    }
-  };
-
-  ws.onclose = () => {
-    if (thisWs !== ws) return; /* stale connection – don't touch current state */
-    stopPing();
-    stopWatchdog();
-    stopCandleCountdown();
-    UI.wsStatus.textContent = "DISCONNECTED";
-    UI.wsStatus.className = "status-badge disabled";
-    UI.connectBtn.disabled = false;
-    UI.disconnectBtn.disabled = true;
-    updateFeedStatusBar("disconnected");
-    stopUptimeTimer();
-    addLog("WebSocket closed");
-
-    /* Reset per-symbol auto-trade slots on disconnect — but preserve
-       contract IDs for reconnect if this was an unintentional close. */
-    for (const [sym, slot] of autoTradeSlots.entries()) {
-      if (slot.contractId && !intentionalClose) {
-        slot.pendingContractId = slot.contractId;
-        addLog(`📌 Preserving contract ${slot.contractId} for re-subscribe after reconnect (${sym})`);
-      }
-      /* Clear all active trade timers */
-      for (const t of slot.activeTrades) {
-        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
-      }
-      slot.activeTrades = [];
-      slot.inProgress = false;
-      slot.contractId = null;
-    }
-
-    if (intentionalClose) {
-      /* Intentional disconnect — resolve any stuck PENDING entries */
-      for (const [sym, slot] of autoTradeSlots.entries()) {
-        clearAutoTradePendingTimeout(sym);
-        slot.pendingContractId = null;
-      }
-      for (const e of autoTradeHistory) {
-        if (e.result === "PENDING") {
-          e.result = "CANCELLED";
-          e.profit = 0;
-        }
-      }
-    }
-    /* If unintentional close, leave PENDING entries and the pending timeout
-       running — they will be resolved after reconnect via re-subscribe,
-       or time out via the pending timer as a safety net. */
-    recalcAutoTradePL();
-    renderAutoTradeHistory();
-    updateAutoTradePLUI();
-    persistAutoTradeHistory();
-
-    /* Nullify so connect() guard doesn't block reconnection */
-    ws = null;
-
-    /* Auto-reconnect if not intentional */
-    if (!intentionalClose) {
-      scheduleReconnect();
-    }
-  };
-
-  ws.onerror = (evt) => {
-    if (thisWs !== ws) return; /* stale connection */
-    const errorMsg = evt.message || evt.reason || "connection failed";
-    addLog("WebSocket error: " + errorMsg);
-    console.error("WebSocket error details:", evt);
-    
-    /* Show user-friendly error notification */
-    if (!intentionalClose) {
-      showToast("Connection Error", "WebSocket connection failed. Reconnecting...", "warning", TOAST_WARNING_DURATION_MS);
-    }
-  };
-}
-
-function disconnect() {
-  intentionalClose = true;
-  authorized = false;
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  if (chartRedrawTimer) { cancelAnimationFrame(chartRedrawTimer); chartRedrawTimer = null; }
-  chartRedrawPending = false;
-  stopPing();
-  stopCandleCountdown();
-  stopUptimeTimer();
-  stopNyOpenRangeTimer();
-  updateAccountBadge(null);
-  /* Clear all per-symbol auto-trade slots */
-  for (const [sym, slot] of autoTradeSlots.entries()) {
-    clearAutoTradePendingTimeout(sym);
-    for (const t of slot.activeTrades) {
-      if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
-    }
-    slot.activeTrades = [];
-    slot.inProgress = false;
-    slot.contractId = null;
-    slot.pendingContractId = null;
-  }
-
-  /* Resolve any stuck PENDING entries on intentional disconnect */
-  for (const e of autoTradeHistory) {
-    if (e.result === "PENDING") {
-      e.result = "CANCELLED";
-      e.profit = 0;
-    }
-  }
-  recalcAutoTradePL();
-  renderAutoTradeHistory();
-  updateAutoTradePLUI();
-  persistAutoTradeHistory();
-
-  if (ws) {
-    /* Detach handlers so the closing socket can't interfere with future state */
-    const dyingWs = ws;
-    ws = null;
-    dyingWs.onopen = dyingWs.onmessage = dyingWs.onclose = dyingWs.onerror = null;
-
-    /* Clean up active subscriptions before closing */
-    try {
-      if (dyingWs.readyState === WebSocket.OPEN) {
-        dyingWs.send(JSON.stringify({ forget_all: "candles" }));
-        dyingWs.send(JSON.stringify({ forget_all: "ticks" }));
-      }
-    } catch (e) { /* ignore send errors during teardown */ }
-
-    dyingWs.close();
-  }
-
-  /* Close the authenticated trading connection too */
-  if (authWs) {
-    const dyingAuth = authWs;
-    authWs = null;
-    dyingAuth.onopen = dyingAuth.onmessage = dyingAuth.onclose = dyingAuth.onerror = null;
-    try {
-      if (dyingAuth.readyState === WebSocket.OPEN) {
-        dyingAuth.send(JSON.stringify({ forget_all: "balance" }));
-      }
-    } catch (e) { /* ignore */ }
-    dyingAuth.close();
-  }
-
-  /* Update UI so the connect button is re-enabled (onclose won't fire
-     because handlers were detached above) */
-  UI.wsStatus.textContent = "DISCONNECTED";
-  UI.wsStatus.className = "status-badge disabled";
-  UI.connectBtn.disabled = false;
-  UI.disconnectBtn.disabled = true;
-  updateFeedStatusBar("disconnected");
-  addLog("Disconnected");
-}
-
-/**
- * Open the authenticated WebSocket for trading actions (authorize / buy / sell / balance).
- * Called after the public feed connects successfully when a Deriv token is stored.
- * Market data (charts, indicators) always comes from the public feed — this channel
- * is strictly for account-bound operations.
- *
- * @param {string} symbol — currently-selected symbol (used for multiplier pre-fetch)
- */
-function connectAuthWs(symbol) {
-  const token = sessionStorage.getItem(DERIV_TOKEN_KEY) || "";
-  if (!token) return; /* no token — trading disabled, public-feed-only mode */
-
-  if (authWs && authWs.readyState <= 1) return; /* already connecting or open */
-
-  authWs = new WebSocket(AUTH_WS_URL);
-  const thisAuthWs = authWs;
-
-  authWs.onopen = () => {
-    if (thisAuthWs !== authWs) return;
-    addLog("Authorizing Deriv account for trading…");
-    thisAuthWs.send(JSON.stringify({ authorize: token }));
-  };
-
-  authWs.onmessage = (evt) => {
-    if (thisAuthWs !== authWs) return;
-    const msg = JSON.parse(evt.data);
-
-    if (msg.msg_type === "ping" || msg.msg_type === "pong") return;
-
-    if (msg.error) {
-      if (handleAutoTradeMessage(msg, thisAuthWs)) return;
-      addLog("Auth error: " + msg.error.message);
-      if (msg.msg_type === "authorize") {
-        addLog("⚠ Authorization failed – trading disabled (market data still active)");
-        authorized = false;
-        updateAccountBadge(null);
-      }
-      return;
-    }
-
-    /* ── Authorize response ── */
-    if (msg.msg_type === "authorize") {
-      authorized = true;
-      const acct = msg.authorize;
-      const isReal = !acct.is_virtual;
-      updateAccountBadge(acct);
-      addLog(streamMode
-        ? `✅ Authorized (${isReal ? "REAL" : "DEMO"})`
-        : `✅ Authorized as ${acct.loginid} (${isReal ? "REAL" : "DEMO"}) – ${acct.currency} ${acct.balance}`);
-      if (!isReal) {
-        addLog("⚠ Demo account – switch to a real account token for live trading");
-      }
-      autoTradeBalance = parseFloat(acct.balance) || null;
-      if (sessionStartBalance === null || sessionStartBalance === undefined) sessionStartBalance = autoTradeBalance;
-      ensureAutoTradeDailyBaseline();
-      updateAutoTradeBalanceUI();
-      updateAutoTradeBalanceVisibility();
-      thisAuthWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-      autoUpdateMultiplier(symbol);
-      /* Re-subscribe to any in-flight contracts that survived a reconnect */
-      for (const [sym, slot] of autoTradeSlots.entries()) {
-        if (slot.pendingContractId) {
-          addLog(`🔄 Re-subscribing to contract ${slot.pendingContractId} after reconnect (${sym})…`);
-          slot.contractId = slot.pendingContractId;
-          slot.inProgress = true;
-          slot.pendingContractId = null;
-          thisAuthWs.send(JSON.stringify({
-            proposal_open_contract: 1,
-            contract_id: slot.contractId,
-            subscribe: 1,
-            passthrough: { auto_trade: true, source: "reconnect", tradeSymbol: sym }
-          }));
-          startAutoTradePendingTimeout(sym, thisAuthWs);
-        }
-      }
-      return;
-    }
-
-    /* Delegate proposal / buy / POC / balance to the shared handler */
-    handleAutoTradeMessage(msg, thisAuthWs);
-  };
-
-  authWs.onclose = () => {
-    if (thisAuthWs !== authWs) return;
-    if (!intentionalClose) {
-      for (const [sym, slot] of autoTradeSlots.entries()) {
-        if (slot.contractId) {
-          slot.pendingContractId = slot.contractId;
-          addLog(`📌 Preserving contract ${slot.contractId} for re-subscribe after auth reconnect (${sym})`);
-        }
-      }
-    }
-    authorized = false;
-    authWs = null;
-    updateAccountBadge(null);
-    addLog("Auth WebSocket closed" + (intentionalClose ? "" : " — will reconnect with next market feed cycle"));
-  };
-
-  authWs.onerror = (evt) => {
-    if (thisAuthWs !== authWs) return;
-    addLog("Auth WebSocket error: " + (evt.message || "connection failed"));
-  };
-}
-
-function scheduleReconnect() {
-  if (intentionalClose) return;
-  
-  const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts), RECONNECT_MAX_DELAY);
-  reconnectAttempts++;
-  
-  /* Cap reconnect attempts and provide user feedback */
-  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-    addLog("⚠️ Max reconnection attempts reached. Please check your connection and click Connect.");
-    UI.wsStatus.textContent = "FAILED";
-    UI.wsStatus.className = "status-badge error";
-    updateFeedStatusBar("disconnected");
-    showToast("Connection Failed", "Unable to reconnect after multiple attempts. Please try again manually.", "error", TOAST_ERROR_DURATION_MS);
-    return;
-  }
-  
-  addLog(`Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${reconnectAttempts})...`);
-  UI.wsStatus.textContent = "RECONNECTING";
-  UI.wsStatus.className = "status-badge warning";
-  updateFeedStatusBar("reconnecting");
-  
-  reconnectTimer = setTimeout(() => {
-    if (!intentionalClose) {
-      try {
-        connect();
-      } catch (err) {
-        console.error("Reconnection error:", err);
-        addLog(`Reconnection failed: ${err.message}`);
-        scheduleReconnect(); /* Try again with exponential backoff */
-      }
-    }
-  }, delay);
-}
-
-function debouncedReconnect() {
-  if (reconnectDebounceTimer) clearTimeout(reconnectDebounceTimer);
-  reconnectDebounceTimer = setTimeout(() => {
-    disconnect();
-    setTimeout(connect, 100);
-  }, RECONNECT_DEBOUNCE_MS);
-}
-
-function adjustIndicesAfterSlice(removed) {
-  if (openingRange) {
-    openingRange.startIdx = Math.max(0, openingRange.startIdx - removed);
-    openingRange.endIdx   = Math.max(0, openingRange.endIdx - removed);
-  }
-  if (breakout) breakout.candleIdx = Math.max(0, breakout.candleIdx - removed);
-  if (retestInfo) retestInfo.candleIdx = Math.max(0, retestInfo.candleIdx - removed);
-  if (indecisionInfo) indecisionInfo.candleIdx = Math.max(0, indecisionInfo.candleIdx - removed);
-  if (confirmInfo) confirmInfo.candleIdx = Math.max(0, confirmInfo.candleIdx - removed);
-
-  /* Adjust strategy signal indices and cooldown trackers */
-  lastLiquiditySweepIdx = Math.max(-999, lastLiquiditySweepIdx - removed);
-  lastStopLossHuntIdx   = Math.max(-999, lastStopLossHuntIdx - removed);
-  lastFailedPinBarIdx   = Math.max(-999, lastFailedPinBarIdx - removed);
-  lastFibScalpIdx       = Math.max(-999, lastFibScalpIdx - removed);
-  lastPo3Idx            = Math.max(-999, lastPo3Idx - removed);
-  lastGridScalperMAIdx  = Math.max(-999, lastGridScalperMAIdx - removed);
-  lastScalpCandleIdx    = Math.max(-999, lastScalpCandleIdx - removed);
-  lastMtfTopDownIdx     = Math.max(-999, lastMtfTopDownIdx - removed);
-
-  for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory]) {
-    for (const s of h) {
-      if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
-    }
-  }
-}
-
-/* ================= EMA COMPUTATION ================= */
-function computeEMAs() {
-  const closes = candles.map(c => c.close);
-  emaFast = computeEMA(closes, EMA_FAST_PERIOD);
-  emaSlow = computeEMA(closes, EMA_SLOW_PERIOD);
-  emaHTF  = computeEMA(closes, HTF_EMA_PERIOD);
-}
-
-/**
- * Requirement #10: detailed per-symbol indicator logging for Step Index (and
- * other) markets. Logs the latest computed value of each indicator so failures
- * are visible in the signal log instead of silently skipping.
- */
-function logIndicatorSnapshot(symbol) {
-  try {
-    const last = (a) => (Array.isArray(a) && a.length) ? a[a.length - 1] : null;
-    const f = (v, d = 4) => (v == null || isNaN(v)) ? "--" : fmt(v, d);
-    addLog(
-      `📈 ${symbol} indicators — ` +
-      `RSI:${f(last(rsiValues), 1)} MACD:${f(last(macdHistogram), 4)} ` +
-      `EMA${EMA_FAST_PERIOD}:${f(last(emaFast))} EMA${EMA_SLOW_PERIOD}:${f(last(emaSlow))} ` +
-      `BB[${f(last(bbLower))}/${f(last(bbMiddle))}/${f(last(bbUpper))}] ` +
-      `ATR:${f(atrValue)} ADX:${f(adxValue, 1)} ` +
-      `Stoch%K:${f(last(stochK), 1)} %D:${f(last(stochD), 1)} ` +
-      `VWAP:${f(last(vwapValues))}`
-    );
-  } catch (e) {
-    addLog(`⚠️ ${symbol} indicator snapshot failed: ${e.message}`);
-  }
-}
-
-function computeEMA(data, period) {
-  if (!data || data.length === 0 || period <= 0) return [];
-  const result = [];
-  const multiplier = 2 / (period + 1);
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    if (i < period) {
-      sum += data[i];
-      if (i === period - 1) {
-        result.push(period > 0 ? sum / period : 0);
-      } else {
-        result.push(null);
-      }
-    } else {
-      const ema = (data[i] - result[i - 1]) * multiplier + result[i - 1];
-      result.push(ema);
-    }
-  }
-  return result;
-}
-
-/**
- * Compute a Simple Moving Average over an array of values.
- * Returns an array of the same length; positions before period-1 are null.
- */
-function computeSMA(data, period) {
-  if (!data || data.length === 0 || period <= 0) return [];
-  const result = [];
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    sum += data[i];
-    if (i >= period) sum -= data[i - period];
-    result.push(i >= period - 1 ? sum / period : null);
-  }
-  return result;
-}
-
-/* ================= ATR COMPUTATION ================= */
-/**
- * #4/#10: Incremental ATR — O(1) per new appended candle after the initial build.
- *
- * When the current candle is an update to the last candle (same epoch), we always
- * recompute the last TR and patch `atrValues` in-place so the chart and all
- * consumers always see the current-candle-aware ATR.
- *
- * When candles.length grows by exactly 1 (a new bar was appended), we update
- * `_atrPrev` with a single Wilder smoothing step instead of iterating all history.
- *
- * When candles are reset / sliced (count drops or jumps by >1) we fall back to
- * the full O(n) build and cache the result for future incremental steps.
- */
-function computeATR() {
-  if (!candles || candles.length < 2) {
-    atrValue = 0; atrValues = [];
-    _atrPrev = 0; _atrCandleCount = 0;
-    return;
-  }
-
-  /* Helper: compute a single true range */
-  function _tr(c, prev) {
-    return Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close));
-  }
-
-  const n = candles.length;
-
-  /* ── Full (re)build required ── */
-  if (_atrCandleCount === 0 || n < _atrCandleCount - 1 || n > _atrCandleCount + 1) {
-    const trueRanges = [];
-    for (let i = 1; i < n; i++) {
-      if (candles[i] && candles[i - 1]) trueRanges.push(_tr(candles[i], candles[i - 1]));
-    }
-    atrValues = new Array(n).fill(null);
-    if (trueRanges.length < ATR_PERIOD) {
-      const avg = trueRanges.length > 0 ? trueRanges.reduce((a, b) => a + b, 0) / trueRanges.length : 0;
-      atrValue = avg;
-      for (let i = 0; i < trueRanges.length; i++) atrValues[i + 1] = avg;
-      _atrPrev = avg; _atrCandleCount = n;
-      return;
-    }
-    let sum = 0;
-    for (let i = 0; i < ATR_PERIOD; i++) sum += trueRanges[i];
-    let prev = sum / ATR_PERIOD;
-    atrValues[ATR_PERIOD] = prev;
-    for (let i = ATR_PERIOD; i < trueRanges.length; i++) {
-      prev = (prev * (ATR_PERIOD - 1) + trueRanges[i]) / ATR_PERIOD;
-      atrValues[i + 1] = prev;
-    }
-    atrValue = prev;
-    _atrPrev = prev; _atrCandleCount = n;
-    return;
-  }
-
-  /* ── New candle appended (n === _atrCandleCount + 1) ── */
-  if (n === _atrCandleCount + 1) {
-    const newTR = _tr(candles[n - 1], candles[n - 2]);
-    const newATR = (atrValues.length >= n && atrValues[n - 2] !== null && atrValues[n - 2] !== undefined)
-      ? (_atrPrev * (ATR_PERIOD - 1) + newTR) / ATR_PERIOD
-      : _atrPrev;  /* insufficient history — keep previous value */
-    atrValues.push(newATR);
-    atrValue = newATR;
-    _atrPrev = newATR; _atrCandleCount = n;
-    return;
-  }
-
-  /* ── Current candle updated in-place (n === _atrCandleCount) ── */
-  /* Recompute only the TR for the last candle and patch the final atrValues entry */
-  if (n >= 2 && candles[n - 2]) {
-    const updatedTR = _tr(candles[n - 1], candles[n - 2]);
-    /* Walk back one step to recalculate the terminal ATR from the previous smoothed value */
-    const prevSmoothed = atrValues.length >= n ? (atrValues[n - 2] ?? _atrPrev) : _atrPrev;
-    const updatedATR = (prevSmoothed * (ATR_PERIOD - 1) + updatedTR) / ATR_PERIOD;
-    if (atrValues.length === n) {
-      atrValues[n - 1] = updatedATR;
-    } else {
-      atrValues.push(updatedATR);
-    }
-    atrValue = updatedATR;
-    /* Do NOT update _atrPrev or _atrCandleCount — this was just a tick update */
-  }
-}
-
-/* ================= RSI COMPUTATION ================= */
-function computeRSI() {
-  if (!candles || candles.length < RSI_PERIOD + 1) { rsiValues = []; return; }
-  const closes = candles.map(c => c && c.close != null ? c.close : 0);
-  rsiValues = [];
-
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= RSI_PERIOD; i++) {
-    const change = closes[i] - closes[i - 1];
-    if (change > 0) gains += change;
-    else losses -= change;
-  }
-  let avgGain = RSI_PERIOD > 0 ? gains / RSI_PERIOD : 0;
-  let avgLoss = RSI_PERIOD > 0 ? losses / RSI_PERIOD : 0;
-
-  for (let i = 0; i < RSI_PERIOD; i++) rsiValues.push(null);
-
-  /* When avgLoss is 0 all movement was up → RSI = 100 */
-  rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
-
-  for (let i = RSI_PERIOD + 1; i < closes.length; i++) {
-    const change = closes[i] - closes[i - 1];
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? -change : 0;
-    avgGain = RSI_PERIOD > 0 ? (avgGain * (RSI_PERIOD - 1) + gain) / RSI_PERIOD : 0;
-    avgLoss = RSI_PERIOD > 0 ? (avgLoss * (RSI_PERIOD - 1) + loss) / RSI_PERIOD : 0;
-    rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
-  }
-}
-
-function getCurrentRSI() {
-  if (rsiValues.length === 0) return null;
-  return rsiValues[rsiValues.length - 1];
-}
-
-/* ================= MACD COMPUTATION ================= */
-function computeMACD() {
-  const closes = candles.map(c => c.close);
-  if (closes.length < MACD_SLOW) { macdLine = []; macdSignal = []; macdHistogram = []; return; }
-  const emaFastArr = computeEMA(closes, MACD_FAST);
-  const emaSlowArr = computeEMA(closes, MACD_SLOW);
-  macdLine = [];
-  for (let i = 0; i < closes.length; i++) {
-    if (emaFastArr[i] != null && emaSlowArr[i] != null) {
-      macdLine.push(emaFastArr[i] - emaSlowArr[i]);
-    } else {
-      macdLine.push(null);
-    }
-  }
-  const validMACD = macdLine.filter(v => v != null);
-  if (validMACD.length < MACD_SIGNAL_PERIOD) { macdSignal = []; macdHistogram = []; return; }
-  macdSignal = computeEMA(macdLine.map(v => v ?? 0), MACD_SIGNAL_PERIOD);
-  /* Fix: null out signal where MACD was null */
-  for (let i = 0; i < macdLine.length; i++) {
-    if (macdLine[i] === null || macdLine[i] === undefined) macdSignal[i] = null;
-  }
-  macdHistogram = [];
-  for (let i = 0; i < macdLine.length; i++) {
-    if (macdLine[i] !== null && macdLine[i] !== undefined && macdSignal[i] !== null && macdSignal[i] !== undefined) {
-      macdHistogram.push(macdLine[i] - macdSignal[i]);
-    } else {
-      macdHistogram.push(null);
-    }
-  }
-}
-
-function getCurrentMACD() {
-  if (macdHistogram.length === 0) return null;
-  return macdHistogram[macdHistogram.length - 1];
-}
-
-function isMACDAligned(dir) {
-  if (!macdFilterEnabled) return true;
-  const hist = getCurrentMACD();
-  if (hist === null || hist === undefined) return true;
-  return dir === "BULL" ? hist > 0 : hist < 0;
-}
-
-/* ================= BOLLINGER BANDS COMPUTATION ================= */
-function computeBollingerBands() {
-  if (!candles || candles.length < BB_PERIOD) {
-    bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];
-    return;
-  }
-  const closes = candles.map(c => c && c.close != null ? c.close : 0);
-  bbUpper = []; bbLower = []; bbMiddle = []; bbWidth = []; _bbValidWidths = [];
-
-  /* #5: O(n) sliding-window variance using Welford's online algorithm.
-   * Maintains a running mean and sum-of-squared-deltas as the window moves,
-   * avoiding the O(n×period) double-pass slice.reduce of the old approach. */
-  let wMean = 0, wM2 = 0;
-  /* Seed first window using Welford */
-  for (let i = 0; i < BB_PERIOD - 1; i++) {
-    const d = closes[i] - wMean;
-    wMean += d / (i + 1);
-    wM2   += d * (closes[i] - wMean);
-    bbUpper.push(null); bbLower.push(null); bbMiddle.push(null); bbWidth.push(null);
-  }
-  /* Complete the first full window (index BB_PERIOD - 1) */
-  {
-    const i = BB_PERIOD - 1;
-    const d = closes[i] - wMean;
-    wMean += d / BB_PERIOD;
-    wM2   += d * (closes[i] - wMean);
-    const stdDev = Math.sqrt(wM2 / BB_PERIOD);
-    bbMiddle.push(wMean);
-    bbUpper.push(wMean + BB_STD_DEV * stdDev);
-    bbLower.push(wMean - BB_STD_DEV * stdDev);
-    bbWidth.push(wMean + BB_STD_DEV * stdDev - (wMean - BB_STD_DEV * stdDev));
-  }
-  /* Slide the window for remaining candles */
-  for (let i = BB_PERIOD; i < closes.length; i++) {
-    const outgoing = closes[i - BB_PERIOD];
-    const incoming = closes[i];
-    /* Welford online update for sliding window */
-    const oldMean = wMean;
-    wMean  = wMean  + (incoming - outgoing) / BB_PERIOD;
-    wM2    = wM2    + (incoming - outgoing) * (incoming - wMean + outgoing - oldMean);
-    /* Guard against floating-point drift into negative variance */
-    const variance = Math.max(0, wM2 / BB_PERIOD);
-    const stdDev = Math.sqrt(variance);
-    bbMiddle.push(wMean);
-    bbUpper.push(wMean + BB_STD_DEV * stdDev);
-    bbLower.push(wMean - BB_STD_DEV * stdDev);
-    bbWidth.push(2 * BB_STD_DEV * stdDev);
-  }
-  /* #11: cache non-null widths so isBBSqueeze() doesn't re-filter every call */
-  _bbValidWidths = bbWidth.filter(w => w != null);
-}
-
-function isBBSqueeze() {
-  /* #11: use pre-filtered cache from computeBollingerBands instead of re-filtering */
-  if (_bbValidWidths.length < BB_PERIOD) return false;
-  const current = _bbValidWidths[_bbValidWidths.length - 1];
-  const lookback = _bbValidWidths.slice(-BB_PERIOD * 2);
-  const avgWidth = lookback.reduce((a, b) => a + b, 0) / lookback.length;
-  return current < avgWidth * BB_SQUEEZE_THRESHOLD;
-}
-
-function getBBPosition() {
-  if (candles.length === 0 || bbUpper.length === 0) return null;
-  const i = candles.length - 1;
-  if (bbUpper[i] === null || bbUpper[i] === undefined || bbLower[i] === null || bbLower[i] === undefined) return null;
-  const price = candles[i].close;
-  const width = bbUpper[i] - bbLower[i];
-  if (width <= 0) return null;
-  return (price - bbLower[i]) / width;  /* 0 = at lower band, 1 = at upper band */
-}
-
-/* ================= ADX COMPUTATION ================= */
-function computeADX() {
-  adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
-  if (candles.length < ADX_PERIOD * 2 + 1) return;
-  const trArr = [], dpArr = [], dmArr = [];
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i], p = candles[i - 1];
-    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
-    const upMove = c.high - p.high;
-    const downMove = p.low - c.low;
-    dpArr.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    dmArr.push(downMove > upMove && downMove > 0 ? downMove : 0);
-    trArr.push(tr);
-  }
-  /* Wilder smoothing */
-  let atr14 = 0, smoothDP = 0, smoothDM = 0;
-  for (let i = 0; i < ADX_PERIOD; i++) { atr14 += trArr[i]; smoothDP += dpArr[i]; smoothDM += dmArr[i]; }
-  const dxArr = [];
-  for (let i = ADX_PERIOD; i < trArr.length; i++) {
-    atr14 = atr14 - atr14 / ADX_PERIOD + trArr[i];
-    smoothDP = smoothDP - smoothDP / ADX_PERIOD + dpArr[i];
-    smoothDM = smoothDM - smoothDM / ADX_PERIOD + dmArr[i];
-    const diP = atr14 > 0 ? (smoothDP / atr14) * 100 : 0;
-    const diM = atr14 > 0 ? (smoothDM / atr14) * 100 : 0;
-    const diSum = diP + diM;
-    const dx = diSum > 0 ? Math.abs(diP - diM) / diSum * 100 : 0;
-    dxArr.push({ dx, diP, diM });
-  }
-  if (dxArr.length < ADX_PERIOD) return;
-  let adxSmooth = 0;
-  for (let i = 0; i < ADX_PERIOD; i++) adxSmooth += dxArr[i].dx;
-  adxSmooth /= ADX_PERIOD;
-  for (let i = ADX_PERIOD; i < dxArr.length; i++) {
-    adxSmooth = (adxSmooth * (ADX_PERIOD - 1) + dxArr[i].dx) / ADX_PERIOD;
-  }
-  adxValue = adxSmooth;
-  const last = dxArr[dxArr.length - 1];
-  adxDiPlus = last.diP;
-  adxDiMinus = last.diM;
-}
-
-function getVolatilityRegime() {
-  if (adxValue >= ADX_TRENDING_THRESHOLD) return "TRENDING";
-  if (adxValue < ADX_RANGING_THRESHOLD) return "RANGING";
-  return "TRANSITIONING";
-}
-
-function getCurrentRegimeTag() {
-  return adxValue > 0 ? getVolatilityRegime() : "TRANSITIONING";
-}
-
-function getUtcDateKey(ts = Date.now()) {
+function gridV2_getDayKey(ts = Date.now()) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-function ensureAutoTradeDailyBaseline() {
-  const today = getUtcDateKey();
-  if (autoTradeDailyDateKey !== today) {
-    autoTradeDailyDateKey = today;
-    autoTradeDailyStartBalance = autoTradeBalance;
-    autoTradeDailyPeakBalance  = autoTradeBalance;
-  } else if ((autoTradeDailyStartBalance === null || autoTradeDailyStartBalance === undefined) && autoTradeBalance !== null && autoTradeBalance !== undefined) {
-    autoTradeDailyStartBalance = autoTradeBalance;
-  }
-  /* Track intraday peak balance for the daily profit lock */
-  if (autoTradeBalance != null && (autoTradeDailyPeakBalance == null || autoTradeBalance > autoTradeDailyPeakBalance)) {
-    autoTradeDailyPeakBalance = autoTradeBalance;
-  }
+function gridV2_resetDailyState(force = false) {
+  const dayKey = gridV2_getDayKey();
+  if (!force && gridScalperV2DailyState.dayKey === dayKey) return;
+  gridScalperV2DailyState.dayKey = dayKey;
+  gridScalperV2DailyState.consecutiveLosses = 0;
+  gridScalperV2DailyState.halted = false;
+  gridScalperV2DailyState.haltReason = "";
+  gridScalperV2DailyState.baselineBalance = Number.isFinite(autoTradeBalance) ? autoTradeBalance : null;
 }
 
-function getOptimizationProfile(symbol, granSec, regime) {
-  const s = symbol || getActiveSymbol();
-  const g = granSec || getCurrentGranularitySec();
-  const r = regime || getCurrentRegimeTag();
-  return walkForwardProfiles[`${s}|${g}|${r}`] || walkForwardProfiles[`${s}|${g}|TRANSITIONING`] || null;
+function gridV2_setStatusMessage(message, toast = false) {
+  const next = message || "";
+  if (gridScalperV2StatusMessage === next) return;
+  gridScalperV2StatusMessage = next;
+  if (next) addLog(`💹 ${next}`);
+  if (toast && next) showToast("Grid Scalper V2", next, "warning", 5000);
+  updateGridScalperV2DashboardUI();
 }
 
-function getDynamicMinConfluence(symbol, granSec, regime) {
-  const r = regime || getCurrentRegimeTag();
-  const profile = getOptimizationProfile(symbol, granSec, r);
-  let threshold = minConfluenceValue;
-  if (r === "TRENDING") threshold += DYNAMIC_CONF_TRENDING_DELTA;
-  else if (r === "RANGING") threshold += DYNAMIC_CONF_RANGING_DELTA;
-  else threshold += DYNAMIC_CONF_TRANSITIONING_DELTA;
-  if (profile && Number.isFinite(profile.requiredConfluence)) {
-    threshold = Math.max(threshold, profile.requiredConfluence);
-  }
-  return Math.max(6, Math.min(16, threshold));
-}
-
-function requiresStrongBreakoutNow(symbol, granSec, regime) {
-  const r = regime || getCurrentRegimeTag();
-  if (r === "RANGING") return true;
-  const profile = getOptimizationProfile(symbol, granSec, r);
-  return !!(profile && profile.requireStrongBreakout);
-}
-
-function isADXFavorable() {
-  if (!adxFilterEnabled) return true;
-  return adxValue >= ADX_RANGING_THRESHOLD;  /* block signals in ranging markets */
-}
-
-/* ================= STOCHASTIC COMPUTATION ================= */
-function computeStochastic() {
-  stochK = []; stochD = [];
-  if (candles.length < STOCH_K_PERIOD + STOCH_SMOOTH) return;
-  /* Raw %K */
-  const rawK = [];
-  for (let i = 0; i < candles.length; i++) {
-    if (i < STOCH_K_PERIOD - 1) { rawK.push(null); continue; }
-    const slice = candles.slice(i - STOCH_K_PERIOD + 1, i + 1);
-    const hh = Math.max(...slice.map(c => c.high));
-    const ll = Math.min(...slice.map(c => c.low));
-    const range = hh - ll;
-    rawK.push(range > 0 ? ((candles[i].close - ll) / range) * 100 : 50);
-  }
-  /* Smooth %K with SMA */
-  for (let i = 0; i < rawK.length; i++) {
-    if (rawK[i] == null || i < STOCH_K_PERIOD - 1 + STOCH_SMOOTH - 1) { stochK.push(null); continue; }
-    let sum = 0;
-    for (let j = i - STOCH_SMOOTH + 1; j <= i; j++) sum += (rawK[j] ?? 0);
-    stochK.push(sum / STOCH_SMOOTH);
-  }
-  /* #6: %D = SMA of smoothed %K — O(n) explicit sliding window (correct & fast).
-   * An array-backed deque is used instead of a back-search so null gaps never
-   * cause an incorrect subtraction.  The window is reset whenever a null is seen
-   * (matching the semantics of "not enough data"). */
-  const dWindow = [];
-  let dSum = 0;
-  for (let i = 0; i < stochK.length; i++) {
-    if (stochK[i] == null) { stochD.push(null); dWindow.length = 0; dSum = 0; continue; }
-    dWindow.push(stochK[i]);
-    dSum += stochK[i];
-    if (dWindow.length > STOCH_D_PERIOD) dSum -= dWindow.shift();
-    stochD.push(dWindow.length >= STOCH_D_PERIOD ? dSum / STOCH_D_PERIOD : null);
-  }
-}
-
-function getCurrentStoch() {
-  if (stochK.length === 0) return null;
-  return stochK[stochK.length - 1];
-}
-
-function isStochFavorable(dir) {
-  if (!stochFilterEnabled) return true;
-  const k = getCurrentStoch();
-  if (k == null) return true;
-  /* For BULL: stoch should be coming from oversold (room to rise) */
-  if (dir === "BULL") return k <= STOCH_OVERBOUGHT;  /* not already overbought */
-  /* For BEAR: stoch should be coming from overbought (room to fall) */
-  if (dir === "BEAR") return k >= STOCH_OVERSOLD;  /* not already oversold */
-  return true;
-}
-
-/* ================= PROFIT-DIRECTION CONSTRAINT FILTERS ================= */
-
-/* Compute EMA 200 for MTF structure */
-function computeEMA200() {
-  emaMTF = [];
-  if (candles.length === 0) return;
-  const k = 2 / (MTF_EMA_PERIOD + 1);
-  let ema = candles[0].close;
-  emaMTF.push(ema);
-  for (let i = 1; i < candles.length; i++) {
-    ema = candles[i].close * k + ema * (1 - k);
-    emaMTF.push(ema);
-  }
-}
-
-/* Compute VWAP approximation (rolling typical price × range weighted average).
- * Uses candle range as volume proxy since synthetic indices don't provide real volume data. */
-function computeVWAP() {
-  vwapValues = [];
-  if (candles.length === 0) return;
-  let cumTPxVol = 0;
-  let cumVol = 0;
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const tp = (c.high + c.low + c.close) / 3;
-    const vol = c.high - c.low;  /* range as volume proxy for synthetics */
-    cumTPxVol += tp * (vol || 1);
-    cumVol += (vol || 1);
-    vwapValues.push(cumVol > 0 ? cumTPxVol / cumVol : tp);
-  }
-}
-
-/* 1. Min Confluence Gate — applied after trade is built (main strategy) or before signal fires (secondary strategies).
-   Shared by every strategy gate: when specific confluences are selected (requiredConfluences non-empty),
-   the numeric min-score threshold is overridden and the signal passes only if ALL selected factors are active. */
-function checkConfluenceGate(overrideDir, overrideLevel, overrideCandleIdx) {
-  if (requiredConfluences.length > 0) {
-    const active = getActiveConfluenceFactors(overrideDir, overrideLevel, overrideCandleIdx);
-    const missing = requiredConfluences.filter(f => !active.includes(f));
-    return {
-      pass: missing.length === 0,
-      reason: missing.length === 0
-        ? `all ${requiredConfluences.length} selected confluences active`
-        : `missing selected confluence${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`
-    };
-  }
-  const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
-  return {
-    pass: score >= minConfluenceValue,
-    reason: `confluence ${score}/${minConfluenceValue} below minimum`
-  };
-}
-
-function isConfluenceSufficient(overrideDir, overrideLevel, overrideCandleIdx) {
-  if (!minConfluenceEnabled) return true;
-  if (requiredConfluences.length > 0) {
-    return checkConfluenceGate(overrideDir, overrideLevel, overrideCandleIdx).pass;
-  }
-  const score = computeConfluenceScore(overrideDir, overrideLevel, overrideCandleIdx);
-  const dynamicMin = getDynamicMinConfluence(getActiveSymbol(), getCurrentGranularitySec(), getCurrentRegimeTag());
-  return score >= dynamicMin;
-}
-
-/* 2. Double Retest — track retest count */
-function isDoubleRetestSatisfied() {
-  if (!doubleRetestEnabled) return true;
-  return retestCount >= 2;
-}
-
-/* 3. Confirmation Bar — check if candle at idx closed in trade direction */
-function isConfirmBarValid(idx) {
-  if (!confirmBarEnabled) return true;
-  if (idx >= candles.length || !breakout) return true;
-  const c = candles[idx];
-  if (breakout.dir === "BULL") return c.close > c.open;  /* bullish close */
-  if (breakout.dir === "BEAR") return c.close < c.open;  /* bearish close */
-  return true;
-}
-
-/* 4. Momentum Divergence — detect RSI divergence at retest */
-function hasMomentumDivergence(dir) {
-  if (!divergenceFilterEnabled) return true;
-  if (rsiValues.length < 10 || !breakout || !retestInfo) return true;
-
-  /* Find RSI at breakout and at retest */
-  const boIdx = breakout.candleIdx;
-  const rtIdx = retestInfo.candleIdx;
-  if (boIdx >= rsiValues.length || rtIdx >= rsiValues.length) return true;
-  const rsiBO = rsiValues[boIdx];
-  const rsRT = rsiValues[rtIdx];
-  if (rsiBO == null || rsRT == null) return true;
-
-  const priceBO = candles[boIdx].close;
-  const pricRT = candles[rtIdx].close;
-
-  if (dir === "BULL") {
-    /* Bullish divergence: price makes lower low but RSI makes higher low */
-    return pricRT <= priceBO ? rsRT > rsiBO : true;
-  }
-  if (dir === "BEAR") {
-    /* Bearish divergence: price makes higher high but RSI makes lower high */
-    return pricRT >= priceBO ? rsRT < rsiBO : true;
-  }
-  return true;
-}
-
-/* 5. ADX Hard Gate — block when ADX < 20 or > max threshold */
-function isADXInRange() {
-  if (!adxHardGateEnabled) return true;
-  if (adxValue <= 0) return true;  /* no data yet */
-  return adxValue >= ADX_RANGING_THRESHOLD && adxValue <= adxMaxThreshold;
-}
-
-/* 6. Breakout Distance — reject if retest too far from breakout level */
-function isBreakoutDistanceOK(idx) {
-  if (!breakoutDistEnabled) return true;
-  if (!breakout || atrValue <= 0) return true;
-  const price = candles[idx].close;
-  const dist = Math.abs(price - breakout.level);
-  return dist <= breakoutDistATR * atrValue;
-}
-
-/* 7. Time Decay — reject if too many candles between breakout and current */
-function isTimeDecayOK(idx) {
-  if (!timeDecayEnabled) return true;
-  if (!breakout) return true;
-  return (idx - breakout.candleIdx) <= timeDecayCandles;
-}
-
-/* 8. Consecutive Direction — 2 of last 3 candles close in trade direction */
-function hasConsecutiveDirection(idx, dir) {
-  if (!consecutiveDirEnabled) return true;
-  if (idx < 2) return true;
-  let count = 0;
-  for (let i = Math.max(0, idx - 2); i <= idx; i++) {
-    const c = candles[i];
-    if (dir === "BULL" && c.close > c.open) count++;
-    if (dir === "BEAR" && c.close < c.open) count++;
-  }
-  return count >= 2;
-}
-
-/* 9. VWAP Alignment — price near/above VWAP for BULL, near/below for BEAR */
-function isVWAPAligned(dir) {
-  if (!vwapFilterEnabled) return true;
-  if (vwapValues.length === 0 || candles.length === 0) return true;
-  const vwap = vwapValues[vwapValues.length - 1];
-  const price = candles[candles.length - 1].close;
-  if (vwap === null || vwap === undefined) return true;
-  /* Allow within 0.5 ATR of VWAP as "near" */
-  const tolerance = atrValue > 0 ? atrValue * VWAP_ATR_TOLERANCE : Math.abs(price * VWAP_PRICE_TOLERANCE_PCT);
-  if (dir === "BULL") return price >= vwap - tolerance;
-  if (dir === "BEAR") return price <= vwap + tolerance;
-  return true;
-}
-
-/* 10. Stochastic Crossover — K crossing D from oversold/overbought */
-function hasStochCrossover(dir) {
-  if (!stochCrossEnabled) return true;
-  if (stochK.length < 2 || stochD.length < 2) return true;
-  const kNow  = stochK[stochK.length - 1];
-  const kPrev = stochK[stochK.length - 2];
-  const dNow  = stochD[stochD.length - 1];
-  const dPrev = stochD[stochD.length - 2];
-  if (kNow == null || kPrev == null || dNow == null || dPrev == null) return true;
-  if (dir === "BULL") {
-    /* K crosses above D from below, and coming from oversold zone */
-    return kPrev <= dPrev && kNow > dNow && kPrev <= STOCH_OVERSOLD + STOCH_CROSSOVER_BUFFER;
-  }
-  if (dir === "BEAR") {
-    /* K crosses below D from above, and coming from overbought zone */
-    return kPrev >= dPrev && kNow < dNow && kPrev >= STOCH_OVERBOUGHT - STOCH_CROSSOVER_BUFFER;
-  }
-  return true;
-}
-
-/* 11. Opening Range Size — range must be within min-max ATR multiples */
-function isRangeSizeOK() {
-  if (!rangeSizeEnabled) return true;
-  if (!openingRange || atrValue <= 0) return true;
-  const rangeSize = openingRange.high - openingRange.low;
-  const ratio = rangeSize / atrValue;
-  return ratio >= rangeSizeMin && ratio <= rangeSizeMax;
-}
-
-/* 12. Higher-High / Higher-Low Structure Check */
-function hasHHHLStructure(dir) {
-  if (!hhhlEnabled) return true;
-  if (candles.length < HHHL_LOOKBACK_PERIOD) return true;
-  /* Look at last N candles for swing structure */
-  const lookback = Math.min(candles.length, HHHL_LOOKBACK_PERIOD);
-  const start = candles.length - lookback;
-  const highs = [];
-  const lows = [];
-  /* Find mini swing points (local extremes) */
-  for (let i = start + 1; i < candles.length - 1; i++) {
-    if (candles[i].high > candles[i - 1].high && candles[i].high > candles[i + 1].high) {
-      highs.push(candles[i].high);
-    }
-    if (candles[i].low < candles[i - 1].low && candles[i].low < candles[i + 1].low) {
-      lows.push(candles[i].low);
-    }
-  }
-  if (highs.length < 2 || lows.length < 2) return true;  /* not enough data */
-  if (dir === "BULL") {
-    /* Higher highs and higher lows */
-    const hhOK = highs[highs.length - 1] > highs[highs.length - 2];
-    const hlOK = lows[lows.length - 1] > lows[lows.length - 2];
-    return hhOK && hlOK;
-  }
-  if (dir === "BEAR") {
-    /* Lower highs and lower lows */
-    const lhOK = highs[highs.length - 1] < highs[highs.length - 2];
-    const llOK = lows[lows.length - 1] < lows[lows.length - 2];
-    return lhOK && llOK;
-  }
-  return true;
-}
-
-/* 13. Post-Breakout Follow-Through — next candle after breakout continues in direction */
-function hasFollowThrough() {
-  if (!followThroughEnabled) return true;
-  if (!breakout || breakout.candleIdx + 1 >= candles.length) return true;
-  const nextCandle = candles[breakout.candleIdx + 1];
-  if (breakout.dir === "BULL") return nextCandle.close > nextCandle.open;
-  if (breakout.dir === "BEAR") return nextCandle.close < nextCandle.open;
-  return true;
-}
-
-/* 14. MTF Structure — EMA 200 alignment */
-function isMTFStructureAligned(dir) {
-  if (!mtfStructureEnabled) return true;
-  if (emaMTF.length === 0 || candles.length === 0) return true;
-  const ema200 = emaMTF[emaMTF.length - 1];
-  const price = candles[candles.length - 1].close;
-  if (ema200 === null || ema200 === undefined) return true;
-  if (dir === "BULL") return price > ema200;
-  if (dir === "BEAR") return price < ema200;
-  return true;
-}
-
-/* ---- Revert all settings to defaults ---- */
-function revertAllSettings() {
-  /* API default */
-  APP_ID = 120128;
-  updateWsUrl();
-
-  /* Core filter defaults */
-  autoResetEnabled     = true;
-  emaFilterEnabled     = false;
-  htfFilterEnabled     = false;
-  atrToleranceEnabled  = false;
-  trailingStopEnabled  = false;
-  partialTpEnabled     = false;
-  falseBreakoutEnabled = false;
-  minRREnabled         = false;
-  minRRValue           = 2.0;
-  pureTrailingEnabled  = false;
-  teslaScalingEnabled  = false;
-  teslaScalingPlan     = "conservative";
-
-  /* Advanced signal defaults */
-  rsiFilterEnabled     = false;
-  volumeSpikeEnabled   = false;
-  sessionFilterEnabled = false;
-  sessionFilterMode    = "london_ny";
-  fibRetestEnabled     = false;
-
-  /* GainzAlgo V2 defaults */
-  macdFilterEnabled      = false;
-  bbSqueezeFilterEnabled = false;
-  adxFilterEnabled       = false;
-  stochFilterEnabled     = false;
-
-  /* Profit-Direction Constraint defaults */
-  minConfluenceEnabled    = false;
-  minConfluenceValue      = 6;
-  requiredConfluences     = [];
-  doubleRetestEnabled     = false;
-  confirmBarEnabled       = false;
-  divergenceFilterEnabled = false;
-  adxHardGateEnabled      = false;
-  adxMaxThreshold         = 50;
-  breakoutDistEnabled     = false;
-  breakoutDistATR         = 3.0;
-  timeDecayEnabled        = false;
-  timeDecayCandles        = 20;
-  consecutiveDirEnabled   = false;
-  vwapFilterEnabled       = false;
-  stochCrossEnabled       = false;
-  rangeSizeEnabled        = false;
-  rangeSizeMin            = 0.5;
-  rangeSizeMax            = 3.0;
-  hhhlEnabled             = false;
-  followThroughEnabled    = false;
-  mtfStructureEnabled     = false;
-
-  /* Scalping & misc */
-  scalpingModeEnabled  = false;
-  nyOpenRangeEnabled   = false;
-  sessionRangesEnabled = false;
-  autoApplyRecommended = true;
-  lockTimeframe = false;
-  lockRR        = false;
-  lockRangeMin  = false;
-  liquiditySweepEnabled = false;
-  stopLossHuntEnabled   = false;
-  failedPinBarEnabled   = false;
-  fibScalpEnabled       = false;
-  po3Enabled            = false;
-  po3EntryMaxAge        = PO3_ENTRY_MAX_AGE_SAFE;
-  tiktokEnabled         = false;
-  gridScalperMAEnabled  = false;
-  gridScalperMAStrategy = "price_vs_ma";
-  gridScalperMAPeriod   = 21;
-  fvgStratEnabled       = false;
-  mtfTopDownEnabled     = false;
-  candleInterpEnabled   = false;
-  autoTradeExecutionMode = "deriv";
-  mt5SignalApiUrl        = "/api/mt5/signal.php";
-  mt5StatusApiUrl        = "/api/mt5/order_status.php";
-  mt5MinStopPoints       = 0;
-  mt5FreezePoints        = 0;
-  mt5LotStep             = 0.01;
-  mt5MinLot              = 0.01;
-  mt5MaxLot              = 100;
-  mt5StatusPollingEnabled = true;
-  mt5LastStatusSyncTs     = 0;
-  RANGE_MINUTES           = 15;
-  LEVEL_TOUCH_TOLERANCE   = 0.15;
-  DOJI_BODY_RATIO         = 0.2;
-  SWING_LOOKBACK_PERIOD   = 35;
-
-  /* Sync all UI elements */
-  if (UI.appIdInput)             UI.appIdInput.value               = APP_ID;
-  if (UI.autoResetToggle)        UI.autoResetToggle.checked        = autoResetEnabled;
-  if (UI.emaFilterToggle)        UI.emaFilterToggle.checked        = emaFilterEnabled;
-  if (UI.htfFilterToggle)        UI.htfFilterToggle.checked        = htfFilterEnabled;
-  if (UI.atrToleranceToggle)     UI.atrToleranceToggle.checked     = atrToleranceEnabled;
-  if (UI.trailingStopToggle)     UI.trailingStopToggle.checked     = trailingStopEnabled;
-  if (UI.partialTpToggle)        UI.partialTpToggle.checked        = partialTpEnabled;
-  if (UI.falseBreakoutToggle)    UI.falseBreakoutToggle.checked    = falseBreakoutEnabled;
-  if (UI.minRRToggle)            UI.minRRToggle.checked            = minRREnabled;
-  if (UI.minRRInput)             UI.minRRInput.value               = minRRValue;
-  if (UI.pureTrailingToggle)     UI.pureTrailingToggle.checked     = pureTrailingEnabled;
-  if (UI.teslaScalingToggle)     UI.teslaScalingToggle.checked     = teslaScalingEnabled;
-  if (UI.teslaScalingPlan)       UI.teslaScalingPlan.value         = teslaScalingPlan;
-  if (UI.rsiFilterToggle)        UI.rsiFilterToggle.checked        = rsiFilterEnabled;
-  if (UI.volumeSpikeToggle)      UI.volumeSpikeToggle.checked      = volumeSpikeEnabled;
-  if (UI.sessionFilterToggle)    UI.sessionFilterToggle.checked    = sessionFilterEnabled;
-  if (UI.sessionFilterMode)      UI.sessionFilterMode.value        = sessionFilterMode;
-  if (UI.fibRetestToggle)        UI.fibRetestToggle.checked        = fibRetestEnabled;
-  if (UI.macdFilterToggle)       UI.macdFilterToggle.checked       = macdFilterEnabled;
-  if (UI.bbSqueezeFilterToggle)  UI.bbSqueezeFilterToggle.checked  = bbSqueezeFilterEnabled;
-  if (UI.adxFilterToggle)        UI.adxFilterToggle.checked        = adxFilterEnabled;
-  if (UI.stochFilterToggle)      UI.stochFilterToggle.checked      = stochFilterEnabled;
-  if (UI.scalpingModeToggle)     UI.scalpingModeToggle.checked     = scalpingModeEnabled;
-  if (UI.nyOpenRangeToggle)      UI.nyOpenRangeToggle.checked      = nyOpenRangeEnabled;
-  if (UI.sessionRangesToggle)    UI.sessionRangesToggle.checked    = sessionRangesEnabled;
-  if (UI.autoApplyRecToggle)     UI.autoApplyRecToggle.checked     = autoApplyRecommended;
-  if (UI.lockTimeframeToggle)    UI.lockTimeframeToggle.checked    = lockTimeframe;
-  if (UI.lockRRToggle)           UI.lockRRToggle.checked           = lockRR;
-  if (UI.lockRangeMinToggle)     UI.lockRangeMinToggle.checked     = lockRangeMin;
-  if (UI.lockIndicatorFiltersToggle) UI.lockIndicatorFiltersToggle.checked = lockIndicatorFilters;
-  if (UI.liquiditySweepToggle)   UI.liquiditySweepToggle.checked   = liquiditySweepEnabled;
-  if (UI.stopLossHuntToggle)     UI.stopLossHuntToggle.checked     = stopLossHuntEnabled;
-  if (UI.failedPinBarToggle)     UI.failedPinBarToggle.checked     = failedPinBarEnabled;
-  if (UI.fibScalpToggle)         UI.fibScalpToggle.checked         = fibScalpEnabled;
-  if (UI.po3Toggle)              UI.po3Toggle.checked              = po3Enabled;
-  _syncPo3FreshnessModeUI();
-  if (UI.tiktokToggle)           UI.tiktokToggle.checked           = tiktokEnabled;
-  if (UI.gridScalperMAToggle)        UI.gridScalperMAToggle.checked        = gridScalperMAEnabled;
-  if (UI.gridScalperMAStrategySelect) UI.gridScalperMAStrategySelect.value = gridScalperMAStrategy;
-  if (UI.gridScalperMAPeriodInput)   UI.gridScalperMAPeriodInput.value     = gridScalperMAPeriod;
-  _updateGridScalperMAPeriodVisibility();
-  if (UI.fvgStratToggle)         UI.fvgStratToggle.checked         = fvgStratEnabled;
-  if (UI.mtfTopDownToggle)       UI.mtfTopDownToggle.checked       = mtfTopDownEnabled;
-  if (UI.candleInterpToggle)     UI.candleInterpToggle.checked     = candleInterpEnabled;
-  if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
-  if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
-  renderRequiredConfluenceList();
-  if (UI.doubleRetestToggle)     UI.doubleRetestToggle.checked     = doubleRetestEnabled;
-  if (UI.confirmBarToggle)       UI.confirmBarToggle.checked       = confirmBarEnabled;
-  if (UI.divergenceFilterToggle) UI.divergenceFilterToggle.checked = divergenceFilterEnabled;
-  if (UI.adxHardGateToggle)      UI.adxHardGateToggle.checked      = adxHardGateEnabled;
-  if (UI.adxMaxInput)            UI.adxMaxInput.value              = adxMaxThreshold;
-  if (UI.breakoutDistToggle)     UI.breakoutDistToggle.checked     = breakoutDistEnabled;
-  if (UI.breakoutDistInput)      UI.breakoutDistInput.value        = breakoutDistATR;
-  if (UI.timeDecayToggle)        UI.timeDecayToggle.checked        = timeDecayEnabled;
-  if (UI.timeDecayInput)         UI.timeDecayInput.value           = timeDecayCandles;
-  if (UI.consecutiveDirToggle)   UI.consecutiveDirToggle.checked   = consecutiveDirEnabled;
-  if (UI.vwapFilterToggle)       UI.vwapFilterToggle.checked       = vwapFilterEnabled;
-  if (UI.stochCrossToggle)       UI.stochCrossToggle.checked       = stochCrossEnabled;
-  if (UI.rangeSizeToggle)        UI.rangeSizeToggle.checked        = rangeSizeEnabled;
-  if (UI.rangeSizeMinInput)      UI.rangeSizeMinInput.value        = rangeSizeMin;
-  if (UI.rangeSizeMaxInput)      UI.rangeSizeMaxInput.value        = rangeSizeMax;
-  if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
-  if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
-  if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
-  if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value   = autoTradeExecutionMode;
-  if (UI.mt5SignalApiUrl)        UI.mt5SignalApiUrl.value          = mt5SignalApiUrl;
-  if (UI.mt5StatusApiUrl)        UI.mt5StatusApiUrl.value          = mt5StatusApiUrl;
-  if (UI.mt5MinStopPoints)       UI.mt5MinStopPoints.value         = mt5MinStopPoints;
-  if (UI.mt5FreezePoints)        UI.mt5FreezePoints.value          = mt5FreezePoints;
-  if (UI.mt5LotStep)             UI.mt5LotStep.value               = mt5LotStep;
-  if (UI.mt5MinLot)              UI.mt5MinLot.value                = mt5MinLot;
-  if (UI.mt5MaxLot)              UI.mt5MaxLot.value                = mt5MaxLot;
-  if (UI.mt5StatusPollingToggle) UI.mt5StatusPollingToggle.checked = mt5StatusPollingEnabled;
-
-  /* Advanced parameter UI sync */
-  if (UI.rangeDuration)  UI.rangeDuration.value  = RANGE_MINUTES;
-  if (UI.touchTolerance) UI.touchTolerance.value = (LEVEL_TOUCH_TOLERANCE * 100).toFixed(0);
-  if (UI.dojiRatio)      UI.dojiRatio.value      = (DOJI_BODY_RATIO * 100).toFixed(0);
-  if (UI.lookbackPeriod) UI.lookbackPeriod.value = SWING_LOOKBACK_PERIOD;
-
-  saveSettings();
-  updateStateUI();
-  updateRecommendedSettings();
-  addLog("🔄 All settings reverted to defaults");
-}
-
-/* ================= SIGNAL STRENGTH GAUGE ================= */
-function getSignalStrength(score) {
-  if (score >= 13) return { label: "EXCELLENT", cls: "bull", pct: 100 };
-  if (score >= 10) return { label: "STRONG", cls: "bull", pct: 80 };
-  if (score >= 7)  return { label: "MODERATE", cls: "warning", pct: 60 };
-  if (score >= 4)  return { label: "WEAK", cls: "bear", pct: 40 };
-  return { label: "VERY WEAK", cls: "disabled", pct: 20 };
-}
-
-/* ================= STRATEGY 1: LIQUIDITY SWEEP (15m → 1m) ================= */
-/**
- * Detect a liquidity sweep pattern:
- * 1. Take the high and low of a "reference" candle as the range.
- * 2. If the next candle breaks the range (high or low) but closes back inside → signal.
- *
- * On a 15m chart this identifies the sweep; the same logic works on 1m using
- * the 15m candle's high/low as the range for tighter entries.
- *
- * Returns null or { dir, entry, sl, tp, range, candleIdx, epoch, symbol, result }
- */
-function detectLiquiditySweep() {
-  if (!liquiditySweepEnabled) return null;
-
-  /* One-at-a-time: skip detection while any signal is still PENDING */
-  if (liquiditySweepHistory.some(s => s.result === "PENDING")) return null;
-
-  const len = candles.length;
-  if (len < 3) return null;
-
-  const idx = len - 1;
-  if (idx - lastLiquiditySweepIdx < LIQUIDITY_SWEEP_COOLDOWN) return null;
-
-  /* Use candle at idx-1 as the "range" candle, idx as the sweep candle */
-  const rangeCandle = candles[idx - 1];
-  const sweepCandle = candles[idx];
-
-  const rangeHigh = rangeCandle.high;
-  const rangeLow  = rangeCandle.low;
-
-  let dir = null;
-
-  /* Bullish sweep: candle breaks below the range low but closes back inside */
-  if (sweepCandle.low < rangeLow && sweepCandle.close >= rangeLow && sweepCandle.close <= rangeHigh) {
-    dir = "BULL";
-  }
-  /* Bearish sweep: candle breaks above the range high but closes back inside */
-  if (sweepCandle.high > rangeHigh && sweepCandle.close <= rangeHigh && sweepCandle.close >= rangeLow) {
-    /* If both directions triggered, pick the one with more extreme wick */
-    if (dir === "BULL") {
-      const bearWick = sweepCandle.high - rangeHigh;
-      const bullWick = rangeLow - sweepCandle.low;
-      dir = bearWick > bullWick ? "BEAR" : "BULL";
-    } else {
-      dir = "BEAR";
-    }
-  }
-
-  if (!dir) return null;
-
-  /* ── EMA trend filter: reject signals that fight the short-term trend ── */
-  if (emaFast.length >= idx && emaSlow.length >= idx) {
-    const ef = emaFast[emaFast.length - 1];
-    const es = emaSlow[emaSlow.length - 1];
-    if (ef != null && es != null) {
-      /* BULL signal requires EMA 8 ≥ EMA 21 (not in a clear downtrend) */
-      if (dir === "BULL" && ef < es) return null;
-      /* BEAR signal requires EMA 8 ≤ EMA 21 (not in a clear uptrend) */
-      if (dir === "BEAR" && ef > es) return null;
-    }
-  }
-
-  /* ── Compute entry / SL / TP with ATR-capped risk ── */
-  const entry = sweepCandle.close;
-  const rangeSize = rangeHigh - rangeLow;
-  const atr = atrValue > 0 ? atrValue : rangeSize;
-  const _profParams = getStrategyProfitParams();
-
-  /* SL: pick the closer-to-entry reference (tighter stop) from range vs sweep candle */
-  const slBuffer = atr * 0.1 * _profParams.slBufferMult;
-  let sl;
-  if (dir === "BULL") {
-    /* For BULL: SL is below entry. Higher value = closer to entry = tighter.
-       sweepCandle.low < rangeLow (by definition), so Math.max picks rangeLow. */
-    sl = Math.max(rangeLow, sweepCandle.low) - slBuffer;
-  } else {
-    /* For BEAR: SL is above entry. Lower value = closer to entry = tighter.
-       sweepCandle.high > rangeHigh (by definition), so Math.min picks rangeHigh. */
-    sl = Math.min(rangeHigh, sweepCandle.high) + slBuffer;
-  }
-
-  let risk = Math.abs(entry - sl);
-
-  /* Cap SL distance to prevent runaway risk when entry drifts far from range */
-  const maxRisk = atr * LIQUIDITY_SWEEP_MAX_SL_ATR;
-  if (risk > maxRisk) {
-    sl = dir === "BULL" ? entry - maxRisk : entry + maxRisk;
-    risk = maxRisk;
-  }
-
-  /* Reject if risk is negligible (likely noise) */
-  if (risk < atr * 0.05) return null;
-
-  /* R:R target — profit-optimized per symbol type */
-  const rrTarget = _profParams.rrLiquiditySweep;
-  const tp = dir === "BULL" ? entry + risk * rrTarget : entry - risk * rrTarget;
-  const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
-
-  return {
-    dir, entry, sl, tp, rr,
-    range: { high: rangeHigh, low: rangeLow },
-    candleIdx: idx,
-    epoch: sweepCandle.epoch,
-    symbol: getActiveSymbol(),
-    result: "PENDING",
-    type: "liquidity_sweep"
-  };
-}
-
-/**
- * Run the liquidity sweep scanner and handle alerting.
- */
-function processLiquiditySweep() {
-  const signal = detectLiquiditySweep();
-  if (!signal) return;
-
-  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-  if (minConfluenceEnabled) {
-    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
-    if (!confGate.pass) {
-      addLog(`⚠ Liquidity Sweep REJECTED — ${confGate.reason}`);
-      return;
-    }
-  }
-
-  lastLiquiditySweepIdx = signal.candleIdx;
-
-  /* Always compute and store confluence score on the signal for UI display */
-  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
-
-  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
-  liquiditySweepHistory.unshift(signal);
-  if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
-
-  /* Audio alert */
-  playStrategyAlert(signal.dir);
-
-  /* Log */
-  const symbol = getActiveSymbol() || "--";
-  addLog(`🌊 LIQUIDITY SWEEP ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Range [${fmtPrice(signal.range.low, symbol)}–${fmtPrice(signal.range.high, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
-
-  showToast(
-    `Liquidity Sweep ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
-    "trade", 10000
-  );
-
-  /* Browser notification */
-  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `🌊 ${signal.dir} Liquidity Sweep — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
-    throttledNotification("IT Guru: Liquidity Sweep!", body);
-  }
-
-  /* Telegram alert (delayed to let canvas redraw first) */
-  if (telegramStrategyAutoSend) {
-    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
-  }
-
-  renderStrategyAlerts();
-
-  /* Auto-trade: place a Deriv multiplier contract for the liquidity sweep */
-  if (autoTradeStrategyEnabled && autoTradeLiquiditySweep && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "liquiditySweep" });
-  }
-}
-
-/**
- * Monitor pending liquidity sweep signals for SL/TP outcome.
- */
-function monitorLiquiditySweepOutcomes(candle) {
-  if (!liquiditySweepEnabled) return;
-  let changed = false;
-  for (const s of liquiditySweepHistory) {
-    if (s.result !== "PENDING") continue;
-    const elapsed = (candles.length - 1) - s.candleIdx;
-    /* Safety: resolve signals with corrupted/future candleIdx (e.g. after candle slicing) or timeout after 30 candles */
-    if (elapsed < 0 || elapsed >= 30) { /* stale/corrupted index or timeout — SL not hit, signal expired */
-      s.result = "EXPIRED";
-      addLog(`🌊 Liquidity Sweep EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
-      changed = true; continue;
-    }
-    if (s.dir === "BULL") {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
-      const lsSlHit = candle.low <= s.sl, lsTpHit = candle.high >= s.tp;
-      if (lsSlHit && lsTpHit) { s.result = resolveBothHit(s); addLog(`🌊 Liquidity Sweep ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (lsSlHit) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (lsTpHit) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    } else {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Liquidity Sweep")) changed = true;
-      const lsSlHit = candle.high >= s.sl, lsTpHit = candle.low <= s.tp;
-      if (lsSlHit && lsTpHit) { s.result = resolveBothHit(s); addLog(`🌊 Liquidity Sweep ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (lsSlHit) { s.result = "LOSS"; addLog(`🌊 Liquidity Sweep LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (lsTpHit) { s.result = "WIN"; addLog(`🌊 Liquidity Sweep WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    }
-  }
-  if (changed) {
-    renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal.
-       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
-    for (const s of liquiditySweepHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
-        sendStrategyOutcomeTelegram(s);
-      }
-    }
-    /* Feature 13: record confluence factor outcomes for adaptive weighting */
-    if (adaptiveConfluenceEnabled) {
-      for (const s of liquiditySweepHistory) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
-      }
-    }
-    /* One-at-a-time: allow the next trade after the cooldown period elapses.
-       Previously this was set to -999, which bypassed the cooldown entirely and
-       caused rapid-fire re-entry loops when signals kept hitting SL. */
-    lastLiquiditySweepIdx = candles.length - 1;
-    addLog("🌊 Range signal resolved — scanning for next trade…");
-  }
-}
-
-/* ================= STRATEGY 2: STOP LOSS HUNT ================= */
-/**
- * Find key support/resistance levels from recent candles.
- * A key level is a price zone touched at least SLH_KEY_LEVEL_TOUCHES times.
- * Returns array of { level, touches, type: "support"|"resistance" }.
- */
-function findKeyLevels() {
-  const len = candles.length;
-  const lookback = Math.min(SLH_LEVEL_LOOKBACK, len);
-  if (lookback < 5) return [];
-
-  /* Collect swing highs and lows */
-  const pivots = [];
-  for (let i = len - lookback; i < len; i++) {
-    const c = candles[i];
-    pivots.push({ price: c.high, type: "resistance" });
-    pivots.push({ price: c.low,  type: "support" });
-  }
-
-  /* Cluster pivots into levels */
-  const levels = [];
-  const tolerance = candles[len - 1].close * SLH_LEVEL_TOLERANCE_PCT;
-
-  for (const p of pivots) {
-    let found = false;
-    for (const l of levels) {
-      if (Math.abs(p.price - l.level) <= tolerance) {
-        l.touches++;
-        l.level = (l.level * (l.touches - 1) + p.price) / l.touches; /* running average */
-        if (p.type === "support") l.supportCount++;
-        else l.resistanceCount++;
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      levels.push({
-        level: p.price,
-        touches: 1,
-        supportCount: p.type === "support" ? 1 : 0,
-        resistanceCount: p.type === "resistance" ? 1 : 0
-      });
-    }
-  }
-
-  /* Only return levels with enough touches */
-  return levels
-    .filter(l => l.touches >= SLH_KEY_LEVEL_TOUCHES)
-    .map(l => ({
-      level: l.level,
-      touches: l.touches,
-      type: l.supportCount >= l.resistanceCount ? "support" : "resistance"
-    }))
-    .sort((a, b) => b.touches - a.touches);
-}
-
-/**
- * Detect a stop loss hunt pattern:
- * 1. Identify a key S/R level tested multiple times.
- * 2. Price breaks below support (or above resistance) but closes back inside.
- * 3. Entry at close of the stop hunt candle.
- *
- * Returns null or { dir, entry, sl, tp, level, candleIdx, epoch, symbol, result }
- */
-function detectStopLossHunt() {
-  if (!stopLossHuntEnabled) return null;
-  const len = candles.length;
-  if (len < 5) return null;
-
-  const idx = len - 1;
-  if (idx - lastStopLossHuntIdx < STOP_LOSS_HUNT_COOLDOWN) return null;
-
-  const c = candles[idx];
-  const keyLevels = findKeyLevels();
-  if (keyLevels.length === 0) return null;
-
-  const atr = atrValue > 0 ? atrValue : (c.high - c.low);
-  const tolerance = atr * 0.2;
-  const _profParams = getStrategyProfitParams();
-
-  for (const kl of keyLevels) {
-    /* Support hunt: price breaks below support but closes back above */
-    if (kl.type === "support") {
-      if (c.low < kl.level - tolerance && c.close > kl.level) {
-        const entry = c.close;
-        const sl = c.low - tolerance * 0.5 * _profParams.slBufferMult;
-        const risk = Math.abs(entry - sl);
-        const tp = entry + risk * _profParams.rrStopLossHunt;
-
-        return {
-          dir: "BULL", entry, sl, tp,
-          rr: risk > 0 ? Math.abs(tp - entry) / risk : 0,
-          level: kl,
-          candleIdx: idx, epoch: c.epoch,
-          symbol: getActiveSymbol(),
-          result: "PENDING",
-          type: "stop_loss_hunt"
-        };
-      }
-    }
-
-    /* Resistance hunt: price breaks above resistance but closes back below */
-    if (kl.type === "resistance") {
-      if (c.high > kl.level + tolerance && c.close < kl.level) {
-        const entry = c.close;
-        const sl = c.high + tolerance * 0.5 * _profParams.slBufferMult;
-        const risk = Math.abs(entry - sl);
-        const tp = entry - risk * _profParams.rrStopLossHunt;
-
-        return {
-          dir: "BEAR", entry, sl, tp,
-          rr: risk > 0 ? Math.abs(tp - entry) / risk : 0,
-          level: kl,
-          candleIdx: idx, epoch: c.epoch,
-          symbol: getActiveSymbol(),
-          result: "PENDING",
-          type: "stop_loss_hunt"
-        };
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Run the stop loss hunt scanner and handle alerting.
- */
-function processStopLossHunt() {
-  /* Keep one active stop-loss-hunt setup at a time to avoid repeated alerts
-     while the current setup is still pending outcome (SL/TP). */
-  if (stopLossHuntHistory.some(s => s.result === "PENDING")) return;
-
-  const signal = detectStopLossHunt();
-  if (!signal) return;
-
-  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-  if (minConfluenceEnabled) {
-    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
-    if (!confGate.pass) {
-      addLog(`⚠ Stop Loss Hunt REJECTED — ${confGate.reason}`);
-      return;
-    }
-  }
-
-  lastStopLossHuntIdx = signal.candleIdx;
-
-  /* Always compute and store confluence score on the signal for UI display */
-  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
-
-  /* Check for "stop hunt of stop hunters" — re-entry if previous was stopped out */
-  const levelTol = signal.level.level * SLH_LEVEL_TOLERANCE_PCT;
-  const prevStopped = stopLossHuntHistory.find(s => s.result === "LOSS" && Math.abs(s.level.level - signal.level.level) <= levelTol);
-  const reEntry = !!prevStopped;
-
-  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
-  stopLossHuntHistory.unshift(signal);
-  if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
-
-  playStrategyAlert(signal.dir);
-
-  const symbol = getActiveSymbol() || "--";
-  const reLabel = reEntry ? " (RE-ENTRY — stop hunt of stop hunters)" : "";
-  addLog(`🎯 STOP LOSS HUNT ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Level ${fmtPrice(signal.level.level, symbol)} (${signal.level.touches} touches) | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
-
-  showToast(
-    `Stop Loss Hunt ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}${reLabel}`,
-    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
-    "trade", 10000
-  );
-
-  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `🎯 ${signal.dir} Stop Loss Hunt${reLabel} — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nLevel: ${fmtPrice(signal.level.level, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
-    throttledNotification("IT Guru: Stop Loss Hunt!", body);
-  }
-
-  /* Telegram alert (delayed to let canvas redraw first) */
-  if (telegramStrategyAutoSend) {
-    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
-  }
-
-  renderStrategyAlerts();
-
-  /* Auto-trade: place a Deriv multiplier contract for the stop loss hunt */
-  if (autoTradeStrategyEnabled && autoTradeStopLossHunt && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "stopLossHunt" });
-  }
-}
-
-/**
- * Monitor pending stop loss hunt signals for SL/TP outcome.
- */
-function monitorStopLossHuntOutcomes(candle) {
-  if (!stopLossHuntEnabled) return;
-  let changed = false;
-  for (const s of stopLossHuntHistory) {
-    if (s.result !== "PENDING") continue;
-    const elapsed = (candles.length - 1) - s.candleIdx;
-    if (elapsed < 0 || elapsed >= 30) {
-      s.result = "EXPIRED";
-      addLog(`🎯 Stop Loss Hunt EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
-      changed = true; continue;
-    }
-    if (s.dir === "BULL") {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
-      const slhSlHit = candle.low <= s.sl, slhTpHit = candle.high >= s.tp;
-      if (slhSlHit && slhTpHit) { s.result = resolveBothHit(s); addLog(`🎯 Stop Loss Hunt ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (slhSlHit) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (slhTpHit) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    } else {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Stop Loss Hunt")) changed = true;
-      const slhSlHit = candle.high >= s.sl, slhTpHit = candle.low <= s.tp;
-      if (slhSlHit && slhTpHit) { s.result = resolveBothHit(s); addLog(`🎯 Stop Loss Hunt ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (slhSlHit) { s.result = "LOSS"; addLog(`🎯 Stop Loss Hunt LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (slhTpHit) { s.result = "WIN"; addLog(`🎯 Stop Loss Hunt WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    }
-  }
-  if (changed) {
-    renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal.
-       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
-    for (const s of stopLossHuntHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
-        sendStrategyOutcomeTelegram(s);
-      }
-    }
-    /* Feature 13: record confluence factor outcomes for adaptive weighting */
-    if (adaptiveConfluenceEnabled) {
-      for (const s of stopLossHuntHistory) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
-      }
-    }
-  }
-}
-
-/* ================= STRATEGY 3: FAILED PIN BAR (Fear/Greed) ================= */
-/**
- * Detect the market state: consecutive strong bearish candles = fear,
- * consecutive strong bullish candles = greed.
- * Returns "fear" | "greed" | null.
- */
-function detectFearGreedState(idx) {
-  if (idx < FPB_CONSECUTIVE_CANDLES) return null;
-
-  let bullCount = 0;
-  let bearCount = 0;
-
-  for (let i = idx - FPB_CONSECUTIVE_CANDLES; i < idx; i++) {
-    const c = candles[i];
-    const body = Math.abs(c.close - c.open);
-    const range = c.high - c.low;
-    if (range <= 0) continue;
-
-    const bodyRatio = body / range;
-    if (bodyRatio < FPB_BODY_RATIO_MIN) continue; /* not a strong candle */
-
-    if (c.close > c.open) bullCount++;
-    else bearCount++;
-  }
-
-  if (bearCount >= FPB_CONSECUTIVE_CANDLES) return "fear";
-  if (bullCount >= FPB_CONSECUTIVE_CANDLES) return "greed";
-  return null;
-}
-
-/**
- * Detect a failed pin bar pattern in fear/greed:
- * 1. Identify market state (fear = consecutive bearish, greed = consecutive bullish).
- * 2. Spot a pin bar against the dominant emotion on the current candle set.
- * 3. Wait for the pin bar to be broken (next candle breaks the pin bar).
- * 4. Enter at the close of the candle that breaks the pin bar.
- *
- * Returns null or { dir, entry, sl, tp, state, candleIdx, epoch, symbol, result }
- */
-function detectFailedPinBar() {
-  if (!failedPinBarEnabled) return null;
-  const len = candles.length;
-  if (len < FPB_CONSECUTIVE_CANDLES + 2) return null;
-
-  const idx = len - 1;
-  if (idx - lastFailedPinBarIdx < FAILED_PIN_BAR_COOLDOWN) return null;
-
-  const breakCandle = candles[idx];       /* candle that breaks the pin bar */
-  const pinBarCandle = candles[idx - 1];  /* the pin bar itself */
-
-  /* Check market state BEFORE the pin bar (using candles before it) */
-  const state = detectFearGreedState(idx - 1);
-  if (!state) return null;
-
-  /* Detect pin bar against the dominant emotion */
-  const pinBody = Math.abs(pinBarCandle.close - pinBarCandle.open);
-  const pinRange = pinBarCandle.high - pinBarCandle.low;
-  if (pinRange <= 0 || pinBody <= 0) return null;
-  const pinBodyRatio = pinBody / pinRange;
-
-  /* Pin bar should have small body relative to range */
-  if (pinBodyRatio > 0.4) return null;
-
-  const upperWick = pinBarCandle.high - Math.max(pinBarCandle.open, pinBarCandle.close);
-  const lowerWick = Math.min(pinBarCandle.open, pinBarCandle.close) - pinBarCandle.low;
-
-  let pinDir = null;
-
-  if (state === "fear") {
-    /* In fear (bearish), look for bullish pin bar (long lower wick) */
-    if (lowerWick > pinBody * 2 && lowerWick > upperWick * 1.5) {
-      pinDir = "BULL"; /* bullish pin bar against fear */
-    }
-  } else if (state === "greed") {
-    /* In greed (bullish), look for bearish pin bar (long upper wick) */
-    if (upperWick > pinBody * 2 && upperWick > lowerWick * 1.5) {
-      pinDir = "BEAR"; /* bearish pin bar against greed */
-    }
-  }
-
-  if (!pinDir) return null;
-
-  /* Now check if the break candle "fails" the pin bar by breaking it
-     in the direction of the original momentum (continuing fear/greed) */
-  let pinBarBroken = false;
-  let dir = null;
-
-  if (pinDir === "BULL" && state === "fear") {
-    /* Pin bar was bullish (against fear). Failure = break below the pin bar low.
-       Trade direction = BEAR (momentum continues) → BUT the strategy says
-       "enter at the close of the candle that breaks the pin bar" which means
-       we enter in the direction of the break. Actually the strategy says the
-       pin bar FAILS, meaning price continues in the original fear direction.
-       So we enter BEAR (with momentum). */
-    if (breakCandle.close < pinBarCandle.low) {
-      pinBarBroken = true;
-      dir = "BEAR"; /* momentum continues down */
-    }
-  } else if (pinDir === "BEAR" && state === "greed") {
-    /* Pin bar was bearish (against greed). Failure = break above the pin bar high.
-       Entry = BULL (momentum continues up). */
-    if (breakCandle.close > pinBarCandle.high) {
-      pinBarBroken = true;
-      dir = "BULL"; /* momentum continues up */
-    }
-  }
-
-  if (!pinBarBroken || !dir) return null;
-
-  /* Compute entry / SL / TP */
-  const entry = breakCandle.close;
-  const atr = atrValue > 0 ? atrValue : pinRange;
-  const _profParams = getStrategyProfitParams();
-
-  /* SL: beyond the pin bar (the opposite extreme) */
-  const slBuffer = atr * 0.1 * _profParams.slBufferMult;
-  const sl = dir === "BULL" ? pinBarCandle.low - slBuffer : pinBarCandle.high + slBuffer;
-  const risk = Math.abs(entry - sl);
-  /* TP: profit-optimized R:R (momentum direction for fast pips) */
-  const tp = dir === "BULL" ? entry + risk * _profParams.rrFailedPinBar : entry - risk * _profParams.rrFailedPinBar;
-  const rr = risk > 0 ? Math.abs(tp - entry) / risk : 0;
-
-  return {
-    dir, entry, sl, tp, rr, state,
-    pinBarIdx: idx - 1,
-    candleIdx: idx,
-    epoch: breakCandle.epoch,
-    symbol: getActiveSymbol(),
-    result: "PENDING",
-    type: "failed_pin_bar"
-  };
-}
-
-/**
- * Run the failed pin bar scanner and handle alerting.
- */
-function processFailedPinBar() {
-  const signal = detectFailedPinBar();
-  if (!signal) return;
-
-  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-  if (minConfluenceEnabled) {
-    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
-    if (!confGate.pass) {
-      addLog(`⚠ Failed Pin Bar REJECTED — ${confGate.reason}`);
-      return;
-    }
-  }
-
-  lastFailedPinBarIdx = signal.candleIdx;
-
-  /* Always compute and store confluence score on the signal for UI display */
-  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
-
-  signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
-  failedPinBarHistory.unshift(signal);
-  if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
-
-  playStrategyAlert(signal.dir);
-
-  const symbol = getActiveSymbol() || "--";
-  const stateEmoji = signal.state === "fear" ? "😱" : "🤑";
-  addLog(`${stateEmoji} FAILED PIN BAR ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | State: ${signal.state.toUpperCase()} | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)}`);
-
-  showToast(
-    `Failed Pin Bar ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | ${signal.state.toUpperCase()} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`,
-    "trade", 10000
-  );
-
-  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `${stateEmoji} ${signal.dir} Failed Pin Bar — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nState: ${signal.state.toUpperCase()} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
-    throttledNotification("IT Guru: Failed Pin Bar!", body);
-  }
-
-  /* Telegram alert (delayed to let canvas redraw first) */
-  if (telegramStrategyAutoSend) {
-    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
-  }
-
-  renderStrategyAlerts();
-
-  /* Auto-trade: place a Deriv multiplier contract for the failed pin bar */
-  if (autoTradeStrategyEnabled && autoTradeFailedPinBar && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "failedPinBar" });
-  }
-}
-
-/**
- * Monitor pending failed pin bar signals for SL/TP outcome.
- */
-function monitorFailedPinBarOutcomes(candle) {
-  if (!failedPinBarEnabled) return;
-  let changed = false;
-  for (const s of failedPinBarHistory) {
-    if (s.result !== "PENDING") continue;
-    const elapsed = (candles.length - 1) - s.candleIdx;
-    if (elapsed < 0 || elapsed >= 20) { /* shorter timeout — scalp-style; also resolves stale indices */
-      s.result = "EXPIRED";
-      addLog(`${s.state === "fear" ? "😱" : "🤑"} Failed Pin Bar EXPIRED (timeout) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
-      changed = true; continue;
-    }
-    if (s.dir === "BULL") {
-      const em = s.state === "fear" ? "😱" : "🤑";
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
-      const fpbSlHit = candle.low <= s.sl, fpbTpHit = candle.high >= s.tp;
-      if (fpbSlHit && fpbTpHit) { s.result = resolveBothHit(s); addLog(`${em} Failed Pin Bar ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (fpbSlHit) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (fpbTpHit) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    } else {
-      const em = s.state === "fear" ? "😱" : "🤑";
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Failed Pin Bar")) changed = true;
-      const fpbSlHit = candle.high >= s.sl, fpbTpHit = candle.low <= s.tp;
-      if (fpbSlHit && fpbTpHit) { s.result = resolveBothHit(s); addLog(`${em} Failed Pin Bar ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (fpbSlHit) { s.result = "LOSS"; addLog(`${em} Failed Pin Bar LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (fpbTpHit) { s.result = "WIN"; addLog(`${em} Failed Pin Bar WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    }
-  }
-  if (changed) {
-    renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal.
-       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
-    for (const s of failedPinBarHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
-        sendStrategyOutcomeTelegram(s);
-      }
-    }
-    /* Feature 13: record confluence factor outcomes for adaptive weighting */
-    if (adaptiveConfluenceEnabled) {
-      for (const s of failedPinBarHistory) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
-      }
-    }
-  }
-}
-
-/* ================= STRATEGY 4: FIB GOLDEN ZONE SCALP ================= */
-/**
- * Detect a Fibonacci Golden Zone scalp setup on the 1-minute chart.
- *
- * Steps:
- *   1. Identify a micro-trend using recent swing points:
- *      - Uptrend: at least 2 consecutive higher lows
- *      - Downtrend: at least 2 consecutive lower highs
- *   2. Detect a break of structure (BOS):
- *      - Uptrend BOS: price breaks above the most recent swing high
- *      - Downtrend BOS: price breaks below the most recent swing low
- *   3. Draw Fibonacci retracement from the swing that started the impulse
- *      to the BOS extreme.
- *   4. Wait for price to retrace into the 0.5–0.618 zone (Golden Zone).
- *   5. Enter in the trend direction.
- *   6. TP at the previous swing low (downtrend) or swing high (uptrend).
- *   7. SL just beyond the 0.786 Fibonacci level.
- *
- * Returns null or { dir, entry, sl, tp, rr, fibHigh, fibLow, goldenHigh,
- *                    goldenLow, candleIdx, epoch, symbol, result, type }
- */
-function detectFibScalp() {
-  if (!fibScalpEnabled) return null;
-
-  /* One-at-a-time: skip detection while any signal is still PENDING */
-  if (fibScalpHistory.some(s => s.result === "PENDING")) return null;
-
-  const len = candles.length;
-  if (len < 10) return null;
-
-  const idx = len - 1;
-  if (idx - lastFibScalpIdx < FIB_SCALP_COOLDOWN) return null;
-
-  const c = candles[idx];
-
-  /* --- Collect recent swing highs and swing lows --- */
-  const lookbackStart = Math.max(0, idx - FIB_SCALP_SWING_LOOKBACK);
-  const swingHighs = [];  /* { idx, price } most recent first */
-  const swingLows  = [];
-
-  for (let i = idx - 1; i >= lookbackStart; i--) {
-    if (isTrueSwingHigh(i)) swingHighs.push({ idx: i, price: candles[i].high });
-    if (isTrueSwingLow(i))  swingLows.push({ idx: i, price: candles[i].low });
-  }
-
-  /* Need enough swing points for structure analysis */
-  if (swingHighs.length < 2 || swingLows.length < 2) return null;
-
-  /* --- Detect micro-trend using FIB_SCALP_TREND_SWINGS consecutive points --- */
-  let trendDir = null;
-
-  /* Uptrend: consecutive higher lows */
-  if (swingLows.length >= FIB_SCALP_TREND_SWINGS) {
-    let isUptrend = true;
-    for (let i = 0; i < FIB_SCALP_TREND_SWINGS - 1; i++) {
-      if (swingLows[i].price <= swingLows[i + 1].price) { isUptrend = false; break; }
-    }
-    if (isUptrend) trendDir = "BULL";
-  }
-  /* Downtrend: consecutive lower highs */
-  if (swingHighs.length >= FIB_SCALP_TREND_SWINGS) {
-    let isDowntrend = true;
-    for (let i = 0; i < FIB_SCALP_TREND_SWINGS - 1; i++) {
-      if (swingHighs[i].price >= swingHighs[i + 1].price) { isDowntrend = false; break; }
-    }
-    if (isDowntrend) {
-      /* If both directions qualify, pick the one with the most recent swing */
-      if (trendDir === "BULL") {
-        trendDir = swingHighs[0].idx > swingLows[0].idx ? "BEAR" : "BULL";
-      } else {
-        trendDir = "BEAR";
-      }
-    }
-  }
-
-  if (!trendDir) return null;
-
-  /* --- Detect break of structure (BOS) --- */
-  let fibLow, fibHigh, bosConfirmed = false;
-  let targetPrice;  /* TP target: previous swing low (bear) or swing high (bull) */
-
-  if (trendDir === "BULL") {
-    /* BOS: current or recent candle closed above the most recent swing high */
-    const recentSH = swingHighs[0];
-    /* The impulse runs from the most recent swing low up to the BOS level */
-    const recentSL = swingLows[0];
-
-    /* BOS must be recent (within last few candles) */
-    let bosCandle = null;
-    for (let i = idx; i >= Math.max(recentSH.idx + 1, idx - 5); i--) {
-      if (candles[i].close > recentSH.price) { bosCandle = candles[i]; break; }
-    }
-    if (!bosCandle) return null;
-
-    bosConfirmed = true;
-    /* Fib from the swing low (start of impulse) to the BOS high */
-    fibLow  = recentSL.price;
-    fibHigh = bosCandle.high;
-
-    /* TP = the swing high before the most recent one (prior resistance), or the BOS high */
-    targetPrice = recentSH.price;
-    if (swingHighs.length >= 2) {
-      /* Use the prior swing high (the one before the BOS level), if higher */
-      const priorSH = swingHighs[1].price;
-      if (priorSH > fibHigh) targetPrice = priorSH;
-      else targetPrice = fibHigh;
-    }
-  } else {
-    /* BEAR: BOS below the most recent swing low */
-    const recentSL = swingLows[0];
-    const recentSH = swingHighs[0];
-
-    let bosCandle = null;
-    for (let i = idx; i >= Math.max(recentSL.idx + 1, idx - 5); i--) {
-      if (candles[i].close < recentSL.price) { bosCandle = candles[i]; break; }
-    }
-    if (!bosCandle) return null;
-
-    bosConfirmed = true;
-    /* Fib from the swing high (start of impulse) down to the BOS low */
-    fibHigh = recentSH.price;
-    fibLow  = bosCandle.low;
-
-    /* TP = the prior swing low (the one before the BOS level), or the BOS low */
-    targetPrice = recentSL.price;
-    if (swingLows.length >= 2) {
-      const priorSL = swingLows[1].price;
-      if (priorSL < fibLow) targetPrice = priorSL;
-      else targetPrice = fibLow;
-    }
-  }
-
-  if (!bosConfirmed) return null;
-
-  /* --- Calculate Golden Zone (0.5 – 0.618 retracement) --- */
-  const fibRange = fibHigh - fibLow;
-  if (fibRange <= 0) return null;
-
-  let goldenHigh, goldenLow;
-  if (trendDir === "BULL") {
-    /* Retracement pulls back down from the high */
-    goldenHigh = fibHigh - fibRange * 0.5;
-    goldenLow  = fibHigh - fibRange * 0.618;
-  } else {
-    /* Retracement pulls back up from the low */
-    goldenLow  = fibLow + fibRange * 0.5;
-    goldenHigh = fibLow + fibRange * 0.618;
-  }
-
-  /* --- Check if current price is in the Golden Zone --- */
-  const price = c.close;
-  const inGoldenZone = price >= Math.min(goldenLow, goldenHigh)
-                    && price <= Math.max(goldenLow, goldenHigh);
-
-  if (!inGoldenZone) return null;
-
-  /* --- Compute entry / SL / TP --- */
-  const entry = price;
-  let sl, tp;
-
-  if (trendDir === "BULL") {
-    /* SL just below the 0.786 retracement (beyond the golden zone for protection) */
-    sl = fibHigh - fibRange * 0.786;
-    /* Add a small ATR buffer for safety */
-    if (atrValue > 0) sl -= atrValue * 0.15;
-    /* TP at the previous BOS high or next swing high */
-    tp = targetPrice;
-    /* Ensure TP is above entry */
-    if (tp <= entry) tp = entry + fibRange * 0.5;
-  } else {
-    /* SL just above the 0.786 retracement */
-    sl = fibLow + fibRange * 0.786;
-    if (atrValue > 0) sl += atrValue * 0.15;
-    /* TP at the previous BOS low or next swing low */
-    tp = targetPrice;
-    /* Ensure TP is below entry */
-    if (tp >= entry) tp = entry - fibRange * 0.5;
-  }
-
-  const risk = Math.abs(entry - sl);
-  const reward = Math.abs(tp - entry);
-  const rr = risk > 0 ? reward / risk : 0;
-
-  /* Reject if R:R is too low */
-  if (rr < 1.0) return null;
-
-  return {
-    dir: trendDir,
-    entry, sl, tp, rr,
-    fibHigh, fibLow,
-    goldenHigh, goldenLow,
-    candleIdx: idx,
-    epoch: c.epoch,
-    symbol: getActiveSymbol(),
-    result: "PENDING",
-    type: "fib_scalp"
-  };
-}
-
-/**
- * Run the Fib Golden Zone scalp scanner and handle alerting.
- */
-function processFibScalp() {
-  const signal = detectFibScalp();
-  if (!signal) return;
-
-  /* Min Confluence Gate — override any per-strategy hardcoded threshold when enabled */
-  if (minConfluenceEnabled) {
-    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
-    if (!confGate.pass) {
-      addLog(`⚠ Fib Golden Zone REJECTED — ${confGate.reason}`);
-      return;
-    }
-  }
-
-  lastFibScalpIdx = signal.candleIdx;
-
-  /* Always compute and store confluence score on the signal for UI display */
-  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
-
-  signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
-  fibScalpHistory.unshift(signal);
-  if (fibScalpHistory.length > FIB_SCALP_MAX_HISTORY) fibScalpHistory.pop();
-
-  /* Audio alert */
-  playStrategyAlert(signal.dir);
-
-  /* Log */
-  const symbol = getActiveSymbol() || "--";
-  addLog(`📐 FIB GOLDEN ZONE ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${symbol} @ ${fmtPrice(signal.entry, symbol)} | Golden Zone [${fmtPrice(signal.goldenLow, symbol)}–${fmtPrice(signal.goldenHigh, symbol)}] | SL ${fmtPrice(signal.sl, symbol)} | TP ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`);
-
-  showToast(
-    `Fib Golden Zone ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${symbol} @ ${fmtPrice(signal.entry, symbol)} | SL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)} | R:R 1:${fmt(signal.rr, 1)}`,
-    "trade", 10000
-  );
-
-  /* Browser notification */
-  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `📐 ${signal.dir} Fib Golden Zone — ${symbol} @ ${fmtPrice(signal.entry, symbol)}\nGolden Zone: ${fmtPrice(signal.goldenLow, symbol)}–${fmtPrice(signal.goldenHigh, symbol)}\nSL: ${fmtPrice(signal.sl, symbol)} | TP: ${fmtPrice(signal.tp, symbol)}`;
-    throttledNotification("IT Guru: Fib Golden Zone Scalp!", body);
-  }
-
-  /* Telegram alert */
-  if (telegramStrategyAutoSend) {
-    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
-  }
-
-  renderStrategyAlerts();
-
-  /* Auto-trade: place a Deriv multiplier contract for the fib scalp */
-  if (autoTradeStrategyEnabled && autoTradeFibScalp && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp, symbol: signal.symbol || symbol, source: "strategy", strategyName: "fibScalp" });
-  }
-}
-
-/**
- * Monitor pending Fib Golden Zone scalp signals for SL/TP outcome.
- */
-function monitorFibScalpOutcomes(candle) {
-  if (!fibScalpEnabled) return;
-  let changed = false;
-  for (const s of fibScalpHistory) {
-    if (s.result !== "PENDING") continue;
-    const elapsed = (candles.length - 1) - s.candleIdx;
-
-    /* Timeout after FIB_SCALP_MAX_CANDLES or stale index */
-    if (elapsed < 0 || elapsed >= FIB_SCALP_MAX_CANDLES) {
-      s.result = "EXPIRED";
-      addLog(`📐 Fib Golden Zone EXPIRED (timeout ${FIB_SCALP_MAX_CANDLES} candles) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
-      changed = true; continue;
-    }
-
-    /* Check SL / TP */
-    if (s.dir === "BULL") {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
-      const fibSlHit = candle.low <= s.sl, fibTpHit = candle.high >= s.tp;
-      if (fibSlHit && fibTpHit) { s.result = resolveBothHit(s); addLog(`📐 Fib Golden Zone ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (fibSlHit) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (fibTpHit) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    } else {
-      /* Track 1R profit level and fire exit alert if price reverses to entry */
-      if (_checkProfitExitAlert(s, candle, "Fib Golden Zone")) changed = true;
-      const fibSlHit = candle.high >= s.sl, fibTpHit = candle.low <= s.tp;
-      if (fibSlHit && fibTpHit) { s.result = resolveBothHit(s); addLog(`📐 Fib Golden Zone ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (fibSlHit) { s.result = "LOSS"; addLog(`📐 Fib Golden Zone LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (fibTpHit) { s.result = "WIN"; addLog(`📐 Fib Golden Zone WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    }
-
-    /* If momentum stalls (price stuck near entry for several candles), expire the signal */
-    if (s.result === "PENDING" && elapsed >= 8) {
-      const stalledRange = atrValue > 0 ? atrValue * 0.3 : Math.abs(s.tp - s.entry) * 0.1;
-      if (Math.abs(candle.close - s.entry) < stalledRange) {
-        s.result = "EXPIRED";
-        addLog(`📐 Fib Golden Zone EXPIRED (momentum stalled) — ${s.symbol || ""} @ ${fmt(candle.close, 4)} (SL not hit)`);
-        changed = true;
-      }
-    }
-  }
-  if (changed) {
-    renderStrategyAlerts();
-    /* Send Telegram outcome for each newly resolved signal.
-       Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
-    for (const s of fibScalpHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
-        sendStrategyOutcomeTelegram(s);
-      }
-    }
-    /* Allow next trade after cooldown elapses (not immediately) */
-    lastFibScalpIdx = candles.length - 1;
-    addLog("📐 Fib Golden Zone signal resolved — scanning for next trade…");
-    /* Feature 13: record confluence factor outcomes for adaptive weighting */
-    if (adaptiveConfluenceEnabled) {
-      for (const s of fibScalpHistory) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
-      }
-    }
-  }
-}
-
-/* ================= STRATEGY 13: TIKTOK FIBONACCI ================= */
-
-/**
- * Detect a TikTok Fibonacci setup on candle[idx].
- *
- * Returns a signal object on confirmed step D, or null otherwise.
- */
-function detectTiktokStrategy(idx) {
-  if (!tiktokEnabled) return null;
-  if (candles.length < 10 || idx < 5) return null;
-
-  const c = candles[idx];
-  const tolerance = atrValue > 0 ? atrValue * TIKTOK_ZONE_TOLERANCE_ATR : 0;
-
-  /* Scan for swing highs and lows in the lookback window (excludes the current candle) */
-  const lookbackStart = Math.max(0, idx - TIKTOK_SWING_LOOKBACK);
-  const swingHighs = [];  /* sorted newest-first */
-  const swingLows  = [];
-
-  for (let i = idx - 1; i >= lookbackStart; i--) {
-    if (isTrueSwingHigh(i)) swingHighs.push({ idx: i, price: candles[i].high });
-    if (isTrueSwingLow(i))  swingLows.push({ idx: i, price: candles[i].low });
-  }
-
-  if (swingHighs.length < 1 || swingLows.length < 1) return null;
-
-  /*
-   * Try BULL and BEAR impulse setups (newest pair first for each direction).
-   * BULL: swingLow occurred BEFORE swingHigh (price moved UP).
-   * BEAR: swingHigh occurred BEFORE swingLow (price moved DOWN).
-   */
-  const setups = [];
-
-  /* BULL candidates */
-  for (const sh of swingHighs) {
-    const sl = swingLows.find(s => s.idx < sh.idx);
-    if (!sl) continue;
-    const range = sh.price - sl.price;
-    if (atrValue > 0 && range < TIKTOK_MIN_IMPULSE_ATR * atrValue) continue;
-    setups.push({ dir: "BULL", swingLow: sl.price, swingHigh: sh.price,
-                  swingLowIdx: sl.idx, swingHighIdx: sh.idx });
-    break; /* most recent only */
-  }
-
-  /* BEAR candidates */
-  for (const sl of swingLows) {
-    const sh = swingHighs.find(s => s.idx < sl.idx);
-    if (!sh) continue;
-    const range = sh.price - sl.price;
-    if (atrValue > 0 && range < TIKTOK_MIN_IMPULSE_ATR * atrValue) continue;
-    setups.push({ dir: "BEAR", swingLow: sl.price, swingHigh: sh.price,
-                  swingLowIdx: sl.idx, swingHighIdx: sh.idx });
-    break;
-  }
-
-  for (const setup of setups) {
-    const { dir, swingLow, swingHigh, swingHighIdx, swingLowIdx } = setup;
-    const range = swingHigh - swingLow;
-    if (range <= 0) continue;
-
-    /* Fibonacci levels — all measured from swingLow (0) toward swingHigh (1) */
-    const lvl_0   = swingLow;
-    const lvl_382 = swingLow + 0.382 * range;
-    const lvl_5   = swingLow + 0.5   * range;
-    const lvl_618 = swingLow + 0.618 * range;
-    const lvl_88  = swingLow + 0.88  * range;
-    const lvl_100 = swingHigh;
-
-    /* Impulse end: the HIGH for BULL, the LOW for BEAR */
-    const impulseEndIdx = (dir === "BULL") ? swingHighIdx : swingLowIdx;
-
-    /* Scan candles after the impulse end (steps B, C) */
-    let stepBDone = false;
-    let stepBIdx  = -1;
-    let invalid   = false;
-
-    for (let i = impulseEndIdx + 1; i < idx; i++) {
-      const cn = candles[i];
-
-      if (!stepBDone) {
-        /* Step B: price must enter [lvl_5, lvl_618] zone */
-        if (dir === "BULL") {
-          /* Price coming DOWN from above — wick breaks below lvl_618 = entered */
-          if (cn.low < lvl_5 - tolerance) { invalid = true; break; }  /* went past B zone */
-          if (cn.low <= lvl_618 + tolerance) { stepBDone = true; stepBIdx = i; }
-        } else {
-          /* BEAR: price bouncing UP from below — wick reaches above lvl_5 = entered */
-          if (cn.high > lvl_618 + tolerance) { invalid = true; break; } /* went past B zone top */
-          if (cn.high >= lvl_5 - tolerance) { stepBDone = true; stepBIdx = i; }
-        }
-      } else {
-        /* Step C: price must enter [lvl_0, lvl_382] zone (applies to both directions) */
-        if (cn.low < lvl_0 - tolerance) { invalid = true; break; } /* went past C zone bottom */
-      }
-    }
-
-    if (invalid || !stepBDone) continue;
-
-    /* Check if step C was satisfied somewhere after step B and before current candle */
-    let stepCDone = false;
-    for (let i = stepBIdx + 1; i < idx; i++) {
-      const cn = candles[i];
-      if (cn.low < lvl_0 - tolerance) { stepCDone = false; break; }
-      if (cn.low <= lvl_382 + tolerance) { stepCDone = true; }
-    }
-    if (!stepCDone) continue;
-
-    /* Step D: current candle must touch the 0.88 level (price came up from below) */
-    const stepDMet = (c.high >= lvl_88 - tolerance) && (c.low <= lvl_88 + tolerance);
-    if (!stepDMet) continue;
-
-    /* Build signal */
-    const entry = lvl_88;
-    const _profParams = getStrategyProfitParams();
-    let sl, tp;
-    if (dir === "BULL") {
-      sl = lvl_0 - (atrValue > 0 ? atrValue * TIKTOK_SL_BUFFER_ATR * _profParams.slBufferMult : range * 0.05);
-      tp = lvl_100;
-    } else {
-      sl = lvl_100 + (atrValue > 0 ? atrValue * TIKTOK_SL_BUFFER_ATR * _profParams.slBufferMult : range * 0.05);
-      tp = lvl_0;
-    }
-
-    const risk   = Math.abs(entry - sl);
-    const reward = Math.abs(tp - entry);
-    const rr     = risk > 0 ? reward / risk : 0;
-    if (rr < 1.0) continue;
-
-    return {
-      dir, entry, sl, tp, rr,
-      swingLow, swingHigh, lvl_88, lvl_618, lvl_5, lvl_382,
-      candleIdx: idx,
-      epoch: c.epoch,
-      symbol: getActiveSymbol(),
-      result: "PENDING",
-      type: "tiktok",
-      _stratOutcomeSent: false,
-      _sentViaTelegram: false
-    };
-  }
-  return null;
-}
-
-/**
- * Run the TikTok Fibonacci scanner and fire alerts.
- */
-function processTiktokStrategy() {
-  if (!tiktokEnabled) return;
-  if (candles.length < 10) return;
-
-  const idx = candles.length - 1;
-  if (idx - lastTiktokIdx < TIKTOK_COOLDOWN) return;
-
-  /* Prevent duplicate PENDING */
-  if (tiktokHistory.some(s => s.result === "PENDING")) return;
-
-  const signal = detectTiktokStrategy(idx);
-  if (!signal) return;
-
-  if (minConfluenceEnabled) {
-    const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
-    if (!confGate.pass) {
-      addLog(`⚠ TikTok Fib REJECTED — ${confGate.reason}`);
-      return;
-    }
-  }
-
-  lastTiktokIdx = idx;
-
-  /* Always compute and store confluence score on the signal for UI display */
-  signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
-  signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
-
-  signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
-  tiktokHistory.unshift(signal);
-  if (tiktokHistory.length > TIKTOK_MAX_HISTORY) tiktokHistory.pop();
-
-  playStrategyAlert(signal.dir);
-
-  const sym = getActiveSymbol() || "--";
-  addLog(`📈 TIKTOK FIB ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | 0.88: ${fmtPrice(signal.lvl_88, sym)} | SL ${fmtPrice(signal.sl, sym)} | TP ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`);
-
-  showToast(
-    `TikTok Fib ${signal.dir === "BULL" ? "▲ BUY" : "▼ SELL"}`,
-    `${sym} @ ${fmtPrice(signal.entry, sym)} | SL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)} | R:R 1:${fmt(signal.rr, 1)}`,
-    "trade", 10000
-  );
-
-  if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-    const body = `📈 ${signal.dir} TikTok Fib — ${sym} @ ${fmtPrice(signal.entry, sym)}\nSL: ${fmtPrice(signal.sl, sym)} | TP: ${fmtPrice(signal.tp, sym)}`;
-    throttledNotification("IT Guru: TikTok Fibonacci!", body);
-  }
-
-  if (telegramStrategyAutoSend) {
-    setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
-  }
-
-  renderStrategyAlerts();
-
-  if (autoTradeStrategyEnabled && autoTradeTiktok && !_historicalProcessing) {
-    executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp,
-                       symbol: signal.symbol || sym, source: "strategy", strategyName: "tiktok" });
-  }
-}
-
-/**
- * Monitor pending TikTok Fib signals for SL/TP outcomes.
- */
-function monitorTiktokOutcomes(candle) {
-  if (!tiktokEnabled) return;
-  let changed = false;
-
-  for (const s of tiktokHistory) {
-    if (s.result !== "PENDING") continue;
-    const elapsed = (candles.length - 1) - s.candleIdx;
-
-    if (elapsed < 0 || elapsed >= TIKTOK_MAX_CANDLES) {
-      s.result = "EXPIRED";
-      addLog(`📈 TikTok Fib EXPIRED (timeout ${TIKTOK_MAX_CANDLES} candles) — ${s.symbol || ""} @ ${fmt(candle.close, 4)}`);
-      changed = true;
-      continue;
-    }
-
-    if (s.dir === "BULL") {
-      if (_checkProfitExitAlert(s, candle, "TikTok Fib")) changed = true;
-      const slHit = candle.low  <= s.sl;
-      const tpHit = candle.high >= s.tp;
-      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`📈 TikTok Fib ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (slHit) { s.result = "LOSS"; addLog(`📈 TikTok Fib LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (tpHit) { s.result = "WIN";  addLog(`📈 TikTok Fib WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    } else {
-      if (_checkProfitExitAlert(s, candle, "TikTok Fib")) changed = true;
-      const slHit = candle.high >= s.sl;
-      const tpHit = candle.low  <= s.tp;
-      if (slHit && tpHit) { s.result = resolveBothHit(s); addLog(`📈 TikTok Fib ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (slHit) { s.result = "LOSS"; addLog(`📈 TikTok Fib LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (tpHit) { s.result = "WIN";  addLog(`📈 TikTok Fib WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
-    }
-  }
-
-  if (changed) {
-    renderStrategyAlerts();
-    for (const s of tiktokHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
-        sendStrategyOutcomeTelegram(s);
-      }
-    }
-    lastTiktokIdx = candles.length - 1;
-    addLog("📈 TikTok Fib signal resolved — scanning for next trade…");
-    /* Feature 13: record confluence factor outcomes for adaptive weighting */
-    if (adaptiveConfluenceEnabled) {
-      for (const s of tiktokHistory) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
-      }
-    }
-  }
-}
-
-/* ================= STRATEGY 19: GRID SCALPER V2 ================= */
-
-/**
- * Grid Scalper V2 – Indicator calculations (ATR, EMA, RSI)
- */
-function gridV2_calculateATR(period = GRID_SCALPER_V2_ATR_PERIOD) {
-  if (candles.length < period) return 0;
+function gridV2_calculateATR(period, uptoIdx = candles.length - 1, sourceCandles = candles) {
+  if (!Array.isArray(sourceCandles) || sourceCandles.length === 0) return 0;
+  const settings = normalizeGridScalperV2Settings();
+  const p = Math.max(2, period || settings.atrPeriod);
+  if (uptoIdx <= 0 || uptoIdx >= sourceCandles.length) uptoIdx = sourceCandles.length - 1;
+  if (uptoIdx <= 0) return 0;
   let sum = 0;
-  for (let i = 0; i < period; i++) {
-    const idx = candles.length - 1 - i;
-    if (idx < 0) break;
-    const c = candles[idx];
-    const prevC = idx > 0 ? candles[idx - 1] : c;
+  let count = 0;
+  for (let i = uptoIdx; i > Math.max(0, uptoIdx - p); i--) {
+    const c = sourceCandles[i];
+    const prevC = sourceCandles[i - 1] || c;
     const tr = Math.max(
       c.high - c.low,
       Math.abs(c.high - prevC.close),
       Math.abs(c.low - prevC.close)
     );
     sum += tr;
+    count++;
   }
-  return sum / period;
+  return count > 0 ? sum / count : 0;
 }
 
-function gridV2_calculateEMA(period = GRID_SCALPER_V2_EMA_PERIOD) {
-  if (candles.length < period) return 0;
-  let ema = 0;
-  const multiplier = 2 / (period + 1);
-  for (let i = candles.length - 1; i >= Math.max(0, candles.length - period * 2); i--) {
-    if (ema === 0) {
-      ema = candles[i].close;
-    } else {
-      ema = candles[i].close * multiplier + ema * (1 - multiplier);
-    }
-  }
-  return ema;
+function gridV2_calculateEMA(period, uptoIdx = candles.length - 1, sourceCandles = candles) {
+  const p = Math.max(2, period || normalizeGridScalperV2Settings().emaFastPeriod);
+  const closes = (sourceCandles || []).slice(0, uptoIdx + 1).map(c => c.close);
+  if (closes.length < p) return 0;
+  const series = computeEMA(closes, p);
+  return series[series.length - 1] || 0;
 }
 
-function gridV2_calculateRSI(period = GRID_SCALPER_V2_RSI_PERIOD) {
-  if (candles.length < period) return 50;
+function gridV2_calculateRSI(period, uptoIdx = candles.length - 1, sourceCandles = candles) {
+  const p = Math.max(2, period || normalizeGridScalperV2Settings().rsiPeriod);
+  const data = (sourceCandles || []).slice(0, uptoIdx + 1);
+  if (data.length < p + 1) return 50;
   let gains = 0, losses = 0;
-  for (let i = 1; i < period; i++) {
-    const idx = candles.length - i;
-    if (idx < 0) break;
-    const change = candles[idx - 1].close - candles[idx].close;
-    if (change > 0) {
-      gains += change;
-    } else {
-      losses += Math.abs(change);
-    }
+  for (let i = data.length - p; i < data.length; i++) {
+    if (i <= 0) continue;
+    const change = data[i].close - data[i - 1].close;
+    if (change > 0) gains += change;
+    else losses += Math.abs(change);
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
+  const avgGain = gains / p;
+  const avgLoss = losses / p;
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - (100 / (1 + rs));
 }
 
-/**
- * Detect if market is in ranging mode
- */
-function gridV2_isRanging() {
-  const atr = gridV2_calculateATR();
-  if (atr <= GRID_SCALPER_V2_RANGE_THRESHOLD_ATR) {
-    return !gridV2_isTrending();
+function gridV2_calculateADX(period = 14, uptoIdx = candles.length - 1, sourceCandles = candles) {
+  const data = (sourceCandles || []).slice(0, uptoIdx + 1);
+  if (data.length < period + 2) return 0;
+  const trs = [], dmPlus = [], dmMinus = [];
+  for (let i = 1; i < data.length; i++) {
+    const cur = data[i];
+    const prev = data[i - 1];
+    const upMove = cur.high - prev.high;
+    const downMove = prev.low - cur.low;
+    dmPlus.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    dmMinus.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    trs.push(Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prev.close),
+      Math.abs(cur.low - prev.close)
+    ));
   }
-  return false;
+  if (trs.length < period) return 0;
+  let trSmooth = trs.slice(0, period).reduce((a, b) => a + b, 0);
+  let dmPlusSmooth = dmPlus.slice(0, period).reduce((a, b) => a + b, 0);
+  let dmMinusSmooth = dmMinus.slice(0, period).reduce((a, b) => a + b, 0);
+  const dxs = [];
+  for (let i = period; i < trs.length; i++) {
+    const diPlus = trSmooth > 0 ? (dmPlusSmooth / trSmooth) * 100 : 0;
+    const diMinus = trSmooth > 0 ? (dmMinusSmooth / trSmooth) * 100 : 0;
+    const sum = diPlus + diMinus;
+    dxs.push(sum > 0 ? Math.abs(diPlus - diMinus) / sum * 100 : 0);
+    trSmooth = trSmooth - (trSmooth / period) + trs[i];
+    dmPlusSmooth = dmPlusSmooth - (dmPlusSmooth / period) + dmPlus[i];
+    dmMinusSmooth = dmMinusSmooth - (dmMinusSmooth / period) + dmMinus[i];
+  }
+  if (dxs.length === 0) return 0;
+  const recent = dxs.slice(-period);
+  return recent.reduce((a, b) => a + b, 0) / recent.length;
 }
 
-/**
- * Detect if market is in strong trending mode
- */
-function gridV2_isTrending() {
-  const atr = gridV2_calculateATR();
-  const ema = gridV2_calculateEMA();
-  const currentPrice = candles[candles.length - 1].close;
-  const distanceFromEMA = Math.abs(currentPrice - ema);
-  
-  if (distanceFromEMA > (GRID_SCALPER_V2_TREND_STRENGTH_ATR * atr)) {
-    const rsi = gridV2_calculateRSI();
-    if ((currentPrice > ema && rsi > 55) || (currentPrice < ema && rsi < 45)) {
-      return true;
+function gridV2_averageAtr(period, sampleSize = 50, uptoIdx = candles.length - 1, sourceCandles = candles) {
+  const end = Math.min(uptoIdx, sourceCandles.length - 1);
+  const start = Math.max(period, end - sampleSize + 1);
+  let sum = 0;
+  let count = 0;
+  for (let i = start; i <= end; i++) {
+    const atr = gridV2_calculateATR(period, i, sourceCandles);
+    if (atr > 0) {
+      sum += atr;
+      count++;
     }
   }
-  return false;
+  return count > 0 ? sum / count : 0;
 }
 
-/**
- * Detect exhaustion pattern: price moved far from EMA, now reverting
- */
-function gridV2_detectExhaustion() {
-  if (candles.length < GRID_SCALPER_V2_LOOKBACK_BARS) return null;
-  
-  const atr = gridV2_calculateATR();
-  const ema = gridV2_calculateEMA();
-  const currentPrice = candles[candles.length - 1].close;
-  
-  let highBar = currentPrice;
-  let lowBar = currentPrice;
-  const lookbackStart = Math.max(0, candles.length - GRID_SCALPER_V2_LOOKBACK_BARS);
-  
-  for (let i = candles.length - 1; i >= lookbackStart; i--) {
-    highBar = Math.max(highBar, candles[i].high);
-    lowBar = Math.min(lowBar, candles[i].low);
+function gridV2_calculateMACDState(uptoIdx = candles.length - 1, sourceCandles = candles) {
+  if (sourceCandles === candles && macdHistogram.length > uptoIdx && uptoIdx > 0) {
+    return {
+      hist: macdHistogram[uptoIdx],
+      prevHist: macdHistogram[uptoIdx - 1]
+    };
   }
-  
-  const spikeRange = highBar - lowBar;
-  
-  if (spikeRange > (atr * 2)) {
-    if (currentPrice < ema && candles[candles.length - 1].close > candles[candles.length - 2].close) {
-      return "BUY";
-    } else if (currentPrice > ema && candles[candles.length - 1].close < candles[candles.length - 2].close) {
-      return "SELL";
+  const closes = sourceCandles.slice(0, uptoIdx + 1).map(c => c.close);
+  if (closes.length < 35) return { hist: 0, prevHist: 0 };
+  const fast = computeEMA(closes, 12);
+  const slow = computeEMA(closes, 26);
+  const macd = [];
+  for (let i = 0; i < closes.length; i++) macd.push((fast[i] != null && slow[i] != null) ? fast[i] - slow[i] : null);
+  const signal = computeEMA(macd.map(v => v ?? 0), 9);
+  const hist = macd[macd.length - 1] != null && signal[signal.length - 1] != null ? macd[macd.length - 1] - signal[signal.length - 1] : 0;
+  const prevHist = macd.length > 1 && signal.length > 1 && macd[macd.length - 2] != null && signal[signal.length - 2] != null
+    ? macd[macd.length - 2] - signal[signal.length - 2]
+    : 0;
+  return { hist, prevHist };
+}
+
+function gridV2_calculateStochasticState(uptoIdx = candles.length - 1, sourceCandles = candles) {
+  if (sourceCandles === candles && stochK.length > uptoIdx && stochD.length > uptoIdx && uptoIdx > 0) {
+    return {
+      k: stochK[uptoIdx],
+      d: stochD[uptoIdx],
+      prevK: stochK[uptoIdx - 1],
+      prevD: stochD[uptoIdx - 1]
+    };
+  }
+  const period = 14;
+  const start = Math.max(0, uptoIdx - period - 5);
+  const segment = sourceCandles.slice(start, uptoIdx + 1);
+  if (segment.length < period) return { k: 50, d: 50, prevK: 50, prevD: 50 };
+  const rawK = [];
+  for (let i = 0; i < segment.length; i++) {
+    if (i < period - 1) { rawK.push(null); continue; }
+    let high = -Infinity, low = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      high = Math.max(high, segment[j].high);
+      low = Math.min(low, segment[j].low);
     }
+    const range = high - low;
+    rawK.push(range > 0 ? ((segment[i].close - low) / range) * 100 : 50);
+  }
+  const validK = rawK.filter(v => v != null);
+  const k = validK.length > 0 ? validK[validK.length - 1] : 50;
+  const prevK = validK.length > 1 ? validK[validK.length - 2] : k;
+  const dWindow = validK.slice(-3);
+  const d = dWindow.length > 0 ? dWindow.reduce((a, b) => a + b, 0) / dWindow.length : 50;
+  const prevDWindow = validK.slice(-4, -1);
+  const prevD = prevDWindow.length > 0 ? prevDWindow.reduce((a, b) => a + b, 0) / prevDWindow.length : d;
+  return { k, d, prevK, prevD };
+}
+
+function gridV2_findNearbyLevels(uptoIdx = candles.length - 1, sourceCandles = candles) {
+  const lookback = Math.min(60, uptoIdx + 1);
+  const levels = { support: null, resistance: null };
+  for (let i = Math.max(2, uptoIdx - lookback); i <= uptoIdx - 2; i++) {
+    const prev = sourceCandles[i - 1];
+    const cur = sourceCandles[i];
+    const next = sourceCandles[i + 1];
+    if (!prev || !cur || !next) continue;
+    if (cur.low < prev.low && cur.low < next.low) {
+      if (levels.support == null || Math.abs(sourceCandles[uptoIdx].close - cur.low) < Math.abs(sourceCandles[uptoIdx].close - levels.support)) {
+        levels.support = cur.low;
+      }
+    }
+    if (cur.high > prev.high && cur.high > next.high) {
+      if (levels.resistance == null || Math.abs(cur.high - sourceCandles[uptoIdx].close) < Math.abs(levels.resistance - sourceCandles[uptoIdx].close)) {
+        levels.resistance = cur.high;
+      }
+    }
+  }
+  return levels;
+}
+
+function gridV2_getSnapshot(idx = candles.length - 1, sourceCandles = candles) {
+  const settings = normalizeGridScalperV2Settings();
+  const atr = gridV2_calculateATR(settings.atrPeriod, idx, sourceCandles);
+  const avgAtr = gridV2_averageAtr(settings.atrPeriod, 40, idx, sourceCandles);
+  const ema50 = gridV2_calculateEMA(settings.emaFastPeriod, idx, sourceCandles);
+  const ema200 = gridV2_calculateEMA(settings.emaSlowPeriod, idx, sourceCandles);
+  const rsi = gridV2_calculateRSI(settings.rsiPeriod, idx, sourceCandles);
+  const adx = (sourceCandles === candles && idx === candles.length - 1 && adxValue > 0) ? adxValue : gridV2_calculateADX(14, idx, sourceCandles);
+  const macd = gridV2_calculateMACDState(idx, sourceCandles);
+  const stoch = gridV2_calculateStochasticState(idx, sourceCandles);
+  const levels = gridV2_findNearbyLevels(idx, sourceCandles);
+  const price = sourceCandles[idx]?.close || 0;
+  return {
+    idx,
+    candle: sourceCandles[idx],
+    atr,
+    avgAtr,
+    atrRatio: (atr > 0 && avgAtr > 0) ? atr / avgAtr : 1,
+    ema50,
+    ema200,
+    emaSpreadAtr: atr > 0 ? Math.abs(ema50 - ema200) / atr : 0,
+    rsi,
+    adx,
+    macdHist: macd.hist || 0,
+    macdPrevHist: macd.prevHist || 0,
+    stochK: stoch.k,
+    stochD: stoch.d,
+    stochPrevK: stoch.prevK,
+    stochPrevD: stoch.prevD,
+    levels,
+    price
+  };
+}
+
+function gridV2_classifyMarket(snapshot) {
+  const settings = normalizeGridScalperV2Settings();
+  const trendDirection = snapshot.ema50 > snapshot.ema200 ? "BUY" : snapshot.ema50 < snapshot.ema200 ? "SELL" : "NEUTRAL";
+  let regime = "RANGING";
+  let warning = "";
+  if (snapshot.adx >= settings.adxDisableThreshold || snapshot.emaSpreadAtr >= settings.regimeTrendSpreadAtr) {
+    regime = "TRENDING";
+    warning = "Grid trading paused - trending market detected.";
+  } else if (snapshot.atrRatio >= settings.regimeVolatileAtrRatio) {
+    regime = "HIGHLY VOLATILE";
+    warning = "Grid trading paused - volatility spike detected.";
+  } else if (snapshot.atrRatio <= settings.regimeQuietAtrRatio) {
+    regime = "QUIET";
+    warning = "Grid trading paused - quiet market detected.";
+  }
+  return {
+    regime,
+    trendDirection,
+    allowTrade: regime === "RANGING" && trendDirection !== "NEUTRAL" && snapshot.adx < settings.adxDisableThreshold,
+    warning
+  };
+}
+
+function gridV2_detectExhaustion(snapshot, sourceCandles = candles) {
+  const settings = normalizeGridScalperV2Settings();
+  if (snapshot.idx < settings.exhaustionLookbackBars || snapshot.atr <= 0) return null;
+  const start = Math.max(1, snapshot.idx - settings.exhaustionLookbackBars + 1);
+  let highest = -Infinity;
+  let lowest = Infinity;
+  for (let i = start; i <= snapshot.idx; i++) {
+    highest = Math.max(highest, sourceCandles[i].high);
+    lowest = Math.min(lowest, sourceCandles[i].low);
+  }
+  const range = highest - lowest;
+  const prev = sourceCandles[snapshot.idx - 1];
+  if (!prev) return null;
+  if (snapshot.ema50 > snapshot.ema200) {
+    const bounce = snapshot.candle.close > prev.close && snapshot.candle.low <= snapshot.ema50;
+    if (range >= snapshot.atr * 1.6 && bounce && snapshot.rsi <= 45) return "BUY";
+  } else if (snapshot.ema50 < snapshot.ema200) {
+    const rejection = snapshot.candle.close < prev.close && snapshot.candle.high >= snapshot.ema50;
+    if (range >= snapshot.atr * 1.6 && rejection && snapshot.rsi >= 55) return "SELL";
   }
   return null;
 }
 
-/**
- * Main Grid Scalper V2 detection function
- */
-function detectGridScalperV2Strategy(idx) {
-  if (!gridScalperV2Enabled) return null;
-  if (candles.length < 20) return null;
-  if (idx - lastGridScalperV2Idx < GRID_SCALPER_V2_COOLDOWN) return null;
-  if (gridScalperV2State && gridScalperV2State.status === "ACTIVE") return null;
-  if (!gridV2_isRanging()) return null;
-  
-  const exhaustion = gridV2_detectExhaustion();
-  if (!exhaustion) return null;
-  
-  const rsi = gridV2_calculateRSI();
-  if (exhaustion === "BUY" && rsi >= 40) return null;
-  if (exhaustion === "SELL" && rsi <= 60) return null;
-  
-  const atr = gridV2_calculateATR();
-  const currentPrice = candles[idx].close;
-  const sym = getActiveSymbol() || "--";
-  
+function gridV2_isSRBlocked(dir, snapshot) {
+  const settings = normalizeGridScalperV2Settings();
+  const buffer = snapshot.atr * settings.supportResistanceBufferAtr;
+  if (dir === "BUY" && Number.isFinite(snapshot.levels.resistance)) {
+    return (snapshot.levels.resistance - snapshot.price) <= buffer;
+  }
+  if (dir === "SELL" && Number.isFinite(snapshot.levels.support)) {
+    return (snapshot.price - snapshot.levels.support) <= buffer;
+  }
+  return false;
+}
+
+function gridV2_calculateConfidence(dir, snapshot, market) {
+  const checks = [
+    { name: "EMA Trend", pass: market.trendDirection === dir },
+    { name: "RSI", pass: dir === "BUY" ? snapshot.rsi <= 45 : snapshot.rsi >= 55 },
+    { name: "MACD", pass: dir === "BUY" ? snapshot.macdHist >= snapshot.macdPrevHist : snapshot.macdHist <= snapshot.macdPrevHist },
+    { name: "Stochastic", pass: dir === "BUY"
+      ? snapshot.stochPrevK <= snapshot.stochPrevD && snapshot.stochK >= snapshot.stochD && snapshot.stochK < 40
+      : snapshot.stochPrevK >= snapshot.stochPrevD && snapshot.stochK <= snapshot.stochD && snapshot.stochK > 60 },
+    { name: "ATR Filter", pass: market.regime === "RANGING" },
+    { name: "ADX Filter", pass: snapshot.adx < normalizeGridScalperV2Settings().adxDisableThreshold }
+  ];
+  const passed = checks.filter(c => c.pass).length;
+  return {
+    score: Math.round((passed / checks.length) * 100),
+    checks
+  };
+}
+
+function gridV2_buildStop(dir, entry, snapshot) {
+  const settings = normalizeGridScalperV2Settings();
+  const atrStop = dir === "BUY"
+    ? entry - snapshot.atr * settings.atrStopMultiplier
+    : entry + snapshot.atr * settings.atrStopMultiplier;
+  if (settings.stopMode !== "swing") return { price: atrStop, mode: "ATR" };
+  const swing = dir === "BUY"
+    ? findSwingLow(snapshot.idx)
+    : findSwingHigh(snapshot.idx);
+  if (!Number.isFinite(swing)) return { price: atrStop, mode: "ATR" };
+  const bufferedSwing = dir === "BUY" ? swing - snapshot.atr * 0.15 : swing + snapshot.atr * 0.15;
+  return { price: bufferedSwing, mode: "SWING" };
+}
+
+function gridV2_calculateEntryScore(dir, snapshot, market, stopPrice, exhaustion) {
+  const riskDist = Math.abs(snapshot.price - stopPrice);
+  const supportRoom = Number.isFinite(snapshot.levels.support) ? snapshot.price - snapshot.levels.support : snapshot.atr * 3;
+  const resistanceRoom = Number.isFinite(snapshot.levels.resistance) ? snapshot.levels.resistance - snapshot.price : snapshot.atr * 3;
+  const trendQuality = market.regime === "RANGING" && market.trendDirection === dir ? 25 : market.regime === "RANGING" ? 15 : 0;
+  const volatilityScore = market.regime === "RANGING" ? Math.round(gridV2_clamp(25 - Math.abs(snapshot.atrRatio - 1) * 20, 5, 25)) : market.regime === "QUIET" ? 10 : 0;
+  const directionalRoom = dir === "BUY" ? resistanceRoom : supportRoom;
+  const riskScore = snapshot.atr > 0 && riskDist > 0 && directionalRoom > riskDist
+    ? Math.round(gridV2_clamp((directionalRoom / riskDist) * 8, 8, 25))
+    : 0;
+  const marketStructureScore = exhaustion ? 15 + (gridV2_isSRBlocked(dir, snapshot) ? 0 : 10) : 0;
+  return {
+    score: Math.round(gridV2_clamp(trendQuality + volatilityScore + riskScore + marketStructureScore, 0, 100)),
+    breakdown: { trendQuality, volatilityScore, riskScore, marketStructureScore }
+  };
+}
+
+function gridV2_getGridDistance(snapshot) {
+  const settings = normalizeGridScalperV2Settings();
+  return gridV2_clamp(snapshot.atr * settings.gridAtrMultiplier, settings.minGridDistance, settings.maxGridDistance);
+}
+
+function gridV2_refreshSignalLevels(signal) {
+  const openTrades = signal.trades.filter(t => t.remaining > 0);
+  const totalQty = openTrades.reduce((sum, t) => sum + t.remaining, 0);
+  signal.averageEntry = totalQty > 0
+    ? openTrades.reduce((sum, t) => sum + (t.entry * t.remaining), 0) / totalQty
+    : signal.entry;
+  signal.activeTrades = openTrades.length;
+  signal.openGridLevels = signal.activeTrades;
+  const riskDist = Math.abs(signal.averageEntry - signal.initialStopLoss);
+  signal.riskPerUnit = riskDist;
+  const prevTargets = signal.targets || [];
+  signal.targets = [
+    { key: "tp1", label: "TP1", share: signal.tpShares.tp1, rr: signal.tpRR.tp1, hit: prevTargets[0]?.hit === true },
+    { key: "tp2", label: "TP2", share: signal.tpShares.tp2, rr: signal.tpRR.tp2, hit: prevTargets[1]?.hit === true },
+    { key: "tp3", label: "TP3", share: signal.tpShares.tp3, rr: signal.tpRR.tp3, hit: prevTargets[2]?.hit === true }
+  ].map(target => ({
+    ...target,
+    price: signal.dir === "BUY"
+      ? signal.averageEntry + (riskDist * target.rr)
+      : signal.averageEntry - (riskDist * target.rr)
+  }));
+  signal.sl = signal.stopLoss;
+  signal.tp = signal.targets[signal.targets.length - 1].price;
+}
+
+function gridV2_openTradeLeg(signal, price, idx) {
+  signal.trades.push({
+    level: signal.trades.length + 1,
+    entry: price,
+    remaining: 1,
+    openedIdx: idx
+  });
+  gridV2_refreshSignalLevels(signal);
+}
+
+function gridV2_getUnrealizedProfit(signal, price) {
+  return signal.trades.reduce((sum, leg) => {
+    if (leg.remaining <= 0) return sum;
+    const pnlPerUnit = signal.dir === "BUY" ? (price - leg.entry) : (leg.entry - price);
+    return sum + (pnlPerUnit * signal.lotSize * leg.remaining);
+  }, 0);
+}
+
+function gridV2_realizeFraction(signal, fractionOfCurrent, exitPrice) {
+  const fraction = gridV2_clamp(fractionOfCurrent, 0, 1);
+  if (fraction <= 0) return 0;
+  let realized = 0;
+  for (const leg of signal.trades) {
+    if (leg.remaining <= 0) continue;
+    const qty = leg.remaining * fraction;
+    const pnlPerUnit = signal.dir === "BUY" ? (exitPrice - leg.entry) : (leg.entry - exitPrice);
+    realized += pnlPerUnit * signal.lotSize * qty;
+    leg.remaining = Math.max(0, leg.remaining - qty);
+  }
+  signal.realizedProfit += realized;
+  gridV2_refreshSignalLevels(signal);
+  return realized;
+}
+
+function gridV2_closeAll(signal, exitPrice) {
+  let realized = 0;
+  for (const leg of signal.trades) {
+    if (leg.remaining <= 0) continue;
+    const pnlPerUnit = signal.dir === "BUY" ? (exitPrice - leg.entry) : (leg.entry - exitPrice);
+    realized += pnlPerUnit * signal.lotSize * leg.remaining;
+    leg.remaining = 0;
+  }
+  signal.realizedProfit += realized;
+  gridV2_refreshSignalLevels(signal);
+  return realized;
+}
+
+function gridV2_finalizeSignal(signal, result, exitPrice, idx, reason) {
+  signal.closedPrice = exitPrice;
+  signal.closedIdx = idx;
+  signal.durationBars = idx - signal.candleIdx;
+  signal.result = result;
+  signal.status = "CLOSED";
+  signal.closeReason = reason;
+  signal.totalProfit = signal.realizedProfit;
+  signal.closedProfit = signal.realizedProfit;
+}
+
+function gridV2_getRiskState() {
+  const settings = normalizeGridScalperV2Settings();
+  gridV2_resetDailyState();
+  if (Number.isFinite(autoTradeBalance) && gridScalperV2DailyState.baselineBalance == null) {
+    gridScalperV2DailyState.baselineBalance = autoTradeBalance;
+  }
+  if (gridScalperV2DailyState.halted) {
+    return { halted: true, reason: gridScalperV2DailyState.haltReason || "Grid trading paused for daily protection." };
+  }
+  if (Number.isFinite(gridScalperV2DailyState.baselineBalance) && Number.isFinite(autoTradeBalance) && gridScalperV2DailyState.baselineBalance > 0) {
+    const ddPct = ((gridScalperV2DailyState.baselineBalance - autoTradeBalance) / gridScalperV2DailyState.baselineBalance) * 100;
+    if (ddPct >= settings.dailyDrawdownLimitPct) {
+      gridScalperV2DailyState.halted = true;
+      gridScalperV2DailyState.haltReason = `Grid trading paused - daily drawdown limit reached (${fmt(ddPct, 1)}%).`;
+      return { halted: true, reason: gridScalperV2DailyState.haltReason };
+    }
+  }
+  if (gridScalperV2DailyState.consecutiveLosses >= settings.consecutiveLossLimit) {
+    gridScalperV2DailyState.halted = true;
+    gridScalperV2DailyState.haltReason = `Grid trading paused - ${settings.consecutiveLossLimit} consecutive losses reached.`;
+    return { halted: true, reason: gridScalperV2DailyState.haltReason };
+  }
+  return { halted: false, reason: "" };
+}
+
+function gridV2_buildSignal(idx, sourceCandles = candles, runtime = null, legacyMode = false) {
+  const settings = normalizeGridScalperV2Settings();
+  const state = runtime?.state || gridScalperV2State;
+  const lastIdx = runtime?.lastIdx ?? lastGridScalperV2Idx;
+  const symbol = runtime?.symbol || getActiveSymbol() || "--";
+  const minCandles = legacyMode ? 20 : Math.max(settings.emaSlowPeriod + 5, settings.atrPeriod + 30);
+  if (idx < minCandles) return null;
+  if (idx - lastIdx < GRID_SCALPER_V2_COOLDOWN) return null;
+  if (state && state.status === "ACTIVE") return null;
+  const snapshot = gridV2_getSnapshot(idx, sourceCandles);
+  const market = gridV2_classifyMarket(snapshot);
+  const dir = gridV2_detectExhaustion(snapshot, sourceCandles);
+  if (!dir) return null;
+
+  if (legacyMode) {
+    if (market.regime === "TRENDING") return null;
+    const stopPrice = dir === "BUY" ? snapshot.price - snapshot.atr * 2 : snapshot.price + snapshot.atr * 2;
+    const spacing = snapshot.atr * 1.4;
+    return {
+      idx,
+      symbol,
+      dir,
+      entry: snapshot.price,
+      averageEntry: snapshot.price,
+      atr: snapshot.atr,
+      adx: snapshot.adx,
+      candleIdx: idx,
+      epoch: sourceCandles[idx].epoch || Math.floor(Date.now() / 1000),
+      timestamp: Date.now(),
+      regime: market.regime,
+      trendDirection: market.trendDirection,
+      confidenceScore: 50,
+      entryScore: 50,
+      signalStrength: 50,
+      maxTrades: 4,
+      gridSpacing: spacing,
+      lotSize: settings.lotSize,
+      openGridLevels: 1,
+      activeTrades: 1,
+      trades: [{ level: 1, entry: snapshot.price, remaining: 1, openedIdx: idx }],
+      tpShares: { tp1: 0, tp2: 0, tp3: 1 },
+      tpRR: { tp1: 0.5, tp2: 1, tp3: 1.4 },
+      stopMode: "ATR",
+      stopLoss: stopPrice,
+      initialStopLoss: stopPrice,
+      sl: stopPrice,
+      tp: dir === "BUY" ? snapshot.price + spacing * 0.9 : snapshot.price - spacing * 0.9,
+      riskPerUnit: Math.abs(snapshot.price - stopPrice),
+      targets: [{ key: "tp3", label: "TP3", share: 1, rr: 1.4, hit: false, price: dir === "BUY" ? snapshot.price + spacing * 0.9 : snapshot.price - spacing * 0.9 }],
+      realizedProfit: 0,
+      totalProfit: 0,
+      floatingLoss: 0,
+      peakProfit: 0,
+      maxDrawdownAbs: 0,
+      remainingSharePool: 1,
+      breakEvenMoved: false,
+      result: "PENDING",
+      status: "ACTIVE",
+      closeReason: "",
+      _stratOutcomeSent: false,
+      _sentViaTelegram: false,
+      _confRecorded: false
+    };
+  }
+
+  const riskState = gridV2_getRiskState();
+  if (riskState.halted) {
+    if (!runtime) gridV2_setStatusMessage(riskState.reason, false);
+    return null;
+  }
+  if (!market.allowTrade) {
+    if (!runtime) gridV2_setStatusMessage(market.warning || "Grid trading paused - ranging conditions not available.", market.regime === "TRENDING");
+    return null;
+  }
+  if (gridScalperV2SymbolDisableMap[symbol]?.disabled) {
+    if (!runtime) gridV2_setStatusMessage(`Grid trading paused - ${symbol} auto-disabled after poor last ${settings.performanceLookback} trades.`, false);
+    return null;
+  }
+  if (market.trendDirection !== dir || gridV2_isSRBlocked(dir, snapshot)) return null;
+  const confidence = gridV2_calculateConfidence(dir, snapshot, market);
+  if (confidence.score < settings.confidenceThreshold) return null;
+  const stopInfo = gridV2_buildStop(dir, snapshot.price, snapshot);
+  if (!Number.isFinite(stopInfo.price) || stopInfo.price === snapshot.price) return null;
+  const entryQuality = gridV2_calculateEntryScore(dir, snapshot, market, stopInfo.price, true);
+  if (entryQuality.score < settings.entryScoreThreshold) return null;
   const signal = {
-    idx: idx,
-    symbol: sym,
-    dir: exhaustion,
-    entry: currentPrice,
-    atr: atr,
+    idx,
+    symbol,
+    dir,
+    entry: snapshot.price,
+    averageEntry: snapshot.price,
+    atr: snapshot.atr,
+    adx: snapshot.adx,
     candleIdx: idx,
-    epoch: candles[idx].epoch,
-    timestamp: new Date().getTime(),
-    maxTrades: GRID_SCALPER_V2_MAX_TRADES,
-    gridSpacing: atr * GRID_SCALPER_V2_GRID_MULTIPLIER,
-    lotSize: GRID_SCALPER_V2_LOT_SIZE,
+    epoch: sourceCandles[idx].epoch || Math.floor(Date.now() / 1000),
+    timestamp: Date.now(),
+    regime: market.regime,
+    trendDirection: market.trendDirection,
+    confidenceScore: confidence.score,
+    entryScore: entryQuality.score,
+    signalStrength: Math.round((confidence.score + entryQuality.score) / 2),
+    confidenceChecks: confidence.checks,
+    entryScoreBreakdown: entryQuality.breakdown,
+    maxTrades: settings.maxGridLevels,
+    gridSpacing: gridV2_getGridDistance(snapshot),
+    lotSize: settings.lotSize,
+    openGridLevels: 1,
     activeTrades: 1,
-    basketTP: GRID_SCALPER_V2_BASKET_TP_PCT,
-    partialClosePct: GRID_SCALPER_V2_PARTIAL_CLOSE_PCT,
-    maxDrawdown: GRID_SCALPER_V2_MAX_DRAWDOWN_PCT,
-    trades: [],
+    trades: [{ level: 1, entry: snapshot.price, remaining: 1, openedIdx: idx }],
+    tpShares: { tp1: settings.tp1Share, tp2: settings.tp2Share, tp3: settings.tp3Share },
+    tpRR: { tp1: settings.tp1RR, tp2: settings.tp2RR, tp3: settings.tp3RR },
+    stopMode: stopInfo.mode,
+    stopLoss: stopInfo.price,
+    initialStopLoss: stopInfo.price,
+    sl: stopInfo.price,
+    tp: snapshot.price,
+    riskPerUnit: Math.abs(snapshot.price - stopInfo.price),
+    targets: [],
+    realizedProfit: 0,
     totalProfit: 0,
     floatingLoss: 0,
+    peakProfit: 0,
+    maxDrawdownAbs: 0,
+    remainingSharePool: 1,
+    breakEvenMoved: false,
     result: "PENDING",
+    status: "ACTIVE",
+    closeReason: "",
     _stratOutcomeSent: false,
     _sentViaTelegram: false,
     _confRecorded: false
   };
-  
+  gridV2_refreshSignalLevels(signal);
   return signal;
 }
 
-/**
- * Process Grid Scalper V2 signals
- */
+function gridV2_manageOpenSignal(signal, candle, idx) {
+  const settings = normalizeGridScalperV2Settings();
+  if (!signal || signal.status !== "ACTIVE") return false;
+  let changed = false;
+  while (signal.activeTrades < signal.maxTrades) {
+    const lastLeg = signal.trades[signal.trades.length - 1];
+    const nextEntry = signal.dir === "BUY" ? lastLeg.entry - signal.gridSpacing : lastLeg.entry + signal.gridSpacing;
+    const touched = signal.dir === "BUY" ? candle.low <= nextEntry : candle.high >= nextEntry;
+    if (!touched) break;
+    gridV2_openTradeLeg(signal, nextEntry, idx);
+    changed = true;
+  }
+  signal.unrealizedProfit = gridV2_getUnrealizedProfit(signal, candle.close);
+  signal.totalProfit = signal.realizedProfit + signal.unrealizedProfit;
+  signal.floatingLoss = signal.totalProfit < 0 ? signal.totalProfit : 0;
+  signal.peakProfit = Math.max(signal.peakProfit || 0, signal.totalProfit);
+  signal.maxDrawdownAbs = Math.max(signal.maxDrawdownAbs || 0, (signal.peakProfit || 0) - signal.totalProfit);
+
+  if (!signal.breakEvenMoved && signal.riskPerUnit > 0) {
+    const beTrigger = signal.dir === "BUY"
+      ? signal.averageEntry + (signal.riskPerUnit * settings.breakEvenTriggerR)
+      : signal.averageEntry - (signal.riskPerUnit * settings.breakEvenTriggerR);
+    const beHit = signal.dir === "BUY" ? candle.high >= beTrigger : candle.low <= beTrigger;
+    if (beHit) {
+      signal.stopLoss = signal.dir === "BUY"
+        ? signal.averageEntry + (signal.atr * settings.breakEvenBufferAtr)
+        : signal.averageEntry - (signal.atr * settings.breakEvenBufferAtr);
+      signal.breakEvenMoved = true;
+      signal.closeReason = "Break-even protection armed";
+      signal.sl = signal.stopLoss;
+      changed = true;
+    }
+  }
+
+  for (const target of signal.targets) {
+    if (target.hit) continue;
+    const hit = signal.dir === "BUY" ? candle.high >= target.price : candle.low <= target.price;
+    if (!hit) continue;
+    target.hit = true;
+    const remainingPool = Math.max(signal.remainingSharePool, 0.0001);
+    const fractionOfCurrent = target.key === "tp3" ? 1 : gridV2_clamp(target.share / remainingPool, 0, 1);
+    gridV2_realizeFraction(signal, fractionOfCurrent, target.price);
+    signal.remainingSharePool = Math.max(0, signal.remainingSharePool - target.share);
+    changed = true;
+    if (target.key === "tp3" || signal.activeTrades === 0) {
+      gridV2_finalizeSignal(signal, "WIN", target.price, idx, `${target.label} hit`);
+      return true;
+    }
+  }
+
+  const slHit = signal.dir === "BUY" ? candle.low <= signal.stopLoss : candle.high >= signal.stopLoss;
+  if (slHit) {
+    gridV2_closeAll(signal, signal.stopLoss);
+    gridV2_finalizeSignal(signal, signal.realizedProfit >= 0 ? "WIN" : "LOSS", signal.stopLoss, idx, signal.breakEvenMoved ? "Break-even stop" : "Stop loss hit");
+    return true;
+  }
+  if (Math.abs(signal.totalProfit) >= settings.maxTradeLoss && signal.totalProfit < 0) {
+    gridV2_closeAll(signal, candle.close);
+    gridV2_finalizeSignal(signal, "LOSS", candle.close, idx, "Max trade loss reached");
+    return true;
+  }
+  if ((idx - signal.candleIdx) >= settings.maxDurationBars) {
+    gridV2_closeAll(signal, candle.close);
+    gridV2_finalizeSignal(signal, signal.realizedProfit >= 0 ? "WIN" : "LOSS", candle.close, idx, "Time exit");
+    return true;
+  }
+  return changed;
+}
+
+function gridV2_updateSymbolPerformance() {
+  const settings = normalizeGridScalperV2Settings();
+  const grouped = {};
+  for (const s of gridScalperV2History) {
+    if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
+    const sym = s.symbol || "--";
+    if (!grouped[sym]) grouped[sym] = [];
+    grouped[sym].push(s);
+  }
+  gridScalperV2SymbolPerformance = {};
+  gridScalperV2SymbolDisableMap = {};
+  for (const [sym, arr] of Object.entries(grouped)) {
+    const recent = arr.slice(0, settings.performanceLookback);
+    const wins = recent.filter(s => s.result === "WIN").length;
+    const losses = recent.filter(s => s.result === "LOSS").length;
+    const total = wins + losses;
+    const positive = recent.reduce((sum, s) => sum + Math.max(0, s.closedProfit || 0), 0);
+    const negative = recent.reduce((sum, s) => sum + Math.abs(Math.min(0, s.closedProfit || 0)), 0);
+    const netProfit = recent.reduce((sum, s) => sum + (s.closedProfit || 0), 0);
+    const avgDrawdownR = total > 0
+      ? recent.reduce((sum, s) => sum + ((Number.isFinite(s.maxDrawdownAbs) && Number.isFinite(s.riskPerUnit) && s.riskPerUnit > 0)
+        ? s.maxDrawdownAbs / (s.riskPerUnit * Math.max(s.lotSize || 1, 0.0001))
+        : 0), 0) / total
+      : 0;
+    const pf = negative > 0 ? positive / negative : (positive > 0 ? Infinity : 0);
+    const winRate = total > 0 ? (wins / total) * 100 : 0;
+    const disabled = total >= settings.performanceLookback && (
+      winRate < settings.minWinRatePct ||
+      pf < settings.minProfitFactor ||
+      netProfit <= 0 ||
+      avgDrawdownR > settings.maxAverageDrawdownR
+    );
+    gridScalperV2SymbolPerformance[sym] = { total, wins, losses, winRate, netProfit, avgDrawdownR, profitFactor: pf };
+    if (disabled) {
+      gridScalperV2SymbolDisableMap[sym] = { disabled: true, reason: `${sym} disabled: WR ${fmt(winRate,1)}%, PF ${pf === Infinity ? "∞" : fmt(pf,2)}, Avg DD ${fmt(avgDrawdownR,2)}R` };
+    }
+  }
+}
+
+function gridV2_registerClosedSignal(signal) {
+  signal.closedAt = Date.now();
+  gridV2_resetDailyState();
+  if (signal.result === "LOSS") gridScalperV2DailyState.consecutiveLosses++;
+  else gridScalperV2DailyState.consecutiveLosses = 0;
+  gridV2_updateSymbolPerformance();
+  const riskState = gridV2_getRiskState();
+  if (riskState.halted) gridV2_setStatusMessage(riskState.reason, false);
+}
+
+function updateGridScalperV2DashboardUI() {
+  const currentSignal = gridScalperV2History[0] || gridScalperV2State;
+  const snapshot = candles.length > 0 ? gridV2_getSnapshot(candles.length - 1, candles) : null;
+  const market = snapshot ? gridV2_classifyMarket(snapshot) : { regime: "--", trendDirection: "--" };
+  const resolved = gridScalperV2History.filter(s => s && (s.result === "WIN" || s.result === "LOSS"));
+  const wins = resolved.filter(s => s.result === "WIN").length;
+  const losses = resolved.filter(s => s.result === "LOSS").length;
+  const total = wins + losses;
+  const positive = resolved.reduce((sum, s) => sum + Math.max(0, s.closedProfit || 0), 0);
+  const negative = resolved.reduce((sum, s) => sum + Math.abs(Math.min(0, s.closedProfit || 0)), 0);
+  const winRate = total > 0 ? (wins / total) * 100 : 0;
+  const pf = negative > 0 ? positive / negative : (positive > 0 ? Infinity : 0);
+  const dailyPL = gridScalperV2History
+    .filter(s => s && s.closedAt && gridV2_getDayKey(s.closedAt) === gridV2_getDayKey())
+    .reduce((sum, s) => sum + (s.closedProfit || 0), 0);
+  if (UI.gridScalperV2MarketRegime) UI.gridScalperV2MarketRegime.textContent = market.regime;
+  if (UI.gridScalperV2SignalStrength) UI.gridScalperV2SignalStrength.textContent = currentSignal ? `${currentSignal.signalStrength || 0}%` : "--";
+  if (UI.gridScalperV2TrendDirection) UI.gridScalperV2TrendDirection.textContent = market.trendDirection === "NEUTRAL" ? "--" : (market.trendDirection === "BUY" ? "Bullish" : "Bearish");
+  if (UI.gridScalperV2AdxValue) UI.gridScalperV2AdxValue.textContent = snapshot ? fmt(snapshot.adx, 1) : "--";
+  if (UI.gridScalperV2AtrValue) UI.gridScalperV2AtrValue.textContent = snapshot ? fmt(snapshot.atr, 4) : "--";
+  if (UI.gridScalperV2OpenLevels) UI.gridScalperV2OpenLevels.textContent = currentSignal && currentSignal.status === "ACTIVE" ? `${currentSignal.openGridLevels}/${currentSignal.maxTrades}` : "0";
+  if (UI.gridScalperV2WinRate) UI.gridScalperV2WinRate.textContent = total > 0 ? `${fmt(winRate, 1)}%` : "--";
+  if (UI.gridScalperV2ProfitFactor) UI.gridScalperV2ProfitFactor.textContent = total > 0 ? (pf === Infinity ? "∞" : fmt(pf, 2)) : "--";
+  if (UI.gridScalperV2DailyPL) UI.gridScalperV2DailyPL.textContent = `${dailyPL >= 0 ? "+" : ""}$${fmt(dailyPL, 2)}`;
+  if (UI.gridScalperV2Status) UI.gridScalperV2Status.textContent = gridScalperV2StatusMessage || "Ready";
+  if (UI.gridScalperV2DisabledSymbols) {
+    const disabledList = Object.values(gridScalperV2SymbolDisableMap).map(v => v.reason);
+    UI.gridScalperV2DisabledSymbols.textContent = disabledList.length ? disabledList.join(" • ") : "None";
+  }
+  if (UI.gridScalperV2BacktestReport && gridScalperV2BacktestReport) {
+    UI.gridScalperV2BacktestReport.textContent = gridScalperV2BacktestReport;
+  }
+}
+
+function detectGridScalperV2Strategy(idx) {
+  if (!gridScalperV2Enabled) return null;
+  const signal = gridV2_buildSignal(idx, candles, null, false);
+  if (signal) gridV2_setStatusMessage("", false);
+  return signal;
+}
+
 function processGridScalperV2() {
   if (!gridScalperV2Enabled) return;
-  if (candles.length < 20) return;
-  
+  const settings = normalizeGridScalperV2Settings();
+  applyGridScalperV2SettingsToUI();
+  gridV2_resetDailyState();
+  if (candles.length < Math.max(settings.emaSlowPeriod + 5, settings.atrPeriod + 30)) return;
   const idx = candles.length - 1;
-  
   if (!gridScalperV2State || gridScalperV2State.status === "CLOSED") {
     const signal = detectGridScalperV2Strategy(idx);
-    if (!signal) return;
-    
+    if (!signal) {
+      updateGridScalperV2DashboardUI();
+      return;
+    }
     lastGridScalperV2Idx = idx;
     gridScalperV2State = signal;
-    signal._confRecorded = false;
-    signal._stratOutcomeSent = false;
     signal._sentViaTelegram = (telegramStrategyAutoSend && !_historicalProcessing);
-    
     gridScalperV2History.unshift(signal);
-    if (gridScalperV2History.length > GRID_SCALPER_V2_MAX_HISTORY) {
-      gridScalperV2History.pop();
-    }
-    
+    if (gridScalperV2History.length > GRID_SCALPER_V2_MAX_HISTORY) gridScalperV2History.pop();
     playStrategyAlert(signal.dir);
-    
     const sym = signal.symbol || "--";
-    addLog(`💹 GRID SCALPER V2 ${signal.dir === "BUY" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | Grid: ${fmtPrice(signal.gridSpacing, sym)} | Max Trades: ${signal.maxTrades}`);
-    
-    showToast(
-      `Grid Scalper V2 ${signal.dir === "BUY" ? "▲ BUY" : "▼ SELL"}`,
-      `${sym} @ ${fmtPrice(signal.entry, sym)} | Grid Spacing: ${fmtPrice(signal.gridSpacing, sym)}`,
-      "trade", 10000
-    );
-    
+    addLog(`💹 GRID SCALPER V2 ${signal.dir === "BUY" ? "▲ BUY" : "▼ SELL"} — ${sym} @ ${fmtPrice(signal.entry, sym)} | Regime ${signal.regime} | Confidence ${signal.confidenceScore}% | Entry ${signal.entryScore}% | Grid ${fmtPrice(signal.gridSpacing, sym)} | Max Levels ${signal.maxTrades}`);
+    showToast(`Grid Scalper V2 ${signal.dir === "BUY" ? "▲ BUY" : "▼ SELL"}`, `${sym} • ${signal.regime} • Confidence ${signal.confidenceScore}% • Entry ${signal.entryScore}%`, "trade", 10000);
     if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-      const body = `💹 ${signal.dir} Grid Scalper V2 — ${sym} @ ${fmtPrice(signal.entry, sym)}\nGrid Spacing: ${fmtPrice(signal.gridSpacing, sym)}`;
-      throttledNotification("Grid Scalper V2", body);
+      throttledNotification("Grid Scalper V2", `${sym} ${signal.dir} • ${signal.regime}\nADX ${fmt(signal.adx, 1)} • ATR ${fmt(signal.atr, 4)} • Levels ${signal.maxTrades}`);
     }
-    
     if (telegramStrategyAutoSend) {
       setTimeout(() => sendTelegramStrategyAlert(signal), CHART_RENDER_DELAY_MS);
     }
-    
     renderStrategyAlerts();
-    
+    updateGridScalperV2DashboardUI();
     if (autoTradeStrategyEnabled && autoTradeGridScalperV2 && !_historicalProcessing) {
-      /* Determine effective direction: if opposite mode is ON, flip the signal.
-         Grid Scalper V2 uses BUY/SELL internally, but executeAutoTrade expects
-         BULL/BEAR for contract type mapping. */
-      const effectiveGridDir = autoTradeStrategyOpposite
-        ? (signal.dir === "BUY" ? "SELL" : "BUY")
-        : signal.dir;
-      /* Normalize to BULL/BEAR for the auto-trade execution pipeline */
-      const normalizedDir = effectiveGridDir === "BUY" ? "BULL" : "BEAR";
-
-      if (autoTradeStrategyOpposite) {
-        addLog(`🔄 Grid Scalper V2 opposite: ${signal.dir} → ${effectiveGridDir} (SL/TP recalculated for ${effectiveGridDir})`);
-      }
-
-      /* Compute SL/TP based on the effective (post-opposite) direction.
-         This avoids the naive SL↔TP swap which produces a too-tight SL on
-         Step Index when direction is reversed. */
-      const sl = effectiveGridDir === "BUY"
-        ? signal.entry - (signal.atr * 2.0)
-        : signal.entry + (signal.atr * 2.0);
-      const tp = effectiveGridDir === "BUY"
-        ? signal.entry + (signal.gridSpacing * GRID_SCALPER_V2_INITIAL_OFFSET)
-        : signal.entry - (signal.gridSpacing * GRID_SCALPER_V2_INITIAL_OFFSET);
-
       executeAutoTrade({
-        dir: normalizedDir,
+        dir: signal.dir === "BUY" ? "BULL" : "BEAR",
         entry: signal.entry,
-        sl: sl,
-        tp: tp,
+        sl: signal.stopLoss,
+        tp: signal.targets[signal.targets.length - 1].price,
         symbol: sym,
         source: "strategy",
-        strategyName: "gridScalperV2",
-        _oppositePreApplied: true  /* flag: SL/TP already computed for effective dir */
+        strategyName: "gridScalperV2"
       });
     }
   }
 }
 
-/**
- * Monitor Grid Scalper V2 outcomes
- */
 function monitorGridScalperV2Outcomes(candle) {
   if (!gridScalperV2Enabled) return;
   let changed = false;
-  
   for (const s of gridScalperV2History) {
-    if (s.result !== "PENDING") continue;
-    
-    const elapsed = (candles.length - 1) - s.candleIdx;
-    
-    if (elapsed >= 240) {
-      s.result = "EXPIRED";
-      addLog(`💹 Grid Scalper V2 EXPIRED — timeout after ${elapsed} candles`);
-      changed = true;
-      continue;
-    }
-    
-    const currentPrice = candle.close;
-    const pnl = s.dir === "BUY"
-      ? (currentPrice - s.entry) * s.lotSize * s.activeTrades
-      : (s.entry - currentPrice) * s.lotSize * s.activeTrades;
-    const pnlPct = (pnl / (s.entry * s.lotSize * s.activeTrades)) * 100;
-    
-    s.totalProfit = pnl;
-    s.floatingLoss = pnl < 0 ? pnl : 0;
-    
-    if (pnlPct >= s.basketTP) {
-      s.result = "WIN";
-      addLog(`💹 Grid Scalper V2 WIN — basket TP hit @ ${pnlPct.toFixed(2)}% profit`);
-      changed = true;
-    }
-    else if (Math.abs(s.floatingLoss) >= s.maxDrawdown) {
-      s.result = "LOSS";
-      addLog(`💹 Grid Scalper V2 LOSS — kill switch triggered @ ${Math.abs(s.floatingLoss).toFixed(2)}$ loss`);
-      changed = true;
+    if (!s || s.result !== "PENDING" || s.status !== "ACTIVE") continue;
+    const updated = gridV2_manageOpenSignal(s, candle, candles.length - 1);
+    changed = changed || updated;
+    if (s.status === "CLOSED") {
+      gridScalperV2State = null;
+      gridV2_registerClosedSignal(s);
+      addLog(`💹 Grid Scalper V2 ${s.result} — ${s.symbol || "--"} ${s.closeReason} | P/L ${s.closedProfit >= 0 ? "+" : ""}$${fmt(s.closedProfit || 0, 2)} | Max DD $${fmt(s.maxDrawdownAbs || 0, 2)}`);
     }
   }
-  
   if (changed) {
     renderStrategyAlerts();
+    updateGridScalperV2DashboardUI();
     for (const s of gridScalperV2History) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+      if ((s.result === "WIN" || s.result === "LOSS") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
-    lastGridScalperV2Idx = candles.length - 1;
-    
-    if (adaptiveConfluenceEnabled) {
-      for (const s of gridScalperV2History) {
-        if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result);
-          s._confRecorded = true;
-        }
+  }
+}
+
+function gridV2_collectBacktestMetrics(history) {
+  const resolved = history.filter(s => s && (s.result === "WIN" || s.result === "LOSS"));
+  const profits = resolved.map(s => s.closedProfit || 0);
+  const wins = profits.filter(p => p > 0).length;
+  const netProfit = profits.reduce((a, b) => a + b, 0);
+  const positive = profits.reduce((sum, p) => sum + Math.max(0, p), 0);
+  const negative = profits.reduce((sum, p) => sum + Math.abs(Math.min(0, p)), 0);
+  let eq = 0, peak = 0, maxDrawdown = 0;
+  for (const p of profits) {
+    eq += p;
+    peak = Math.max(peak, eq);
+    maxDrawdown = Math.max(maxDrawdown, peak - eq);
+  }
+  const avg = profits.length ? netProfit / profits.length : 0;
+  const variance = profits.length ? profits.reduce((sum, p) => sum + Math.pow(p - avg, 2), 0) / profits.length : 0;
+  const std = Math.sqrt(variance);
+  const durations = resolved.map(s => s.durationBars || 0);
+  return {
+    trades: resolved.length,
+    netProfit,
+    winRate: resolved.length ? (wins / resolved.length) * 100 : 0,
+    maxDrawdown,
+    sharpe: std > 0 ? avg / std : 0,
+    profitFactor: negative > 0 ? positive / negative : (positive > 0 ? Infinity : 0),
+    avgTradeDuration: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0
+  };
+}
+
+function gridV2_runBacktestSimulation(sourceCandles, symbol, legacyMode = false) {
+  const runtime = { state: null, lastIdx: -999, symbol };
+  const history = [];
+  for (let idx = 0; idx < sourceCandles.length; idx++) {
+    if (runtime.state && runtime.state.status === "ACTIVE") {
+      gridV2_manageOpenSignal(runtime.state, sourceCandles[idx], idx);
+      if (runtime.state.status === "CLOSED") runtime.state = null;
+    }
+    if (!runtime.state) {
+      const signal = gridV2_buildSignal(idx, sourceCandles, runtime, legacyMode);
+      if (signal) {
+        runtime.state = signal;
+        runtime.lastIdx = idx;
+        history.unshift(signal);
       }
     }
   }
+  if (runtime.state && runtime.state.status === "ACTIVE") {
+    const lastIdx = sourceCandles.length - 1;
+    gridV2_closeAll(runtime.state, sourceCandles[lastIdx].close);
+    gridV2_finalizeSignal(runtime.state, runtime.state.realizedProfit >= 0 ? "WIN" : "LOSS", sourceCandles[lastIdx].close, lastIdx, "Backtest end");
+  }
+  return gridV2_collectBacktestMetrics(history);
+}
+
+function runGridScalperV2ComparisonBacktest() {
+  const settings = normalizeGridScalperV2Settings();
+  const symbols = settings.backtestSymbols.split(",").map(s => s.trim()).filter(Boolean);
+  const lines = ["Grid Scalper V2 Comparison Report", ""];
+  for (const symbol of symbols) {
+    let sourceCandles = null;
+    if (multiPanels.has(symbol)) sourceCandles = multiPanels.get(symbol).candles || null;
+    else if ((getActiveSymbol() || "") === symbol) sourceCandles = candles;
+    if (!sourceCandles || sourceCandles.length < Math.max(settings.emaSlowPeriod + 5, settings.atrPeriod + 30)) {
+      lines.push(`${symbol}: unavailable (load symbol data first)`);
+      continue;
+    }
+    const legacy = gridV2_runBacktestSimulation(sourceCandles, symbol, true);
+    const enhanced = gridV2_runBacktestSimulation(sourceCandles, symbol, false);
+    lines.push(`${symbol}`);
+    lines.push(`  Current  -> Net ${fmt(legacy.netProfit,2)} | WR ${fmt(legacy.winRate,1)}% | DD ${fmt(legacy.maxDrawdown,2)} | Sharpe ${fmt(legacy.sharpe,2)} | PF ${legacy.profitFactor === Infinity ? "∞" : fmt(legacy.profitFactor,2)} | AvgDur ${fmt(legacy.avgTradeDuration,1)} bars`);
+    lines.push(`  Enhanced -> Net ${fmt(enhanced.netProfit,2)} | WR ${fmt(enhanced.winRate,1)}% | DD ${fmt(enhanced.maxDrawdown,2)} | Sharpe ${fmt(enhanced.sharpe,2)} | PF ${enhanced.profitFactor === Infinity ? "∞" : fmt(enhanced.profitFactor,2)} | AvgDur ${fmt(enhanced.avgTradeDuration,1)} bars`);
+    lines.push("");
+  }
+  gridScalperV2BacktestReport = lines.join("\n");
+  updateGridScalperV2DashboardUI();
+  return gridScalperV2BacktestReport;
+}
+
+function debugGridScalperV2MultiAnalysis() {
+  const idx = candles.length - 1;
+  if (idx < 0) return null;
+  const snapshot = gridV2_getSnapshot(idx, candles);
+  const market = gridV2_classifyMarket(snapshot);
+  const dir = gridV2_detectExhaustion(snapshot, candles);
+  const confidence = dir ? gridV2_calculateConfidence(dir, snapshot, market) : { score: 0, checks: [] };
+  const stopInfo = dir ? gridV2_buildStop(dir, snapshot.price, snapshot) : { price: null, mode: "--" };
+  const entryScore = dir ? gridV2_calculateEntryScore(dir, snapshot, market, stopInfo.price, true) : { score: 0, breakdown: {} };
+  const blocked = [];
+  if (market.regime !== "RANGING") blocked.push(market.warning || `Blocked by ${market.regime}`);
+  if (!dir) blocked.push("No qualified exhaustion reversal");
+  if (dir && gridV2_isSRBlocked(dir, snapshot)) blocked.push("Support/resistance filter blocked entry");
+  if (dir && confidence.score < normalizeGridScalperV2Settings().confidenceThreshold) blocked.push("Confidence below threshold");
+  if (dir && entryScore.score < normalizeGridScalperV2Settings().entryScoreThreshold) blocked.push("Entry quality below threshold");
+  return {
+    steps: [
+      { step: 1, title: "Market Regime", regime: market.regime, trend_direction: market.trendDirection, adx: fmt(snapshot.adx, 1), atr: fmt(snapshot.atr, 4), atr_ratio: fmt(snapshot.atrRatio, 2) },
+      { step: 2, title: "Trend Filter", ema50: fmt(snapshot.ema50, 4), ema200: fmt(snapshot.ema200, 4), ema_spread_atr: fmt(snapshot.emaSpreadAtr, 2), allowed_grid_side: market.trendDirection },
+      { step: 3, title: "Exhaustion & S/R", exhaustion_signal: dir || "NONE", support: snapshot.levels.support != null ? fmt(snapshot.levels.support, 4) : "--", resistance: snapshot.levels.resistance != null ? fmt(snapshot.levels.resistance, 4) : "--", sr_blocked: dir ? gridV2_isSRBlocked(dir, snapshot) : true },
+      { step: 4, title: "Confidence Score", confidence: `${confidence.score}%`, checks: confidence.checks.map(c => `${c.pass ? "✓" : "✗"} ${c.name}`) },
+      { step: 5, title: "Entry Quality", entry_score: `${entryScore.score}%`, stop_mode: stopInfo.mode, stop_loss: stopInfo.price != null ? fmt(stopInfo.price, 4) : "--", breakdown: Object.entries(entryScore.breakdown).map(([k, v]) => `${k}: ${v}`) },
+      { step: 6, title: "OVERALL SIGNAL DECISION", enabled: gridScalperV2Enabled, all_conditions_met: gridScalperV2Enabled && blocked.length === 0, blocking_reasons: blocked.length ? blocked : ["None"] }
+    ]
+  };
 }
 
 /**
- * DEBUG: Multi-step analysis with indexes for Grid Scalper V2 (M5)
- * Shows each condition step-by-step with actual values
+ * Open Grid Scalper V2 Analysis Modal with multi-panel support
  */
-function debugGridScalperV2MultiAnalysis() {
-  if (candles.length < 20) {
-    console.warn("❌ Not enough candles (need 20+, have " + candles.length + ")");
-    return;
-  }
-  
-  const analysis = {
-    timestamp: new Date().toLocaleString(),
-    timeframe: "M5",
-    candle_count: candles.length,
-    steps: []
-  };
-  
-  // STEP 1: Current Candle Data
-  const idx = candles.length - 1;
-  const currentCandle = candles[idx];
-  analysis.steps.push({
-    step: 1,
-    title: "Current M5 Candle",
-    index: idx,
-    data: {
-      open: currentCandle.open,
-      high: currentCandle.high,
-      low: currentCandle.low,
-      close: currentCandle.close,
-      range: (currentCandle.high - currentCandle.low).toFixed(4)
-    }
-  });
-  
-  // STEP 2: ATR & Ranging Check
-  const atr = gridV2_calculateATR();
-  const isRanging = gridV2_isRanging();
-  analysis.steps.push({
-    step: 2,
-    title: "ATR & Ranging Detection",
-    atr: atr.toFixed(4),
-    atr_threshold: GRID_SCALPER_V2_RANGE_THRESHOLD_ATR,
-    is_ranging: isRanging,
-    passing: isRanging ? "✅ YES (ATR <= " + GRID_SCALPER_V2_RANGE_THRESHOLD_ATR + ")" : "❌ NO (trending)"
-  });
-  
-  // STEP 3: EMA & Trend Strength Check
-  const ema = gridV2_calculateEMA();
-  const isTrending = gridV2_isTrending();
-  const distFromEMA = Math.abs(currentCandle.close - ema);
-  const trendThreshold = GRID_SCALPER_V2_TREND_STRENGTH_ATR * atr;
-  analysis.steps.push({
-    step: 3,
-    title: "EMA & Trend Strength",
-    ema: ema.toFixed(4),
-    current_price: currentCandle.close.toFixed(4),
-    distance_from_ema: distFromEMA.toFixed(4),
-    trend_threshold: trendThreshold.toFixed(4),
-    is_trending: isTrending,
-    passing: !isTrending ? "✅ YES (not trending)" : "❌ NO (strong trend)"
-  });
-  
-  // STEP 4: RSI & Exhaustion Check
-  const rsi = gridV2_calculateRSI();
-  const exhaustion = gridV2_detectExhaustion();
-  analysis.steps.push({
-    step: 4,
-    title: "RSI & Exhaustion Pattern",
-    rsi: rsi.toFixed(2),
-    exhaustion_signal: exhaustion || "NONE",
-    rsi_confirmation: exhaustion === "BUY" 
-      ? (rsi >= 40 ? "❌ FAIL (RSI >= 40)" : "✅ PASS (RSI < 40)")
-      : exhaustion === "SELL"
-      ? (rsi <= 60 ? "❌ FAIL (RSI <= 60)" : "✅ PASS (RSI > 60)")
-      : "⚠️ No exhaustion"
-  });
-  
-  // STEP 5: Cooldown & State Check
-  const timeSinceLastSignal = idx - lastGridScalperV2Idx;
-  const inCooldown = timeSinceLastSignal < GRID_SCALPER_V2_COOLDOWN;
-  const stateActive = gridScalperV2State && gridScalperV2State.status === "ACTIVE";
-  analysis.steps.push({
-    step: 5,
-    title: "Cooldown & State",
-    last_signal_index: lastGridScalperV2Idx,
-    candles_since_signal: timeSinceLastSignal,
-    cooldown_period: GRID_SCALPER_V2_COOLDOWN,
-    in_cooldown: inCooldown,
-    state_active: stateActive,
-    passing: (!inCooldown && !stateActive) ? "✅ READY" : "❌ Blocked"
-  });
-  
-  // STEP 6: Overall Decision
-  const enabledCheck = gridScalperV2Enabled;
-  const shouldFire = enabledCheck && isRanging && !isTrending && exhaustion && 
-                     ((exhaustion === "BUY" && rsi < 40) || (exhaustion === "SELL" && rsi > 60)) &&
-                     !inCooldown && !stateActive;
-  
-  analysis.steps.push({
-    step: 6,
-    title: "OVERALL SIGNAL DECISION",
-    enabled: enabledCheck,
-    all_conditions_met: shouldFire,
-    result: shouldFire ? "🟢 SIGNAL SHOULD FIRE" : "🔴 SIGNAL BLOCKED",
-    blocking_reasons: (() => {
-      const reasons = [];
-      if (!enabledCheck) reasons.push("Strategy disabled");
-      if (!isRanging) reasons.push("Market is trending");
-      if (isTrending) reasons.push("Strong trend detected");
-      if (!exhaustion) reasons.push("No exhaustion pattern");
-      if (exhaustion === "BUY" && rsi >= 40) reasons.push("BUY exhaustion but RSI >= 40");
-      if (exhaustion === "SELL" && rsi <= 60) reasons.push("SELL exhaustion but RSI <= 60");
-      if (inCooldown) reasons.push("In cooldown period");
-      if (stateActive) reasons.push("Trade already active");
-      return reasons.length > 0 ? reasons : ["None"];
-    })()
-  });
-  
-  console.group("📊 GRID SCALPER V2 — MULTI-ANALYSIS (M5)");
-  console.table(analysis);
-  console.log("%c=== DETAILED STEPS ===", "font-weight:bold;font-size:13px;");
-  analysis.steps.forEach(s => {
-    console.group(`Step ${s.step}: ${s.title}`);
-    console.table(s);
-    console.groupEnd();
-  });
-  console.groupEnd();
-  
-  return analysis;
-}
-
 /**
  * Open Grid Scalper V2 Analysis Modal with multi-panel support
  */
