@@ -94,6 +94,9 @@ async function safeJson(resp) {
 
 const DERIV_TOKEN_KEY = "deriv_token";
 const STREAM_MODE_KEY = "itguru_indicator_streamMode";
+const LS_PREFIX = "itguru_indicator_";
+const PROFILES_LS_KEY = "itguru_indicator_profiles";
+const SIGNAL_NOTES_LS_KEY = "itguru_signal_notes";
 const NOTIF_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>📊</text></svg>";
 
 /* Tuning defaults (user-configurable via UI) */
@@ -1583,6 +1586,40 @@ function calcPositionMetrics(tradeObj) {
     isSynthetic: true
   };
 }
+
+/* ================= STRATEGY 8: GRID SCALPER MA ================= */
+let gridScalperMAEnabled   = false;          /* master toggle */
+let gridScalperMAStrategy  = "price_vs_ma";  /* "price_vs_ma" | "bos" | "triple_ma" */
+let gridScalperMAPeriod    = 21;             /* MA period for Price vs MA mode */
+let gridScalperMAHistory   = [];             /* alert history */
+let lastGridScalperMAIdx   = -999;
+let autoTradeGridScalperMA = true;
+let gridScalperMAOppositeEnabled = false;    /* execute/log opposite direction for Grid Scalper MA */
+let gridScalperAdaptiveEnabled = false;      /* adaptive confluence gate toggle */
+let gridScalperAdaptiveModeValue = "Off";    /* Off | ObservationOnly | Active */
+const GRID_SCALPER_MA_MAX_HISTORY  = 30;
+const GRID_SCALPER_MA_COOLDOWN     = 5;      /* min candles between signals */
+const GRID_SCALPER_MA_BOS_LOOKBACK = 30;     /* candles to scan for swing points in BOS mode */
+const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0;    /* max SL distance as ATR multiple */
+const GRID_SCALPER_MA_RR_VOL1S     = 1.5;    /* Volatility 1s: quick 1.5:1 scalp */
+const GRID_SCALPER_MA_RR_STANDARD  = 2.5;    /* Volatility Standard: ride 2.5:1 */
+const GRID_SCALPER_MA_RR_DEFAULT   = 2.0;    /* all other symbols: balanced 2:1 */
+
+/* ================= STRATEGY 12: ORDERBLOCK DETECTION ================= */
+let orderblockEnabled   = false;     /* master toggle */
+let orderblockHistory   = [];        /* alert history */
+let lastOrderblockIdx   = -999;
+let autoTradeOrderblock = true;
+
+/* ================= FEATURE: NAMED SETTINGS PROFILES ================= */
+let savedProfiles = {};              /* { name: settingsSnapshot } */
+
+/* ================= FEATURE: SIGNAL NOTES ================= */
+let signalNotes = {};                /* { signalId: noteText } */
+
+/* ================= FEATURE: ADAPTIVE CONFLUENCE WEIGHTING ================= */
+let adaptiveConfluenceEnabled = false;
+let confluenceFactorStats = {};      /* { factorName: { wins, losses } } */
 
 /* Confluence score for current setup */
 let confluenceScore = 0;
@@ -16359,6 +16396,21 @@ function initKeyboardShortcuts() {
     }
   });
 }
+
+/* Granularity → human-readable label map (used for display + recommended settings) */
+const GRAN_LABELS = {
+  60: "1 min", 120: "2 min", 180: "3 min", 300: "5 min", 600: "10 min", 900: "15 min",
+  1800: "30 min", 3600: "1 hour", 7200: "2 hours", 14400: "4 hours", 28800: "8 hours", 86400: "1 day"
+};
+
+/* Session filter mode → display label map */
+const SESSION_MODE_LABELS = {
+  london_ny: "London+NY ✅",
+  london:    "London ✅",
+  new_york:  "NY ✅",
+  overlap:   "Overlap ✅",
+  asian:     "Asian ✅"
+};
 
 function formatMinutes(m) {
   if (m < 60) return m + " min";
