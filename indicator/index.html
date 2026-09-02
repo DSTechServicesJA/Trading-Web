@@ -1035,6 +1035,65 @@
               </div>
 
               <hr class="param-divider" />
+              <p class="param-group-title">💹 Strategy 19: Grid Scalper V2</p>
+              <p class="hint">Range-only grid engine with market regime detection, EMA50/EMA200 bias, ADX gating, ATR-based spacing, recovery caps, adaptive stop placement, breakeven protection, partial take profits, entry quality scoring, and daily loss protection. It pauses new entries in trending or unstable conditions.</p>
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin:8px 0;">
+                <label class="hint" for="gridScalperV2AtrMultiplierInput">ATR Multiplier
+                  <input type="number" id="gridScalperV2AtrMultiplierInput" min="0.2" max="10" step="0.1" value="1.4" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2MaxLevelsInput">Max Grid Levels
+                  <input type="number" id="gridScalperV2MaxLevelsInput" min="1" max="10" step="1" value="3" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2MinGridInput">Min Grid Distance
+                  <input type="number" id="gridScalperV2MinGridInput" min="0.00001" step="0.01" value="0.4" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2MaxGridInput">Max Grid Distance
+                  <input type="number" id="gridScalperV2MaxGridInput" min="0.00001" step="0.01" value="3.5" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2StopMode">Smart Stop Mode
+                  <select id="gridScalperV2StopMode" style="width:100%;margin-top:3px;">
+                    <option value="atr">ATR Based</option>
+                    <option value="swing">Swing High/Low</option>
+                  </select>
+                </label>
+                <label class="hint" for="gridScalperV2AtrStopInput">ATR Stop Multiplier
+                  <input type="number" id="gridScalperV2AtrStopInput" min="0.5" max="10" step="0.1" value="2" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2BreakEvenInput">Break-even Trigger (R)
+                  <input type="number" id="gridScalperV2BreakEvenInput" min="0.25" max="5" step="0.25" value="1" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2BreakEvenBufferInput">Break-even Buffer (ATR)
+                  <input type="number" id="gridScalperV2BreakEvenBufferInput" min="0" max="2" step="0.05" value="0.1" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2ConfidenceInput">Min Confidence %
+                  <input type="number" id="gridScalperV2ConfidenceInput" min="0" max="100" step="1" value="70" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2EntryScoreInput">Min Entry Score %
+                  <input type="number" id="gridScalperV2EntryScoreInput" min="0" max="100" step="1" value="65" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2DailyDDInput">Daily Drawdown %
+                  <input type="number" id="gridScalperV2DailyDDInput" min="0.1" max="25" step="0.1" value="3" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2ConsecutiveLossInput">Consecutive Loss Limit
+                  <input type="number" id="gridScalperV2ConsecutiveLossInput" min="1" max="20" step="1" value="3" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2Tp1ShareInput">TP1 Share %
+                  <input type="number" id="gridScalperV2Tp1ShareInput" min="0" max="100" step="1" value="30" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2Tp2ShareInput">TP2 Share %
+                  <input type="number" id="gridScalperV2Tp2ShareInput" min="0" max="100" step="1" value="30" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2Tp3ShareInput">TP3 Share %
+                  <input type="number" id="gridScalperV2Tp3ShareInput" min="0" max="100" step="1" value="40" style="width:100%;margin-top:3px;" />
+                </label>
+                <label class="hint" for="gridScalperV2BacktestSymbolsInput">Backtest Symbols
+                  <input type="text" id="gridScalperV2BacktestSymbolsInput" value="R_10,R_25,R_50,R_75,R_100" style="width:100%;margin-top:3px;" />
+                </label>
+              </div>
+              <button id="gridScalperV2BacktestBtn" class="analysis-btn" type="button">📊 Compare Current vs Enhanced</button>
+              <pre id="gridScalperV2BacktestReport" style="margin-top:8px;white-space:pre-wrap;max-height:220px;overflow:auto;padding:10px;border-radius:8px;background:rgba(15,23,42,0.55);color:var(--text-primary);border:1px solid var(--glass-border);font-size:0.75rem;"></pre>
+
+              <hr class="param-divider" />
               <p class="param-group-title">🎯 Strategy 9: Fair Value Gap (FVG)</p>
               <p class="hint">ICT-style supply &amp; demand strategy using Fair Value Gaps as confluence. Detects a "big push" (3+ consecutive strong candles) that leaves FVG imbalances, then marks the origin candle (the demand/supply zone <em>before</em> the push). Waits for price to retrace back into that zone at a Fibonacci discount (&lt;50% retracement), confirms with a bullish/bearish engulfing pattern, and enters in the direction of the original push. SL below the demand zone (or above supply). TP at the recent swing high/low. Requires EMA trend alignment. Works on any timeframe.</p>
 
@@ -1091,6 +1150,11 @@
               <p class="param-group-title">🔲 Grid Scalper MA Alerts</p>
               <ul id="gridScalperMAAlertList" class="scalp-alert-list"></ul>
               <span id="gridScalperMAAlertCount" style="display:none;">0</span>
+
+              <hr class="param-divider" />
+              <p class="param-group-title">💹 Grid Scalper V2 Alerts</p>
+              <ul id="gridScalperV2AlertList" class="scalp-alert-list"></ul>
+              <span id="gridScalperV2AlertCount" style="display:none;">0</span>
 
               <hr class="param-divider" />
               <p class="param-group-title">🎯 Fair Value Gap Alerts</p>
@@ -1631,6 +1695,26 @@
             </div>
           </section>
 
+          <section class="dashboard">
+            <div class="section-header">
+              <span class="icon">💹</span>
+              <h3>Grid Scalper V2 Dashboard</h3>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;font-size:0.8rem;align-items:center;">
+              <span>Market Regime</span><span id="gridScalperV2MarketRegime" class="env-label">--</span>
+              <span>Signal Strength</span><span id="gridScalperV2SignalStrength" class="env-label">--</span>
+              <span>Trend Direction</span><span id="gridScalperV2TrendDirection" class="env-label">--</span>
+              <span>ADX Value</span><span id="gridScalperV2AdxValue" class="env-label">--</span>
+              <span>ATR Value</span><span id="gridScalperV2AtrValue" class="env-label">--</span>
+              <span>Open Grid Levels</span><span id="gridScalperV2OpenLevels" class="env-label">0</span>
+              <span>Win Rate</span><span id="gridScalperV2WinRate" class="env-label">--</span>
+              <span>Profit Factor</span><span id="gridScalperV2ProfitFactor" class="env-label">--</span>
+              <span>Daily P/L</span><span id="gridScalperV2DailyPL" class="env-label">--</span>
+              <span>Status</span><span id="gridScalperV2Status" class="env-label">Ready</span>
+              <span>Disabled Symbols</span><span id="gridScalperV2DisabledSymbols" class="env-label" style="text-align:right;word-break:break-word;">None</span>
+            </div>
+          </section>
+
           <!-- Per-Strategy Stats -->
           <section class="dashboard">
             <div class="section-header">
@@ -1650,6 +1734,7 @@
               <div id="stratWR_nyOpenRange" class="strat-wr-row" data-label="🕤 NY Open"></div>
               <div id="stratWR_sessionRange" class="strat-wr-row" data-label="🌍 Session Rng"></div>
               <div id="stratWR_gridScalper" class="strat-wr-row" data-label="🔲 Grid Scalper"></div>
+              <div id="stratWR_gridScalperV2" class="strat-wr-row" data-label="💹 Grid Scalper V2"></div>
               <div id="stratWR_fvgStrat" class="strat-wr-row" data-label="🎯 FVG"></div>
               <div id="stratWR_liveScalp" class="strat-wr-row" data-label="⚡ Live Scalp"></div>
               <div id="stratWR_mtfTopDown" class="strat-wr-row" data-label="⏱ MTF Top-Down"></div>
