@@ -17764,6 +17764,7 @@ function initMultiSymbolPicker() {
 
 /* ================= BOOT ================= */
 document.addEventListener("DOMContentLoaded", () => {
+ try {
   initUI();
   initLoginGate();
   restoreSettings();
@@ -18104,7 +18105,7 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.teslaScalingPlan.addEventListener("change", () => { teslaScalingPlan = UI.teslaScalingPlan.value; saveSettings(); });
   }
   if (UI.rsiFilterToggle) {
-    UI.rsiFilterToggle.addEventListener("change", () => { rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.rsiFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: RSI Filter", UI.rsiFilterToggle.checked); rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.volumeSpikeToggle) {
     UI.volumeSpikeToggle.addEventListener("change", () => { volumeSpikeEnabled = UI.volumeSpikeToggle.checked; saveSettings(); updateStateUI(); });
@@ -18119,16 +18120,16 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.macdFilterToggle) {
-    UI.macdFilterToggle.addEventListener("change", () => { macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.macdFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: MACD Filter", UI.macdFilterToggle.checked); macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.bbSqueezeFilterToggle) {
-    UI.bbSqueezeFilterToggle.addEventListener("change", () => { bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.bbSqueezeFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Bollinger Bands Squeeze Filter", UI.bbSqueezeFilterToggle.checked); bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.adxFilterToggle) {
     UI.adxFilterToggle.addEventListener("change", () => { adxFilterEnabled = UI.adxFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.stochFilterToggle) {
-    UI.stochFilterToggle.addEventListener("change", () => { stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.stochFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Stochastic Filter", UI.stochFilterToggle.checked); stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
@@ -18489,42 +18490,50 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.po3FreshnessModeQuick.addEventListener("change", () => applyPo3FreshnessMode(UI.po3FreshnessModeQuick.value));
   }
 
-  /* Strategy 8: Grid Scalper MA listener */
-  if (UI.gridScalperMAToggle) {
-    UI.gridScalperMAToggle.addEventListener("change", () => {
-      gridScalperMAEnabled = UI.gridScalperMAToggle.checked;
-      saveSettings();
-      if (gridScalperMAEnabled) {
-        const modeLabel = gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA";
-        addLog(`🔲 Grid Scalper MA strategy enabled [${modeLabel}] — MA period: ${gridScalperMAPeriod}`);
-        showToast("Grid Scalper MA Enabled", `Scanning with ${modeLabel} signal mode.`, "info", 5000);
-      } else {
-        addLog("🔲 Grid Scalper MA strategy disabled");
-      }
-      drawChart();
-      updateStrategyBadges();
-    });
-  }
-  if (UI.gridScalperMAStrategySelect) {
-    UI.gridScalperMAStrategySelect.addEventListener("change", () => {
-      gridScalperMAStrategy = UI.gridScalperMAStrategySelect.value;
-      _updateGridScalperMAPeriodVisibility();
-      saveSettings();
-    });
-  }
-  if (UI.gridScalperMAPeriodInput) {
-    UI.gridScalperMAPeriodInput.addEventListener("change", () => {
-      const v = parseInt(UI.gridScalperMAPeriodInput.value, 10);
-      if (!isNaN(v) && v >= 2 && v <= 200) gridScalperMAPeriod = v;
-      UI.gridScalperMAPeriodInput.value = gridScalperMAPeriod;
-      saveSettings();
-    });
-  }
-  if (UI.autoTradeGridScalperMAToggle) {
-    UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
-      autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
-      saveSettings();
-    });
+  /* Strategy 8: Grid Scalper MA listeners.
+     Isolated in its own try/catch so a failure here (this is one of the
+     most frequently modified features) cannot silently prevent the
+     EMA / Orderblock toggles wired further below from ever receiving
+     their click handlers. */
+  try {
+    if (UI.gridScalperMAToggle) {
+      UI.gridScalperMAToggle.addEventListener("change", () => {
+        gridScalperMAEnabled = UI.gridScalperMAToggle.checked;
+        saveSettings();
+        if (gridScalperMAEnabled) {
+          const modeLabel = gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA";
+          addLog(`🔲 Grid Scalper MA strategy enabled [${modeLabel}] — MA period: ${gridScalperMAPeriod}`);
+          showToast("Grid Scalper MA Enabled", `Scanning with ${modeLabel} signal mode.`, "info", 5000);
+        } else {
+          addLog("🔲 Grid Scalper MA strategy disabled");
+        }
+        drawChart();
+        updateStrategyBadges();
+      });
+    }
+    if (UI.gridScalperMAStrategySelect) {
+      UI.gridScalperMAStrategySelect.addEventListener("change", () => {
+        gridScalperMAStrategy = UI.gridScalperMAStrategySelect.value;
+        _updateGridScalperMAPeriodVisibility();
+        saveSettings();
+      });
+    }
+    if (UI.gridScalperMAPeriodInput) {
+      UI.gridScalperMAPeriodInput.addEventListener("change", () => {
+        const v = parseInt(UI.gridScalperMAPeriodInput.value, 10);
+        if (!isNaN(v) && v >= 2 && v <= 200) gridScalperMAPeriod = v;
+        UI.gridScalperMAPeriodInput.value = gridScalperMAPeriod;
+        saveSettings();
+      });
+    }
+    if (UI.autoTradeGridScalperMAToggle) {
+      UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
+        autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
+        saveSettings();
+      });
+    }
+  } catch (err) {
+    console.error("Grid Scalper MA controls failed to initialize:", err);
   }
 
   /* Strategy 9: Fair Value Gap (FVG) listener */
@@ -18929,7 +18938,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* EMA toggle */
   if (UI.emaToggle) {
-    UI.emaToggle.addEventListener("change", () => { saveSettings(); drawChart(); });
+    UI.emaToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: EMA", UI.emaToggle.checked); saveSettings(); drawChart(); });
   }
 
   /* Symbol nav buttons */
@@ -18998,6 +19007,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.orderblockToggle) {
     UI.orderblockToggle.checked = orderblockEnabled;
     UI.orderblockToggle.addEventListener("change", () => {
+      console.log("Indicator toggle clicked: Orderblock", UI.orderblockToggle.checked);
       orderblockEnabled = UI.orderblockToggle.checked;
       saveSettings(); drawChart(); updateStrategyBadges();
     });
@@ -19164,4 +19174,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();
+ } catch (err) {
+  /* Guard against any single init step throwing and silently aborting
+     all remaining event-listener bindings (including indicator toggles). */
+  console.error("Indicator init error – some controls may not respond to clicks:", err);
+  try { addLog("⚠️ Initialization error – some buttons may not respond. Check console (F12) and reload."); } catch (_) { /* addLog itself may be unavailable */ }
+ }
 });

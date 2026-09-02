@@ -18453,6 +18453,7 @@ function initMultiSymbolPicker() {
 
 /* ================= BOOT ================= */
 document.addEventListener("DOMContentLoaded", () => {
+ try {
   initUI();
   initLoginGate();
   restoreSettings();
@@ -18711,7 +18712,7 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.teslaScalingPlan.addEventListener("change", () => { teslaScalingPlan = UI.teslaScalingPlan.value; saveSettings(); });
   }
   if (UI.rsiFilterToggle) {
-    UI.rsiFilterToggle.addEventListener("change", () => { rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.rsiFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: RSI Filter", UI.rsiFilterToggle.checked); rsiFilterEnabled = UI.rsiFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.volumeSpikeToggle) {
     UI.volumeSpikeToggle.addEventListener("change", () => { volumeSpikeEnabled = UI.volumeSpikeToggle.checked; saveSettings(); updateStateUI(); });
@@ -18726,16 +18727,16 @@ document.addEventListener("DOMContentLoaded", () => {
     UI.fibRetestToggle.addEventListener("change", () => { fibRetestEnabled = UI.fibRetestToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.macdFilterToggle) {
-    UI.macdFilterToggle.addEventListener("change", () => { macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.macdFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: MACD Filter", UI.macdFilterToggle.checked); macdFilterEnabled = UI.macdFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.bbSqueezeFilterToggle) {
-    UI.bbSqueezeFilterToggle.addEventListener("change", () => { bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.bbSqueezeFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Bollinger Bands Squeeze Filter", UI.bbSqueezeFilterToggle.checked); bbSqueezeFilterEnabled = UI.bbSqueezeFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.adxFilterToggle) {
     UI.adxFilterToggle.addEventListener("change", () => { adxFilterEnabled = UI.adxFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.stochFilterToggle) {
-    UI.stochFilterToggle.addEventListener("change", () => { stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
+    UI.stochFilterToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: Stochastic Filter", UI.stochFilterToggle.checked); stochFilterEnabled = UI.stochFilterToggle.checked; saveSettings(); updateStateUI(); });
   }
   if (UI.scalpingModeToggle) {
     UI.scalpingModeToggle.addEventListener("change", () => { scalpingModeEnabled = UI.scalpingModeToggle.checked; saveSettings(); updateStateUI(); });
@@ -19085,42 +19086,50 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  /* Strategy 8: Grid Scalper MA listener */
-  if (UI.gridScalperMAToggle) {
-    UI.gridScalperMAToggle.addEventListener("change", () => {
-      gridScalperMAEnabled = UI.gridScalperMAToggle.checked;
-      saveSettings();
-      if (gridScalperMAEnabled) {
-        const modeLabel = gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA";
-        addLog(`🔲 Grid Scalper MA strategy enabled [${modeLabel}] — MA period: ${gridScalperMAPeriod}`);
-        showToast("Grid Scalper MA Enabled", `Scanning with ${modeLabel} signal mode.`, "info", 5000);
-      } else {
-        addLog("🔲 Grid Scalper MA strategy disabled");
-      }
-      drawChart();
-      updateStrategyBadges();
-    });
-  }
-  if (UI.gridScalperMAStrategySelect) {
-    UI.gridScalperMAStrategySelect.addEventListener("change", () => {
-      gridScalperMAStrategy = UI.gridScalperMAStrategySelect.value;
-      _updateGridScalperMAPeriodVisibility();
-      saveSettings();
-    });
-  }
-  if (UI.gridScalperMAPeriodInput) {
-    UI.gridScalperMAPeriodInput.addEventListener("change", () => {
-      const v = parseInt(UI.gridScalperMAPeriodInput.value, 10);
-      if (!isNaN(v) && v >= 2 && v <= 200) gridScalperMAPeriod = v;
-      UI.gridScalperMAPeriodInput.value = gridScalperMAPeriod;
-      saveSettings();
-    });
-  }
-  if (UI.autoTradeGridScalperMAToggle) {
-    UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
-      autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
-      saveSettings();
-    });
+  /* Strategy 8: Grid Scalper MA listeners.
+     Isolated in its own try/catch so a failure here (this is one of the
+     most frequently modified features) cannot silently prevent the
+     EMA / Orderblock toggles and the Public Market Feed buttons wired
+     further below from ever receiving their click handlers. */
+  try {
+    if (UI.gridScalperMAToggle) {
+      UI.gridScalperMAToggle.addEventListener("change", () => {
+        gridScalperMAEnabled = UI.gridScalperMAToggle.checked;
+        saveSettings();
+        if (gridScalperMAEnabled) {
+          const modeLabel = gridScalperMAStrategy === "bos" ? "BOS" : "Price vs MA";
+          addLog(`🔲 Grid Scalper MA strategy enabled [${modeLabel}] — MA period: ${gridScalperMAPeriod}`);
+          showToast("Grid Scalper MA Enabled", `Scanning with ${modeLabel} signal mode.`, "info", 5000);
+        } else {
+          addLog("🔲 Grid Scalper MA strategy disabled");
+        }
+        drawChart();
+        updateStrategyBadges();
+      });
+    }
+    if (UI.gridScalperMAStrategySelect) {
+      UI.gridScalperMAStrategySelect.addEventListener("change", () => {
+        gridScalperMAStrategy = UI.gridScalperMAStrategySelect.value;
+        _updateGridScalperMAPeriodVisibility();
+        saveSettings();
+      });
+    }
+    if (UI.gridScalperMAPeriodInput) {
+      UI.gridScalperMAPeriodInput.addEventListener("change", () => {
+        const v = parseInt(UI.gridScalperMAPeriodInput.value, 10);
+        if (!isNaN(v) && v >= 2 && v <= 200) gridScalperMAPeriod = v;
+        UI.gridScalperMAPeriodInput.value = gridScalperMAPeriod;
+        saveSettings();
+      });
+    }
+    if (UI.autoTradeGridScalperMAToggle) {
+      UI.autoTradeGridScalperMAToggle.addEventListener("change", () => {
+        autoTradeGridScalperMA = UI.autoTradeGridScalperMAToggle.checked;
+        saveSettings();
+      });
+    }
+  } catch (err) {
+    console.error("Grid Scalper MA controls failed to initialize:", err);
   }
 
   /* Strategy 9: Fair Value Gap (FVG) listener */
@@ -19279,7 +19288,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* EMA toggle */
   if (UI.emaToggle) {
-    UI.emaToggle.addEventListener("change", () => { saveSettings(); drawChart(); });
+    UI.emaToggle.addEventListener("change", () => { console.log("Indicator toggle clicked: EMA", UI.emaToggle.checked); saveSettings(); drawChart(); });
   }
 
   /* Symbol nav buttons */
@@ -19348,6 +19357,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.orderblockToggle) {
     UI.orderblockToggle.checked = orderblockEnabled;
     UI.orderblockToggle.addEventListener("change", () => {
+      console.log("Indicator toggle clicked: Orderblock", UI.orderblockToggle.checked);
       orderblockEnabled = UI.orderblockToggle.checked;
       saveSettings(); drawChart(); updateStrategyBadges();
     });
@@ -19511,61 +19521,82 @@ document.addEventListener("DOMContentLoaded", () => {
   /* Fetch news calendar on load if enabled */
   if (newsPauseEnabled) fetchNewsCalendar();
 
-  /* ── Public Market Feed controls ── */
-  const AUTO_START_FEED_KEY = "itguru_autoStartFeed";
-
-  // Restore auto-start preference from localStorage
+  /* ── Public Market Feed controls ──
+     Wrapped in its own try/catch: this is the most recently added
+     integration (public Deriv WS feed) and the notice banner on the page
+     explicitly states these buttons are "required before indicators and
+     charts can update" — a failure here must not prevent the Start/Stop
+     buttons themselves from being wired. */
   try {
-    const saved = localStorage.getItem(AUTO_START_FEED_KEY);
-    if (saved !== null) autoStartFeedEnabled = JSON.parse(saved) === true;
-  } catch (_) { /* ignore */ }
+    const AUTO_START_FEED_KEY = "itguru_autoStartFeed";
 
-  // Sync checkbox
-  if (UI.autoStartFeedToggle) {
-    UI.autoStartFeedToggle.checked = autoStartFeedEnabled;
-    UI.autoStartFeedToggle.addEventListener("change", () => {
-      autoStartFeedEnabled = UI.autoStartFeedToggle.checked;
-      try { localStorage.setItem(AUTO_START_FEED_KEY, JSON.stringify(autoStartFeedEnabled)); } catch (_) {}
-      saveSettings();
-    });
-  }
+    // Restore auto-start preference from localStorage
+    try {
+      const saved = localStorage.getItem(AUTO_START_FEED_KEY);
+      if (saved !== null) autoStartFeedEnabled = JSON.parse(saved) === true;
+    } catch (_) { /* ignore */ }
 
-  // Wire Start / Stop buttons (they delegate to the existing connect/disconnect)
-  if (UI.startPublicFeedBtn) {
-    UI.startPublicFeedBtn.addEventListener("click", () => {
-      updatePublicFeedPanel('connecting');
-      connect();
-    });
-  }
-  if (UI.stopPublicFeedBtn) {
-    UI.stopPublicFeedBtn.addEventListener("click", disconnect);
-  }
+    // Sync checkbox
+    if (UI.autoStartFeedToggle) {
+      UI.autoStartFeedToggle.checked = autoStartFeedEnabled;
+      UI.autoStartFeedToggle.addEventListener("change", () => {
+        autoStartFeedEnabled = UI.autoStartFeedToggle.checked;
+        try { localStorage.setItem(AUTO_START_FEED_KEY, JSON.stringify(autoStartFeedEnabled)); } catch (_) {}
+        saveSettings();
+      });
+    }
 
-  // Initialise panel to disconnected state
-  updatePublicFeedPanel('disconnected');
-
-  // Auto-start: fetch server config first, fall back to local preference
-  fetch("/api/market-data/feed-config.php")
-    .then(r => r.ok ? r.json() : null)
-    .then(cfg => {
-      // Server config wins over local localStorage if it exists
-      const serverAutoStart = cfg && typeof cfg.autoStart === "boolean" ? cfg.autoStart : null;
-      const shouldStart = serverAutoStart !== null ? serverAutoStart : autoStartFeedEnabled;
-
-      if (shouldStart) {
+    // Wire Start / Stop buttons (they delegate to the existing connect/disconnect)
+    if (UI.startPublicFeedBtn) {
+      UI.startPublicFeedBtn.addEventListener("click", () => {
+        console.log("Public feed button clicked: start");
         updatePublicFeedPanel('connecting');
-        // Small delay so the UI renders before the connection attempt
-        setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
-      }
-    })
-    .catch(() => {
-      // Network error or server unavailable – honour local preference only
-      if (autoStartFeedEnabled) {
-        updatePublicFeedPanel('connecting');
-        setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
-      }
-    });
+        connect();
+      });
+    }
+    if (UI.stopPublicFeedBtn) {
+      UI.stopPublicFeedBtn.addEventListener("click", () => {
+        console.log("Public feed button clicked: stop");
+        disconnect();
+      });
+    }
+
+    // Initialise panel to disconnected state
+    updatePublicFeedPanel('disconnected');
+
+    // Auto-start: fetch server config first, fall back to local preference
+    fetch("/api/market-data/feed-config.php")
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        // Server config wins over local localStorage if it exists
+        const serverAutoStart = cfg && typeof cfg.autoStart === "boolean" ? cfg.autoStart : null;
+        const shouldStart = serverAutoStart !== null ? serverAutoStart : autoStartFeedEnabled;
+
+        if (shouldStart) {
+          updatePublicFeedPanel('connecting');
+          // Small delay so the UI renders before the connection attempt
+          setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
+        }
+      })
+      .catch(() => {
+        // Network error or server unavailable – honour local preference only
+        if (autoStartFeedEnabled) {
+          updatePublicFeedPanel('connecting');
+          setTimeout(() => { if (!ws || ws.readyState > 1) connect(); }, 400);
+        }
+      });
+  } catch (err) {
+    console.error("Public Market Feed controls failed to initialize:", err);
+  }
 
   addLog("Indicator ready – press Connect to start");
   updateStatsUI();
+ } catch (err) {
+  /* Guard against any single init step throwing and silently aborting
+     all remaining event-listener bindings (including indicator toggles
+     and the Start/Stop Public Market Feed buttons). Surface the error
+     instead of leaving the UI in a half-wired, unresponsive state. */
+  console.error("Indicator init error – some controls may not respond to clicks:", err);
+  try { addLog("⚠️ Initialization error – some buttons may not respond. Check console (F12) and reload."); } catch (_) { /* addLog itself may be unavailable */ }
+ }
 });
