@@ -228,38 +228,37 @@
 
           <!-- API Configuration -->
           <section class="box">
-            <div class="section-header">
-              <span class="icon">🔑</span>
-              <h3>API</h3>
-            </div>
-            <div class="api-fields-row">
-              <div class="api-field">
-                <label for="appIdInput">Deriv App ID</label>
-                <input type="number" id="appIdInput" class="param-input" value="120128" min="1" step="1" />
+            <h3 class="collapsible">🔑 API</h3>
+            <div class="collapsible-body open">
+              <div class="api-fields-row">
+                <div class="api-field">
+                  <label for="appIdInput">Deriv App ID</label>
+                  <input type="number" id="appIdInput" class="param-input" value="120128" min="1" step="1" />
+                </div>
+                <div class="api-field">
+                  <label for="derivTokenInput">Deriv API Token</label>
+                  <input type="password" id="derivTokenInput" class="param-input" placeholder="Paste token…" />
+                </div>
               </div>
-              <div class="api-field">
-                <label for="derivTokenInput">Deriv API Token</label>
-                <input type="password" id="derivTokenInput" class="param-input" placeholder="Paste token…" />
+              <div class="deriv-login-row">
+                <button id="derivLoginBtn" type="button" class="deriv-login-btn">
+                  <span class="deriv-login-icon">🔐</span> Login with Deriv
+                </button>
+                <button id="derivDisconnectBtn" type="button" class="deriv-disconnect-btn">Disconnect</button>
+                <span id="derivAccountStatus" class="deriv-account-status"></span>
               </div>
-            </div>
-            <div class="deriv-login-row">
-              <button id="derivLoginBtn" type="button" class="deriv-login-btn">
-                <span class="deriv-login-icon">🔐</span> Login with Deriv
-              </button>
-              <button id="derivDisconnectBtn" type="button" class="deriv-disconnect-btn">Disconnect</button>
-              <span id="derivAccountStatus" class="deriv-account-status"></span>
-            </div>
-            <p class="hint">Your Deriv API app_id and API token. Tokens are kept for the current session only. Reconnect after changing.<br>
-              <strong>Login with Deriv</strong> to authenticate via Deriv OAuth and auto-fill your token.</p>
+              <p class="hint">Your Deriv API app_id and API token. Tokens are kept for the current session only. Reconnect after changing.<br>
+                <strong>Login with Deriv</strong> to authenticate via Deriv OAuth and auto-fill your token.</p>
 
-            <!-- Auto-start public feed toggle -->
-            <div class="param-row" style="margin-top:8px;">
-              <label class="toggle-label" for="autoStartFeedToggle">
-                <input type="checkbox" id="autoStartFeedToggle" class="toggle-input" />
-                Auto-start public market feed on page load
-              </label>
+              <!-- Auto-start public feed toggle -->
+              <div class="param-row" style="margin-top:8px;">
+                <label class="toggle-label" for="autoStartFeedToggle">
+                  <input type="checkbox" id="autoStartFeedToggle" class="toggle-input" />
+                  Auto-start public market feed on page load
+                </label>
+              </div>
+              <p class="hint">When enabled, the public price feed connects automatically when you open the dashboard (no API token required). Matches the server-side <code>AUTO_START_PUBLIC_FEED</code> option.</p>
             </div>
-            <p class="hint">When enabled, the public price feed connects automatically when you open the dashboard (no API token required). Matches the server-side <code>AUTO_START_PUBLIC_FEED</code> option.</p>
           </section>
 
           <!-- Symbol Selection -->

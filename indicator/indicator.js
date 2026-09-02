@@ -18976,9 +18976,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* Collapsible sections */
   document.querySelectorAll(".collapsible").forEach(el => {
+    const body = el.nextElementSibling;
+    /* Keep the header's arrow indicator in sync with the body's initial state */
+    if (body && body.classList.contains("open")) el.classList.add("open");
     el.addEventListener("click", () => {
-      const body = el.nextElementSibling;
       if (body) body.classList.toggle("open");
+      el.classList.toggle("open");
     });
   });
 
