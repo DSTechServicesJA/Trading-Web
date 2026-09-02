@@ -166,6 +166,125 @@ function getDB(): PDO
                 $detail = ': ' . $e->getMessage();
             }
         }
+
+        /**
+         * Return the set of columns present on a table.
+         *
+         * @return array<string,bool>
+         */
+        function getTableColumns(PDO $pdo, string $table): array
+        {
+            static $cache = [];
+
+            if (isset($cache[$table])) {
+                return $cache[$table];
+            }
+
+            try {
+                $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}`");
+                $cols = [];
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $field = (string) ($row['Field'] ?? '');
+                    if ($field !== '') {
+                        $cols[$field] = true;
+                    }
+                }
+                return $cache[$table] = $cols;
+            } catch (\Throwable $e) {
+                return $cache[$table] = [];
+            }
+        }
+
+        function tableHasColumn(PDO $pdo, string $table, string $column): bool
+        {
+            return isset(getTableColumns($pdo, $table)[$column]);
+        }
+
+        function tableExists(PDO $pdo, string $table): bool
+        {
+            return getTableColumns($pdo, $table) !== [];
+        }
+
+        /**
+         * Load a user row while tolerating optional schema columns missing from older databases.
+         *
+         * @return array<string,mixed>|null
+         */
+        function fetchAuthUser(PDO $pdo, string $lookupField, mixed $lookupValue, bool $includePasswordHash = false): ?array
+        {
+            $baseFields = ['id', 'username', 'display_name'];
+            if ($includePasswordHash) {
+                $baseFields[] = 'password_hash';
+            }
+
+            $optionalFields = [
+                'email',
+                'role',
+                'status',
+                'subscription_status',
+                'subscription_plan',
+                'subscription_expires_at',
+                'telegram_user_id',
+                'telegram_username',
+                'telegram_linked_at',
+                'last_login_at',
+            ];
+
+            $selectFields = [];
+            foreach (array_merge($baseFields, $optionalFields) as $field) {
+                if (tableHasColumn($pdo, 'users', $field)) {
+                    $selectFields[] = $field;
+                }
+            }
+
+            if ($selectFields === []) {
+                return null;
+            }
+
+            $sql = 'SELECT ' . implode(', ', $selectFields) . " FROM users WHERE {$lookupField} = ? LIMIT 1";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$lookupValue]);
+            $user = $stmt->fetch();
+
+            if (!$user) {
+                return null;
+            }
+
+            $user['display_name'] = $user['display_name'] ?? $user['username'] ?? null;
+            $user['role'] = $user['role'] ?? 'user';
+            $user['status'] = $user['status'] ?? 'active';
+            $user['subscription_status'] = $user['subscription_status'] ?? 'inactive';
+            $user['subscription_plan'] = $user['subscription_plan'] ?? null;
+            $user['subscription_expires_at'] = $user['subscription_expires_at'] ?? null;
+            $user['telegram_user_id'] = $user['telegram_user_id'] ?? null;
+            $user['telegram_username'] = $user['telegram_username'] ?? null;
+            $user['telegram_linked_at'] = $user['telegram_linked_at'] ?? null;
+
+            return $user;
+        }
+
+        /**
+         * Return granted strategy keys when the strategy_access table is available.
+         *
+         * @return list<string>
+         */
+        function fetchUserStrategies(PDO $pdo, int $userId): array
+        {
+            if (!tableExists($pdo, 'strategy_access')
+                || !tableHasColumn($pdo, 'strategy_access', 'user_id')
+                || !tableHasColumn($pdo, 'strategy_access', 'strategy_key')) {
+                return [];
+            }
+
+            try {
+                $stmt = $pdo->prepare('SELECT strategy_key FROM strategy_access WHERE user_id = ? ORDER BY strategy_key');
+                $stmt->execute([$userId]);
+                return $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+            } catch (\Throwable $e) {
+                error_log('Strategy access lookup skipped: ' . $e->getMessage());
+                return [];
+            }
+        }
         throw new RuntimeException('Database connection failed' . $detail, 0, $e);
     }
 }

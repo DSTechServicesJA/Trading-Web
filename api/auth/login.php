@@ -28,14 +28,7 @@ if ($username === '' || $password === '') {
 try {
     /* ── Look up user ── */
     $pdo  = getDB();
-    $stmt = $pdo->prepare(
-        'SELECT id, username, display_name, password_hash, role, status,
-                subscription_status, subscription_plan, subscription_expires_at,
-                telegram_user_id, telegram_username
-         FROM users WHERE username = ?'
-    );
-    $stmt->execute([$username]);
-    $user = $stmt->fetch();
+    $user = fetchAuthUser($pdo, 'username', $username, true);
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
         jsonResponse(['error' => 'Invalid credentials'], 401);
@@ -69,13 +62,13 @@ try {
     }
 
     /* ── Update last_login_at ── */
-    $pdo->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')
-        ->execute([$user['id']]);
+    if (tableHasColumn($pdo, 'users', 'last_login_at')) {
+        $pdo->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')
+            ->execute([$user['id']]);
+    }
 
     /* ── Fetch granted strategies ── */
-    $stmtS = $pdo->prepare('SELECT strategy_key FROM strategy_access WHERE user_id = ? ORDER BY strategy_key');
-    $stmtS->execute([$user['id']]);
-    $strategies = $stmtS->fetchAll(PDO::FETCH_COLUMN);
+    $strategies = fetchUserStrategies($pdo, (int) $user['id']);
 
     /* ── Issue JWT (8-hour expiry) ── */
     $token = jwtEncode([

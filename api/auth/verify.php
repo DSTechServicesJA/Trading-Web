@@ -29,14 +29,7 @@ try {
 
     /* ── Fetch fresh user data from DB ── */
     $pdo  = getDB();
-    $stmt = $pdo->prepare(
-        'SELECT id, username, display_name, email, role, status,
-                subscription_status, subscription_plan, subscription_expires_at,
-                telegram_user_id, telegram_username, telegram_linked_at
-         FROM users WHERE id = ?'
-    );
-    $stmt->execute([$payload['sub']]);
-    $user = $stmt->fetch();
+    $user = fetchAuthUser($pdo, 'id', $payload['sub']);
 
     if (!$user) {
         jsonResponse(['valid' => false], 401);
@@ -79,9 +72,7 @@ try {
     }
 
     /* ── Fetch granted strategies ── */
-    $stmtS = $pdo->prepare('SELECT strategy_key FROM strategy_access WHERE user_id = ? ORDER BY strategy_key');
-    $stmtS->execute([$user['id']]);
-    $strategies = $stmtS->fetchAll(PDO::FETCH_COLUMN);
+    $strategies = fetchUserStrategies($pdo, (int) $user['id']);
 
     jsonResponse([
         'valid' => true,
