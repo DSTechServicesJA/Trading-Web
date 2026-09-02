@@ -24,7 +24,7 @@ declare(strict_types=1);
 
 /* ── Default public endpoint ── */
 if (!defined('DERIV_PUBLIC_WS_DEFAULT')) {
-    define('DERIV_PUBLIC_WS_DEFAULT', 'wss://api.derivws.com/trading/v1/options/ws/public');
+    define('DERIV_PUBLIC_WS_DEFAULT', 'wss://ws.derivws.com/websockets/v3?app_id=120128');
 }
 
 class DerivMarketDataService
