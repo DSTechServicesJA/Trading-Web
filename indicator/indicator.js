@@ -8218,7 +8218,11 @@ async function sendTelegramScalpAlert(scalp, force = false) {
     const panel = (scalp.symbol && multiPanels.has(scalp.symbol)) ? multiPanels.get(scalp.symbol) : null;
     const blob = await captureTelegramScreenshot(panel);
     if (blob) {
-      await sendTelegramPhoto(blob, caption);
+      if (blob) {
+        await sendTelegramPhoto(blob, caption);
+      } else {
+        await sendTelegramMessage(caption);
+      }
     } else {
       await sendTelegramMessage(caption);
     }

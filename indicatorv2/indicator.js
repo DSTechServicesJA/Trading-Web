@@ -3921,7 +3921,11 @@ async function sendTelegramAlert() {
     const caption = buildTelegramCaption();
     const blob = await captureTelegramScreenshot();
     if (blob) {
-      await sendTelegramPhoto(blob, caption);
+      if (blob) {
+        await sendTelegramPhoto(blob, caption);
+      } else {
+        await sendTelegramMessage(caption);
+      }
     } else {
       await sendTelegramMessage(caption);
     }
