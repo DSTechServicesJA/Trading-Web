@@ -68,10 +68,8 @@
 /* ================= CONFIG ================= */
 let APP_ID  = 120128;
 
-/** Public market-data endpoint — no API token required (charts, indicators, analysis).
- *  This is the same Deriv API WebSocket endpoint used for authenticated trading;
- *  no auth token is sent on it, so it is safe to use for public market data. */
-let PUBLIC_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+/** Public market-data endpoint — no API token required (charts, indicators, analysis). */
+let PUBLIC_WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 
 /** Standard Deriv API endpoint — supports ticks_history (OHLC candles), authorize, trading.
  *  Used for both the chart data feed and authenticated trading actions. */
@@ -80,12 +78,12 @@ let AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 /** Alias for the standard Deriv API — used for chart candle subscriptions and panels. */
 let WS_URL = AUTH_WS_URL;
 
-/** Rebuild AUTH_WS_URL, PUBLIC_WS_URL and WS_URL after APP_ID changes. */
+/** Rebuild AUTH_WS_URL and WS_URL after APP_ID changes. */
 function updateWsUrl() {
-  PUBLIC_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
   AUTH_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
   WS_URL = AUTH_WS_URL;
 }
+
 
 /** Safely parse a JSON response, returning {} on empty/invalid body */
 async function safeJson(resp) {
