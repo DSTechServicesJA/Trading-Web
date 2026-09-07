@@ -9184,7 +9184,11 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     } else {
       caption = buildSessionRangeTelegramCaption(signalType);
     }
-    await sendTelegramPhoto(blob, caption);
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
