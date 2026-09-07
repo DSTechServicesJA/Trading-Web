@@ -1620,6 +1620,9 @@ let orderblockHistory   = [];        /* alert history */
 let lastOrderblockIdx   = -999;
 let autoTradeOrderblock = true;
 
+/* ================= FEATURE: SESSION HEATMAP (17) ================= */
+let sessionHeatmapEnabled = false;   /* draw session colour bands on chart */
+
 /* ================= FEATURE: NAMED SETTINGS PROFILES ================= */
 let savedProfiles = {};              /* { name: settingsSnapshot } */
 
