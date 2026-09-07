@@ -3869,6 +3869,16 @@ function _renderGridScalperV2Alerts() {
 }
 
 /* ================= STRATEGY 15: 4H POWER OF 3 (HDF PO3) LIQUIDITY PLAY ================= */
+let po3_4hEnabled       = false;      /* master toggle */
+let po3_4hHistory       = [];         /* alert history */
+let lastPo3_4hIdx       = -999;
+let autoTradePo3_4h     = true;       /* auto-trade sub-toggle */
+const PO3_4H_COOLDOWN            = 10;    /* min candles between signals (4H-scale strategy) */
+const PO3_4H_MAX_HISTORY         = 20;
+const PO3_4H_MAX_CANDLES         = 80;    /* trade monitoring timeout */
+const PO3_4H_ACCUM_MIN_CANDLES   = 3;     /* min candles for accumulation phase */
+const PO3_4H_SWEEP_ATR_MULT      = 0.3;   /* ATR multiple beyond accumulation range to confirm sweep */
+
 /**
  * Detect a 4H Power of 3 (PO3) Liquidity Play setup.
  *
@@ -4205,6 +4215,16 @@ function monitorPo3_4hOutcomes(candle) {
 }
 
 /* ================= STRATEGY 16: 1H ACCUMULATION BREAKER BLOCK SCALPING ================= */
+let breakerBlockEnabled       = false;    /* master toggle */
+let breakerBlockHistory       = [];       /* alert history */
+let lastBreakerBlockIdx       = -999;
+let autoTradeBreakerBlock     = true;     /* auto-trade sub-toggle */
+const BREAKER_BLOCK_COOLDOWN     = 5;     /* min candles between signals */
+const BREAKER_BLOCK_MAX_HISTORY  = 30;
+const BREAKER_BLOCK_MAX_CANDLES  = 40;    /* trade monitoring timeout */
+const BREAKER_ACCUM_BODY_PCT     = 0.6;   /* accumulation candle body must be ≥ 60% of range */
+const BREAKER_ACCUM_WICK_PCT     = 0.2;   /* each wick must be ≤ 20% of range */
+const BREAKER_SWEEP_ATR_MULT     = 0.3;   /* ATR multiple beyond accumulation level to confirm sweep */
 /**
  * Detect a 1H Accumulation Break + Breaker Block Scalping setup.
  *
@@ -4597,6 +4617,17 @@ function monitorBreakerBlockOutcomes(candle) {
 }
 
 /* ================= STRATEGY 17: OTE GOLDEN POCKET ================= */
+let oteGoldenPocketEnabled       = false;    /* master toggle */
+let oteGoldenPocketHistory       = [];       /* alert history */
+let lastOteGoldenPocketIdx       = -999;
+let autoTradeOteGoldenPocket     = true;     /* auto-trade sub-toggle */
+const OTE_COOLDOWN            = 6;      /* min candles between signals */
+const OTE_MAX_HISTORY         = 30;
+const OTE_MAX_CANDLES         = 40;     /* trade monitoring timeout */
+const OTE_ENTRY_LEVEL         = 0.705;  /* Golden Pocket entry fib level */
+const OTE_GOLDEN_HIGH         = 0.786;  /* Golden Pocket upper fib level */
+const OTE_MIN_EXPANSION_ATR   = 1.5;    /* expansion leg must be ≥ this ATR multiple */
+const OTE_MIN_RR              = 3;      /* minimum acceptable R:R */
 /**
  * Detect an OTE (Optimal Trade Entry) Golden Pocket signal.
  *
@@ -4914,6 +4945,27 @@ function monitorOteGoldenPocketOutcomes(candle) {
 }
 
 /* ================= STRATEGY 18: OPENING RANGE BREAKOUT (ORB) ================= */
+let orbEnabled              = false;    /* master toggle */
+let orbHistory               = [];      /* alert history */
+let lastOrbIdx                = -999;
+let autoTradeOrb              = true;   /* auto-trade sub-toggle */
+let orbCandleConfirmation     = false;  /* require full-body close beyond retest level */
+/* Internal session-tracking state (reset each new trading session) */
+let _orbSessionStartEpoch = null;
+let _orbSessionHigh       = null;
+let _orbSessionLow        = null;
+let _orbSessionEstablished = false;
+let _orbBreakHigh  = false;
+let _orbBreakLow   = false;
+let _orbRetestHigh = false;
+let _orbRetestLow  = false;
+const ORB_COOLDOWN              = 5;     /* min candles between signals */
+const ORB_MAX_HISTORY           = 30;
+const ORB_MAX_CANDLES           = 50;     /* trade monitoring timeout */
+const ORB_SESSION_MINUTES       = 30;     /* opening range window length */
+const ORB_MIN_RANGE_ATR         = 0.3;    /* opening range must be ≥ this ATR multiple */
+const ORB_MAX_RANGE_ATR         = 2.0;    /* opening range must be ≤ this ATR multiple */
+const ORB_RETEST_TOLERANCE_ATR  = 0.15;   /* ATR buffer for retest proximity check */
 
 /**
  * Determine the session start epoch for the current trading day.
@@ -6346,6 +6398,21 @@ function initGridScalperMAOpposite() {
   renderGridScalperMAOppositeStats();
 }
 
+/* ================= STRATEGY 9: FAIR VALUE GAP (FVG) STATE ================= */
+let fvgStratEnabled  = false;           /* master toggle */
+let fvgStratHistory  = [];              /* alert history */
+let lastFvgStratIdx  = -999;
+const FVG_STRAT_MAX_HISTORY  = 30;
+const FVG_STRAT_COOLDOWN     = 8;       /* min candles between signals */
+const FVG_STRAT_MAX_CANDLES  = 40;      /* trade monitoring timeout */
+const FVG_PUSH_MIN_CANDLES   = 3;       /* min consecutive strong candles for a "big push" */
+const FVG_PUSH_BODY_PCT      = 0.55;    /* body must be ≥ 55% of range to count as a strong push candle */
+const FVG_PUSH_ATR_MIN       = 0.4;     /* range must be ≥ 0.4× ATR to count as strong */
+const FVG_MIN_SIZE_ATR       = 0.2;     /* FVG gap must be ≥ this fraction of ATR */
+const FVG_ZONE_ATR_BUFFER    = 0.15;    /* ATR buffer below/above demand/supply zone */
+const FVG_LOOKBACK           = 60;      /* candles to scan for push + zone */
+const FVG_FIB_DISCOUNT       = 0.5;     /* below this fib retracement level = discount */
+
 /**
  * ================= STRATEGY 9: FAIR VALUE GAP (FVG) DETECTION =================
  *
@@ -6790,6 +6857,20 @@ function monitorCustomStrategyOutcomes(candle) {
 }
 
 /* ================= MTF TOP-DOWN STRATEGY (Strategy 11) ================= */
+let mtfTopDownEnabled   = false;    /* master toggle */
+let mtfTopDownHistory   = [];       /* alert history */
+let lastMtfTopDownIdx   = -999;     /* cooldown tracker */
+let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
+
+const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
+const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
+const MTF_TOP_DOWN_MAX_CANDLES = 60;  /* monitoring timeout (candles) */
+const MTF_BIAS_TF_MULT         = 16;  /* ×current TF → "4H" synthesis ratio */
+const MTF_SETUP_TF_MULT        = 4;   /* ×current TF → "1H" synthesis ratio */
+const MTF_BIAS_LOOKBACK        = 6;   /* synthesised 4H bars for bias */
+const MTF_SETUP_LOOKBACK       = 12;  /* synthesised 1H bars for setup range */
+const MTF_SL_ATR_BUFFER        = 0.3; /* ATR buffer beyond wick for SL */
+const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest */
 
 /**
  * Synthesise higher-timeframe candles by grouping `ratio` consecutive base
@@ -7739,6 +7820,14 @@ function monitorCandleInterpOutcomes(candle) {
     }
   }
 }
+/* ================= LIVE SCALP SCANNER ================= */
+let liveScalpEnabled = false;       /* master toggle */
+let liveScalpMinConf = 3;           /* min confluence out of 7 to show alert */
+let liveScalpHistory = [];          /* recent scalp alerts: { dir, price, sl, tp, conf, reasons[], epoch, candleIdx } */
+const LIVE_SCALP_MAX_HISTORY = 30;
+const LIVE_SCALP_COOLDOWN_CANDLES = 3;  /* min candles between consecutive scalp alerts */
+let lastScalpCandleIdx = -999;
+
 /**
  * Scans the latest candles for high-probability scalp setups using multi-
  * indicator confluence.  Runs on every candle update when liveScalpEnabled
@@ -8987,6 +9076,75 @@ function buildSessionRangeTelegramCaption(signalType) {
   lines.push(``);
   lines.push(`<i>${ts}</i>`);
   return lines.join("\n");
+}
+
+async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
+  if (!telegramSessionRangeOutcomeSend) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+  } catch (err) {
+    addLog(`📤 Session Range outcome Telegram skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const sym = getSymbolLabel(resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "");
+    const activeSym = resolvedTrade.symbol || panelSymbol || getActiveSymbol() || "";
+    const dir = resolvedTrade.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = resolvedTrade.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = resolvedTrade.entry != null ? fmtPrice(resolvedTrade.entry, activeSym) : "--";
+    const slStr = resolvedTrade.sl != null ? fmtPrice(resolvedTrade.sl, activeSym) : "--";
+    const tpStr = resolvedTrade.tp != null ? fmtPrice(resolvedTrade.tp, activeSym) : "--";
+    const rrStr = resolvedTrade.rr != null ? "1:" + fmt(resolvedTrade.rr, 1) : "--";
+    const risk = Math.abs(resolvedTrade.entry - resolvedTrade.sl);
+
+    const lines = [];
+    lines.push(`${icon} <b>Session Range ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>🌍 London Sweep Trade</b>`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(`<b>🎯 TP:</b> <code>${tpStr}</code>`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    if (risk > 0) {
+      lines.push(`<b>Risk (pips):</b> <code>${fmt(risk, 5)}</code>`);
+    }
+
+    /* Lot size / position sizing based on account amount */
+    if (accountSize > 0 && riskPercent > 0 && resolvedTrade.entry != null && resolvedTrade.sl != null) {
+      const tradeObj = { entry: resolvedTrade.entry, sl: resolvedTrade.sl, tp: resolvedTrade.tp, rr: resolvedTrade.rr || 0, symbol: resolvedTrade.symbol || getActiveSymbol() };
+      const m = calcPositionMetrics(tradeObj);
+      if (m) {
+        lines.push(``);
+        lines.push(`<b>📦 Lot Size:</b> ${fmt(m.lotSize, 2)}`);
+        lines.push(`<b>💰 $ Risk:</b> $${fmt(m.dollarRisk, 2)}`);
+        if (resolvedTrade.tp != null) lines.push(`<b>💰 $ Reward:</b> $${fmt(m.dollarReward, 2)}`);
+        if (!m.isSynthetic) {
+          lines.push(`<b>📏 Pips at Risk:</b> ${fmt(m.pips, 1)}`);
+        }
+      }
+    }
+
+    /* Win/loss tally */
+    const totalW = sessionRangeTradeWins;
+    const totalL = sessionRangeTradeLosses;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`🌍 <b>Session Range Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: Session Range outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Session Range outcome Telegram error: ${err.message}`);
+  }
 }
 
 /**
@@ -14896,6 +15054,460 @@ function telegramProxyHeaders(extra = {}) {
   return h;
 }
 
+async function captureTelegramScreenshot(panel = null) {
+  const label = panel ? `panel ${panel.symbol || "chart"}` : "chart";
+  const capturePromise = panel ? capturePanelScreenshot(panel) : captureChartScreenshot();
+  try {
+    return await withTimeout(
+      capturePromise,
+      TELEGRAM_SCREENSHOT_TIMEOUT_MS,
+      new Error("Screenshot timed out")
+    );
+  } catch (err) {
+    addLog(`📤 ${label} screenshot unavailable, sending text-only signal: ${err.message}`);
+    return null;
+  }
+}
+async function sendTelegramPhoto(blob, caption) {
+  /* Check rate limit before making API call */
+  if (!(await waitForApiCallSlot("telegram", 20000))) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
+  const { token, chatId } = getTelegramCredentials();
+  validateTelegramCredentials(token, chatId);
+
+  /** Build the base FormData fields shared by both proxy and direct paths */
+  function buildPhotoForm() {
+    const f = new FormData();
+    f.append("chat_id", chatId);
+    f.append("photo", blob, "chart.png");
+    f.append("caption", caption);
+    f.append("parse_mode", "HTML");
+    return f;
+  }
+
+  /* Try server-side proxy first (avoids CORS), fall back to direct API */
+  let resp;
+  let useDirectFallback = false;
+  try {
+    const form = buildPhotoForm();
+    form.append("action", "sendPhoto");
+    form.append("token", token);
+    resp = await fetch(TELEGRAM_PROXY_URL, { method: "POST", headers: telegramProxyHeaders(), body: form });
+    /* If proxy returns 401/403 (auth issue), fall back to direct API */
+    if (resp.status === 401 || resp.status === 403) {
+      useDirectFallback = true;
+    }
+  } catch (_proxyErr) {
+    /* Proxy unreachable — try direct Telegram API as fallback */
+    useDirectFallback = true;
+  }
+  if (useDirectFallback) {
+    resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: buildPhotoForm() });
+  }
+  const data = await safeJson(resp);
+  if (!data.ok) {
+    recordTelegramDeliveryStat("failed", 1);
+    throw new Error(data.description || "Telegram API error");
+  }
+  recordTelegramDeliveryStat("sent", 1);
+  return data;
+}
+
+/**
+ * Send a text-only message to Telegram via Bot API (HTML parse mode).
+ */
+async function sendTelegramMessage(text) {
+  /* Check rate limit before making API call */
+  if (!(await waitForApiCallSlot("telegram", 20000))) {
+    throw new Error("Rate limit exceeded. Please wait before sending another message.");
+  }
+
+  const { token, chatId } = getTelegramCredentials();
+  validateTelegramCredentials(token, chatId);
+
+  const payload = { chat_id: chatId, text, parse_mode: "HTML" };
+
+  /* Try server-side proxy first (avoids CORS), fall back to direct API */
+  let resp;
+  let useDirectFallback = false;
+  try {
+    resp = await fetch(TELEGRAM_PROXY_URL, {
+      method: "POST",
+      headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ action: "sendMessage", token, payload })
+    });
+    /* If proxy returns 401/403 (auth issue), fall back to direct API */
+    if (resp.status === 401 || resp.status === 403) {
+      useDirectFallback = true;
+    }
+  } catch (_proxyErr) {
+    useDirectFallback = true;
+  }
+  if (useDirectFallback) {
+    resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  }
+  const data = await safeJson(resp);
+  if (!data.ok) {
+    recordTelegramDeliveryStat("failed", 1);
+    throw new Error(data.description || "Telegram API error");
+  }
+  recordTelegramDeliveryStat("sent", 1);
+  return data;
+}
+
+/**
+ * Send a Telegram alert when a trade hits the 1:1 partial TP level.
+ * Applies to both the main breakout strategy and PO3 strategy.
+ * Notifies the trader that the 1:1 level has been reached so they can consider
+ * closing a portion of the position manually. The main strategy continues to
+ * the original TP/SL without any automatic SL adjustment.
+ * Uses the outcome Telegram toggle (telegramOutcomeSend) so no extra setting is needed.
+ */
+async function sendPartialTpTelegram(signal, partialLevel) {
+  if (!partialTpEnabled) return;
+  if (!telegramOutcomeSend) return;
+  try {
+    const activeSym = signal.symbol || getActiveSymbol() || "";
+    const sym = getSymbolLabel(activeSym);
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
+    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+    const rrStr    = signal.rr    != null ? "1:" + signal.rr.toFixed(1)       : "--";
+    const lvlStr   = partialLevel != null ? fmtPrice(partialLevel, activeSym) : "--";
+
+    const lines = [];
+    lines.push(`🔔 <b>Partial TP Hit — 1:1 Reached</b>`);
+    lines.push(``);
+    lines.push(`<b>Consider closing a portion of your position now to protect profits.</b>`);
+    lines.push(`Trade continues to full TP with original SL intact.`);
+    lines.push(``);
+    lines.push(`${dir} ${sym}`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🔔 1:1 Level:</b> <code>${lvlStr}</code>`);
+    lines.push(`<b>🎯 Full TP:</b> <code>${tpStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(``);
+    lines.push(`<i>Monitoring trade for full TP or SL exit…</i>`);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: partial TP alert (1:1) sent`);
+  } catch (err) {
+    addLog(`📤 Partial TP Telegram error: ${err.message}`);
+  }
+}
+
+/**
+ * Send a Telegram alert when price reaches a Tesla 3–6–9 level (T1=3R, T2=6R, T3=9R).
+ * Uses the outcome Telegram toggle so no extra setting is needed.
+ * @param {object} signal - the pending trade signal
+ * @param {string} levelLabel - "T1 (3R)", "T2 (6R)", or "T3 (9R)"
+ * @param {number} levelPrice - price at this level
+ * @param {string} plan - "conservative" | "aggressive"
+ */
+async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
+  if (!teslaScalingEnabled) return;
+  if (!telegramOutcomeSend) return;
+  try {
+    const activeSym = signal.symbol || getActiveSymbol() || "";
+    const sym = getSymbolLabel(activeSym);
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const slStr    = signal.sl    != null ? fmtPrice(signal.sl, activeSym)    : "--";
+    const lvlStr   = fmtPrice(levelPrice, activeSym);
+    const planLabel = plan === "aggressive" ? "Aggressive" : "Conservative";
+
+    /* Determine position action for each level based on the chosen plan */
+    const actions = {
+      "T1 (3R)": plan === "conservative" ? "Close 50% of position" : "Close 25% of position",
+      "T2 (6R)": plan === "conservative" ? "Close 30% of position" : "Close 35% of position",
+      "T3 (9R)": plan === "conservative" ? "Close remaining 20%" : "Close 20% — trail the rest"
+    };
+    const action = actions[levelLabel] || "Review open position";
+
+    const lines = [];
+    lines.push(`⚡ <b>Tesla 3–6–9: ${levelLabel} Reached</b>`);
+    lines.push(``);
+    lines.push(`<b>Plan:</b> ${planLabel}`);
+    lines.push(`<b>Action:</b> ${action}`);
+    lines.push(``);
+    lines.push(`${dir} ${sym}`);
+    lines.push(`<b>📍 Entry:</b> <code>${entryStr}</code>`);
+    lines.push(`<b>🎯 ${levelLabel} Level:</b> <code>${lvlStr}</code>`);
+    lines.push(`<b>🛑 SL:</b> <code>${slStr}</code>`);
+    lines.push(``);
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: Tesla ${levelLabel} alert sent`);
+  } catch (err) {
+    addLog(`📤 Tesla level Telegram error: ${err.message}`);
+  }
+}
+async function sendTradeOutcomeTelegram(signal) {
+  if (!telegramOutcomeSend) return;
+  if (signal._outcomeSent) return;
+  /* Set the flag synchronously before the first await so that any re-entrant call
+     (possible because JS is single-threaded but event-loop interleaving can occur
+     between awaits) sees the flag and returns early without sending a duplicate. */
+  signal._outcomeSent = true;
+  try {
+    const sym = getSymbolLabel(signal.symbol || "");
+    const activeSym = signal.symbol || getActiveSymbol() || "";
+    const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
+    const result = signal.result;
+    const icon = result === "WIN" ? "✅" : "❌";
+    const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
+    const exitStr  = signal.exitPrice != null ? fmtPrice(signal.exitPrice, activeSym) : "--";
+    const slStr = signal.sl != null ? fmtPrice(signal.sl, activeSym) : "--";
+    const tpStr = signal.tp != null ? fmtPrice(signal.tp, activeSym) : "--";
+    const rrStr = signal.rr != null ? "1:" + signal.rr.toFixed(1) : "--";
+    const confScore = signal.confluenceScore != null ? signal.confluenceScore + "/16" : "--";
+    const pattern = signal.confirmPattern || "--";
+
+    const lines = [];
+    lines.push(`${icon} <b>Trade ${result}</b> — ${dir} ${sym}`);
+    lines.push("");
+    lines.push(`<b>Pattern:</b> ${pattern}`);
+    lines.push(`<b>Entry:</b> ${entryStr}`);
+    lines.push(`<b>Exit:</b> ${exitStr}`);
+    lines.push(`<b>SL:</b> ${slStr}`);
+    lines.push(`<b>TP:</b> ${tpStr}`);
+    lines.push(`<b>R:R:</b> ${rrStr}`);
+    lines.push(`<b>Confluence:</b> ${confScore}`);
+    if (signal.trailingSL != null) {
+      lines.push(`<b>Trailing SL:</b> ${fmtPrice(signal.trailingSL, activeSym)}`);
+    }
+    if (signal.partialTpHit) {
+      lines.push(`<b>Partial TP:</b> Hit at 1:1`);
+    }
+    /* Win/loss tally */
+    const totalW = signalWins;
+    const totalL = signalLosses;
+    const wr = (totalW + totalL) > 0 ? (totalW / (totalW + totalL) * 100).toFixed(1) + "%" : "N/A";
+    lines.push("");
+    lines.push(`📊 <b>Record:</b> ${totalW}W / ${totalL}L (${wr} win rate)`);
+
+    /* Opposite mode effectiveness from auto-trade history */
+    const oppTrades = autoTradeHistory.filter(e => e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    const normTrades = autoTradeHistory.filter(e => !e.isOpposite && (e.result === "WIN" || e.result === "LOSS"));
+    if (oppTrades.length > 0 || normTrades.length > 0) {
+      lines.push("");
+      if (normTrades.length > 0) {
+        const nw = normTrades.filter(e => e.result === "WIN").length;
+        const nwr = (nw / normTrades.length * 100).toFixed(1);
+        lines.push(`📈 <b>Normal Trades:</b> ${nw}W / ${normTrades.length - nw}L (${nwr}%)`);
+      }
+      if (oppTrades.length > 0) {
+        const ow = oppTrades.filter(e => e.result === "WIN").length;
+        const owr = (ow / oppTrades.length * 100).toFixed(1);
+        lines.push(`🔄 <b>Opposite Trades:</b> ${ow}W / ${oppTrades.length - ow}L (${owr}%)`);
+      }
+    }
+
+    lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
+
+    await sendTelegramMessage(lines.join("\n"));
+    addLog(`📤 Telegram: trade outcome (${result}) sent`);
+  } catch (err) {
+    addLog(`📤 Telegram outcome error: ${err.message}`);
+  }
+}
+
+/**
+ * Test the Telegram connection by calling getMe and getChat.
+ * Shows success/failure in the Telegram status area.
+ */
+async function testTelegramConnection() {
+  if (UI.telegramStatus) {
+    UI.telegramStatus.textContent = "Testing connection…";
+    UI.telegramStatus.className = "hint telegram-status";
+  }
+  try {
+    const { token, chatId } = getTelegramCredentials();
+    validateTelegramCredentials(token, chatId);
+
+    /* Verify the bot token — proxy first, direct fallback */
+    let meResp;
+    let meUseDirectFallback = false;
+    try {
+      meResp = await fetch(TELEGRAM_PROXY_URL, {
+        method: "POST",
+        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ action: "getMe", token, payload: {} })
+      });
+      if (meResp.status === 401 || meResp.status === 403) {
+        meUseDirectFallback = true;
+      }
+    } catch (_proxyErr) {
+      meUseDirectFallback = true;
+    }
+    if (meUseDirectFallback) {
+      meResp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    }
+    const meData = await safeJson(meResp);
+    if (!meData.ok) throw new Error(meData.description || "Invalid bot token");
+
+    /* Verify the chat ID is reachable — proxy first, direct fallback */
+    let chatResp;
+    let chatUseDirectFallback = false;
+    try {
+      chatResp = await fetch(TELEGRAM_PROXY_URL, {
+        method: "POST",
+        headers: telegramProxyHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ action: "getChat", token, payload: { chat_id: chatId } })
+      });
+      if (chatResp.status === 401 || chatResp.status === 403) {
+        chatUseDirectFallback = true;
+      }
+    } catch (_proxyErr) {
+      chatUseDirectFallback = true;
+    }
+    if (chatUseDirectFallback) {
+      chatResp = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId })
+      });
+    }
+    const chatData = await safeJson(chatResp);
+    if (!chatData.ok) throw new Error(chatData.description || "Cannot reach chat");
+
+    const botName = meData.result.first_name || meData.result.username;
+    const chatTitle = chatData.result.title || chatData.result.first_name || chatId;
+    const msg = `✅ Connected! Bot: ${botName} → Chat: ${chatTitle}`;
+    addLog(`📤 ${msg}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = msg;
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+
+    /* Sync variables and persist */
+    telegramBotToken = token;
+    telegramChatId = chatId;
+    saveSettings();
+  } catch (err) {
+    const msg = `❌ ${err.message}`;
+    addLog(`📤 Telegram test: ${err.message}`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = msg;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS * 2);         /* longer display for test results */
+}
+
+/**
+ * Capture chart + build caption and send to Telegram.
+ * Shows status in the signal log and the Telegram status label.
+ */
+async function sendTelegramAlert() {
+  /* Sync variables from DOM before sending */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* In multi-panel mode, delegate to the panel-specific sender
+     so the chart screenshot and caption always match the focused panel */
+  if (focusedPanelSymbol && multiPanels.has(focusedPanelSymbol)) {
+    return sendPanelTelegramAlert(focusedPanelSymbol);
+  }
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
+  try {
+    const caption = buildTelegramCaption();
+    const blob = await captureTelegramScreenshot();
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
+    addLog("📤 Telegram alert sent successfully");
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "✅ Sent!";
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+    /* Persist credentials on success */
+    saveSettings();
+  } catch (err) {
+    addLog(`📤 Telegram error: ${err.message}`);
+    showToast("❌ Telegram Error", err.message, "warning", 6000);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  /* Clear status after 5 seconds */
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+/**
+ * Send Telegram alert for a specific multi-panel symbol.
+ * Activates the panel's state, captures its mini-chart screenshot,
+ * builds a caption using the panel's data, and sends to Telegram.
+ */
+async function sendPanelTelegramAlert(symbol) {
+  const p = multiPanels.get(symbol);
+  if (!p) return;
+
+  /* Sync credentials from DOM */
+  if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
+  if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
+
+  /* Build caption from panel state (without touching globals) */
+  const caption = buildPanelTelegramCaption(p);
+
+  /* Capture screenshot from the panel's mini-chart canvas */
+  const blob = await captureTelegramScreenshot(p);
+
+  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
+  try {
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
+    addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
+      UI.telegramStatus.className = "hint telegram-status telegram-ok";
+    }
+  } catch (err) {
+    addLog(`📤 [${symbol}] Telegram error: ${err.message}`);
+    showToast("❌ Telegram Error", `${getSymbolLabel(symbol)}: ${err.message}`, "warning", 6000);
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = `❌ ${getSymbolLabel(symbol)}: ${err.message}`;
+      UI.telegramStatus.className = "hint telegram-status telegram-err";
+    }
+  }
+  /* Clear status */
+  setTimeout(() => {
+    if (UI.telegramStatus) {
+      UI.telegramStatus.textContent = "";
+      UI.telegramStatus.className = "hint telegram-status";
+    }
+  }, TELEGRAM_STATUS_CLEAR_MS);
+}
+
+
+
 function isBreakevenSignal(signal) {
   return !!signal &&
     signal.result === "LOSS" &&
@@ -16157,6 +16769,16 @@ function getAggregatedStrategyHistory() {
   return all;
 }
 
+/**
+ * Notify the strategy ticker banner that a new strategy signal has fired.
+ * The banner itself is data-driven (rebuilt from the aggregated strategy
+ * history), so this simply triggers a re-render; the `item` payload is
+ * accepted for call-site compatibility but not otherwise required.
+ */
+function addStrategyTickerItem(item) {
+  try { renderStrategyTickerBanner(); } catch (_err) { /* non-critical UI update */ }
+}
+
 function renderStrategyTickerBanner() {
   if (!UI.strategyTickerTrack) return;
   UI.strategyTickerTrack.innerHTML = "";
@@ -16248,6 +16870,9 @@ function updateScalpStatsUI() {
   if (UI.scalpStatsBestConf) UI.scalpStatsBestConf.textContent = bestConf + "/7";
   if (UI.scalpStatsLastTime) UI.scalpStatsLastTime.textContent = lastTime;
 }
+
+/* ---- Feature: PDF/CSV export in-progress guard ---- */
+let _isExporting = false;
 
 function exportSignalsCSV() {
   if (_isExporting) return;
@@ -20722,6 +21347,10 @@ function monitorTiktokOutcomes(candle) {
   }
 }
 
+/* Grid Scalper V2: ATR-based regime thresholds (range vs. trend detection) */
+const GRID_SCALPER_V2_RANGE_THRESHOLD_ATR = 0.5;   /* ATR ≤ this = low-volatility/ranging regime */
+const GRID_SCALPER_V2_TREND_STRENGTH_ATR  = 1.0;   /* price distance from EMA ≥ this × ATR = trending */
+
 function gridV2_isRanging() {
   const atr = gridV2_calculateATR();
   if (atr <= GRID_SCALPER_V2_RANGE_THRESHOLD_ATR) {
@@ -21315,6 +21944,12 @@ function renderAdaptiveConfluenceTable() {
 }
 
 /* ---- Feature 1: Backtesting Engine ---- */
+let backtestMode      = false;
+let backtestIdx       = 0;
+let backtestInterval  = null;
+let backtestSpeedMs   = BACKTEST_DEFAULT_SPEED_MS;
+let _backtestCandles  = [];
+
 function startBacktest() {
   if (backtestMode) stopBacktest();
   if (candles.length < 10) {
@@ -21364,6 +21999,10 @@ function updateBacktestUI() {
 }
 
 /* ---- Feature 15: Multi-R Partial Exit Ladder ---- */
+let multiRLadderEnabled = false;
+let multiRLadder   = JSON.parse(JSON.stringify(MULTI_R_LADDER_DEFAULT));
+let multiRHitLevels = [];             /* indices of already-triggered ladder levels */
+
 function monitorMultiRLadder(idx) {
   if (!multiRLadderEnabled || !trade || multiRLadder.length === 0) return;
   const c = candles[idx]; if (!c) return;
@@ -21393,6 +22032,11 @@ function monitorMultiRLadder(idx) {
 }
 
 /* ---- Feature 11: Economic Calendar / News Pause ---- */
+let newsPauseEnabled  = false;
+let newsPauseMinutes  = NEWS_PAUSE_DEFAULT_MIN;
+let newsEvents        = [];           /* [{ time, title, impact, currency }] */
+let _newsCacheFetched = 0;
+
 async function fetchNewsCalendar() {
   const now = Date.now();
   if (now - _newsCacheFetched < NEWS_CACHE_EXPIRY_MS && newsEvents.length > 0) return;
@@ -21422,6 +22066,9 @@ function getNewsPauseEvent() {
 }
 
 /* ---- Feature 8: Multi-Symbol Scanner ---- */
+let scannerEnabled  = false;
+let scannerSymbols  = ["1HZ100V", "1HZ50V", "1HZ10V", "frxEURUSD", "frxGBPUSD"];
+
 function updateScannerSymbolCount() {
   const el = document.getElementById("scannerSymbolCount");
   if (el) el.textContent = `${scannerSymbols.length} symbol${scannerSymbols.length !== 1 ? "s" : ""} selected`;
