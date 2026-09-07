@@ -8218,11 +8218,7 @@ async function sendTelegramScalpAlert(scalp, force = false) {
     const panel = (scalp.symbol && multiPanels.has(scalp.symbol)) ? multiPanels.get(scalp.symbol) : null;
     const blob = await captureTelegramScreenshot(panel);
     if (blob) {
-      if (blob) {
-        await sendTelegramPhoto(blob, caption);
-      } else {
-        await sendTelegramMessage(caption);
-      }
+      await sendTelegramPhoto(blob, caption);
     } else {
       await sendTelegramMessage(caption);
     }
@@ -9188,7 +9184,11 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     } else {
       caption = buildSessionRangeTelegramCaption(signalType);
     }
-    await sendTelegramPhoto(blob, caption);
+    if (blob) {
+      await sendTelegramPhoto(blob, caption);
+    } else {
+      await sendTelegramMessage(caption);
+    }
     addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
