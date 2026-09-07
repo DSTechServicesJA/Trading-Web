@@ -1623,6 +1623,23 @@ let autoTradeOrderblock = true;
 /* ================= FEATURE: SESSION HEATMAP (17) ================= */
 let sessionHeatmapEnabled = false;   /* draw session colour bands on chart */
 
+/* ================= FEATURE: CANDLE PATTERN ANNOTATIONS (6) ================= */
+let candleAnnotationsEnabled = true;  /* draw labels above/below pattern candles */
+
+/* ================= FEATURE: VOLUME PROFILE (9) ================= */
+let volumeProfileEnabled = false;     /* range-based histogram on chart right edge */
+
+/* ================= FEATURE: FIBONACCI EXTENSIONS (10) ================= */
+let fibExtensionsEnabled = false;     /* draw 1.272/1.414/1.618/2.0/2.618 extension levels */
+
+/* ================= FEATURE: BOS / ChoCH MARKERS (5) ================= */
+let bosChochEnabled  = false;         /* draw BOS/ChoCH labels on chart */
+let bosChochMarkers  = [];            /* [{ idx, type:"BOS"|"ChoCH", dir:"BULL"|"BEAR", price }] */
+
+/* ================= FEATURE: DIVERGENCE VISUAL MARKERS (7) ================= */
+let divergenceVisualEnabled = false;  /* draw divergence lines on price + RSI panel */
+let divergenceMarkers = [];           /* [{ boIdx, rtIdx, dir, rsiBO, rsiRT, priceBO, priceRT }] */
+
 /* ================= FEATURE: NAMED SETTINGS PROFILES ================= */
 let savedProfiles = {};              /* { name: settingsSnapshot } */
 
@@ -3101,6 +3118,19 @@ function displayGridScalperV2Analysis(symbol) {
 }
 
 /* ================= STRATEGY 5: POWER OF 3 (ICT) ================= */
+let po3Enabled = false;              /* master toggle */
+let po3History = [];                 /* alert history */
+const PO3_MAX_HISTORY = 30;
+const PO3_COOLDOWN = 5;             /* min candles between alerts */
+const PO3_MAX_CANDLES = 30;         /* timeout: close trade monitoring after N candles */
+const PO3_SWEEP_LOOKBACK = 6;       /* candles to look back for manipulation sweep */
+const PO3_FVG_MIN_ATR = 0.3;        /* min FVG gap size as fraction of ATR */
+const PO3_MSS_BODY_PCT = 0.6;       /* displacement candle body must be ≥ 60% of range */
+const PO3_ENTRY_MAX_AGE_SAFE = 1;   /* allows 1-candle lag after a touch (safer, less strict) */
+const PO3_ENTRY_MAX_AGE_STRICT = 0; /* only current-touch candle is valid (strictest timing) */
+let po3EntryMaxAge = PO3_ENTRY_MAX_AGE_SAFE;
+let lastPo3Idx = -999;
+
 /**
  * Detect a Power of 3 (ICT) setup.
  *
@@ -5248,6 +5278,32 @@ function monitorOrbOutcomes(candle) {
 }
 
 /* ================= STRATEGY 20: CRT + TBS (TURTLE BODY SOUP) ================= */
+let crtTbsEnabled       = false;      /* master toggle */
+let crtTbsHistory       = [];         /* alert history */
+let lastCrtTbsIdx       = -999;
+let autoTradeCrtTbs     = true;
+let _crtStrictTbs       = true;       /* require full-body close beyond swept level */
+const CRT_TBS_MAX_HISTORY          = 30;
+const CRT_TBS_MAX_CANDLES          = 30;    /* timeout: close trade monitoring after N candles */
+const CRT_TBS_COOLDOWN             = 5;     /* min candles between alerts */
+const CRT_TBS_HTF_RATIO            = 4;     /* LTF candles synthesised into one HTF candle */
+const CRT_TBS_MIN_CRT_BODY_ATR     = 0.6;   /* min HTF candle body as ATR multiple to qualify as A+ CRT */
+const CRT_TBS_MIN_BODY_RANGE_RATIO = 0.5;   /* min body/range ratio to qualify as A+ CRT */
+const CRT_TBS_SWING_LOOKBACK       = 10;    /* LTF candles to scan back for old swing high/low */
+const CRT_TBS_DISPLACEMENT_MULT    = 1.2;   /* Model #1 displacement candle vs avg body multiple */
+const CRT_TBS_MODEL1_TIMEOUT       = 10;    /* candles to wait for Model #1 confirmation before reset */
+
+/* CRT+TBS state machine (see _crtTbsReset for the field list) */
+let _crtState        = 0;
+let _crtHigh         = null;
+let _crtLow          = null;
+let _crt50           = null;
+let _crtBias         = null;
+let _crtManipCandle  = null;
+let _crtLtfOldHigh   = null;
+let _crtLtfOldLow    = null;
+let _crtTbsDetected  = false;
+let _crtTbsCandleIdx = null;
 
 /**
  * Reset CRT+TBS state machine to initial state.
