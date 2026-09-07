@@ -1599,6 +1599,15 @@ let lastGridScalperMAIdx   = -999;
 let autoTradeGridScalperMA = true;
 let gridScalperAdaptiveEnabled = false;      /* adaptive confluence gate toggle */
 let gridScalperAdaptiveModeValue = "Off";    /* Off | ObservationOnly | Active */
+/* TP_PROB_MIN_SAMPLE is declared in grid-scalper-ma-opposite.js (shared constant),
+   which is always loaded before this file. */
+const GS_FLIP_MIN_STATS              = 10;   /* minimum resolved trades before hiding "need more data" */
+const TP_PROB_SIGNIFICANCE_THRESHOLD = 0.05; /* min difference to declare one direction better */
+let _signalIdCounter = 0;
+/* Cumulative Grid Scalper MA resolved-outcome tracking (persisted to localStorage
+   so stats survive page reloads and panel/symbol switches, unlike the in-memory
+   gridScalperMAHistory which resets). */
+let gsFlipStats = { wins: 0, losses: 0, bullWins: 0, bullLosses: 0, bearWins: 0, bearLosses: 0 };
 const GRID_SCALPER_MA_MAX_HISTORY  = 30;
 const GRID_SCALPER_MA_COOLDOWN     = 5;      /* min candles between signals */
 const GRID_SCALPER_MA_BOS_LOOKBACK = 30;     /* candles to scan for swing points in BOS mode */
