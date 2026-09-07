@@ -1,5 +1,12 @@
 # ──────────────────────────────────────────────
-# Deny all direct web access to the scheduled-job scripts.
-# These run only from the command line via cron.
+# Scheduled-job scripts in this folder are normally CLI-only, but hosts
+# like Hostinger only support triggering cron via a public URL. Web
+# access is therefore allowed at the server level; each script enforces
+# its own protection by requiring a valid CRON_SECRET_KEY (see
+# requireCronSecret() in api/config.php) before doing any work, so
+# unauthenticated requests are rejected with 403 by the script itself.
 # ──────────────────────────────────────────────
-Require all denied
+Require all granted
+
+# Never allow browsing this directory's listing.
+Options -Indexes

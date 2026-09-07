@@ -111,6 +111,78 @@ function env(string $key, string $default = ''): string
     putenv("JWT_SECRET=$secret");
 })();
 
+/* ── Auto-generate CRON_SECRET_KEY if missing or placeholder ─
+   Scheduled jobs (cron/*.php) are triggered via a public URL on
+   hosts like Hostinger that only support HTTP-based cron. This key
+   must be appended to that URL (?key=...) so the endpoint can tell a
+   legitimate cron trigger apart from a random visitor. Auto-generates
+   and persists a secret to .cron_secret so it works out-of-the-box. */
+(function (): void {
+    $current = env('CRON_SECRET_KEY');
+    $placeholder = 'REPLACE_WITH_LONG_RANDOM_KEY';
+
+    if ($current !== '' && $current !== $placeholder) {
+        define('CRON_SECRET_KEY', $current);
+        return;                                        // already configured
+    }
+
+    $secretFile = dirname(__DIR__) . '/.cron_secret';
+
+    /* Try to load a previously auto-generated secret */
+    if (is_file($secretFile) && is_readable($secretFile)) {
+        $saved = trim((string) file_get_contents($secretFile));
+        if ($saved !== '' && $saved !== $placeholder) {
+            $_ENV['CRON_SECRET_KEY'] = $saved;
+            putenv("CRON_SECRET_KEY=$saved");
+            define('CRON_SECRET_KEY', $saved);
+            return;
+        }
+    }
+
+    /* Generate a new secret and persist it */
+    $secret = bin2hex(random_bytes(32));               // 64 hex chars
+    $written = @file_put_contents($secretFile, $secret, LOCK_EX);
+    if ($written !== false) {
+        @chmod($secretFile, 0600);
+    } else {
+        /* Cannot persist — log a warning so the admin knows */
+        error_log('CRON_SECRET_KEY auto-generation: could not write ' . $secretFile
+            . ' — a new secret will be generated on every request until this is fixed.');
+    }
+
+    $_ENV['CRON_SECRET_KEY'] = $secret;
+    putenv("CRON_SECRET_KEY=$secret");
+    define('CRON_SECRET_KEY', $secret);
+})();
+
+/**
+ * Guard a cron endpoint that is triggered over a public URL (Hostinger-style
+ * "run via cron URL" hosting). Direct/unauthenticated HTTP access is
+ * rejected; requests carrying the correct CRON_SECRET_KEY are allowed
+ * through, and CLI execution (e.g. a traditional shell cron entry) is
+ * always allowed since it never touches the public network.
+ *
+ * The key may be supplied as a query string / POST param (?key=...) or via
+ * the X-Cron-Key header.
+ */
+function requireCronSecret(string $paramName = 'key'): void
+{
+    if (PHP_SAPI === 'cli') {
+        return; // invoked directly from a shell/cron entry — no HTTP surface
+    }
+
+    $incoming = (string) ($_SERVER['HTTP_X_CRON_KEY'] ?? '');
+    if ($incoming === '') {
+        $incoming = (string) ($_GET[$paramName] ?? $_POST[$paramName] ?? '');
+    }
+
+    if ($incoming === '' || !hash_equals(CRON_SECRET_KEY, $incoming)) {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        exit(json_encode(['error' => 'Forbidden']));
+    }
+}
+
 /** Check whether debug mode is enabled in .env (APP_DEBUG=true). */
 function isDebug(): bool
 {

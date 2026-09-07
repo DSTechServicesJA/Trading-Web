@@ -16,18 +16,28 @@
  *      subscription_reminders ledger.
  *
  * Design goals: idempotent execution, per-item error isolation, structured
- * logging, a file lock to prevent overlapping runs, and no web exposure.
+ * logging, a file lock to prevent overlapping runs, and no unauthenticated
+ * web exposure.
+ *
+ * Hostinger (and similar shared hosts) only support triggering cron jobs by
+ * requesting a URL rather than invoking the PHP CLI directly. To support
+ * that while still blocking public/direct access, this script also accepts
+ * HTTP requests — but only when the correct CRON_SECRET_KEY is supplied:
+ *
+ *   https://yourdomain.com/cron/subscription_cron.php?key=YOUR_CRON_SECRET_KEY
+ *
+ * Requests missing/mismatching the key are rejected with 403. CLI
+ * invocations (a traditional shell cron entry) are always allowed.
  */
 
 declare(strict_types=1);
 
-/* ── 1. Refuse to run over HTTP — this is a CLI-only maintenance job. ── */
-if (PHP_SAPI !== 'cli') {
-    http_response_code(403);
-    exit('This script may only be run from the command line.');
-}
-
 require_once __DIR__ . '/../api/config.php';
+
+/* ── 1. Block unauthenticated public access — CLI is always allowed;
+   HTTP requests must supply the correct CRON_SECRET_KEY. ── */
+requireCronSecret();
+
 require_once __DIR__ . '/../api/telegram/helpers.php';
 require_once __DIR__ . '/../api/lib/subscription_email.php';
 
@@ -159,4 +169,10 @@ cronLog('INFO', sprintf(
 
 flock($lockFp, LOCK_UN);
 fclose($lockFp);
+
+if (PHP_SAPI !== 'cli') {
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => true, 'stats' => $stats]);
+}
+
 exit(0);
