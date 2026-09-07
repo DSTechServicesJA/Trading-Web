@@ -48,6 +48,20 @@ are safe):
 ```
 
 On Hostinger this is configured under **hPanel → Advanced → Cron Jobs**.
+Hostinger's scheduler only supports triggering a job by requesting a URL
+(not by running the PHP CLI directly). To support that, the script also
+accepts HTTP requests — but only when the correct `CRON_SECRET_KEY`
+(from `.env`, see `.env.example`) is supplied as a query parameter:
+
+```
+https://yourdomain.com/cron/subscription_cron.php?key=YOUR_CRON_SECRET_KEY
+```
+
+Use this exact URL as the "Command"/URL field when creating the cron job in
+hPanel. Requests without a matching key are rejected with `403 Forbidden`,
+so the endpoint cannot be triggered by a random visitor even though it is
+reachable over HTTP. Traditional CLI cron entries (as above) are always
+allowed and never need the key.
 
 The job:
 
@@ -57,7 +71,8 @@ The job:
    `subscription_reminders` ledger.
 
 A file lock (`sys_get_temp_dir()/trading_subscription_cron.lock`) prevents
-overlapping runs. The script refuses to execute over HTTP.
+overlapping runs. HTTP access requires `CRON_SECRET_KEY`; CLI execution is
+always allowed.
 
 ## 4. Verifying delivery
 

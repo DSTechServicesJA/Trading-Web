@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 .jwt_secret
+.cron_secret
 
 # ──────────────────────────────────────────────
 # Server-side config that may contain credentials
