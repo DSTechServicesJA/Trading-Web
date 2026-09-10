@@ -356,6 +356,18 @@
             <h3 class="collapsible">📊 Multi-Symbol Analysis</h3>
             <div class="collapsible-body">
               <p class="hint">Select symbols to analyze simultaneously.</p>
+              <label class="toggle-row"><input type="checkbox" id="multiViewRefreshToggle" checked /> Auto-Refresh Multi-View Charts</label>
+              <div style="margin-top:4px;margin-bottom:6px;">
+                <label for="multiViewRefreshInterval" class="hint">Refresh Interval</label>
+                <select id="multiViewRefreshInterval" style="width:100%;">
+                  <option value="15">15 Minutes</option>
+                  <option value="30">30 Minutes</option>
+                  <option value="60" selected>1 Hour</option>
+                  <option value="120">2 Hours</option>
+                  <option value="240">4 Hours</option>
+                </select>
+              </div>
+              <p id="multiViewRefreshStatus" class="hint">Auto-refresh armed (60m) — add panels to activate</p>
               <div style="display:flex;gap:6px;margin-bottom:8px;">
                 <button id="selectAllSymbols" class="btn btn-xs">Select All</button>
                 <button id="deselectAllSymbols" class="btn btn-xs">Deselect All</button>
@@ -936,6 +948,30 @@
               <p class="hint">Enhanced multi-timeframe filter using EMA 200 as a structural trend reference.</p>
 
               <hr class="param-divider" />
+              <p class="param-group-title">⚡ Entry Timing & Win-Rate</p>
+
+              <label class="toggle-row"><input type="checkbox" id="aggressiveEntryToggle" checked /> Aggressive Intrabar Entry</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="aggressiveEntryMinAtrInput" style="margin-right:6px;">Min Progress ATR</label>
+                <input type="number" id="aggressiveEntryMinAtrInput" min="0.05" max="1.5" step="0.01" value="0.18" style="width:70px;" />
+              </div>
+              <p class="hint">Allows earlier entry on the still-forming confirmation candle once price has pushed far enough away from the retest level.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="entryQualityToggle" checked /> Entry Quality Filter</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="entryQualityMinAtrInput" style="margin-right:6px;">Min Close Distance ATR</label>
+                <input type="number" id="entryQualityMinAtrInput" min="0.05" max="1.5" step="0.01" value="0.22" style="width:70px;" />
+              </div>
+              <p class="hint">Reject weak confirmations that close too close to the retest level and are more likely to get wicked out.</p>
+
+              <label class="toggle-row"><input type="checkbox" id="recentLossPauseToggle" checked /> Pause After Clustered Losses</label>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="recentLossPauseCountInput" style="margin-right:6px;">Losses</label>
+                <input type="number" id="recentLossPauseCountInput" min="1" max="5" step="1" value="2" style="width:60px;" />
+              </div>
+              <p class="hint">Blocks same-symbol, same-direction breakout or MTF re-entries after repeated recent losses so the indicator stops chasing noisy clusters.</p>
+
+              <hr class="param-divider" />
               <button id="revertSettingsBtn" class="btn btn-danger" style="width:100%;margin-top:8px;margin-bottom:4px;">🔄 Revert All Settings to Defaults</button>
               <p class="hint">Reset all strategy filters and parameters back to their original default values.</p>
 
@@ -1450,6 +1486,17 @@
 
               <label class="toggle-row"><input type="checkbox" id="telegramProfitExitAlertToggle" /> Auto-Send Profit Exit Alert (protect gains after 1:1 profit)</label>
               <p class="hint">Send a Telegram alert when a strategy or range trade that previously reached 1:1 profit (1× risk) reverses back to the entry price — reminding you to exit with profit before it turns into a loss. Applies to Liquidity Sweep, Stop Loss Hunt, Failed Pin Bar, Fib Golden Zone, Power of 3, NY Open Range, Session Range, and Grid Scalper MA.</p>
+              <label class="toggle-row"><input type="checkbox" id="telegramLifecycleAlertsToggle" checked /> Auto-Send Setup / Approaching / Cancelled Alerts</label>
+              <p class="hint">Sends earlier lifecycle alerts before full confirmation so Telegram users can prepare instead of receiving only late entry alerts.</p>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="signalValidityMinutesInput" style="margin-right:6px;">Signal Validity (min)</label>
+                <input type="number" id="signalValidityMinutesInput" min="1" step="1" value="60" style="width:80px;" />
+              </div>
+              <div class="rr-inputs" style="margin-top:4px;margin-bottom:4px;">
+                <label class="hint" for="signalMaxDistanceAtrInput" style="margin-right:6px;">Max Entry Distance (ATR)</label>
+                <input type="number" id="signalMaxDistanceAtrInput" min="0.1" step="0.1" value="0.9" style="width:80px;" />
+              </div>
+              <p class="hint">Alerts include expiry time and become invalid once price stretches too far from the planned entry.</p>
 
               <div class="telegram-btn-row">
                 <button id="telegramTestBtn" type="button" class="bar-btn telegram-test-btn" title="Test Telegram connection">🔗 Test Connection</button>
