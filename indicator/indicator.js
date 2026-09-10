@@ -454,6 +454,9 @@ const SIGNAL_APPROACH_TOLERANCE_ATR = 0.35; /* pre-entry warning once price is w
 const SIGNAL_DEFAULT_VALIDITY_MIN   = 60;   /* Telegram signal validity / expiry window */
 const SIGNAL_DEFAULT_MAX_DISTANCE_ATR = 0.9; /* invalidate alerts once price has stretched too far from entry */
 const MULTI_VIEW_REFRESH_DEFAULT_MIN = 60;  /* refresh all multi-view panels hourly by default */
+const AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT = 0.18; /* intrabar entry needs at least this much progress beyond the level */
+const ENTRY_QUALITY_PROGRESS_ATR_DEFAULT    = 0.22; /* confirmed entries must displace away from the level by this ATR amount */
+const RECENT_LOSS_PAUSE_COUNT_DEFAULT       = 2;    /* pause fresh entries after repeated same-side losses */
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 100;   /* wait for canvas redraw before screenshot */
@@ -708,6 +711,7 @@ let _multiPanelProcessing = null;  /* null = normal mode, otherwise the panel's 
 let _multiPanelGran = null;        /* gran (seconds) for the panel currently being processed */
 let focusedPanelSymbol = null;     /* which multi-panel drives the main view */
 let _historicalProcessing = false; /* true during processAllCandles() to suppress live-only actions */
+let _entryModeContext = null;      /* temporary context for aggressive intrabar entries */
 
 /* ================= UI REFS ================= */
 const UI = new Proxy({}, {
@@ -781,6 +785,132 @@ function getMaxEntryDriftAtr(symbol, granSec, isMtf = false) {
   if (mtype === "boom" || mtype === "crash") maxDrift -= 0.10;
   if (mtype === "jump") maxDrift += 0.10;
   return Math.max(0.45, maxDrift);
+}
+
+function getCurrentEntryMode() {
+  return _entryModeContext === "aggressive_intrabar" ? "aggressive_intrabar" : "confirmed_close";
+}
+
+function normalizeSignalDir(dir) {
+  if (dir === "BUY") return "BULL";
+  if (dir === "SELL") return "BEAR";
+  return dir;
+}
+
+function getEntryProgressMinAtr(symbol, granSec, isAggressive = false) {
+  let minAtr = parseFloat(isAggressive ? aggressiveEntryMinAtr : entryQualityMinAtr);
+  if (!Number.isFinite(minAtr) || minAtr <= 0) {
+    minAtr = isAggressive ? AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT : ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
+  }
+  const mtype = getMarketType(symbol);
+  if (mtype === "boom" || mtype === "crash" || mtype === "dex") minAtr += 0.06;
+  else if (mtype === "jump") minAtr += 0.03;
+  else if (mtype === "step") minAtr -= 0.04;
+  if (granSec <= LOWER_TF_1M_SEC && isAggressive) minAtr -= 0.02;
+  return Math.max(isAggressive ? 0.08 : 0.10, minAtr);
+}
+
+function evaluateEntryTimingQuality(dir, candle, level, atrRef, options = {}) {
+  const entryMode = options.entryMode || getCurrentEntryMode();
+  const isAggressive = entryMode === "aggressive_intrabar";
+  if (!entryQualityFilterEnabled && !isAggressive) {
+    return { pass: true, progressAtr: null, bodyAtr: null, closeLocation: null, minProgressAtr: null, minBodyAtr: null };
+  }
+  if (!candle || !Number.isFinite(level) || !Number.isFinite(atrRef) || atrRef <= 0) {
+    return { pass: true, progressAtr: null, bodyAtr: null, closeLocation: null, minProgressAtr: null, minBodyAtr: null };
+  }
+  const symbol = options.symbol || getActiveSymbol();
+  const granSec = options.granSec || getCurrentGranularitySec();
+  const progressAtr = dir === "BULL" ? (candle.close - level) / atrRef : (level - candle.close) / atrRef;
+  const bodyAtr = Math.abs(candle.close - candle.open) / atrRef;
+  const range = candle.high - candle.low;
+  const closeLocation = range > 0
+    ? (dir === "BULL" ? (candle.close - candle.low) / range : (candle.high - candle.close) / range)
+    : 0.5;
+  const minProgressAtr = getEntryProgressMinAtr(symbol, granSec, isAggressive);
+  const minBodyAtr = Math.max(0.08, minProgressAtr * 0.8);
+  const minCloseLocation = isAggressive ? 0.55 : 0.60;
+  if (progressAtr < minProgressAtr) {
+    return {
+      pass: false,
+      reason: `${isAggressive ? "intrabar trigger" : "confirmation close"} only cleared ${fmt(progressAtr, 2)} ATR from the retest level (min ${fmt(minProgressAtr, 2)} ATR)`,
+      progressAtr, bodyAtr, closeLocation, minProgressAtr, minBodyAtr
+    };
+  }
+  if (bodyAtr < minBodyAtr) {
+    return {
+      pass: false,
+      reason: `confirmation body ${fmt(bodyAtr, 2)} ATR is too small (min ${fmt(minBodyAtr, 2)} ATR)`,
+      progressAtr, bodyAtr, closeLocation, minProgressAtr, minBodyAtr
+    };
+  }
+  if (closeLocation < minCloseLocation) {
+    return {
+      pass: false,
+      reason: `confirmation closed too far from the candle extreme (${fmt(closeLocation * 100, 0)}% of range)`,
+      progressAtr, bodyAtr, closeLocation, minProgressAtr, minBodyAtr
+    };
+  }
+  return { pass: true, progressAtr, bodyAtr, closeLocation, minProgressAtr, minBodyAtr };
+}
+
+function getSignalCreatedAtMs(signal) {
+  if (!signal || typeof signal !== "object") return 0;
+  if (Number.isFinite(signal.createdAtMs)) return signal.createdAtMs;
+  if (typeof signal.time === "string") {
+    const parsed = Date.parse(signal.time);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function shouldPauseAfterRecentLosses(history, options = {}) {
+  if (!recentLossPauseEnabled) return { block: false };
+  const required = Math.max(1, parseInt(recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+  const symbol = options.symbol || getActiveSymbol();
+  const strategyType = options.strategyType || "breakout_retest";
+  const dir = normalizeSignalDir(options.dir);
+  const timeframeSec = options.timeframeSec || getCurrentGranularitySec();
+  const resolved = (history || [])
+    .filter(s => s && (s.result === "WIN" || s.result === "LOSS"))
+    .filter(s => (s.symbol || symbol) === symbol)
+    .filter(s => normalizeSignalDir(s.dir) === dir)
+    .filter(s => (s.strategyType || s.type || "breakout_retest") === strategyType)
+    .filter(s => s.timeframeSec == null || timeframeSec == null || s.timeframeSec === timeframeSec)
+    .sort((a, b) => getSignalCreatedAtMs(a) - getSignalCreatedAtMs(b));
+  if (resolved.length < required) return { block: false };
+  const recent = resolved.slice(-required);
+  if (recent.every(s => s.result === "LOSS")) {
+    return {
+      block: true,
+      reason: `recent ${required} ${strategyType.replace(/_/g, " ")} ${dir} signal${required === 1 ? "" : "s"} all lost — wait for a cleaner reset`
+    };
+  }
+  return { block: false };
+}
+
+function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade", reason = null) {
+  if (!signal) return null;
+  const atrAtSignal = Number.isFinite(signal.atrAtSignal) ? signal.atrAtSignal : (Number.isFinite(signal.atrAtEntry) ? signal.atrAtEntry : getAtrReference());
+  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+  return {
+    channel,
+    strategyLabel,
+    symbol: signal.symbol || getActiveSymbol(),
+    timeframeSec: signal.timeframeSec != null ? signal.timeframeSec : getCurrentGranularitySec(),
+    dir: signal.dir,
+    level: signal.level,
+    entry: signal.entry,
+    sl: signal.sl || signal.stopLoss || null,
+    tp: signal.tp || signal.takeProfit || null,
+    validUntilMs: signal.validUntilMs,
+    maxDistanceAtr: Number.isFinite(signal.maxEntryDistanceAtr) ? signal.maxEntryDistanceAtr : getSignalDistanceLimitAtr(),
+    distanceAtr: getSignalDistanceFromEntry({ entry: signal.entry, atrAtSignal }, currentPrice),
+    stopBufferAtr: signal.stopBufferAtr,
+    entryDriftAtr: signal.entryDriftAtr,
+    reason,
+    entryMode: signal.entryMode || null
+  };
 }
 
 function stampSignalLifecycle(signal, options = {}) {
@@ -1812,6 +1942,12 @@ let rangeSizeMax         = 3.0;     /* max range size in ATR multiples */
 let hhhlEnabled          = true;    /* higher-high/higher-low structure check */
 let followThroughEnabled = true;    /* post-breakout follow-through (next candle continues) */
 let mtfStructureEnabled  = false;   /* improved MTF via EMA 200 proxy */
+let aggressiveEntryEnabled = true;  /* allow earlier intrabar entry once confirmation is materially underway */
+let aggressiveEntryMinAtr  = AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT;
+let entryQualityFilterEnabled = true; /* require meaningful displacement from the retest level before entering */
+let entryQualityMinAtr       = ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
+let recentLossPauseEnabled   = true;  /* pause same-direction re-entries after clustered losses */
+let recentLossPauseCount     = RECENT_LOSS_PAUSE_COUNT_DEFAULT;
 let retestCount          = 0;       /* track number of retests for double-retest filter */
 
 /* Scalping mode (from MD: quick 5-10 pip profits on 1min/5min charts) */
@@ -7126,6 +7262,20 @@ function detectMtfTopDown(confirmationOverride = null) {
   const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : 0;
   const maxEntryDriftAtr = getMaxEntryDriftAtr(getActiveSymbol(), getCurrentGranularitySec(), true);
   if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) return null;
+  const entryMode = getCurrentEntryMode();
+  const timingQuality = evaluateEntryTimingQuality(dir, c, level, atrValue, {
+    symbol: getActiveSymbol(),
+    granSec: getCurrentGranularitySec(),
+    entryMode
+  });
+  if (!timingQuality.pass) return null;
+  const recentLossPause = shouldPauseAfterRecentLosses(mtfTopDownHistory, {
+    symbol: getActiveSymbol(),
+    dir,
+    strategyType: "mtf_top_down",
+    timeframeSec: getCurrentGranularitySec()
+  });
+  if (recentLossPause.block) return null;
 
   const hasPinBar     = isPinBar(c, dir);
   const hasBullEngulf = dir === "BULL" && isBullishEngulfing(prev, c);
@@ -7180,9 +7330,16 @@ function detectMtfTopDown(confirmationOverride = null) {
     timeframeSec: getCurrentGranularitySec(),
     result: "PENDING",
     type:   "mtf_top_down",
+    strategyType: "mtf_top_down",
     breakoutEpoch: setup && setup.breakoutEpoch != null ? setup.breakoutEpoch : null,
+    validUntilMs: Date.now() + getSignalValidityMs(),
+    maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
     entryDriftAtr,
-    stopBufferAtr: (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(getActiveSymbol(), getCurrentGranularitySec(), { volumeSpike: true })) * (_profParams.slBufferMult || 1)
+    stopBufferAtr: (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(getActiveSymbol(), getCurrentGranularitySec(), { volumeSpike: true })) * (_profParams.slBufferMult || 1),
+    entryMode,
+    entryProgressAtr: timingQuality.progressAtr,
+    entryBodyAtr: timingQuality.bodyAtr,
+    entryCloseLocation: timingQuality.closeLocation
   };
 }
 
@@ -7299,6 +7456,12 @@ function processMtfTopDown() {
 
   if (telegramStrategyAutoSend) {
     setTimeout(function() { sendTelegramStrategyAlert(signal); }, CHART_RENDER_DELAY_MS);
+  }
+  if (!_historicalProcessing) {
+    sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
+      signal.entryMode === "aggressive_intrabar"
+        ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
+        : "Entry activated after the lower-timeframe trigger candle closed."));
   }
 
   renderStrategyAlerts();
@@ -8570,6 +8733,7 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
   }
   if (Number.isFinite(signal.validUntilMs)) lines.push(`<b>Valid Until:</b> ${formatUtcTs(signal.validUntilMs)}`);
+  if (signal.entryMode) lines.push(`<b>Entry Mode:</b> ${signal.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(signal.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(signal.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(signal.maxEntryDistanceAtr)) lines.push(`<b>Max Entry Distance:</b> ${fmt(signal.maxEntryDistanceAtr, 2)} ATR`);
   if (Number.isFinite(signal.stopBufferAtr)) lines.push(`<b>Stop Buffer:</b> ${fmt(signal.stopBufferAtr, 2)} ATR`);
@@ -8845,6 +9009,7 @@ function buildLifecycleTelegramCaption(kind, payload) {
   if (payload.entry != null) lines.push(`<b>Entry:</b> <code>${fmtPrice(payload.entry, symbol)}</code>`);
   if (payload.sl != null) lines.push(`<b>SL:</b> <code>${fmtPrice(payload.sl, symbol)}</code>`);
   if (payload.tp != null) lines.push(`<b>TP:</b> <code>${fmtPrice(payload.tp, symbol)}</code>`);
+  if (payload.entryMode) lines.push(`<b>Entry Mode:</b> ${payload.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(payload.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(payload.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(payload.distanceAtr)) lines.push(`<b>Distance Now:</b> ${fmt(payload.distanceAtr, 2)} ATR`);
   if (Number.isFinite(payload.maxDistanceAtr)) lines.push(`<b>Max Valid Distance:</b> ${fmt(payload.maxDistanceAtr, 2)} ATR`);
@@ -8893,6 +9058,7 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
   if (kind === "setup" && breakout._setupAlertSent) return;
   if (kind === "approaching" && breakout._approachAlertSent) return;
+  if (kind === "active" && breakout._activeAlertSent) return;
   const payload = {
     channel: "trade",
     strategyLabel: "Breakout Retest",
@@ -8908,10 +9074,12 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
     distanceAtr: getSignalDistanceFromEntry(trade || { entry: breakout.level, atrAtSignal: getAtrReference() }, currentPrice),
     maxDistanceAtr: trade && Number.isFinite(trade.maxEntryDistanceAtr) ? trade.maxEntryDistanceAtr : getSignalDistanceLimitAtr(),
     validUntilMs: trade && Number.isFinite(trade.validUntilMs) ? trade.validUntilMs : Date.now() + getSignalValidityMs(),
-    reason: extra.reason || null
+    reason: extra.reason || null,
+    entryMode: trade && trade.entryMode ? trade.entryMode : null
   };
   if (kind === "setup") breakout._setupAlertSent = true;
   if (kind === "approaching") breakout._approachAlertSent = true;
+  if (kind === "active") breakout._activeAlertSent = true;
   sendSignalLifecycleTelegram(kind, payload);
 }
 
@@ -10970,6 +11138,31 @@ function processLatestCandle() {
   updateStateUI();
 }
 
+function runIntrabarTimingOptimizations(currentCandle) {
+  if (!aggressiveEntryEnabled || !candleCloseOnlyEnabled || _historicalProcessing) return;
+  if (!currentCandle || candles.length < 2) return;
+
+  const idx = candles.length - 1;
+  if (!monitoringTrade && !trade && breakout && retestInfo && indecisionInfo && !confirmInfo && phase === "CONFIRM" && idx > indecisionInfo.candleIdx) {
+    const prevMode = _entryModeContext;
+    _entryModeContext = "aggressive_intrabar";
+    try {
+      processLatestCandle();
+    } finally {
+      _entryModeContext = prevMode;
+    }
+  }
+
+  if (monitoringTrade || trade || !mtfTopDownEnabled || mtfTopDownHistory.some(s => s.result === "PENDING")) return;
+  const prevMode = _entryModeContext;
+  _entryModeContext = "aggressive_intrabar";
+  try {
+    processMtfTopDown();
+  } finally {
+    _entryModeContext = prevMode;
+  }
+}
+
 /**
  * Reset indicator state for next setup while keeping candle data and signal history.
  * Starts a new opening range from the latest candle epoch.
@@ -11747,6 +11940,35 @@ function buildTrade(confirmCandle, confirmIdx) {
   const atrRef = getAtrReference();
   const extraStopAtr = getVolatilityAdjustedStopBufferAtr(symbol, _gran, breakout);
   const maxEntryDriftAtr = getMaxEntryDriftAtr(symbol, _gran, false);
+  const entryMode = getCurrentEntryMode();
+  const timingQuality = evaluateEntryTimingQuality(breakout.dir, confirmCandle, breakout.level, atrRef, {
+    symbol,
+    granSec: _gran,
+    entryMode
+  });
+  if (!timingQuality.pass) {
+    const rejectKey = `timing|${confirmIdx}|${timingQuality.reason}`;
+    if (!(entryMode === "aggressive_intrabar" && breakout && breakout._lastEntryRejectKey === rejectKey)) {
+      addLog(`⚠ Trade REJECTED — ${timingQuality.reason}`);
+    }
+    if (entryMode === "aggressive_intrabar" && breakout) breakout._lastEntryRejectKey = rejectKey;
+    return;
+  }
+  const recentLossPause = shouldPauseAfterRecentLosses(signalHistory, {
+    symbol,
+    dir: breakout.dir,
+    strategyType: "breakout_retest",
+    timeframeSec: _gran
+  });
+  if (recentLossPause.block) {
+    const rejectKey = `loss-pause|${confirmIdx}|${recentLossPause.reason}`;
+    if (!(entryMode === "aggressive_intrabar" && breakout && breakout._lastEntryRejectKey === rejectKey)) {
+      addLog(`⚠ Trade REJECTED — ${recentLossPause.reason}`);
+    }
+    if (entryMode === "aggressive_intrabar" && breakout) breakout._lastEntryRejectKey = rejectKey;
+    return;
+  }
+  if (breakout) breakout._lastEntryRejectKey = "";
 
   /* ---- Resolve the retest/indecision zone candles for precise SL placement ----
    * Using the lowest point of the retest + indecision zone (BULL) or the highest
@@ -11794,7 +12016,9 @@ function buildTrade(confirmCandle, confirmIdx) {
       entry, sl, tp, dir: "BULL", rr: actualRR, scalpingMode: scalpingModeEnabled,
       entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol(),
       atrAtEntry: atrRef, stopBufferAtr: slAtrBuf + extraStopAtr, entryDriftAtr,
-      validUntilMs: Date.now() + getSignalValidityMs(), maxEntryDistanceAtr: getSignalDistanceLimitAtr()
+      validUntilMs: Date.now() + getSignalValidityMs(), maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
+      entryMode, entryProgressAtr: timingQuality.progressAtr, entryBodyAtr: timingQuality.bodyAtr,
+      entryCloseLocation: timingQuality.closeLocation
     };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
@@ -11841,7 +12065,9 @@ function buildTrade(confirmCandle, confirmIdx) {
       entry, sl, tp, dir: "BEAR", rr: actualRR, scalpingMode: scalpingModeEnabled,
       entryIdx: confirmIdx, outcomeStartIdx: confirmIdx + 1, symbol: getActiveSymbol(),
       atrAtEntry: atrRef, stopBufferAtr: slAtrBuf + extraStopAtr, entryDriftAtr,
-      validUntilMs: Date.now() + getSignalValidityMs(), maxEntryDistanceAtr: getSignalDistanceLimitAtr()
+      validUntilMs: Date.now() + getSignalValidityMs(), maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
+      entryMode, entryProgressAtr: timingQuality.progressAtr, entryBodyAtr: timingQuality.bodyAtr,
+      entryCloseLocation: timingQuality.closeLocation
     };
     /* #17: Apply backtest slippage — entry worsens by 0.5 ATR in backtest mode.
      * Recalculate TP from the slipped entry so R:R is preserved correctly. */
@@ -11944,6 +12170,9 @@ function recordConfirmedSignal(confirmPattern) {
     time: new Date().toISOString(),
     symbol: sym,
     dir: breakout ? breakout.dir : null,
+    type: "breakout_retest",
+    strategyType: "breakout_retest",
+    candleIdx: confirmInfo && Number.isFinite(confirmInfo.candleIdx) ? confirmInfo.candleIdx : (candles.length - 1),
     entry: null,
     sl: null,
     tp: null,
@@ -11968,6 +12197,7 @@ function recordConfirmedSignal(confirmPattern) {
     volatilityRegime: adxValue > 0 ? getVolatilityRegime() : null,
     timeframeSec: getCurrentGranularitySec(),
     scalpingMode: scalpingModeEnabled,
+    entryMode: getCurrentEntryMode(),
     lotSize: null,
     pipsAtRisk: null,
     stake: null
@@ -11998,6 +12228,9 @@ function recordSignal(confirmPattern) {
   if (!lastConfirmed) signal.time = new Date().toISOString();
   signal.symbol = currentSymbol;
   signal.dir = trade.dir;
+  signal.type = "breakout_retest";
+  signal.strategyType = "breakout_retest";
+  signal.candleIdx = trade.entryIdx;
   signal.entry = trade.entry;
   signal.sl = trade.sl;
   signal.tp = trade.tp;
@@ -12023,11 +12256,15 @@ function recordSignal(confirmPattern) {
   signal.volatilityRegime = adxValue > 0 ? getVolatilityRegime() : null;
   signal.timeframeSec = getCurrentGranularitySec();
   signal.scalpingMode = scalpingModeEnabled;
+  signal.entryMode = trade.entryMode || getCurrentEntryMode();
   signal.lotSize = null;
   signal.pipsAtRisk = null;
   signal.stake = null;
   signal.entryDriftAtr = trade.entryDriftAtr;
   signal.stopBufferAtr = trade.stopBufferAtr;
+  signal.entryProgressAtr = trade.entryProgressAtr;
+  signal.entryBodyAtr = trade.entryBodyAtr;
+  signal.entryCloseLocation = trade.entryCloseLocation;
   stampSignalLifecycle(signal, { atrAtSignal: trade.atrAtEntry });
 
   /* Populate lot-size fields from account sizing */
@@ -14306,6 +14543,12 @@ function setPhase(newPhase) {
       maybeSendBreakoutLifecycleAlert("setup", { reason: "Breakout printed; waiting for retest." });
     } else if (newPhase === "INDECISION" || newPhase === "CONFIRM") {
       maybeSendBreakoutLifecycleAlert("approaching", { reason: "Retest held; confirmation is forming near the entry zone." });
+    } else if (newPhase === "TRADE") {
+      maybeSendBreakoutLifecycleAlert("active", {
+        reason: trade && trade.entryMode === "aggressive_intrabar"
+          ? "Entry activated intrabar after a strong reclaim from the retest zone."
+          : "Entry activated on the confirmation candle."
+      });
     }
   }
   /* Auto-focus the panel that fired a TRADE signal so chart markup is visible.
@@ -15148,6 +15391,7 @@ function buildTelegramCaption() {
       lines.push(`<b>R:R:</b> 1:${fmt(trade.rr, 1)}`);
     }
     if (Number.isFinite(trade.validUntilMs)) lines.push(`<b>Valid Until:</b> ${formatUtcTs(trade.validUntilMs)}`);
+    if (trade.entryMode) lines.push(`<b>Entry Mode:</b> ${trade.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
     if (Number.isFinite(trade.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(trade.entryDriftAtr, 2)} ATR`);
     if (Number.isFinite(trade.maxEntryDistanceAtr)) lines.push(`<b>Max Entry Distance:</b> ${fmt(trade.maxEntryDistanceAtr, 2)} ATR`);
     if (Number.isFinite(trade.stopBufferAtr)) lines.push(`<b>Stop Buffer:</b> ${fmt(trade.stopBufferAtr, 2)} ATR`);
@@ -15887,6 +16131,7 @@ function buildPanelTelegramCaption(p) {
       lines.push(`<b>R:R:</b> 1:${fmt(p.trade.rr, 1)}`);
     }
     if (Number.isFinite(p.trade.validUntilMs)) lines.push(`<b>Valid Until:</b> ${formatUtcTs(p.trade.validUntilMs)}`);
+    if (p.trade.entryMode) lines.push(`<b>Entry Mode:</b> ${p.trade.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
     if (Number.isFinite(p.trade.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(p.trade.entryDriftAtr, 2)} ATR`);
     if (Number.isFinite(p.trade.maxEntryDistanceAtr)) lines.push(`<b>Max Entry Distance:</b> ${fmt(p.trade.maxEntryDistanceAtr, 2)} ATR`);
     if (Number.isFinite(p.trade.stopBufferAtr)) lines.push(`<b>Stop Buffer:</b> ${fmt(p.trade.stopBufferAtr, 2)} ATR`);
@@ -16143,6 +16388,12 @@ function saveSettings() {
       hhhlEnabled,
       followThroughEnabled,
       mtfStructureEnabled,
+      aggressiveEntryEnabled,
+      aggressiveEntryMinAtr,
+      entryQualityFilterEnabled,
+      entryQualityMinAtr,
+      recentLossPauseEnabled,
+      recentLossPauseCount,
       autoApplyRecommended,
       lockTimeframe,
       lockRR,
@@ -16391,6 +16642,12 @@ function restoreSettings() {
     if (s.hhhlEnabled != null) hhhlEnabled = s.hhhlEnabled;
     if (s.followThroughEnabled != null) followThroughEnabled = s.followThroughEnabled;
     if (s.mtfStructureEnabled != null) mtfStructureEnabled = s.mtfStructureEnabled;
+    if (s.aggressiveEntryEnabled != null) aggressiveEntryEnabled = !!s.aggressiveEntryEnabled;
+    if (s.aggressiveEntryMinAtr != null) aggressiveEntryMinAtr = Math.max(0.05, parseFloat(s.aggressiveEntryMinAtr) || AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT);
+    if (s.entryQualityFilterEnabled != null) entryQualityFilterEnabled = !!s.entryQualityFilterEnabled;
+    if (s.entryQualityMinAtr != null) entryQualityMinAtr = Math.max(0.05, parseFloat(s.entryQualityMinAtr) || ENTRY_QUALITY_PROGRESS_ATR_DEFAULT);
+    if (s.recentLossPauseEnabled != null) recentLossPauseEnabled = !!s.recentLossPauseEnabled;
+    if (s.recentLossPauseCount != null) recentLossPauseCount = Math.max(1, parseInt(s.recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
     if (UI.minConfluenceToggle)    UI.minConfluenceToggle.checked    = minConfluenceEnabled;
     if (UI.minConfluenceInput)     UI.minConfluenceInput.value       = minConfluenceValue;
     renderRequiredConfluenceList();
@@ -16412,6 +16669,12 @@ function restoreSettings() {
     if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
     if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
     if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+    if (UI.aggressiveEntryToggle)  UI.aggressiveEntryToggle.checked  = aggressiveEntryEnabled;
+    if (UI.aggressiveEntryMinAtrInput) UI.aggressiveEntryMinAtrInput.value = aggressiveEntryMinAtr;
+    if (UI.entryQualityToggle)     UI.entryQualityToggle.checked     = entryQualityFilterEnabled;
+    if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
+    if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
+    if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
 
     /* Live Scalp Scanner */
     if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
@@ -19346,6 +19609,8 @@ function connect() {
         monitorCustomStrategyOutcomes(c);
         monitorSessionRangeTradeOutcome(c);
         monitorNyOpenRangeTradeOutcome(c);
+      } else if (sameEpoch) {
+        runIntrabarTimingOptimizations(c);
       }
       /* Feature 5: update BOS/ChoCH markers on each new candle */
       if (bosChochEnabled) detectBosChoch();
@@ -20365,6 +20630,12 @@ function revertAllSettings() {
   hhhlEnabled             = false;
   followThroughEnabled    = false;
   mtfStructureEnabled     = false;
+  aggressiveEntryEnabled  = true;
+  aggressiveEntryMinAtr   = AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT;
+  entryQualityFilterEnabled = true;
+  entryQualityMinAtr        = ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
+  recentLossPauseEnabled  = true;
+  recentLossPauseCount    = RECENT_LOSS_PAUSE_COUNT_DEFAULT;
 
   /* Scalping & misc */
   scalpingModeEnabled  = false;
@@ -20468,6 +20739,12 @@ function revertAllSettings() {
   if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
   if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
   if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+  if (UI.aggressiveEntryToggle)  UI.aggressiveEntryToggle.checked  = aggressiveEntryEnabled;
+  if (UI.aggressiveEntryMinAtrInput) UI.aggressiveEntryMinAtrInput.value = aggressiveEntryMinAtr;
+  if (UI.entryQualityToggle)     UI.entryQualityToggle.checked     = entryQualityFilterEnabled;
+  if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
+  if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
+  if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
   if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value   = autoTradeExecutionMode;
   if (UI.mt5SignalApiUrl)        UI.mt5SignalApiUrl.value          = mt5SignalApiUrl;
   if (UI.mt5StatusApiUrl)        UI.mt5StatusApiUrl.value          = mt5StatusApiUrl;
@@ -24642,6 +24919,12 @@ function createPanelState(symbol) {
       hhhlEnabled:             hhhlEnabled,
       followThroughEnabled:    followThroughEnabled,
       mtfStructureEnabled:     mtfStructureEnabled,
+      aggressiveEntryEnabled:  aggressiveEntryEnabled,
+      aggressiveEntryMinAtr:   aggressiveEntryMinAtr,
+      entryQualityFilterEnabled: entryQualityFilterEnabled,
+      entryQualityMinAtr:        entryQualityMinAtr,
+      recentLossPauseEnabled:  recentLossPauseEnabled,
+      recentLossPauseCount:    recentLossPauseCount,
     },
     /* DOM refs for the card */
     cardEl: null,
@@ -24801,6 +25084,12 @@ function activatePanel(p) {
     hhhlEnabled             = f.hhhlEnabled;
     followThroughEnabled    = f.followThroughEnabled;
     mtfStructureEnabled     = f.mtfStructureEnabled;
+    aggressiveEntryEnabled  = f.aggressiveEntryEnabled;
+    aggressiveEntryMinAtr   = f.aggressiveEntryMinAtr;
+    entryQualityFilterEnabled = f.entryQualityFilterEnabled;
+    entryQualityMinAtr        = f.entryQualityMinAtr;
+    recentLossPauseEnabled  = f.recentLossPauseEnabled;
+    recentLossPauseCount    = f.recentLossPauseCount;
   }
 }
 
@@ -24948,6 +25237,12 @@ function savePanel(p) {
   p.filters.hhhlEnabled             = hhhlEnabled;
   p.filters.followThroughEnabled    = followThroughEnabled;
   p.filters.mtfStructureEnabled     = mtfStructureEnabled;
+  p.filters.aggressiveEntryEnabled  = aggressiveEntryEnabled;
+  p.filters.aggressiveEntryMinAtr   = aggressiveEntryMinAtr;
+  p.filters.entryQualityFilterEnabled = entryQualityFilterEnabled;
+  p.filters.entryQualityMinAtr        = entryQualityMinAtr;
+  p.filters.recentLossPauseEnabled  = recentLossPauseEnabled;
+  p.filters.recentLossPauseCount    = recentLossPauseCount;
   /* Reset the "sent via telegram" flag whenever the trade is no longer active,
      so the next TRADE signal (after auto-reset or a new setup) triggers a fresh send. */
   if (phase !== "TRADE") p._tradeTelegramSent = false;
@@ -25090,6 +25385,12 @@ function syncFilterUIFromGlobals() {
   if (UI.hhhlToggle)             UI.hhhlToggle.checked             = hhhlEnabled;
   if (UI.followThroughToggle)    UI.followThroughToggle.checked    = followThroughEnabled;
   if (UI.mtfStructureToggle)     UI.mtfStructureToggle.checked     = mtfStructureEnabled;
+  if (UI.aggressiveEntryToggle)  UI.aggressiveEntryToggle.checked  = aggressiveEntryEnabled;
+  if (UI.aggressiveEntryMinAtrInput) UI.aggressiveEntryMinAtrInput.value = aggressiveEntryMinAtr;
+  if (UI.entryQualityToggle)     UI.entryQualityToggle.checked     = entryQualityFilterEnabled;
+  if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
+  if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
+  if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
 }
 
 /**
@@ -25120,6 +25421,12 @@ function syncProfitDirToAllPanels() {
     p.filters.hhhlEnabled             = hhhlEnabled;
     p.filters.followThroughEnabled    = followThroughEnabled;
     p.filters.mtfStructureEnabled     = mtfStructureEnabled;
+    p.filters.aggressiveEntryEnabled  = aggressiveEntryEnabled;
+    p.filters.aggressiveEntryMinAtr   = aggressiveEntryMinAtr;
+    p.filters.entryQualityFilterEnabled = entryQualityFilterEnabled;
+    p.filters.entryQualityMinAtr        = entryQualityMinAtr;
+    p.filters.recentLossPauseEnabled  = recentLossPauseEnabled;
+    p.filters.recentLossPauseCount    = recentLossPauseCount;
   }
 }
 
@@ -25415,6 +25722,8 @@ function connectPanel(p) {
         monitorCustomStrategyOutcomes(c);
         monitorSessionRangeTradeOutcome(c);
         monitorNyOpenRangeTradeOutcome(c);
+      } else if (sameEpoch) {
+        runIntrabarTimingOptimizations(c);
       }
     }
 
@@ -26519,6 +26828,36 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (UI.mtfStructureToggle) {
     UI.mtfStructureToggle.addEventListener("change", () => { mtfStructureEnabled = UI.mtfStructureToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
+  }
+  if (UI.aggressiveEntryToggle) {
+    UI.aggressiveEntryToggle.addEventListener("change", () => { aggressiveEntryEnabled = UI.aggressiveEntryToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
+  }
+  if (UI.aggressiveEntryMinAtrInput) {
+    UI.aggressiveEntryMinAtrInput.addEventListener("change", () => {
+      aggressiveEntryMinAtr = Math.max(0.05, parseFloat(UI.aggressiveEntryMinAtrInput.value) || AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT);
+      UI.aggressiveEntryMinAtrInput.value = aggressiveEntryMinAtr;
+      syncProfitDirToAllPanels(); saveSettings();
+    });
+  }
+  if (UI.entryQualityToggle) {
+    UI.entryQualityToggle.addEventListener("change", () => { entryQualityFilterEnabled = UI.entryQualityToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
+  }
+  if (UI.entryQualityMinAtrInput) {
+    UI.entryQualityMinAtrInput.addEventListener("change", () => {
+      entryQualityMinAtr = Math.max(0.05, parseFloat(UI.entryQualityMinAtrInput.value) || ENTRY_QUALITY_PROGRESS_ATR_DEFAULT);
+      UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
+      syncProfitDirToAllPanels(); saveSettings();
+    });
+  }
+  if (UI.recentLossPauseToggle) {
+    UI.recentLossPauseToggle.addEventListener("change", () => { recentLossPauseEnabled = UI.recentLossPauseToggle.checked; syncProfitDirToAllPanels(); saveSettings(); updateStateUI(); });
+  }
+  if (UI.recentLossPauseCountInput) {
+    UI.recentLossPauseCountInput.addEventListener("change", () => {
+      recentLossPauseCount = Math.max(1, parseInt(UI.recentLossPauseCountInput.value, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+      UI.recentLossPauseCountInput.value = recentLossPauseCount;
+      syncProfitDirToAllPanels(); saveSettings();
+    });
   }
   if (UI.appIdInput) {
     UI.appIdInput.addEventListener("change", () => {
