@@ -450,7 +450,6 @@ const STRUCTURAL_SL_MIN_RISK_ATR = 0.9;  /* if zone-based SL risk is tighter tha
 const EXECUTION_BUFFER_ATR_DEFAULT = 0.12; /* live spread/slippage allowance beyond the structural stop */
 const ENTRY_DRIFT_ATR_DEFAULT      = 0.9;  /* reject confirmations that close too far from the intended level */
 const MTF_ENTRY_DRIFT_ATR_DEFAULT  = 1.1;  /* MTF setups get slightly more room before being considered stale */
-const SIGNAL_APPROACH_TOLERANCE_ATR = 0.35; /* pre-entry warning once price is within this ATR distance */
 const SIGNAL_DEFAULT_VALIDITY_MIN   = 60;   /* Telegram signal validity / expiry window */
 const SIGNAL_DEFAULT_MAX_DISTANCE_ATR = 0.9; /* invalidate alerts once price has stretched too far from entry */
 const MULTI_VIEW_REFRESH_DEFAULT_MIN = 60;  /* refresh all multi-view panels hourly by default */
@@ -26193,7 +26192,7 @@ function addSymbolPanel(symbol) {
   if (multiPanels.size === 1) focusPanel(symbol);
 
   updateMultiSymbolCount();
-  updateMultiViewRefreshStatus();
+  startMultiViewRefreshTimer();
 }
 
 function removeSymbolPanel(symbol) {
