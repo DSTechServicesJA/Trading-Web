@@ -850,12 +850,7 @@ function getAdaptiveBootstrapLatestSignal(symbol) {
   const strategySignals = typeof getAggregatedStrategyHistory === "function"
     ? getAggregatedStrategyHistory()
     : [];
-  const latestStrategySignal = strategySignals.find((signal) => {
-    if (!signal) return false;
-    const signalSymbol = signal.symbol || targetSymbol;
-    return !targetSymbol || !signalSymbol || signalSymbol === targetSymbol;
-  });
-  addCandidate(latestStrategySignal);
+  for (const signal of strategySignals) addCandidate(signal);
   addCandidate(panel ? (panel.gridScalperV2History || [])[0] : gridScalperV2History[0]);
   addCandidate(panel ? panel.trade : trade);
   addCandidate(panel ? panel.sessionRangeTrade : sessionRangeTrade);

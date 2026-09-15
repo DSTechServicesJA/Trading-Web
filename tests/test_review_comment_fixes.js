@@ -177,8 +177,16 @@ test('bootstrapAdaptiveIntelligence keeps requests scoped and ignores stale resp
     getActiveSymbol: () => activeSymbol,
     getCurrentGranularitySec: () => 60,
     getAggregatedStrategyHistory: () => {
-      if (activeSymbol === 'R_25') return [{ symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }];
-      return [{ symbol: 'R_50', strategyType: 'session_range', epoch: 50 }];
+      if (activeSymbol === 'R_25') {
+        return [
+          { symbol: 'R_25', strategyType: 'session_range', epoch: 10 },
+          { symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }
+        ];
+      }
+      return [
+        { symbol: 'R_50', strategyType: 'breakout_retest', epoch: 20 },
+        { symbol: 'R_50', strategyType: 'session_range', epoch: 50 }
+      ];
     },
     multiPanels: new Map(),
     gridScalperV2History: [],
@@ -248,7 +256,10 @@ test('bootstrapAdaptiveIntelligence does not let an older forced refresh overwri
     initAdaptiveIntelligenceClient: () => {},
     getActiveSymbol: () => 'R_25',
     getCurrentGranularitySec: () => 60,
-    getAggregatedStrategyHistory: () => [{ symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }],
+    getAggregatedStrategyHistory: () => [
+      { symbol: 'R_25', strategyType: 'session_range', epoch: 10 },
+      { symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }
+    ],
     multiPanels: new Map(),
     gridScalperV2History: [],
     trade: null,
