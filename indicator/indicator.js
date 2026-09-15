@@ -1160,6 +1160,9 @@ function stampSignalLifecycle(signal, options = {}) {
   signal.atrAtSignal = Number.isFinite(signal.atrAtSignal) && signal.atrAtSignal > 0
     ? signal.atrAtSignal
     : (Number.isFinite(options.atrAtSignal) && options.atrAtSignal > 0 ? options.atrAtSignal : getAtrReference());
+  if (!signal.adaptiveRegime && signal.result === "PENDING") {
+    signal.adaptiveRegime = signal.volatilityRegime || getCurrentRegimeTag();
+  }
   return signal;
 }
 
@@ -1172,12 +1175,17 @@ function ensureAllKnownSignalIds() {
     orderblockHistory, candleInterpHistory, po3_4hHistory, breakerBlockHistory,
     oteGoldenPocketHistory, orbHistory, crtTbsHistory
   ];
+  let touched = false;
   for (const history of histories) {
     if (!Array.isArray(history)) continue;
     for (const s of history) {
-      if (s && typeof s === "object" && !s.signalId) stampSignalLifecycle(s);
+      if (s && typeof s === "object" && !s.signalId) {
+        stampSignalLifecycle(s);
+        touched = true;
+      }
     }
   }
+  return touched;
 }
 
 function getSignalDistanceFromEntry(signal, currentPrice) {
@@ -9453,12 +9461,12 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   }
   if (!telegramLifecycleAlertsEnabled && !force) return false;
   const now = Date.now();
-  if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled") {
+  if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled" && kind !== "tp" && kind !== "sl") {
     kind = "cancelled";
     payload = Object.assign({}, payload, { reason: payload.reason || "Signal validity window expired before entry." });
   }
   if (payload && Number.isFinite(payload.distanceAtr) && Number.isFinite(payload.maxDistanceAtr)
-      && payload.distanceAtr > payload.maxDistanceAtr && kind !== "cancelled") {
+      && payload.distanceAtr > payload.maxDistanceAtr && kind !== "cancelled" && kind !== "tp" && kind !== "sl") {
     kind = "cancelled";
     payload = Object.assign({}, payload, {
       reason: `Price stretched ${fmt(payload.distanceAtr, 2)} ATR from entry (limit ${fmt(payload.maxDistanceAtr, 2)} ATR).`
@@ -16359,11 +16367,8 @@ async function sendTeslaLevelTelegram(signal, levelLabel, levelPrice, plan) {
 }
 async function sendTradeOutcomeTelegram(signal) {
   if (!telegramOutcomeSend) return;
-  if (signal._outcomeSent) return;
-  /* Set the flag synchronously before the first await so that any re-entrant call
-     (possible because JS is single-threaded but event-loop interleaving can occur
-     between awaits) sees the flag and returns early without sending a duplicate. */
-  signal._outcomeSent = true;
+  if (signal._outcomeSent || signal._outcomeSending) return;
+  signal._outcomeSending = true;
   try {
     const sym = getSymbolLabel(signal.symbol || "");
     const activeSym = signal.symbol || getActiveSymbol() || "";
@@ -16376,6 +16381,7 @@ async function sendTradeOutcomeTelegram(signal) {
       lifecycleDelivered = await sendSignalLifecycleTelegram("cancelled", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade", "Trade expired before TP/SL resolution."));
     }
     if (lifecycleDelivered) {
+      signal._outcomeSent = true;
       addLog(`📤 Telegram breakout outcome skipped (lifecycle already sent: ${result})`);
       return;
     }
@@ -16433,9 +16439,12 @@ async function sendTradeOutcomeTelegram(signal) {
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
+    signal._outcomeSent = true;
     addLog(`📤 Telegram: trade outcome (${result}) sent`);
   } catch (err) {
     addLog(`📤 Telegram outcome error: ${err.message}`);
+  } finally {
+    signal._outcomeSending = false;
   }
 }
 
@@ -16787,6 +16796,7 @@ function _snapshotChartGlobals() {
     bbUpper, bbLower, bbMiddle, bbWidth,
     adxValue, adxDiPlus, adxDiMinus, stochK, stochD,
     trailingSL, partialTpHit, confluenceScore,
+    mtfSetupState, mtfTerminalBreakoutEpoch, lastMtfSetupAlertKey, lastMtfApproachAlertKey,
     signalHistory, signalWins, signalLosses, signalBreakevens,
     liveScalpHistory, lastScalpCandleIdx, ws,
     autoResetEnabled, emaFilterEnabled, htfFilterEnabled,
@@ -16819,6 +16829,10 @@ function _restoreChartGlobals(s) {
   stochK = s.stochK; stochD = s.stochD;
   trailingSL = s.trailingSL; partialTpHit = s.partialTpHit;
   confluenceScore = s.confluenceScore;
+  mtfSetupState = s.mtfSetupState;
+  mtfTerminalBreakoutEpoch = s.mtfTerminalBreakoutEpoch;
+  lastMtfSetupAlertKey = s.lastMtfSetupAlertKey || "";
+  lastMtfApproachAlertKey = s.lastMtfApproachAlertKey || "";
   signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses; signalBreakevens = s.signalBreakevens || 0;
   liveScalpHistory = s.liveScalpHistory; lastScalpCandleIdx = s.lastScalpCandleIdx;
   ws = s.ws;
@@ -17564,7 +17578,8 @@ function restoreSignalHistory() {
       signalHistory = parsed.map(s =>
         (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
       );
-      ensureAllKnownSignalIds();
+      const migratedSignalIds = ensureAllKnownSignalIds();
+      if (migratedSignalIds) persistSignalHistory();
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
       signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
@@ -19254,6 +19269,12 @@ function resetSession() {
   mtfTerminalBreakoutEpoch = null;
   lastMtfSetupAlertKey = "";
   lastMtfApproachAlertKey = "";
+  for (const p of multiPanels.values()) {
+    p.mtfSetupState = null;
+    p.mtfTerminalBreakoutEpoch = null;
+    p.lastMtfSetupAlertKey = "";
+    p.lastMtfApproachAlertKey = "";
+  }
   if (sendSignalLifecycleTelegram._sentKeys && sendSignalLifecycleTelegram._sentKeys.clear) {
     sendSignalLifecycleTelegram._sentKeys.clear();
   }
@@ -19328,6 +19349,9 @@ function resetSession() {
   } catch (e) { /* storage not available */ }
 
   /* Reset auto-trade history */
+  const pendingSettlementHistory = autoTradeHistory
+    .filter(e => e && e.result === "PENDING")
+    .map(e => Object.assign({}, e));
   autoTradeHistory = [];
   autoTradePL = 0;
   /* Reset dynamic stake management state */
@@ -19338,23 +19362,64 @@ function resetSession() {
   symbolTradeTimestamps.clear();
   strategyTradeTimestamps.clear();
   symbolCooldownUntil.clear();
-  for (const slot of autoTradeSlots.values()) {
+  const restoredPendingSettlementKeys = new Set();
+  for (const [symbol, slot] of autoTradeSlots.entries()) {
     if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
-    const hasTrackedContracts = (Array.isArray(slot.activeTrades) && slot.activeTrades.length > 0)
+    if (Array.isArray(slot.activeTrades)) {
+      for (const t of slot.activeTrades) {
+        if (t && t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+      }
+      slot.activeTrades = slot.activeTrades.filter(t => t && t.contractId);
+    }
+    const hasTrackedContracts = (Array.isArray(slot.activeTrades) && slot.activeTrades.some(t => t && t.contractId))
       || !!slot.contractId
       || !!slot.pendingContractId;
     if (!hasTrackedContracts) {
-      if (Array.isArray(slot.activeTrades)) {
-        for (const t of slot.activeTrades) {
-          if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
-        }
-        slot.activeTrades = [];
-      }
+      if (Array.isArray(slot.activeTrades)) slot.activeTrades = [];
       slot.inProgress = false;
       slot.contractId = null;
       slot.pendingContractId = null;
     } else {
-      addLog(`📌 Session reset preserving active auto-trade tracking for ${slot.symbol || "symbol"} until settlement.`);
+      slot.inProgress = true;
+      const preservedTradeIds = Array.isArray(slot.activeTrades)
+        ? slot.activeTrades.map(t => t && t.tradeId ? String(t.tradeId) : "").filter(Boolean)
+        : [];
+      if (preservedTradeIds.length > 0) {
+        for (const tradeId of preservedTradeIds) {
+          const key = `trade:${tradeId}`;
+          if (restoredPendingSettlementKeys.has(key)) continue;
+          const preserved = pendingSettlementHistory.find(e => e && e.result === "PENDING" && String(e.tradeId || "") === tradeId);
+          autoTradeHistory.unshift(preserved ? Object.assign({}, preserved) : {
+            time: Date.now(),
+            source: "breakout",
+            strategyName: null,
+            type: null,
+            symbol,
+            tradeId,
+            profit: null,
+            result: "PENDING",
+            originalDir: null,
+            tradedDir: null,
+            isOpposite: false,
+            regime: null,
+            session: null,
+            timeframeSec: null,
+            realismCost: 0,
+            riskAmount: null
+          });
+          restoredPendingSettlementKeys.add(key);
+        }
+      } else {
+        const key = `symbol:${symbol}`;
+        if (!restoredPendingSettlementKeys.has(key)) {
+          const preserved = pendingSettlementHistory.find(e => e && e.result === "PENDING" && e.symbol === symbol);
+          if (preserved) {
+            autoTradeHistory.unshift(Object.assign({}, preserved));
+            restoredPendingSettlementKeys.add(key);
+          }
+        }
+      }
+      addLog(`📌 Session reset preserving active auto-trade tracking for ${symbol} until settlement.`);
     }
     slot.fetchingMultiplier = false;
     slot.consecutiveErrors = 0;
@@ -25561,6 +25626,8 @@ function createPanelState(symbol) {
     lastOrderblockIdx: -999,
     mtfSetupState: null,
     mtfTerminalBreakoutEpoch: null,
+    lastMtfSetupAlertKey: "",
+    lastMtfApproachAlertKey: "",
     connectTime: null,
     pingTimer: null,
     connected: false,
@@ -25696,10 +25763,12 @@ function activatePanel(p) {
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
+  lastMtfSetupAlertKey = p.lastMtfSetupAlertKey || "";
+  lastMtfApproachAlertKey = p.lastMtfApproachAlertKey || "";
   if (p.mtfSetupState && typeof p.mtfSetupState === "object" && Array.isArray(candles) && candles.length > 0) {
     const restored = Object.assign({}, p.mtfSetupState);
     if (Number.isFinite(restored.breakoutEpoch)) {
-      const detectedIdx = candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch >= restored.breakoutEpoch);
+      const detectedIdx = candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch === restored.breakoutEpoch);
       if (detectedIdx >= 0) {
         restored.setupDetectedIdx = detectedIdx;
         restored.expiresAfterIdx = detectedIdx + (MTF_RETEST_LOOKBACK * 4);
@@ -25872,6 +25941,8 @@ function savePanel(p) {
   p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
   p.mtfSetupState         = mtfSetupState;
   p.mtfTerminalBreakoutEpoch = mtfTerminalBreakoutEpoch;
+  p.lastMtfSetupAlertKey  = lastMtfSetupAlertKey;
+  p.lastMtfApproachAlertKey = lastMtfApproachAlertKey;
   p.candleInterpHistory   = candleInterpHistory;
   p.lastCandleInterpIdx   = lastCandleInterpIdx;
   p.orderblockHistory     = orderblockHistory;
