@@ -19352,6 +19352,17 @@ function resetSession() {
   const pendingSettlementHistory = autoTradeHistory
     .filter(e => e && e.result === "PENDING")
     .map(e => Object.assign({}, e));
+  const pendingSettlementByTradeId = new Map();
+  const pendingSettlementBySymbol = new Map();
+  for (const entry of pendingSettlementHistory) {
+    const tradeId = entry && entry.tradeId ? String(entry.tradeId) : "";
+    if (tradeId && !pendingSettlementByTradeId.has(tradeId)) {
+      pendingSettlementByTradeId.set(tradeId, entry);
+    }
+    if (entry && entry.symbol && !pendingSettlementBySymbol.has(entry.symbol)) {
+      pendingSettlementBySymbol.set(entry.symbol, entry);
+    }
+  }
   autoTradeHistory = [];
   autoTradePL = 0;
   /* Reset dynamic stake management state */
@@ -19388,7 +19399,7 @@ function resetSession() {
         for (const tradeId of preservedTradeIds) {
           const key = `trade:${tradeId}`;
           if (restoredPendingSettlementKeys.has(key)) continue;
-          const preserved = pendingSettlementHistory.find(e => e && e.result === "PENDING" && String(e.tradeId || "") === tradeId);
+          const preserved = pendingSettlementByTradeId.get(tradeId) || null;
           autoTradeHistory.unshift(preserved ? Object.assign({}, preserved) : {
             time: Date.now(),
             source: "breakout",
@@ -19412,7 +19423,7 @@ function resetSession() {
       } else {
         const key = `symbol:${symbol}`;
         if (!restoredPendingSettlementKeys.has(key)) {
-          const preserved = pendingSettlementHistory.find(e => e && e.result === "PENDING" && e.symbol === symbol);
+          const preserved = pendingSettlementBySymbol.get(symbol) || null;
           if (preserved) {
             autoTradeHistory.unshift(Object.assign({}, preserved));
             restoredPendingSettlementKeys.add(key);
