@@ -856,7 +856,12 @@ function getAdaptiveBootstrapLatestSignal(symbol) {
     return !targetSymbol || !signalSymbol || signalSymbol === targetSymbol;
   });
   addCandidate(latestStrategySignal);
-  addCandidate(panel ? (panel.gridScalperV2History || [])[0] : gridScalperV2History[0]);
+  const latestGridScalperV2Signal = (gridScalperV2History || []).find((signal) => {
+    if (!signal) return false;
+    const signalSymbol = signal.symbol || targetSymbol;
+    return !targetSymbol || !signalSymbol || signalSymbol === targetSymbol;
+  });
+  addCandidate(latestGridScalperV2Signal);
   addCandidate(panel ? panel.trade : trade);
   addCandidate(panel ? panel.sessionRangeTrade : sessionRangeTrade);
   addCandidate(panel ? panel.nyOpenRangeTrade : nyOpenRangeTrade);
@@ -910,9 +915,11 @@ async function bootstrapAdaptiveIntelligence(force = false, overrides = {}) {
     if (pending) return pending;
     const cached = adaptiveIntelligenceBootstrapCache.get(scope.key);
     if (cached) {
-      adaptiveIntelligenceBootstrap = cached;
-      adaptiveIntelligenceBootstrapScopeKey = scope.key;
-      mergeRemoteConfluenceStats(cached);
+      if (adaptiveIntelligenceBootstrapScopeKey !== scope.key || adaptiveIntelligenceBootstrap !== cached) {
+        adaptiveIntelligenceBootstrap = cached;
+        adaptiveIntelligenceBootstrapScopeKey = scope.key;
+        mergeRemoteConfluenceStats(cached);
+      }
       return Promise.resolve(cached);
     }
   }
@@ -10895,11 +10902,23 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
 async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
   const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
+  if (panelSymbol && !panel) return;
   const scopedTrade = panel ? (panel.sessionRangeTrade || null) : sessionRangeTrade;
   if (scopedTrade) {
     if (scopedTrade._sentViaTelegram !== true) scopedTrade._sentViaTelegram = false;
     if (scopedTrade._telegramDelivered !== true) scopedTrade._telegramDelivered = false;
   }
+  const scopedConfluenceFactors = (() => {
+    if (typeof getActiveConfluenceFactors !== "function") return [];
+    if (!panel) return getActiveConfluenceFactors();
+    const snap = _snapshotChartGlobals();
+    try {
+      activatePanel(panel);
+      return getActiveConfluenceFactors();
+    } finally {
+      _restoreChartGlobals(snap);
+    }
+  })();
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10918,7 +10937,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     sl: scopedTrade && scopedTrade.sl,
     tp: scopedTrade && scopedTrade.tp,
     time: new Date().toISOString(),
-    _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
+    _confFactors: scopedConfluenceFactors
   }, scopedTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol });
   if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
@@ -11047,11 +11066,24 @@ function buildNyOpenRangeTelegramCaption(phaseType) {
 async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
   if (!telegramStrategyAutoSend) return;
   const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
+  if (panelSymbol && !panel) return;
   const scopedTrade = panel ? (panel.nyOpenRangeTrade || null) : nyOpenRangeTrade;
+  const scopedBreakout = panel ? (panel.nyOpenRangeBreakout || null) : nyOpenRangeBreakout;
   if (scopedTrade) {
     if (scopedTrade._sentViaTelegram !== true) scopedTrade._sentViaTelegram = false;
     if (scopedTrade._telegramDelivered !== true) scopedTrade._telegramDelivered = false;
   }
+  const scopedConfluenceFactors = (() => {
+    if (typeof getActiveConfluenceFactors !== "function") return [];
+    if (!panel) return getActiveConfluenceFactors();
+    const snap = _snapshotChartGlobals();
+    try {
+      activatePanel(panel);
+      return getActiveConfluenceFactors();
+    } finally {
+      _restoreChartGlobals(snap);
+    }
+  })();
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -11065,12 +11097,12 @@ async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
     type: "ny_open_range",
     strategyType: "ny_open_range",
     symbol: panelSymbol || getActiveSymbol(),
-    dir: (scopedTrade && scopedTrade.dir) || (nyOpenRangeBreakout && nyOpenRangeBreakout.dir) || null,
+    dir: (scopedTrade && scopedTrade.dir) || (scopedBreakout && scopedBreakout.dir) || null,
     entry: scopedTrade && scopedTrade.entry,
     sl: scopedTrade && scopedTrade.sl,
     tp: scopedTrade && scopedTrade.tp,
     time: new Date().toISOString(),
-    _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
+    _confFactors: scopedConfluenceFactors
   }, scopedTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "NY Open Range", false, { strategy: "ny_open_range", symbol: pseudoSignal.symbol });
   if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
@@ -11079,7 +11111,6 @@ async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending NY range alert${symLabel ? " " + symLabel : ""}…`;
   try {
-    const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
     const blob = await captureTelegramScreenshot(panel || null);
     let caption;
     if (panel) {
