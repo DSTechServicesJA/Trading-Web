@@ -63,11 +63,63 @@ test('trade payload converts resolved signals into persistent records', () => {
   assert.deepEqual(payload.confluence_factors_present, ['Trend Alignment', 'MACD Confirmation', 'MTF Confirmation']);
 });
 
+test('cancelled trade payload keeps delivered flag but excludes exit P&L metrics', () => {
+  const payload = utils.buildTradePayload({
+    signalId: 'sig-cancelled',
+    symbol: 'BOOM500',
+    strategyType: 'session_range',
+    dir: 'BULL',
+    entry: 100,
+    sl: 95,
+    tp: 110,
+    result: 'CANCELLED',
+    resolvedAtIso: '2026-09-15T01:02:03.000Z',
+    _telegramDelivered: true
+  }, null, { timeframeSec: 60 });
+
+  assert.equal(payload.exit_timestamp, '2026-09-15T01:02:03.000Z');
+  assert.equal(payload.exit_price, null);
+  assert.equal(payload.r_multiple, null);
+  assert.equal(payload.profit_points, null);
+  assert.equal(payload.telegram_sent, true);
+});
+
+test('adaptive client retries php fallback before the query string', async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(url);
+    if (calls.length === 1) {
+      return { status: 404, ok: false, text: async () => '{"error":"missing"}' };
+    }
+    return { status: 200, ok: true, text: async () => '{"ok":true}' };
+  };
+
+  try {
+    const client = new utils.AdaptiveIntelligenceClient({
+      apiBase: 'https://example.test/api',
+      auth: { getToken: () => 'token' }
+    });
+    const data = await client.fetchJson('/adaptive/bootstrap?symbol=BOOM500', { method: 'GET' });
+    assert.deepEqual(data, { ok: true });
+    assert.deepEqual(calls, [
+      'https://example.test/api/adaptive/bootstrap?symbol=BOOM500',
+      'https://example.test/api/adaptive/bootstrap.php?symbol=BOOM500'
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('indicator bootstraps and syncs persistent adaptive learning from the database', () => {
   assert.match(indicatorSource, /initAdaptiveIntelligenceClient\(\)/);
   assert.match(indicatorSource, /bootstrapAdaptiveIntelligence\(true\)/);
   assert.match(indicatorSource, /syncPersistentAdaptiveTradeHistory\(\)/);
   assert.match(indicatorSource, /qualifySignalForTelegram\(/);
+  assert.match(indicatorSource, /adaptiveIntelligenceBootstrapScopeKey/);
+  assert.match(indicatorSource, /gridScalperV2History/);
+  assert.match(indicatorSource, /_adaptiveTradeNextRetryAt/);
+  assert.match(indicatorSource, /sendTelegramNyOpenRangeAlert\("RANGE_SET", currentPanelSymbol\)/);
 });
 
 test('backend service defines persistent trade, factor, rule, and audit handling', () => {
@@ -76,6 +128,11 @@ test('backend service defines persistent trade, factor, rule, and audit handling
   assert.match(serviceSource, /function adaptiveAudit\(/);
   assert.match(serviceSource, /WEIGHT_AUTO_ADJUST/);
   assert.match(serviceSource, /TRADE_RECORDED/);
+  assert.match(serviceSource, /adaptiveNormalizeDbTimestamp/);
+  assert.match(serviceSource, /adaptiveNormalizeRuleCategory/);
+  assert.match(serviceSource, /GET_LOCK/);
+  assert.match(serviceSource, /trust_source/);
+  assert.match(serviceSource, /\(market_category = \?\) DESC,\s*\(symbol_scope = \?\) DESC,\s*\(strategy_key = \?\) DESC/);
 });
 
 test('admin dashboard exposes adaptive management workflows', () => {

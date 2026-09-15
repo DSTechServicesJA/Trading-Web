@@ -790,6 +790,7 @@ function persistAdaptiveRuntime() {
 let adaptiveIntelligenceClient = null;
 let adaptiveIntelligenceBootstrap = null;
 let adaptiveIntelligenceBootstrapPromise = null;
+let adaptiveIntelligenceBootstrapScopeKey = "";
 
 function initAdaptiveIntelligenceClient() {
   if (typeof AdaptiveIntelligenceClient !== "function") return;
@@ -824,11 +825,24 @@ function getAdaptiveMtfStatus(signal) {
   return "UNKNOWN";
 }
 
+function getAdaptiveBootstrapScope(overrides = {}) {
+  const symbol = overrides.symbol || getActiveSymbol();
+  const timeframeSec = overrides.timeframeSec || getCurrentGranularitySec();
+  const strategy = overrides.strategy || (trade && (trade.strategyType || trade.type)) || "breakout_retest";
+  return {
+    symbol,
+    timeframeSec,
+    strategy,
+    key: [symbol || "", timeframeSec || "", strategy || ""].join("|")
+  };
+}
+
 function mergeRemoteConfluenceStats(data) {
   if (!data || !Array.isArray(data.factor_stats)) return;
+  for (const key of Object.keys(confluenceFactorStats)) delete confluenceFactorStats[key];
   let touched = false;
   for (const row of data.factor_stats) {
-    if (!row || row.factor_key == null) continue;
+    if (!row || row.factor_key == null || confluenceFactorStats[row.factor_key]) continue;
     confluenceFactorStats[row.factor_key] = {
       wins: Number(row.wins || 0),
       losses: Number(row.losses || 0),
@@ -844,14 +858,20 @@ function mergeRemoteConfluenceStats(data) {
 async function bootstrapAdaptiveIntelligence(force = false) {
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return null;
+  const scope = getAdaptiveBootstrapScope();
   if (adaptiveIntelligenceBootstrapPromise && !force) return adaptiveIntelligenceBootstrapPromise;
+  if (!force && adaptiveIntelligenceBootstrap && adaptiveIntelligenceBootstrapScopeKey === scope.key) {
+    return Promise.resolve(adaptiveIntelligenceBootstrap);
+  }
   adaptiveIntelligenceBootstrapPromise = adaptiveIntelligenceClient.bootstrap({
-    symbol: getActiveSymbol(),
-    timeframe_sec: getCurrentGranularitySec(),
-    strategy_key: (trade && (trade.strategyType || trade.type)) || "breakout_retest"
+    symbol: scope.symbol,
+    timeframe_sec: scope.timeframeSec,
+    strategy_key: scope.strategy
   }).then((data) => {
     adaptiveIntelligenceBootstrap = data;
+    adaptiveIntelligenceBootstrapScopeKey = scope.key;
     mergeRemoteConfluenceStats(data);
+    syncPersistentAdaptiveTradeHistory();
     return data;
   }).catch((err) => {
     console.warn("Adaptive intelligence bootstrap failed:", err.message);
@@ -925,8 +945,26 @@ async function qualifySignalForTelegram(signal, strategyLabel, force = false, ov
   } catch (err) {
     console.warn("Adaptive signal qualification failed:", err.message);
     addLog(`🧠 Adaptive Intelligence fallback — ${err.message}`);
-    return { allowed: true, decision: null };
+    return { allowed: false, decision: null };
   }
+}
+
+function shouldSyncAdaptiveTradeSignal(signal, now = Date.now()) {
+  if (!signal || signal._adaptiveTradeSynced || signal._adaptiveTradeSyncing || signal._adaptiveTradeLocalOnly) return false;
+  if (Number.isFinite(signal._adaptiveTradeNextRetryAt) && now < signal._adaptiveTradeNextRetryAt) return false;
+  const result = String(signal.result || "").toUpperCase();
+  return ["WIN", "LOSS", "EXPIRED", "CANCELLED"].includes(result);
+}
+
+function ensureAdaptiveTradeResolutionTimestamp(signal) {
+  if (!signal) return;
+  const result = String(signal.result || "").toUpperCase();
+  if (!["WIN", "LOSS", "EXPIRED", "CANCELLED"].includes(result) || signal.resolvedAtIso) return;
+  const resolvedAtMs = Number.isFinite(signal.resolvedAtMs)
+    ? signal.resolvedAtMs
+    : (Number.isFinite(signal.closedAt) ? signal.closedAt : Date.now());
+  signal.resolvedAtMs = resolvedAtMs;
+  signal.resolvedAtIso = new Date(resolvedAtMs).toISOString();
 }
 
 function findPendingTradeSignal(symbol) {
@@ -953,17 +991,23 @@ function syncPersistentAdaptiveTradeHistory() {
   const buckets = [
     signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
     failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
-    sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
+    sessionRangeHistory, gridScalperMAHistory, gridScalperV2History, fvgStratHistory, liveScalpHistory,
     candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
     breakerBlockHistory, oteGoldenPocketHistory, orbHistory, crtTbsHistory
   ].filter(Array.isArray);
+  const now = Date.now();
 
   for (const bucket of buckets) {
     for (const signal of bucket) {
-      if (!signal || signal._adaptiveTradeSynced || signal._adaptiveTradeSyncing) continue;
+      if (!signal) continue;
+      if (backtestMode) {
+        signal._adaptiveTradeLocalOnly = true;
+        continue;
+      }
+      if (!shouldSyncAdaptiveTradeSignal(signal, now)) continue;
       const result = String(signal.result || "").toUpperCase();
-      if (!["WIN", "LOSS", "EXPIRED", "CANCELLED"].includes(result)) continue;
       if (!signal.signalId) stampSignalLifecycle(signal);
+      ensureAdaptiveTradeResolutionTimestamp(signal);
       const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
       const payload = buildAdaptiveTradePayloadFromSignal(cloned);
       if (!payload) continue;
@@ -971,9 +1015,14 @@ function syncPersistentAdaptiveTradeHistory() {
       adaptiveIntelligenceClient.recordTrade(payload)
         .then(() => {
           signal._adaptiveTradeSynced = true;
+          signal._adaptiveTradeFailures = 0;
+          signal._adaptiveTradeNextRetryAt = 0;
         })
         .catch((err) => {
           console.warn("Adaptive trade sync failed:", err.message);
+          const failures = (Number(signal._adaptiveTradeFailures) || 0) + 1;
+          signal._adaptiveTradeFailures = failures;
+          signal._adaptiveTradeNextRetryAt = Date.now() + Math.min(300000, 5000 * (2 ** Math.min(failures - 1, 5)));
         })
         .finally(() => {
           signal._adaptiveTradeSyncing = false;
@@ -3228,6 +3277,8 @@ function gridV2_buildSignal(idx, sourceCandles = candles, runtime = null, legacy
     return {
       idx,
       symbol,
+      type: "grid_scalper_v2",
+      strategyType: "grid_scalper_v2",
       dir,
       entry: snapshot.price,
       averageEntry: snapshot.price,
@@ -3295,6 +3346,8 @@ function gridV2_buildSignal(idx, sourceCandles = candles, runtime = null, legacy
   const signal = {
     idx,
     symbol,
+    type: "grid_scalper_v2",
+    strategyType: "grid_scalper_v2",
     dir,
     entry: snapshot.price,
     averageEntry: snapshot.price,
@@ -3517,7 +3570,7 @@ function processGridScalperV2() {
     }
     lastGridScalperV2Idx = idx;
     gridScalperV2State = signal;
-    signal._sentViaTelegram = (telegramStrategyAutoSend && !_historicalProcessing);
+    signal._sentViaTelegram = false;
     gridScalperV2History.unshift(signal);
     if (gridScalperV2History.length > GRID_SCALPER_V2_MAX_HISTORY) gridScalperV2History.pop();
     playStrategyAlert(signal.dir);
@@ -4107,7 +4160,7 @@ function processPowerOf3() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
+  signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
   po3History.unshift(signal);
   if (po3History.length > PO3_MAX_HISTORY) po3History.pop();
 
@@ -4790,7 +4843,7 @@ function processPo3_4h() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   po3_4hHistory.unshift(signal);
   if (po3_4hHistory.length > PO3_4H_MAX_HISTORY) po3_4hHistory.pop();
 
@@ -5194,7 +5247,7 @@ function processBreakerBlock() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   breakerBlockHistory.unshift(signal);
   if (breakerBlockHistory.length > BREAKER_BLOCK_MAX_HISTORY) breakerBlockHistory.pop();
 
@@ -5521,7 +5574,7 @@ function processOteGoldenPocket() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   oteGoldenPocketHistory.unshift(signal);
   if (oteGoldenPocketHistory.length > OTE_MAX_HISTORY) oteGoldenPocketHistory.pop();
 
@@ -5904,7 +5957,7 @@ function processOrb() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   orbHistory.unshift(signal);
   if (orbHistory.length > ORB_MAX_HISTORY) orbHistory.pop();
 
@@ -6357,7 +6410,7 @@ function processCrtTbs() {
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   crtTbsHistory.unshift(signal);
   if (crtTbsHistory.length > CRT_TBS_MAX_HISTORY) crtTbsHistory.pop();
 
@@ -6695,7 +6748,7 @@ function processGridScalperMA() {
   }
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   gridScalperMAHistory.unshift(signal);
   if (gridScalperMAHistory.length > GRID_SCALPER_MA_MAX_HISTORY) gridScalperMAHistory.pop();
 
@@ -7383,7 +7436,7 @@ function processFVGStrat() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   fvgStratHistory.unshift(signal);
   if (fvgStratHistory.length > FVG_STRAT_MAX_HISTORY) fvgStratHistory.pop();
 
@@ -8439,7 +8492,7 @@ function processMtfTopDown() {
         detail: confGate.reason,
         conditions: Object.assign({}, getMtfPipelineState(signal.symbol || symbol).conditions || {}, { confluenceGate: "FAIL" })
       });
-      sendSignalLifecycleTelegram("cancelled", {
+      if (signal._sentViaTelegram === true) sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
         signalId: signal.signalId,
@@ -8470,7 +8523,7 @@ function processMtfTopDown() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   mtfTopDownHistory.unshift(signal);
   if (mtfSetupState && mtfSetupState.breakoutEpoch != null) mtfTerminalBreakoutEpoch = mtfSetupState.breakoutEpoch;
   mtfSetupState = null; /* consume setup once a trade signal is produced */
@@ -8542,12 +8595,6 @@ function processMtfTopDown() {
   if (telegramStrategyAutoSend) {
     setTimeout(function() { sendTelegramStrategyAlert(signal); }, CHART_RENDER_DELAY_MS);
   }
-  if (!_historicalProcessing) {
-    sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
-      signal.entryMode === "aggressive_intrabar"
-        ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
-        : "Entry activated after the lower-timeframe trigger candle closed."));
-  }
 
   renderStrategyAlerts();
 
@@ -8573,7 +8620,7 @@ function monitorMtfTopDownOutcomes(candle) {
       changed = true;
       addLog("\u23f1 MTF Top-Down EXPIRED (timeout " + MTF_TOP_DOWN_MAX_CANDLES + " candles) \u2014 " + (s.symbol || ""));
       logSignalEngineDebug("MTF_SIGNAL_CANCELLED", { signalId: s.signalId || null, reason: "timeout", symbol: s.symbol || "" });
-      sendSignalLifecycleTelegram("cancelled", {
+      if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
         signalId: s.signalId || null,
@@ -8591,13 +8638,13 @@ function monitorMtfTopDownOutcomes(candle) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
-        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.low <= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
-        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     } else {
@@ -8605,13 +8652,13 @@ function monitorMtfTopDownOutcomes(candle) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
-        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.high >= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
-        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     }
@@ -9166,7 +9213,7 @@ function processCandleInterpretation() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram = false;
   candleInterpHistory.unshift(signal);
   if (candleInterpHistory.length > CANDLE_INTERP_MAX_HISTORY) candleInterpHistory.pop();
 
@@ -10266,6 +10313,10 @@ function maybeSendBreakoutCancelled(reason) {
  */
 async function sendTelegramStrategyAlert(signal, force = false) {
   if (!telegramStrategyAutoSend && !force) return;
+  if (signal) {
+    if (signal._sentViaTelegram !== true) signal._sentViaTelegram = false;
+    if (signal._telegramDelivered !== true) signal._telegramDelivered = false;
+  }
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10292,6 +10343,13 @@ async function sendTelegramStrategyAlert(signal, force = false) {
       await sendTelegramMessage(caption);
     }
     signal._sentViaTelegram = true;
+    signal._telegramDelivered = true;
+    if ((signal.strategyType === "mtf_top_down" || signal.type === "mtf_top_down") && !_historicalProcessing && !signal._adaptiveLifecycleActiveSent) {
+      signal._adaptiveLifecycleActiveSent = await sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
+        signal.entryMode === "aggressive_intrabar"
+          ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
+          : "Entry activated after the lower-timeframe trigger candle closed."));
+    }
     addLog(`📤 Strategy Telegram alert sent (${signal.type})`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Strategy alert sent!";
@@ -10768,6 +10826,10 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
  */
 async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
+  if (sessionRangeTrade) {
+    if (sessionRangeTrade._sentViaTelegram !== true) sessionRangeTrade._sentViaTelegram = false;
+    if (sessionRangeTrade._telegramDelivered !== true) sessionRangeTrade._telegramDelivered = false;
+  }
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10789,6 +10851,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
   }, sessionRangeTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol });
+  if (sessionRangeTrade && qualification.decision) sessionRangeTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
@@ -10812,6 +10875,11 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
       await sendTelegramMessage(caption);
     }
     pseudoSignal._sentViaTelegram = true;
+    pseudoSignal._telegramDelivered = true;
+    if (sessionRangeTrade) {
+      sessionRangeTrade._sentViaTelegram = true;
+      sessionRangeTrade._telegramDelivered = true;
+    }
     addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
@@ -10907,8 +10975,12 @@ function buildNyOpenRangeTelegramCaption(phaseType) {
  * Gated on telegramStrategyAutoSend.
  * @param {"RANGE_SET"|"BREAKOUT"} phaseType
  */
-async function sendTelegramNyOpenRangeAlert(phaseType) {
+async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
   if (!telegramStrategyAutoSend) return;
+  if (nyOpenRangeTrade) {
+    if (nyOpenRangeTrade._sentViaTelegram !== true) nyOpenRangeTrade._sentViaTelegram = false;
+    if (nyOpenRangeTrade._telegramDelivered !== true) nyOpenRangeTrade._telegramDelivered = false;
+  }
 
   try {
     const { token, chatId } = getTelegramCredentials();
@@ -10921,7 +10993,7 @@ async function sendTelegramNyOpenRangeAlert(phaseType) {
   const pseudoSignal = Object.assign({
     type: "ny_open_range",
     strategyType: "ny_open_range",
-    symbol: getActiveSymbol(),
+    symbol: panelSymbol || getActiveSymbol(),
     dir: (nyOpenRangeTrade && nyOpenRangeTrade.dir) || (nyOpenRangeBreakout && nyOpenRangeBreakout.dir) || null,
     entry: nyOpenRangeTrade && nyOpenRangeTrade.entry,
     sl: nyOpenRangeTrade && nyOpenRangeTrade.sl,
@@ -10929,23 +11001,39 @@ async function sendTelegramNyOpenRangeAlert(phaseType) {
     time: new Date().toISOString(),
     _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
   }, nyOpenRangeTrade || {});
-  const qualification = await qualifySignalForTelegram(pseudoSignal, "NY Open Range", false, { strategy: "ny_open_range" });
+  const qualification = await qualifySignalForTelegram(pseudoSignal, "NY Open Range", false, { strategy: "ny_open_range", symbol: pseudoSignal.symbol });
+  if (nyOpenRangeTrade && qualification.decision) nyOpenRangeTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
-  if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending NY range alert…";
-  let caption = buildNyOpenRangeTelegramCaption(phaseType);
-  caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
+  const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
+  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending NY range alert${symLabel ? " " + symLabel : ""}…`;
   try {
-    const blob = await captureTelegramScreenshot();
+    const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
+    const blob = await captureTelegramScreenshot(panel || null);
+    let caption;
+    if (panel) {
+      const snap = _snapshotChartGlobals();
+      activatePanel(panel);
+      caption = buildNyOpenRangeTelegramCaption(phaseType);
+      _restoreChartGlobals(snap);
+    } else {
+      caption = buildNyOpenRangeTelegramCaption(phaseType);
+    }
+    caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
       await sendTelegramMessage(caption);
     }
     pseudoSignal._sentViaTelegram = true;
-    addLog(`📤 NY Open Range Telegram alert sent — ${phaseType}`);
+    pseudoSignal._telegramDelivered = true;
+    if (nyOpenRangeTrade) {
+      nyOpenRangeTrade._sentViaTelegram = true;
+      nyOpenRangeTrade._telegramDelivered = true;
+    }
+    addLog(`📤 NY Open Range Telegram alert sent — ${phaseType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
-      UI.telegramStatus.textContent = "✅ NY range alert sent!";
+      UI.telegramStatus.textContent = `✅ NY range alert sent!${symLabel ? " (" + symLabel + ")" : ""}`;
       UI.telegramStatus.className = "hint telegram-status telegram-ok";
     }
   } catch (err) {
@@ -15610,7 +15698,7 @@ function detectOrderblockStrategy(idx) {
       confluenceScore: computeConfluenceScore(dir, c.close, idx),
       _confFactors:    getActiveConfluenceFactors(dir, c.close, idx),
       _stratOutcomeSent: false,
-      _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing)
+      _sentViaTelegram: false
     };
     orderblockHistory.unshift(signal);
     if (orderblockHistory.length > ORDERBLOCK_MAX_HISTORY) orderblockHistory.pop();
@@ -16058,7 +16146,8 @@ function buildNyOpenRange() {
     );
     /* Telegram alert: range is now established — notify traders so they can prepare */
     if (telegramStrategyAutoSend && !_historicalProcessing) {
-      setTimeout(() => sendTelegramNyOpenRangeAlert("RANGE_SET"), CHART_RENDER_DELAY_MS);
+      const currentPanelSymbol = _multiPanelProcessing || null;
+      setTimeout(() => sendTelegramNyOpenRangeAlert("RANGE_SET", currentPanelSymbol), CHART_RENDER_DELAY_MS);
     }
   }
 }
@@ -16083,7 +16172,8 @@ function processNyOpenRangeCandle(idx) {
       showToast("NY Range Breakout ▲", `Bullish breakout — waiting for retest…`, "info", 8000);
       /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
       if (telegramStrategyAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT", currentPanelSymbol), CHART_RENDER_DELAY_MS);
       }
     } else if (bodyHigh < nyOpenRange.low) {
       nyOpenRangeBreakout = { dir: "BEAR", candleIdx: idx, level: nyOpenRange.low };
@@ -16092,7 +16182,8 @@ function processNyOpenRangeCandle(idx) {
       showToast("NY Range Breakout ▼", `Bearish breakout — waiting for retest…`, "info", 8000);
       /* Telegram alert: breakout confirmed — traders need to watch for the retest entry */
       if (telegramStrategyAutoSend && !_historicalProcessing) {
-        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT"), CHART_RENDER_DELAY_MS);
+        const currentPanelSymbol = _multiPanelProcessing || null;
+        setTimeout(() => sendTelegramNyOpenRangeAlert("BREAKOUT", currentPanelSymbol), CHART_RENDER_DELAY_MS);
       }
     }
     return;
@@ -16145,7 +16236,7 @@ function processNyOpenRangeCandle(idx) {
       if (risk > 0) {
         const tp = dir === "BULL" ? entry + risk * _profParams.rrLiquiditySweep : entry - risk * _profParams.rrLiquiditySweep;
         const rr = _profParams.rrLiquiditySweep;
-        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
+        nyOpenRangeTrade = { entry, sl, tp, dir, rr, entryIdx: idx, candleIdx: idx, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "ny_open_range", _stratOutcomeSent: false, _sentViaTelegram: false };
 
         /* Push to history for strategy alerts panel */
         nyOpenRangeHistory.unshift(nyOpenRangeTrade);
@@ -16356,7 +16447,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry - risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
+        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -16422,7 +16513,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry + risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: (telegramStrategyAutoSend && !_historicalProcessing) };
+        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -17271,6 +17362,10 @@ async function sendTelegramAlert() {
   }
 
   const pending = findPendingTradeSignal();
+  if (pending) {
+    if (pending._sentViaTelegram !== true) pending._sentViaTelegram = false;
+    if (pending._telegramDelivered !== true) pending._telegramDelivered = false;
+  }
   const qualification = pending
     ? await qualifySignalForTelegram(pending, "Breakout Retest", false, { strategy: "breakout_retest" })
     : { allowed: true, decision: null };
@@ -17286,7 +17381,10 @@ async function sendTelegramAlert() {
     } else {
       await sendTelegramMessage(caption);
     }
-    if (pending) pending._sentViaTelegram = true;
+    if (pending) {
+      pending._sentViaTelegram = true;
+      pending._telegramDelivered = true;
+    }
     addLog("📤 Telegram alert sent successfully");
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Sent!";
@@ -17322,6 +17420,10 @@ async function sendPanelTelegramAlert(symbol) {
   if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
 
   const pending = Array.isArray(p.signalHistory) ? [...p.signalHistory].reverse().find((s) => s && s.result === "PENDING") : null;
+  if (pending) {
+    if (pending._sentViaTelegram !== true) pending._sentViaTelegram = false;
+    if (pending._telegramDelivered !== true) pending._telegramDelivered = false;
+  }
   const qualification = pending
     ? await qualifySignalForTelegram(pending, "Breakout Retest", false, {
         symbol,
@@ -17342,7 +17444,10 @@ async function sendPanelTelegramAlert(symbol) {
     } else {
       await sendTelegramMessage(caption);
     }
-    if (pending) pending._sentViaTelegram = true;
+    if (pending) {
+      pending._sentViaTelegram = true;
+      pending._telegramDelivered = true;
+    }
     addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
@@ -18288,6 +18393,9 @@ function persistSignalHistory() {
   try {
     /* Strip chartImage data URLs to avoid exceeding localStorage quota */
     const stripped = signalHistory.slice(-50).map(s => {
+      if (s && (s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED" || s.result === "CANCELLED")) {
+        ensureAdaptiveTradeResolutionTimestamp(s);
+      }
       if (!s || !s.chartImage) return s;
       const copy = Object.assign({}, s);
       delete copy.chartImage;
@@ -18338,6 +18446,7 @@ function updateStatsUI() {
   }
 
   /* Always update aggregated signal count and banners (across all panels) */
+  bootstrapAdaptiveIntelligence();
   processAdaptiveResolvedSignals();
   syncPersistentAdaptiveTradeHistory();
   renderAdaptiveSettingsUI();
@@ -22393,7 +22502,7 @@ function processLiquiditySweep() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
+  signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
   liquiditySweepHistory.unshift(signal);
   if (liquiditySweepHistory.length > LIQUIDITY_SWEEP_MAX_HISTORY) liquiditySweepHistory.pop();
 
@@ -22623,7 +22732,7 @@ function processStopLossHunt() {
   const reEntry = !!prevStopped;
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
+  signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
   stopLossHuntHistory.unshift(signal);
   if (stopLossHuntHistory.length > STOP_LOSS_HUNT_MAX_HISTORY) stopLossHuntHistory.pop();
 
@@ -22843,7 +22952,7 @@ function processFailedPinBar() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;  /* track whether Telegram outcome was sent */
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
+  signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
   failedPinBarHistory.unshift(signal);
   if (failedPinBarHistory.length > FAILED_PIN_BAR_MAX_HISTORY) failedPinBarHistory.pop();
 
@@ -23125,7 +23234,7 @@ function processFibScalp() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing); /* true when entry alert was Telegram-sent */
+  signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
   fibScalpHistory.unshift(signal);
   if (fibScalpHistory.length > FIB_SCALP_MAX_HISTORY) fibScalpHistory.pop();
 
@@ -23390,7 +23499,7 @@ function processTiktokStrategy() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
 
   signal._stratOutcomeSent = false;
-  signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
+  signal._sentViaTelegram  = false;
   tiktokHistory.unshift(signal);
   if (tiktokHistory.length > TIKTOK_MAX_HISTORY) tiktokHistory.pop();
 
