@@ -19339,11 +19339,11 @@ function resetSession() {
   strategyTradeTimestamps.clear();
   symbolCooldownUntil.clear();
   for (const slot of autoTradeSlots.values()) {
+    if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
     const hasTrackedContracts = (Array.isArray(slot.activeTrades) && slot.activeTrades.length > 0)
       || !!slot.contractId
       || !!slot.pendingContractId;
     if (!hasTrackedContracts) {
-      if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
       if (Array.isArray(slot.activeTrades)) {
         for (const t of slot.activeTrades) {
           if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
