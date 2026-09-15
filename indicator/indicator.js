@@ -791,6 +791,10 @@ let adaptiveIntelligenceClient = null;
 let adaptiveIntelligenceBootstrap = null;
 let adaptiveIntelligenceBootstrapPromise = null;
 let adaptiveIntelligenceBootstrapScopeKey = "";
+const adaptiveIntelligenceBootstrapCache = new Map();
+const adaptiveIntelligenceBootstrapPromises = new Map();
+const adaptiveIntelligenceBootstrapLatestRequestIds = new Map();
+let adaptiveIntelligenceBootstrapRequestSeq = 0;
 
 function initAdaptiveIntelligenceClient() {
   if (typeof AdaptiveIntelligenceClient !== "function") return;
@@ -825,10 +829,53 @@ function getAdaptiveMtfStatus(signal) {
   return "UNKNOWN";
 }
 
+function getAdaptiveBootstrapLatestSignal(symbol) {
+  const targetSymbol = symbol || getActiveSymbol();
+  const candidates = [];
+  const addCandidate = (signal) => {
+    if (!signal) return;
+    const strategy = signal.strategyType || signal.type;
+    if (!strategy) return;
+    const signalSymbol = signal.symbol || targetSymbol;
+    if (targetSymbol && signalSymbol && signalSymbol !== targetSymbol) return;
+    const sortKey = Number.isFinite(signal.epoch)
+      ? signal.epoch
+      : (signal.time ? (Date.parse(signal.time) || 0) : 0);
+    candidates.push({ signal, sortKey });
+  };
+
+  const panel = targetSymbol && multiPanels && typeof multiPanels.get === "function"
+    ? multiPanels.get(targetSymbol)
+    : null;
+  const strategySignals = typeof getAggregatedStrategyHistory === "function"
+    ? getAggregatedStrategyHistory()
+    : [];
+  const latestStrategySignal = strategySignals.find((signal) => {
+    if (!signal) return false;
+    const signalSymbol = signal.symbol || targetSymbol;
+    return !targetSymbol || !signalSymbol || signalSymbol === targetSymbol;
+  });
+  addCandidate(latestStrategySignal);
+  addCandidate(panel ? (panel.gridScalperV2History || [])[0] : gridScalperV2History[0]);
+  addCandidate(panel ? panel.trade : trade);
+  addCandidate(panel ? panel.sessionRangeTrade : sessionRangeTrade);
+  addCandidate(panel ? panel.nyOpenRangeTrade : nyOpenRangeTrade);
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.sortKey - a.sortKey);
+  return candidates[0].signal;
+}
+
+function getAdaptiveBootstrapStrategy(overrides = {}) {
+  if (overrides.strategy) return overrides.strategy;
+  const signal = getAdaptiveBootstrapLatestSignal(overrides.symbol || getActiveSymbol());
+  return (signal && (signal.strategyType || signal.type)) || "breakout_retest";
+}
+
 function getAdaptiveBootstrapScope(overrides = {}) {
   const symbol = overrides.symbol || getActiveSymbol();
   const timeframeSec = overrides.timeframeSec || getCurrentGranularitySec();
-  const strategy = overrides.strategy || (trade && (trade.strategyType || trade.type)) || "breakout_retest";
+  const strategy = getAdaptiveBootstrapStrategy({ ...overrides, symbol });
   return {
     symbol,
     timeframeSec,
@@ -838,10 +885,10 @@ function getAdaptiveBootstrapScope(overrides = {}) {
 }
 
 function mergeRemoteConfluenceStats(data) {
-  if (!data || !Array.isArray(data.factor_stats)) return;
+  if (!data) return;
+  const factorStats = Array.isArray(data.factor_stats) ? data.factor_stats : [];
   for (const key of Object.keys(confluenceFactorStats)) delete confluenceFactorStats[key];
-  let touched = false;
-  for (const row of data.factor_stats) {
+  for (const row of factorStats) {
     if (!row || row.factor_key == null || confluenceFactorStats[row.factor_key]) continue;
     confluenceFactorStats[row.factor_key] = {
       wins: Number(row.wins || 0),
@@ -850,36 +897,57 @@ function mergeRemoteConfluenceStats(data) {
       confidenceScore: Number(row.confidence_score || 0),
       sampleSize: Number(row.sample_size || 0)
     };
-    touched = true;
   }
-  if (touched) renderAdaptiveConfluenceTable();
+  renderAdaptiveConfluenceTable();
 }
 
-async function bootstrapAdaptiveIntelligence(force = false) {
+async function bootstrapAdaptiveIntelligence(force = false, overrides = {}) {
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return null;
-  const scope = getAdaptiveBootstrapScope();
-  if (adaptiveIntelligenceBootstrapPromise && !force) return adaptiveIntelligenceBootstrapPromise;
-  if (!force && adaptiveIntelligenceBootstrap && adaptiveIntelligenceBootstrapScopeKey === scope.key) {
-    return Promise.resolve(adaptiveIntelligenceBootstrap);
+  const scope = getAdaptiveBootstrapScope(overrides);
+  if (!force) {
+    const pending = adaptiveIntelligenceBootstrapPromises.get(scope.key);
+    if (pending) return pending;
+    const cached = adaptiveIntelligenceBootstrapCache.get(scope.key);
+    if (cached) {
+      adaptiveIntelligenceBootstrap = cached;
+      adaptiveIntelligenceBootstrapScopeKey = scope.key;
+      mergeRemoteConfluenceStats(cached);
+      return Promise.resolve(cached);
+    }
   }
-  adaptiveIntelligenceBootstrapPromise = adaptiveIntelligenceClient.bootstrap({
+  const requestId = ++adaptiveIntelligenceBootstrapRequestSeq;
+  adaptiveIntelligenceBootstrapLatestRequestIds.set(scope.key, requestId);
+  const request = adaptiveIntelligenceClient.bootstrap({
     symbol: scope.symbol,
     timeframe_sec: scope.timeframeSec,
     strategy_key: scope.strategy
   }).then((data) => {
-    adaptiveIntelligenceBootstrap = data;
-    adaptiveIntelligenceBootstrapScopeKey = scope.key;
-    mergeRemoteConfluenceStats(data);
-    syncPersistentAdaptiveTradeHistory();
+    if (adaptiveIntelligenceBootstrapLatestRequestIds.get(scope.key) !== requestId) {
+      return data;
+    }
+    adaptiveIntelligenceBootstrapCache.set(scope.key, data);
+    if (getAdaptiveBootstrapScope(overrides).key === scope.key) {
+      adaptiveIntelligenceBootstrap = data;
+      adaptiveIntelligenceBootstrapScopeKey = scope.key;
+      mergeRemoteConfluenceStats(data);
+      syncPersistentAdaptiveTradeHistory();
+    }
     return data;
   }).catch((err) => {
     console.warn("Adaptive intelligence bootstrap failed:", err.message);
     return null;
   }).finally(() => {
-    adaptiveIntelligenceBootstrapPromise = null;
+    if (adaptiveIntelligenceBootstrapPromises.get(scope.key) === request) {
+      adaptiveIntelligenceBootstrapPromises.delete(scope.key);
+    }
+    if (adaptiveIntelligenceBootstrapPromise === request) {
+      adaptiveIntelligenceBootstrapPromise = null;
+    }
   });
-  return adaptiveIntelligenceBootstrapPromise;
+  adaptiveIntelligenceBootstrapPromises.set(scope.key, request);
+  adaptiveIntelligenceBootstrapPromise = request;
+  return request;
 }
 
 function buildAdaptiveQualificationPayload(signal, strategyLabel, overrides = {}) {
@@ -10826,9 +10894,11 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
  */
 async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
-  if (sessionRangeTrade) {
-    if (sessionRangeTrade._sentViaTelegram !== true) sessionRangeTrade._sentViaTelegram = false;
-    if (sessionRangeTrade._telegramDelivered !== true) sessionRangeTrade._telegramDelivered = false;
+  const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
+  const scopedTrade = panel ? (panel.sessionRangeTrade || null) : sessionRangeTrade;
+  if (scopedTrade) {
+    if (scopedTrade._sentViaTelegram !== true) scopedTrade._sentViaTelegram = false;
+    if (scopedTrade._telegramDelivered !== true) scopedTrade._telegramDelivered = false;
   }
 
   try {
@@ -10843,26 +10913,25 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     type: "session_range",
     strategyType: "session_range",
     symbol: panelSymbol || getActiveSymbol(),
-    dir: (sessionRangeTrade && sessionRangeTrade.dir) || null,
-    entry: sessionRangeTrade && sessionRangeTrade.entry,
-    sl: sessionRangeTrade && sessionRangeTrade.sl,
-    tp: sessionRangeTrade && sessionRangeTrade.tp,
+    dir: (scopedTrade && scopedTrade.dir) || null,
+    entry: scopedTrade && scopedTrade.entry,
+    sl: scopedTrade && scopedTrade.sl,
+    tp: scopedTrade && scopedTrade.tp,
     time: new Date().toISOString(),
     _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
-  }, sessionRangeTrade || {});
+  }, scopedTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol });
-  if (sessionRangeTrade && qualification.decision) sessionRangeTrade._adaptiveDecision = qualification.decision;
+  if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
-    const p = panelSymbol ? multiPanels.get(panelSymbol) : null;
-    const blob = await captureTelegramScreenshot(p || null);
+    const blob = await captureTelegramScreenshot(panel || null);
     let caption;
-    if (p) {
+    if (panel) {
       const snap = _snapshotChartGlobals();
-      activatePanel(p);
+      activatePanel(panel);
       caption = buildSessionRangeTelegramCaption(signalType);
       _restoreChartGlobals(snap);
     } else {
@@ -10876,9 +10945,9 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     }
     pseudoSignal._sentViaTelegram = true;
     pseudoSignal._telegramDelivered = true;
-    if (sessionRangeTrade) {
-      sessionRangeTrade._sentViaTelegram = true;
-      sessionRangeTrade._telegramDelivered = true;
+    if (scopedTrade) {
+      scopedTrade._sentViaTelegram = true;
+      scopedTrade._telegramDelivered = true;
     }
     addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
@@ -10977,9 +11046,11 @@ function buildNyOpenRangeTelegramCaption(phaseType) {
  */
 async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
   if (!telegramStrategyAutoSend) return;
-  if (nyOpenRangeTrade) {
-    if (nyOpenRangeTrade._sentViaTelegram !== true) nyOpenRangeTrade._sentViaTelegram = false;
-    if (nyOpenRangeTrade._telegramDelivered !== true) nyOpenRangeTrade._telegramDelivered = false;
+  const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
+  const scopedTrade = panel ? (panel.nyOpenRangeTrade || null) : nyOpenRangeTrade;
+  if (scopedTrade) {
+    if (scopedTrade._sentViaTelegram !== true) scopedTrade._sentViaTelegram = false;
+    if (scopedTrade._telegramDelivered !== true) scopedTrade._telegramDelivered = false;
   }
 
   try {
@@ -10994,15 +11065,15 @@ async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
     type: "ny_open_range",
     strategyType: "ny_open_range",
     symbol: panelSymbol || getActiveSymbol(),
-    dir: (nyOpenRangeTrade && nyOpenRangeTrade.dir) || (nyOpenRangeBreakout && nyOpenRangeBreakout.dir) || null,
-    entry: nyOpenRangeTrade && nyOpenRangeTrade.entry,
-    sl: nyOpenRangeTrade && nyOpenRangeTrade.sl,
-    tp: nyOpenRangeTrade && nyOpenRangeTrade.tp,
+    dir: (scopedTrade && scopedTrade.dir) || (nyOpenRangeBreakout && nyOpenRangeBreakout.dir) || null,
+    entry: scopedTrade && scopedTrade.entry,
+    sl: scopedTrade && scopedTrade.sl,
+    tp: scopedTrade && scopedTrade.tp,
     time: new Date().toISOString(),
     _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
-  }, nyOpenRangeTrade || {});
+  }, scopedTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "NY Open Range", false, { strategy: "ny_open_range", symbol: pseudoSignal.symbol });
-  if (nyOpenRangeTrade && qualification.decision) nyOpenRangeTrade._adaptiveDecision = qualification.decision;
+  if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
@@ -11027,9 +11098,9 @@ async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
     }
     pseudoSignal._sentViaTelegram = true;
     pseudoSignal._telegramDelivered = true;
-    if (nyOpenRangeTrade) {
-      nyOpenRangeTrade._sentViaTelegram = true;
-      nyOpenRangeTrade._telegramDelivered = true;
+    if (scopedTrade) {
+      scopedTrade._sentViaTelegram = true;
+      scopedTrade._telegramDelivered = true;
     }
     addLog(`📤 NY Open Range Telegram alert sent — ${phaseType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {

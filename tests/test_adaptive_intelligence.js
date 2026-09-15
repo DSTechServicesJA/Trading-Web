@@ -135,6 +135,11 @@ test('backend service defines persistent trade, factor, rule, and audit handling
   assert.match(serviceSource, /\(market_category = \?\) DESC,\s*\(symbol_scope = \?\) DESC,\s*\(strategy_key = \?\) DESC/);
 });
 
+test('backend normalizes naive timestamps as UTC and skips untrusted trades during rebuilds', () => {
+  assert.match(serviceSource, /\$utc = new DateTimeZone\('UTC'\);[\s\S]*new DateTimeImmutable\(\$raw,\s*\$utc\)/);
+  assert.match(serviceSource, /json_decode\(\(string\) \$row\['notes_json'\], true\)[\s\S]*UNTRUSTED_CLIENT_REPORTED[\s\S]*continue;/);
+});
+
 test('admin dashboard exposes adaptive management workflows', () => {
   assert.match(adminSource, /loadAdaptiveDashboard\(/);
   assert.match(adminSource, /saveAdaptiveRule\(/);
