@@ -8414,7 +8414,7 @@ function monitorMtfTopDownOutcomes(candle) {
       }
     }
     const symbol = getActiveSymbol();
-    const hasPending = mtfTopDownHistory.some(s => s && s.result === "PENDING");
+    const hasPending = mtfTopDownHistory.some(s => s && s.result === "PENDING" && (s.symbol || symbol) === symbol);
     logSignalEngineDebug("MTF_SYMBOL_LOCK_STATUS", {
       symbol,
       locked: hasPending,
