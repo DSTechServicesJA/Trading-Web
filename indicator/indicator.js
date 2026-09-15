@@ -10769,10 +10769,6 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
 async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
 
-  /* Sync credentials from DOM */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  /* Check credentials are available */
   try {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
@@ -10781,14 +10777,25 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     return;
   }
 
+  const pseudoSignal = Object.assign({
+    type: "session_range",
+    strategyType: "session_range",
+    symbol: panelSymbol || getActiveSymbol(),
+    dir: (sessionRangeTrade && sessionRangeTrade.dir) || null,
+    entry: sessionRangeTrade && sessionRangeTrade.entry,
+    sl: sessionRangeTrade && sessionRangeTrade.sl,
+    tp: sessionRangeTrade && sessionRangeTrade.tp,
+    time: new Date().toISOString(),
+    _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
+  }, sessionRangeTrade || {});
+  const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol });
+  if (!qualification.allowed) return;
+
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
-    /* In multi-panel mode, capture the correct panel's chart */
     const p = panelSymbol ? multiPanels.get(panelSymbol) : null;
     const blob = await captureTelegramScreenshot(p || null);
-    /* Build caption — if in multi-panel mode, temporarily activate panel globals
-       so the caption reads the correct session range data for this panel */
     let caption;
     if (p) {
       const snap = _snapshotChartGlobals();
@@ -10798,11 +10805,13 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     } else {
       caption = buildSessionRangeTelegramCaption(signalType);
     }
+    caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
       await sendTelegramMessage(caption);
     }
+    pseudoSignal._sentViaTelegram = true;
     addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
@@ -10909,8 +10918,23 @@ async function sendTelegramNyOpenRangeAlert(phaseType) {
     return;
   }
 
+  const pseudoSignal = Object.assign({
+    type: "ny_open_range",
+    strategyType: "ny_open_range",
+    symbol: getActiveSymbol(),
+    dir: (nyOpenRangeTrade && nyOpenRangeTrade.dir) || (nyOpenRangeBreakout && nyOpenRangeBreakout.dir) || null,
+    entry: nyOpenRangeTrade && nyOpenRangeTrade.entry,
+    sl: nyOpenRangeTrade && nyOpenRangeTrade.sl,
+    tp: nyOpenRangeTrade && nyOpenRangeTrade.tp,
+    time: new Date().toISOString(),
+    _confFactors: typeof getActiveConfluenceFactors === "function" ? getActiveConfluenceFactors() : []
+  }, nyOpenRangeTrade || {});
+  const qualification = await qualifySignalForTelegram(pseudoSignal, "NY Open Range", false, { strategy: "ny_open_range" });
+  if (!qualification.allowed) return;
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending NY range alert…";
-  const caption = buildNyOpenRangeTelegramCaption(phaseType);
+  let caption = buildNyOpenRangeTelegramCaption(phaseType);
+  caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
   try {
     const blob = await captureTelegramScreenshot();
     if (blob) {
@@ -10918,6 +10942,7 @@ async function sendTelegramNyOpenRangeAlert(phaseType) {
     } else {
       await sendTelegramMessage(caption);
     }
+    pseudoSignal._sentViaTelegram = true;
     addLog(`📤 NY Open Range Telegram alert sent — ${phaseType}`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ NY range alert sent!";

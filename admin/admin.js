@@ -1764,8 +1764,7 @@ async function importAdaptiveData() {
 async function resetAdaptiveScope() {
   const filters = getAdaptiveFilters();
   if (!filters.user_id) return alert('User ID is required to reset adaptive learning.');
-  const deleteHistory = confirm('Delete the scoped trade history as well?
-Press OK to delete history, Cancel to rebuild weights from preserved trades.');
+  const deleteHistory = confirm(`Delete the scoped trade history as well?\nPress OK to delete history, Cancel to rebuild weights from preserved trades.`);
   try {
     const resp = await apiRequest('/admin/adaptive?action=reset', {
       method: 'POST',
