@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS telegram_link_tokens (
 
     UNIQUE KEY uq_tlt_token (token),
     INDEX idx_tlt_user    (user_id),
-    INDEX idx_tlt_expires (expires_at),
+    INDEX idx_tlt_expires (expires_at)
 
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
