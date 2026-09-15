@@ -10314,8 +10314,8 @@ function maybeSendBreakoutCancelled(reason) {
 async function sendTelegramStrategyAlert(signal, force = false) {
   if (!telegramStrategyAutoSend && !force) return;
   if (signal) {
-    signal._sentViaTelegram = false;
-    signal._telegramDelivered = false;
+    if (signal._sentViaTelegram !== true) signal._sentViaTelegram = false;
+    if (signal._telegramDelivered !== true) signal._telegramDelivered = false;
   }
 
   try {
@@ -10827,8 +10827,8 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
 async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
   if (sessionRangeTrade) {
-    sessionRangeTrade._sentViaTelegram = false;
-    sessionRangeTrade._telegramDelivered = false;
+    if (sessionRangeTrade._sentViaTelegram !== true) sessionRangeTrade._sentViaTelegram = false;
+    if (sessionRangeTrade._telegramDelivered !== true) sessionRangeTrade._telegramDelivered = false;
   }
 
   try {
@@ -10978,8 +10978,8 @@ function buildNyOpenRangeTelegramCaption(phaseType) {
 async function sendTelegramNyOpenRangeAlert(phaseType, panelSymbol = null) {
   if (!telegramStrategyAutoSend) return;
   if (nyOpenRangeTrade) {
-    nyOpenRangeTrade._sentViaTelegram = false;
-    nyOpenRangeTrade._telegramDelivered = false;
+    if (nyOpenRangeTrade._sentViaTelegram !== true) nyOpenRangeTrade._sentViaTelegram = false;
+    if (nyOpenRangeTrade._telegramDelivered !== true) nyOpenRangeTrade._telegramDelivered = false;
   }
 
   try {
@@ -17363,8 +17363,8 @@ async function sendTelegramAlert() {
 
   const pending = findPendingTradeSignal();
   if (pending) {
-    pending._sentViaTelegram = false;
-    pending._telegramDelivered = false;
+    if (pending._sentViaTelegram !== true) pending._sentViaTelegram = false;
+    if (pending._telegramDelivered !== true) pending._telegramDelivered = false;
   }
   const qualification = pending
     ? await qualifySignalForTelegram(pending, "Breakout Retest", false, { strategy: "breakout_retest" })
@@ -17421,8 +17421,8 @@ async function sendPanelTelegramAlert(symbol) {
 
   const pending = Array.isArray(p.signalHistory) ? [...p.signalHistory].reverse().find((s) => s && s.result === "PENDING") : null;
   if (pending) {
-    pending._sentViaTelegram = false;
-    pending._telegramDelivered = false;
+    if (pending._sentViaTelegram !== true) pending._sentViaTelegram = false;
+    if (pending._telegramDelivered !== true) pending._telegramDelivered = false;
   }
   const qualification = pending
     ? await qualifySignalForTelegram(pending, "Breakout Retest", false, {
