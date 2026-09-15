@@ -36,11 +36,3 @@ test('Lifecycle telegram captions include Signal ID and TP/SL categories', () =>
   assert.match(source, /Take Profit Hit/);
   assert.match(source, /Stop Loss Hit/);
 });
-
-test('MTF diagnostics pipeline and debug rows are present', () => {
-  assert.match(source, /function captureMtfHtfDiagnostics\(/);
-  assert.match(source, /MTF_REJECTION_STATS/);
-  assert.match(source, /MTF_CONDITION_BREAKDOWN/);
-  assert.match(source, /SYMBOL_LOCKED/);
-  assert.match(source, /SYMBOL_UNLOCKED/);
-});

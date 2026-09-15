@@ -15,9 +15,24 @@ function extractBetween(startToken, endToken) {
 
 function extractFunction(name) {
   const startToken = `function ${name}(`;
-  const start = source.indexOf(startToken);
+  const asyncStartToken = `async function ${name}(`;
+  const start = source.indexOf(asyncStartToken) !== -1
+    ? source.indexOf(asyncStartToken)
+    : source.indexOf(startToken);
   if (start === -1) throw new Error(`Missing function ${name}`);
-  let i = source.indexOf('{', start);
+  let i = source.indexOf('(', start);
+  let parenDepth = 0;
+  for (; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') parenDepth++;
+    if (ch === ')') {
+      parenDepth--;
+      if (parenDepth === 0) {
+        i = source.indexOf('{', i);
+        break;
+      }
+    }
+  }
   let depth = 0;
   for (; i < source.length; i++) {
     const ch = source[i];
@@ -202,4 +217,38 @@ test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
   assert.equal(signal.type, 'mtf_top_down');
   assert.equal(signal.signalId, 'sig-1');
   assert.equal(signal.dir, 'BULL');
+});
+
+test('MTF rejection breakdown tracks percentages by reason', () => {
+  const harness = [
+    extractFunction('getMtfPipelineState'),
+    extractFunction('markMtfPipelineStage'),
+    extractFunction('recordMtfRejection'),
+    extractFunction('getMtfRejectionBreakdown'),
+    'module.exports = { getMtfPipelineState, recordMtfRejection, getMtfRejectionBreakdown };'
+  ].join('\n');
+  const context = {
+    module: { exports: {} },
+    mtfPipelineStats: new Map(),
+    getActiveSymbol: () => 'R_100',
+    Date,
+    Map,
+    Object
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { getMtfPipelineState, recordMtfRejection, getMtfRejectionBreakdown } = context.module.exports;
+
+  const state = getMtfPipelineState('R_100');
+  recordMtfRejection('trend_gate', { symbol: 'R_100' });
+  recordMtfRejection('trend_gate', { symbol: 'R_100' });
+  recordMtfRejection('volume_gate', { symbol: 'R_100' });
+
+  const breakdown = getMtfRejectionBreakdown(state);
+  assert.equal(breakdown[0].reason, 'trend_gate');
+  assert.equal(breakdown[0].count, 2);
+  assert.equal(breakdown[0].percent, 67);
+  assert.equal(breakdown[1].reason, 'volume_gate');
+  assert.equal(breakdown[1].count, 1);
+  assert.equal(breakdown[1].percent, 33);
 });

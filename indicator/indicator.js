@@ -7440,6 +7440,15 @@ function getMtfRejectionBreakdown(state) {
   }));
 }
 
+function escapeMtfDebugHtml(value) {
+  return String(value == null ? "--" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderMtfDebugPanel() {
   if (!UI.mtfDebugBody || !UI.mtfDebugPanel) return;
   UI.mtfDebugPanel.style.display = mtfDebugMode ? "" : "none";
@@ -7450,17 +7459,17 @@ function renderMtfDebugPanel() {
     return;
   }
   UI.mtfDebugBody.innerHTML = rows.map((row) => {
-    const htfStatus = row.htfSummary || "--";
-    const reason = row.rejectionReason || "--";
+    const htfStatus = escapeMtfDebugHtml(row.htfSummary || "--");
+    const reason = escapeMtfDebugHtml(row.rejectionReason || "--");
     return `<tr>
-      <td>${row.symbol || "--"}</td>
-      <td>${row.strategy || "MTF Top-Down"}</td>
-      <td>${row.mtfStatus || "--"}</td>
-      <td>${row.ltfSignal || "--"}</td>
+      <td>${escapeMtfDebugHtml(row.symbol || "--")}</td>
+      <td>${escapeMtfDebugHtml(row.strategy || "MTF Top-Down")}</td>
+      <td>${escapeMtfDebugHtml(row.mtfStatus || "--")}</td>
+      <td>${escapeMtfDebugHtml(row.ltfSignal || "--")}</td>
       <td>${htfStatus}</td>
       <td>${reason}</td>
-      <td>${row.alignment || "--"}</td>
-      <td>${row.time || "--"}</td>
+      <td>${escapeMtfDebugHtml(row.alignment || "--")}</td>
+      <td>${escapeMtfDebugHtml(row.time || "--")}</td>
     </tr>`;
   }).join("");
 }
@@ -7794,10 +7803,17 @@ function detectMtfConfirmation(setupOverride = null) {
   const tolerance = atrValue > 0 ? atrValue * 0.5 : level * 0.002;
   const latest = candles[len - 1];
   const gran = getCurrentGranularitySec();
-  const htfSec = Math.max(gran, gran * MTF_SETUP_TF_MULT);
+  const setupRatio = Math.max(1, MTF_SETUP_TF_MULT);
+  const htfSec = Math.max(gran, gran * setupRatio);
   const ltfEpoch = latest && Number.isFinite(latest.epoch) ? latest.epoch : null;
-  const htfEpoch = ltfEpoch != null ? Math.floor(ltfEpoch / htfSec) * htfSec : null;
-  const aligned = ltfEpoch != null && htfEpoch != null ? ltfEpoch >= htfEpoch && ltfEpoch < (htfEpoch + htfSec) : false;
+  const setupBuckets = setupRatio === 1
+    ? (candles || []).map((c) => ({ epoch: c.epoch, _count: 1 }))
+    : synthesizeTfCandles(setupRatio, { includeMeta: true });
+  const currentBucket = ltfEpoch != null
+    ? setupBuckets.find((b) => b && ltfEpoch >= b.epoch && ltfEpoch < (b.epoch + htfSec))
+    : null;
+  const htfEpoch = currentBucket ? currentBucket.epoch : null;
+  const aligned = !!(currentBucket && (setupRatio === 1 || (currentBucket._count || 0) > 0));
   diag.conditions = {
     setupState: "PASS",
     baseCandles: "PASS",
@@ -14078,9 +14094,7 @@ function executeAutoTrade(signal, _capturedWs) {
     logSignalEngineDebug("SYMBOL_LOCKED", { symbol, reason: "cooldown_after_loss", cooldownUntil, leftSec });
     return;
   } else if (symbolCooldownUntil.has(symbol)) {
-    symbolCooldownUntil.delete(symbol);
-    addLog(`🔓 ${symbol} cooldown expired — symbol eligible again`);
-    logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol, reason: "cooldown_expired" });
+    logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol, reason: "cooldown_expired", cooldownUntil });
   }
 
   const freq = canPlaceByFrequency(symbol, signal.strategyName || null);
