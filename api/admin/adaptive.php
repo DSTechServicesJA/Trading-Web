@@ -34,7 +34,7 @@ try {
             jsonResponse(['error' => 'user_id is required'], 400);
         }
         if ($action === 'rules') {
-            $category = adaptiveNormalizeCategory($body['market_category'] ?? '*', $body['symbol'] ?? null, $body['timeframe_sec'] ?? null);
+            $category = adaptiveNormalizeRuleCategory($body['market_category'] ?? '*', $body['symbol'] ?? null, $body['timeframe_sec'] ?? null);
             $strategy = adaptiveNormalizeScopeValue($body['strategy_key'] ?? '*', '*');
             $symbolScope = adaptiveNormalizeScopeValue($body['symbol_scope'] ?? $body['symbol'] ?? '*', '*');
             $rule = adaptiveResolveRule($pdo, $targetUserId, $category, $strategy, $symbolScope);

@@ -74,13 +74,34 @@
     return ['WIN', 'LOSS', 'CANCELLED'].includes(value) ? value : 'CANCELLED';
   }
 
+  function resolveTimestamp(value) {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  function getResolvedTimestamp(signal) {
+    return resolveTimestamp(signal && (
+      signal.exitTime
+      || signal.resolvedAtIso
+      || signal.resolvedAt
+      || signal.exitTimestamp
+      || signal.closedAt
+      || signal.resolvedAtMs
+    )) || new Date().toISOString();
+  }
+
   function calcRMultiple(signal) {
+    const result = normalizeResult(signal && signal.result);
+    if (result !== 'WIN' && result !== 'LOSS') return null;
     if (Number.isFinite(signal && signal.rMultiple)) return Number(signal.rMultiple);
-    if (Number.isFinite(signal && signal.rr) && normalizeResult(signal && signal.result) === 'WIN') return Number(signal.rr);
+    if (Number.isFinite(signal && signal.rr) && result === 'WIN') return Number(signal.rr);
     const entry = Number(signal && signal.entry);
     const sl = Number(signal && signal.sl);
-    const exit = Number(signal && (signal.exitPrice != null ? signal.exitPrice : (signal.result === 'WIN' ? signal.tp : signal.sl)));
-    if (!Number.isFinite(entry) || !Number.isFinite(sl) || !Number.isFinite(exit) || entry === sl) return normalizeResult(signal && signal.result) === 'WIN' ? 1 : -1;
+    const exit = Number(signal && (signal.exitPrice != null ? signal.exitPrice : (result === 'WIN' ? signal.tp : signal.sl)));
+    if (!Number.isFinite(entry) || !Number.isFinite(sl) || !Number.isFinite(exit) || entry === sl) return result === 'WIN' ? 1 : -1;
     const risk = Math.abs(entry - sl);
     if (risk <= 0) return 0;
     const pnl = normalizeDirection(signal && signal.dir) === 'BEAR' ? (entry - exit) : (exit - entry);
@@ -88,8 +109,10 @@
   }
 
   function calcProfitPoints(signal) {
+    const result = normalizeResult(signal && signal.result);
+    if (result !== 'WIN' && result !== 'LOSS') return null;
     const entry = Number(signal && signal.entry);
-    const exit = Number(signal && (signal.exitPrice != null ? signal.exitPrice : (signal.result === 'WIN' ? signal.tp : signal.sl)));
+    const exit = Number(signal && (signal.exitPrice != null ? signal.exitPrice : (result === 'WIN' ? signal.tp : signal.sl)));
     if (!Number.isFinite(entry) || !Number.isFinite(exit)) return null;
     return Math.abs(exit - entry);
   }
@@ -112,7 +135,7 @@
       direction: normalizeDirection(signal && signal.dir),
       signal_timestamp: signal && (signal.time || signal.signalTimestamp || new Date().toISOString()),
       entry_timestamp: signal && (signal.entryTime || signal.time || new Date().toISOString()),
-      exit_timestamp: signal && (signal.exitTime || signal.resolvedAtIso || new Date().toISOString()),
+      exit_timestamp: getResolvedTimestamp(signal),
       entry_price: Number.isFinite(signal && signal.entry) ? signal.entry : null,
       stop_loss: Number.isFinite(signal && signal.sl) ? signal.sl : null,
       take_profit: Number.isFinite(signal && signal.tp) ? signal.tp : null,
@@ -120,8 +143,8 @@
       result,
       r_multiple: calcRMultiple(signal),
       profit_points: calcProfitPoints(signal),
-      telegram_sent: !!(signal && signal._sentViaTelegram),
-      telegram_decision: decision && decision.telegram_action ? decision.telegram_action : (signal && signal._sentViaTelegram ? 'SENT_LEGACY' : 'NOT_SENT'),
+      telegram_sent: !!(signal && (signal._telegramDelivered || signal._sentViaTelegram)),
+      telegram_decision: decision && decision.telegram_action ? decision.telegram_action : (signal && (signal._telegramDelivered || signal._sentViaTelegram) ? 'SENT_LEGACY' : 'NOT_SENT'),
       confidence_score: decision && Number.isFinite(decision.final_confidence_score) ? decision.final_confidence_score : (signal && Number.isFinite(signal.confidenceScore) ? signal.confidenceScore : null),
       signal_score: decision && Number.isFinite(decision.signal_score) ? decision.signal_score : null,
       historical_reliability_score: decision && Number.isFinite(decision.historical_reliability_score) ? decision.historical_reliability_score : null,
@@ -163,8 +186,9 @@
     async fetchJson(path, options) {
       const opts = options || {};
       const resp = await fetch(this.apiBase + path, Object.assign({}, opts, { headers: this.headers(opts.headers) }));
+      const phpPath = path.includes('?') ? path.replace('?', '.php?') : path + '.php';
       const finalResp = (resp.status === 404 && !path.endsWith('.php'))
-        ? await fetch(this.apiBase + path + '.php', Object.assign({}, opts, { headers: this.headers(opts.headers) }))
+        ? await fetch(this.apiBase + phpPath, Object.assign({}, opts, { headers: this.headers(opts.headers) }))
         : resp;
       const text = await finalResp.text();
       let data = {};

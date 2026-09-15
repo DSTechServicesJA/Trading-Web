@@ -133,6 +133,15 @@ function adaptiveNormalizeCategory(?string $category, ?string $symbol = null, ?i
     return 'VOLATILITY_STANDARD';
 }
 
+function adaptiveNormalizeRuleCategory(?string $category, ?string $symbol = null, ?int $timeframeSec = null): string
+{
+    $candidate = strtoupper(trim((string) $category));
+    if ($candidate === '*') {
+        return '*';
+    }
+    return adaptiveNormalizeCategory($category, $symbol, $timeframeSec);
+}
+
 function adaptiveNormalizeScopeValue(?string $value, string $fallback = '*'): string
 {
     $trimmed = trim((string) $value);
@@ -152,6 +161,40 @@ function adaptiveNormalizeResult(?string $result): string
 {
     $normalized = strtoupper(trim((string) $result));
     return in_array($normalized, ['WIN', 'LOSS', 'CANCELLED'], true) ? $normalized : 'CANCELLED';
+}
+
+function adaptiveNormalizeDbTimestamp(mixed $value, ?string $fallback = null): string
+{
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        $raw = $fallback ?? gmdate('Y-m-d H:i:s');
+    }
+
+    try {
+        $dt = new DateTimeImmutable($raw);
+    } catch (Throwable) {
+        $dt = new DateTimeImmutable($fallback ?? 'now', new DateTimeZone('UTC'));
+    }
+
+    return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+}
+
+function adaptiveAcquireUserTradeLock(PDO $pdo, int $userId): void
+{
+    $stmt = $pdo->prepare('SELECT GET_LOCK(?, 10)');
+    $stmt->execute(['adaptive_trade_user_' . $userId]);
+    if ((int) $stmt->fetchColumn() !== 1) {
+        throw new RuntimeException('Unable to acquire adaptive trade lock');
+    }
+}
+
+function adaptiveReleaseUserTradeLock(PDO $pdo, int $userId): void
+{
+    try {
+        $stmt = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+        $stmt->execute(['adaptive_trade_user_' . $userId]);
+    } catch (Throwable) {
+    }
 }
 
 /**
@@ -271,12 +314,12 @@ function adaptiveResolveRule(PDO $pdo, int $userId, string $category, string $st
             AND symbol_scope IN (?, ?)
           ORDER BY
             (market_category = ?) DESC,
-            (strategy_key = ?) DESC,
             (symbol_scope = ?) DESC,
+           (strategy_key = ?) DESC,
             updated_at DESC
           LIMIT 1'
     );
-    $stmt->execute([$userId, $category, '*', $strategy, '*', $symbolScope, '*', $category, $strategy, $symbolScope]);
+    $stmt->execute([$userId, $category, '*', $strategy, '*', $symbolScope, '*', $category, $symbolScope, $strategy]);
     $row = $stmt->fetch();
     return is_array($row) ? $row : adaptiveDefaultRule($category, $strategy, $symbolScope);
 }
@@ -315,7 +358,7 @@ function adaptiveBuildScopes(string $category, string $strategy, string $symbol)
 /**
  * @return array<string,mixed>
  */
-function adaptiveNormalizeTradePayload(array $body): array
+function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride = false): array
 {
     $symbol = adaptiveNormalizeScopeValue($body['symbol'] ?? '', '');
     if ($symbol === '') {
@@ -325,7 +368,10 @@ function adaptiveNormalizeTradePayload(array $body): array
     $strategy = adaptiveNormalizeScopeValue($body['strategy'] ?? $body['strategy_key'] ?? $body['strategyName'] ?? '', 'breakout_retest');
     $symbolScope = adaptiveNormalizeScopeValue($symbol, '*');
     $timeframeSec = max(1, (int) ($body['timeframe_sec'] ?? $body['timeframeSec'] ?? 60));
-    $category = adaptiveNormalizeCategory($body['market_category'] ?? null, $symbol, $timeframeSec);
+    $derivedCategory = adaptiveNormalizeCategory(null, $symbol, $timeframeSec);
+    $category = $allowCategoryOverride
+        ? adaptiveNormalizeCategory($body['market_category'] ?? null, $symbol, $timeframeSec)
+        : $derivedCategory;
     $signalId = trim((string) ($body['signal_id'] ?? $body['signalId'] ?? ''));
     $tradeId = trim((string) ($body['trade_id'] ?? $body['tradeId'] ?? ''));
     if ($tradeId === '') {
@@ -353,9 +399,9 @@ function adaptiveNormalizeTradePayload(array $body): array
         'market_category' => $category,
         'strategy_key' => $strategy,
         'direction' => $direction,
-        'signal_timestamp' => (string) ($body['signal_timestamp'] ?? $body['signalTimestamp'] ?? gmdate('c')),
-        'entry_timestamp' => (string) ($body['entry_timestamp'] ?? $body['entryTimestamp'] ?? $body['signal_timestamp'] ?? gmdate('c')),
-        'exit_timestamp' => (string) ($body['exit_timestamp'] ?? $body['exitTimestamp'] ?? gmdate('c')),
+        'signal_timestamp' => adaptiveNormalizeDbTimestamp($body['signal_timestamp'] ?? $body['signalTimestamp'] ?? null),
+        'entry_timestamp' => adaptiveNormalizeDbTimestamp($body['entry_timestamp'] ?? $body['entryTimestamp'] ?? $body['signal_timestamp'] ?? $body['signalTimestamp'] ?? null),
+        'exit_timestamp' => adaptiveNormalizeDbTimestamp($body['exit_timestamp'] ?? $body['exitTimestamp'] ?? null),
         'entry_price' => $entry,
         'stop_loss' => $sl,
         'take_profit' => $tp,
@@ -754,7 +800,7 @@ function adaptiveFetchFactorRows(PDO $pdo, int $userId, string $category, string
         return [];
     }
     $placeholders = implode(',', array_fill(0, count($factors), '?'));
-    $params = array_merge([$userId, $category, $strategy, '*', $symbolScope, '*'], $factors, [$strategy, $symbolScope]);
+    $params = array_merge([$userId, $category, $strategy, '*', $symbolScope, '*'], $factors, [$symbolScope, $strategy]);
     $stmt = $pdo->prepare(
         "SELECT * FROM adaptive_factor_stats
            WHERE user_id = ?
@@ -762,7 +808,7 @@ function adaptiveFetchFactorRows(PDO $pdo, int $userId, string $category, string
              AND strategy_key IN (?, ?)
              AND symbol_scope IN (?, ?)
              AND factor_key IN ($placeholders)
-           ORDER BY (strategy_key = ?) DESC, (symbol_scope = ?) DESC, sample_size DESC"
+           ORDER BY (symbol_scope = ?) DESC, (strategy_key = ?) DESC, sample_size DESC"
     );
     $stmt->execute($params);
     return $stmt->fetchAll();
@@ -779,7 +825,7 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
     }
     $strategy = adaptiveNormalizeScopeValue($payload['strategy'] ?? $payload['strategy_key'] ?? $payload['strategyName'] ?? '', 'breakout_retest');
     $timeframeSec = max(1, (int) ($payload['timeframe_sec'] ?? $payload['timeframeSec'] ?? 60));
-    $category = adaptiveNormalizeCategory($payload['market_category'] ?? null, $symbol, $timeframeSec);
+    $category = adaptiveNormalizeCategory(null, $symbol, $timeframeSec);
     $symbolScope = adaptiveNormalizeScopeValue($symbol, '*');
     $rule = adaptiveResolveRule($pdo, $userId, $category, $strategy, $symbolScope);
     $signalId = trim((string) ($payload['signal_id'] ?? $payload['signalId'] ?? ''));
@@ -863,7 +909,7 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
         'market_category' => $category,
         'strategy_key' => $strategy,
         'direction' => $direction,
-        'signal_timestamp' => (string) ($payload['signal_timestamp'] ?? $payload['signalTimestamp'] ?? gmdate('c')),
+        'signal_timestamp' => adaptiveNormalizeDbTimestamp($payload['signal_timestamp'] ?? $payload['signalTimestamp'] ?? null),
         'telegram_action' => $action,
         'qualification_band' => $band,
         'signal_score' => $signalScore,
@@ -883,18 +929,24 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
  */
 function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorUserId = null, string $actorRole = 'system'): array
 {
-    $trade = adaptiveNormalizeTradePayload($payload);
-    $lookupStmt = $pdo->prepare(
-        'SELECT id FROM adaptive_trade_history WHERE user_id = ? AND (trade_id = ? OR (? IS NOT NULL AND signal_id = ?)) LIMIT 1'
-    );
-    $lookupStmt->execute([$userId, $trade['trade_id'], $trade['signal_id'], $trade['signal_id']]);
-    $existing = $lookupStmt->fetch();
-    if ($existing) {
-        return ['duplicate' => true, 'trade_id' => $trade['trade_id'], 'id' => (int) $existing['id']];
+    $trustedSource = $actorRole !== 'user';
+    $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
+    if (!$trustedSource) {
+        $trade['notes_json']['trust_source'] = 'UNTRUSTED_CLIENT_REPORTED';
     }
 
-    $pdo->beginTransaction();
+    adaptiveAcquireUserTradeLock($pdo, $userId);
     try {
+        $lookupStmt = $pdo->prepare(
+            'SELECT id FROM adaptive_trade_history WHERE user_id = ? AND (trade_id = ? OR (? IS NOT NULL AND signal_id = ?)) LIMIT 1'
+        );
+        $lookupStmt->execute([$userId, $trade['trade_id'], $trade['signal_id'], $trade['signal_id']]);
+        $existing = $lookupStmt->fetch();
+        if ($existing) {
+            return ['duplicate' => true, 'trade_id' => $trade['trade_id'], 'id' => (int) $existing['id']];
+        }
+
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare(
             'INSERT INTO adaptive_trade_history
             (user_id, trade_id, signal_id, symbol, market_category, strategy_key, strategy_label, direction, signal_timestamp,
@@ -936,12 +988,14 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
             adaptiveJsonEncode($trade['notes_json']),
         ]);
 
-        $scopes = adaptiveBuildScopes($trade['market_category'], $trade['strategy_key'], $trade['symbol']);
-        foreach ($scopes as $scope) {
-            adaptiveUpsertLearningProfile($pdo, $userId, $scope, $trade);
-            $rule = adaptiveResolveRule($pdo, $userId, $scope['market_category'], $scope['strategy_key'], $scope['symbol_scope']);
-            foreach ($trade['confluence_factors_present'] as $factor) {
-                adaptiveUpsertFactorStat($pdo, $userId, $scope, $factor, $trade, $rule, $actorUserId);
+        if ($trustedSource) {
+            $scopes = adaptiveBuildScopes($trade['market_category'], $trade['strategy_key'], $trade['symbol']);
+            foreach ($scopes as $scope) {
+                adaptiveUpsertLearningProfile($pdo, $userId, $scope, $trade);
+                $rule = adaptiveResolveRule($pdo, $userId, $scope['market_category'], $scope['strategy_key'], $scope['symbol_scope']);
+                foreach ($trade['confluence_factors_present'] as $factor) {
+                    adaptiveUpsertFactorStat($pdo, $userId, $scope, $factor, $trade, $rule, $actorUserId);
+                }
             }
         }
 
@@ -957,17 +1011,27 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
             $trade['strategy_key'],
             $trade['symbol'],
             null,
-            ['result' => $trade['result'], 'confidence_score' => $trade['confidence_score'], 'telegram_decision' => $trade['telegram_decision']],
-            'Completed trade stored for persistent adaptive learning'
+            ['result' => $trade['result'], 'confidence_score' => $trade['confidence_score'], 'telegram_decision' => $trade['telegram_decision'], 'trusted_source' => $trustedSource],
+            $trustedSource
+                ? 'Completed trade stored for persistent adaptive learning'
+                : 'Client-reported trade stored as untrusted history and excluded from adaptive learning aggregates'
         );
 
         $pdo->commit();
-        return ['duplicate' => false, 'trade_id' => $trade['trade_id'], 'id' => (int) $pdo->lastInsertId(), 'market_category' => $trade['market_category']];
+        return [
+            'duplicate' => false,
+            'trade_id' => $trade['trade_id'],
+            'id' => (int) $pdo->lastInsertId(),
+            'market_category' => $trade['market_category'],
+            'learning_applied' => $trustedSource,
+        ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
         throw $e;
+    } finally {
+        adaptiveReleaseUserTradeLock($pdo, $userId);
     }
 }
 
@@ -998,9 +1062,10 @@ function adaptiveBootstrap(PDO $pdo, int $userId, array $filters = []): array
     $factorStmt = $pdo->prepare(
         'SELECT * FROM adaptive_factor_stats
           WHERE user_id = ? AND market_category = ? AND strategy_key IN (?, ?)
-          ORDER BY sample_size DESC, last_updated DESC LIMIT 200'
+            AND symbol_scope IN (?, ?)
+          ORDER BY (symbol_scope = ?) DESC, (strategy_key = ?) DESC, sample_size DESC, last_updated DESC LIMIT 200'
     );
-    $factorStmt->execute([$userId, $category, $strategy, '*']);
+    $factorStmt->execute([$userId, $category, $strategy, '*', $symbolScope, '*', $symbolScope, $strategy]);
     $factors = $factorStmt->fetchAll();
 
     $tradeStmt = $pdo->prepare(

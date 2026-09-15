@@ -65,6 +65,58 @@ test('stampSignalLifecycle captures adaptive regime only for pending signals', (
   assert.equal(resolved.adaptiveRegime, undefined);
 });
 
+test('qualifySignalForTelegram fails closed when the adaptive service errors', async () => {
+  const fnSource = extractFunction('qualifySignalForTelegram');
+  const harness = `${fnSource}\nmodule.exports = { qualifySignalForTelegram };`;
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      qualifySignal: async () => { throw new Error('db offline'); }
+    },
+    initAdaptiveIntelligenceClient: () => {},
+    buildAdaptiveQualificationPayload: () => ({ signal_id: 'sig-1' }),
+    addLog: () => {},
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { qualifySignalForTelegram } = context.module.exports;
+
+  const result = await qualifySignalForTelegram({ signalId: 'sig-1' }, 'MTF Top-Down');
+  assert.equal(result.allowed, false);
+  assert.equal(result.decision, null);
+});
+
+test('mergeRemoteConfluenceStats replaces stale scope data and keeps the first scoped factor row', () => {
+  const fnSource = extractFunction('mergeRemoteConfluenceStats');
+  const harness = `${fnSource}\nmodule.exports = { mergeRemoteConfluenceStats };`;
+  const renders = [];
+  const context = {
+    module: { exports: {} },
+    confluenceFactorStats: {
+      Legacy: { wins: 99, losses: 1, currentWeight: 9, confidenceScore: 99, sampleSize: 100 }
+    },
+    Number,
+    Object,
+    renderAdaptiveConfluenceTable: () => renders.push('rendered')
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { mergeRemoteConfluenceStats } = context.module.exports;
+
+  mergeRemoteConfluenceStats({
+    factor_stats: [
+      { factor_key: 'EMA Aligned', wins: 3, losses: 1, current_weight: 5, confidence_score: 60, sample_size: 4 },
+      { factor_key: 'EMA Aligned', wins: 30, losses: 10, current_weight: 8, confidence_score: 90, sample_size: 40 }
+    ]
+  });
+
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), ['EMA Aligned']);
+  assert.equal(context.confluenceFactorStats['EMA Aligned'].wins, 3);
+  assert.equal(renders.length, 1);
+});
+
 test('sendSignalLifecycleTelegram keeps terminal TP alerts as terminal alerts', async () => {
   const fnSource = extractFunction('sendSignalLifecycleTelegram');
   const harness = `${fnSource}\nmodule.exports = { sendSignalLifecycleTelegram };`;
@@ -165,6 +217,7 @@ test('sendTradeOutcomeTelegram retries after a failed fallback send', async () =
 test('restoreSignalHistory persists migrated legacy signal IDs', () => {
   const harness = [
     extractFunction('stampSignalLifecycle'),
+    extractFunction('ensureAdaptiveTradeResolutionTimestamp'),
     extractFunction('ensureAllKnownSignalIds'),
     extractFunction('persistSignalHistory'),
     extractFunction('restoreSignalHistory'),
