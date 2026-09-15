@@ -153,9 +153,21 @@ test('strategy reset contracts clear strategy registries/caches', () => {
 });
 
 test('MTF pipeline warmup uses expanded fetch count and session reset clears diagnostics', () => {
+  assert.match(source, /\) \+ \(Math\.max\(MTF_BIAS_TF_MULT, MTF_SETUP_TF_MULT\) - 1\);/);
   assert.match(source, /const MTF_HISTORY_FETCH_COUNT = Math\.max\(100, MTF_REQUIRED_BASE_CANDLES \+ 32\)/);
   assert.match(source, /count: MTF_HISTORY_FETCH_COUNT/);
   assert.match(source, /resetMtfDiagnostics\(\);/);
+});
+
+test('processMtfTopDown records pipeline stages in feed→aggregation→queue order', () => {
+  const fnSource = extractFunction('processMtfTopDown');
+  const dataFeedPos = fnSource.indexOf('markMtfPipelineStage("data_feed"');
+  const aggregationPos = fnSource.indexOf('markMtfPipelineStage("candle_aggregation"');
+  const queuePos = fnSource.indexOf('markMtfPipelineStage("signal_queue"');
+  const confluenceGatePos = fnSource.indexOf('if (minConfluenceEnabled)');
+  assert.ok(dataFeedPos >= 0);
+  assert.ok(aggregationPos > dataFeedPos);
+  assert.ok(queuePos > confluenceGatePos);
 });
 
 test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
@@ -170,7 +182,7 @@ test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
   }));
   candles[candles.length - 2] = { open: 101, high: 101.1, low: 100.7, close: 100.8, epoch: (candles.length - 2) * 60 };
   candles[candles.length - 1] = { open: 100.9, high: 101.6, low: 100.8, close: 101.4, epoch: (candles.length - 1) * 60 };
-  const state = { conditions: {} };
+  const state = { conditions: { ltfHtfAlignment: 'PASS' }, lastRejection: { reason: 'cooldown' } };
   const context = {
     module: { exports: {} },
     mtfTopDownEnabled: true,
@@ -217,6 +229,37 @@ test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
   assert.equal(signal.type, 'mtf_top_down');
   assert.equal(signal.signalId, 'sig-1');
   assert.equal(signal.dir, 'BULL');
+  assert.equal(state.conditions.ltfHtfAlignment, 'PASS');
+  assert.equal(state.conditions.signalGenerated, 'PASS');
+  assert.equal(state.lastRejection, null);
+});
+
+test('MTF diagnostics timeframe map follows setup/bias synthesis ratios', () => {
+  const harness = [
+    extractFunction('formatMtfTfLabel'),
+    extractFunction('getMtfTfMap'),
+    'module.exports = { getMtfTfMap };'
+  ].join('\n');
+  const context = {
+    module: { exports: {} },
+    MTF_SETUP_TF_MULT: 4,
+    MTF_BIAS_TF_MULT: 16,
+    Number,
+    Math,
+    Set,
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { getMtfTfMap } = context.module.exports;
+  const tfMap = getMtfTfMap(60);
+  assert.deepEqual(Array.from(tfMap, (tf) => tf.ratio), [1, 4, 16]);
+  assert.deepEqual(Array.from(tfMap, (tf) => tf.label), ['1m', '4m', '16m']);
+});
+
+test('symbol cooldown unlock cleanup and terminal unlock branch stay reachable', () => {
+  assert.match(source, /logSignalEngineDebug\("SYMBOL_UNLOCKED", \{ symbol, reason: "cooldown_expired", cooldownUntil \}\);\s*symbolCooldownUntil\.delete\(symbol\);/);
+  assert.match(source, /\n  }\n  if \(pending\.symbol && \(result === "WIN" \|\| result === "CANCELLED"\)\) \{\n    logSignalEngineDebug\("SYMBOL_UNLOCKED", \{ symbol: pending\.symbol, reason: result\.toLowerCase\(\), outcome: result \}\);\n  \}/);
 });
 
 test('MTF rejection breakdown tracks percentages by reason', () => {

@@ -7363,7 +7363,7 @@ const MTF_DEBUG_STORAGE_KEY    = `${LS_PREFIX}mtfDebugMode`;
 const MTF_REQUIRED_BASE_CANDLES = Math.max(
   (MTF_BIAS_LOOKBACK + 2) * MTF_BIAS_TF_MULT,
   (MTF_SETUP_LOOKBACK + 2) * MTF_SETUP_TF_MULT
-) + 4;
+) + (Math.max(MTF_BIAS_TF_MULT, MTF_SETUP_TF_MULT) - 1);
 const MTF_HISTORY_FETCH_COUNT = Math.max(100, MTF_REQUIRED_BASE_CANDLES + 32);
 let mtfDebugMode = false;
 let mtfDebugRows = [];
@@ -7487,27 +7487,39 @@ function resetMtfDiagnostics() {
   renderMtfDebugPanel();
 }
 
-function getMtfTfMap() {
-  return [
-    { label: "1m", sec: 60 },
-    { label: "5m", sec: 300 },
-    { label: "15m", sec: 900 },
-    { label: "30m", sec: 1800 },
-    { label: "1h", sec: 3600 }
-  ];
+function formatMtfTfLabel(sec) {
+  if (!Number.isFinite(sec) || sec <= 0) return "--";
+  if (sec % 3600 === 0) return `${sec / 3600}h`;
+  if (sec % 60 === 0) return `${sec / 60}m`;
+  return `${sec}s`;
+}
+
+function getMtfTfMap(gran) {
+  const baseGran = Number.isFinite(gran) && gran > 0 ? gran : 60;
+  const ratios = [1, MTF_SETUP_TF_MULT, MTF_BIAS_TF_MULT];
+  return Array.from(new Set(ratios))
+    .sort((a, b) => a - b)
+    .map((ratio) => {
+      const sec = ratio * baseGran;
+      return {
+        label: formatMtfTfLabel(sec),
+        sec,
+        ratio
+      };
+    });
 }
 
 function captureMtfHtfDiagnostics(symbol) {
   const state = getMtfPipelineState(symbol);
   const ltf = candles && candles.length > 0 ? candles[candles.length - 1] : null;
   const gran = getCurrentGranularitySec();
-  const tfMap = getMtfTfMap();
+  const tfMap = getMtfTfMap(gran);
   state.availableTimeframes = tfMap.map(tf => tf.label);
   state.htf = {};
   state.alignment = {};
 
   for (const tf of tfMap) {
-    const ratio = Math.max(1, Math.round(tf.sec / gran));
+    const ratio = Math.max(1, tf.ratio || Math.round(tf.sec / gran));
     const bars = ratio === 1
       ? (candles || []).map((c) => Object.assign({ _count: 1 }, c))
       : synthesizeTfCandles(ratio, { includeMeta: true });
@@ -7888,11 +7900,6 @@ function detectMtfTopDown(confirmationOverride = null) {
   const symbol = getActiveSymbol();
   const baseConditions = {};
   if (!mtfTopDownEnabled) return null;
-  markMtfPipelineStage("data_feed", {
-    symbol,
-    candles: candles ? candles.length : 0,
-    granularitySec: getCurrentGranularitySec()
-  });
   if (!isSymbolEligibleForNewSignal(symbol, "mtf_top_down")) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "symbol_not_eligible" });
     recordMtfRejection("symbol_not_eligible", { symbol, conditions: { symbolEligibility: "FAIL" } });
@@ -8124,13 +8131,9 @@ function detectMtfTopDown(confirmationOverride = null) {
   };
   stampSignalLifecycle(signal);
   const state = getMtfPipelineState(symbol);
-  state.conditions = Object.assign({}, baseConditions, { signalGenerated: "PASS" });
+  state.conditions = Object.assign({}, state.conditions || {}, baseConditions, { signalGenerated: "PASS" });
+  state.lastRejection = null;
   state.lastSignal = signal;
-  markMtfPipelineStage("signal_queue", {
-    symbol,
-    signalId: signal.signalId,
-    status: "queued"
-  });
   logSignalEngineDebug("MTF_CONDITION_BREAKDOWN", {
     symbol,
     signalId: signal.signalId,
@@ -8152,6 +8155,12 @@ function detectMtfTopDown(confirmationOverride = null) {
  */
 function processMtfTopDown() {
   const symbol = getActiveSymbol();
+  if (!mtfTopDownEnabled && !mtfDebugMode) return;
+  markMtfPipelineStage("data_feed", {
+    symbol,
+    candles: candles ? candles.length : 0,
+    granularitySec: getCurrentGranularitySec()
+  });
   captureMtfHtfDiagnostics(symbol);
   markMtfPipelineStage("candle_aggregation", {
     symbol,
@@ -8247,6 +8256,11 @@ function processMtfTopDown() {
     }
   }
 
+  markMtfPipelineStage("signal_queue", {
+    symbol: signal.symbol || symbol,
+    signalId: signal.signalId,
+    status: "queued"
+  });
   lastMtfTopDownIdx = signal.candleIdx;
   markMtfPipelineStage("signal_validation", {
     symbol: signal.symbol || symbol,
@@ -8296,14 +8310,13 @@ function processMtfTopDown() {
     const state = getMtfPipelineState(signal.symbol || sym);
     const alignSummary = Object.entries(state.alignment || {}).map(([k, v]) => `${k}:${v && v.aligned ? "OK" : "MISS"}`).join(" ");
     const htfSummary = Object.entries(state.htf || {}).map(([k, v]) => `${k}:${v.closedCandles || 0}${v.complete ? "" : "*"}`).join(" ");
-    const rejectReason = state.lastRejection ? state.lastRejection.reason : "none";
     pushMtfDebugRow({
       symbol: signal.symbol || sym,
       strategy: "MTF Top-Down",
       mtfStatus: "PASS",
       ltfSignal: `${signal.dir} ${signal.patternType}`,
       htfSummary,
-      rejectionReason: rejectReason,
+      rejectionReason: "none",
       alignment: alignSummary || "--",
       time: new Date().toISOString().slice(11, 19)
     });
@@ -12105,7 +12118,7 @@ function runIntrabarTimingOptimizations(currentCandle) {
     }
   }
 
-  if (monitoringTrade || trade || !mtfTopDownEnabled || mtfTopDownHistory.some(s => s.result === "PENDING")) return;
+  if (!mtfTopDownEnabled || mtfTopDownHistory.some(s => s.result === "PENDING")) return;
   const prevMode = _entryModeContext;
   _entryModeContext = "aggressive_intrabar";
   try {
@@ -14095,6 +14108,7 @@ function executeAutoTrade(signal, _capturedWs) {
     return;
   } else if (symbolCooldownUntil.has(symbol)) {
     logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol, reason: "cooldown_expired", cooldownUntil });
+    symbolCooldownUntil.delete(symbol);
   }
 
   const freq = canPlaceByFrequency(symbol, signal.strategyName || null);
@@ -14609,9 +14623,9 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
       autoTradeHalted = true;
       addLog(`🛑 Auto-trade paused — ${AUTO_TRADE_MAX_LOSSES} consecutive losses reached. Reset session to resume.`);
     }
-    if (pending.symbol && (result === "WIN" || result === "CANCELLED")) {
-      logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol: pending.symbol, reason: result.toLowerCase(), outcome: result });
-    }
+  }
+  if (pending.symbol && (result === "WIN" || result === "CANCELLED")) {
+    logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol: pending.symbol, reason: result.toLowerCase(), outcome: result });
   }
   updateAutoTradeCurrentStakeUI();
   updateStrategyRegimeStats(pending);
