@@ -1,8 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 
-const source = fs.readFileSync('/home/runner/work/Trading-Web/Trading-Web/indicator/indicator.js', 'utf8');
+const source = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
 
 test('MTF setup state is persisted and reused', () => {
   assert.match(source, /let mtfSetupState = null/);
