@@ -1063,11 +1063,42 @@ function shouldPauseAfterRecentLosses(history, options = {}) {
   return { block: false };
 }
 
+const SIGNAL_ENGINE_DEBUG_STORAGE_KEY = `${LS_PREFIX}signalEngineDebugMode`;
+let signalEngineDebugMode = false;
+
+function loadSignalEngineDebugMode() {
+  try {
+    const raw = localStorage.getItem(SIGNAL_ENGINE_DEBUG_STORAGE_KEY);
+    signalEngineDebugMode = raw === "1";
+  } catch {
+    signalEngineDebugMode = false;
+  }
+}
+
+function setSignalEngineDebugMode(enabled) {
+  signalEngineDebugMode = enabled === true;
+  try {
+    localStorage.setItem(SIGNAL_ENGINE_DEBUG_STORAGE_KEY, signalEngineDebugMode ? "1" : "0");
+  } catch { /* storage unavailable */ }
+  addLog(`🐞 Signal Engine Debug ${signalEngineDebugMode ? "ENABLED" : "DISABLED"}`);
+}
+
+function logSignalEngineDebug(stage, details = {}) {
+  if (!signalEngineDebugMode) return;
+  try {
+    const compact = JSON.stringify(details);
+    addLog(`🐞 [SignalEngine:${stage}] ${compact}`);
+  } catch {
+    addLog(`🐞 [SignalEngine:${stage}]`);
+  }
+}
+
 function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade", reason = null) {
   if (!signal) return null;
   const atrAtSignal = Number.isFinite(signal.atrAtSignal) ? signal.atrAtSignal : (Number.isFinite(signal.atrAtEntry) ? signal.atrAtEntry : getAtrReference());
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
   return {
+    signalId: signal.signalId || null,
     channel,
     strategyLabel,
     symbol: signal.symbol || getActiveSymbol(),
@@ -1077,6 +1108,7 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
     entry: signal.entry,
     sl: signal.sl || signal.stopLoss || null,
     tp: signal.tp || signal.takeProfit || null,
+    confidenceScore: signal.confluenceScore != null ? signal.confluenceScore : null,
     validUntilMs: signal.validUntilMs,
     maxDistanceAtr: Number.isFinite(signal.maxEntryDistanceAtr) ? signal.maxEntryDistanceAtr : getSignalDistanceLimitAtr(),
     distanceAtr: getSignalDistanceFromEntry({ entry: signal.entry, atrAtSignal }, currentPrice),
@@ -1089,6 +1121,7 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
 
 function stampSignalLifecycle(signal, options = {}) {
   if (!signal || typeof signal !== "object") return signal;
+  if (!signal.signalId) signal.signalId = generateSignalId(signal.strategyType || signal.type || "sig");
   const createdAt = Number.isFinite(signal.createdAtMs) ? signal.createdAtMs : Date.now();
   const validityMs = Number.isFinite(signal.validityMs) ? signal.validityMs : (options.validityMs || getSignalValidityMs());
   signal.createdAtMs = createdAt;
@@ -6584,7 +6617,8 @@ function monitorGridScalperMAOutcomes(candle) {
  * Generate a unique signal ID for trade decision logging.
  */
 function generateSignalId() {
-  return `gs-${Date.now()}-${++_signalIdCounter}`;
+  const prefix = arguments.length > 0 && arguments[0] ? String(arguments[0]).replace(/[^a-z0-9_]+/ig, "_").toLowerCase() : "sig";
+  return `${prefix}-${Date.now()}-${++_signalIdCounter}`;
 }
 
 /**
@@ -7257,6 +7291,7 @@ let lastMtfTopDownIdx   = -999;     /* cooldown tracker */
 let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
 let lastMtfSetupAlertKey = "";
 let lastMtfApproachAlertKey = "";
+let mtfSetupState = null;           /* holds latest qualified setup while waiting for retest */
 
 const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
 const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
@@ -7372,6 +7407,42 @@ function detectMtfSetup() {
   return null;
 }
 
+function getMtfSetupState() {
+  const latest = detectMtfSetup();
+  const idx = candles.length - 1;
+  if (latest) {
+    mtfSetupState = Object.assign({}, latest, {
+      setupDetectedIdx: idx,
+      expiresAfterIdx: idx + (MTF_RETEST_LOOKBACK * 4)
+    });
+    logSignalEngineDebug("MTF_SETUP_DETECTED", {
+      dir: latest.dir,
+      level: latest.level,
+      breakoutEpoch: latest.breakoutEpoch,
+      setupDetectedIdx: idx
+    });
+    return mtfSetupState;
+  }
+  if (mtfSetupState && Number.isFinite(mtfSetupState.expiresAfterIdx) && idx <= mtfSetupState.expiresAfterIdx) {
+    logSignalEngineDebug("MTF_SETUP_REUSED", {
+      dir: mtfSetupState.dir,
+      level: mtfSetupState.level,
+      expiresAfterIdx: mtfSetupState.expiresAfterIdx,
+      idx
+    });
+    return mtfSetupState;
+  }
+  if (mtfSetupState) {
+    logSignalEngineDebug("MTF_SETUP_EXPIRED", {
+      dir: mtfSetupState.dir,
+      level: mtfSetupState.level,
+      idx
+    });
+  }
+  mtfSetupState = null;
+  return null;
+}
+
 /**
  * Detect a current-TF retest of the 1H broken level.
  * A retest: price returns within ATR tolerance of the level then closes
@@ -7380,11 +7451,17 @@ function detectMtfSetup() {
  * @returns {{ dir, level, retestCandleIdx }|null}
  */
 function detectMtfConfirmation(setupOverride = null) {
-  const setup = setupOverride || detectMtfSetup();
-  if (!setup) return null;
+  const setup = setupOverride || getMtfSetupState();
+  if (!setup) {
+    logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "no_setup_state" });
+    return null;
+  }
 
   const len = candles.length;
-  if (len < 5) return null;
+  if (len < 5) {
+    logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "insufficient_base_candles", len });
+    return null;
+  }
 
   const { dir, level } = setup;
   const tolerance = atrValue > 0 ? atrValue * 0.5 : level * 0.002;
@@ -7395,14 +7472,24 @@ function detectMtfConfirmation(setupOverride = null) {
     if (!c) continue;
     if (dir === "BULL") {
       if (c.low <= level + tolerance && c.close >= level) {
+        logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
         return { dir, level, retestCandleIdx: i, setup };
       }
     } else {
       if (c.high >= level - tolerance && c.close <= level) {
+        logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
         return { dir, level, retestCandleIdx: i, setup };
       }
     }
   }
+  logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", {
+    reason: "no_retest_match",
+    dir,
+    level,
+    tolerance,
+    scanStart,
+    len
+  });
   return null;
 }
 
@@ -7415,43 +7502,74 @@ function detectMtfConfirmation(setupOverride = null) {
  */
 function detectMtfTopDown(confirmationOverride = null) {
   if (!mtfTopDownEnabled) return null;
-  if (!candles || candles.length < 20) return null;
+  if (!candles || candles.length < 20) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "insufficient_candles", candles: candles ? candles.length : 0 });
+    return null;
+  }
 
   const idx = candles.length - 1;
 
   /* Cooldown */
-  if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) return null;
+  if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "cooldown", idx, lastMtfTopDownIdx });
+    return null;
+  }
   /* One pending at a time */
-  if (mtfTopDownHistory.some(s => s.result === "PENDING")) return null;
+  if (mtfTopDownHistory.some(s => s.result === "PENDING")) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pending_signal_exists" });
+    return null;
+  }
 
   const confirmation = confirmationOverride || detectMtfConfirmation();
-  if (!confirmation) return null;
+  if (!confirmation) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "no_confirmation" });
+    return null;
+  }
 
   const { dir, level, retestCandleIdx, setup } = confirmation;
 
   /* Only act within 3 candles of the confirmed retest */
-  if (idx - retestCandleIdx > 3) return null;
+  if (idx - retestCandleIdx > 3) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confirmation_window_expired", idx, retestCandleIdx });
+    return null;
+  }
 
   const c    = candles[idx];
   const prev = candles[idx - 1];
-  if (!c || !prev) return null;
+  if (!c || !prev) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "missing_current_or_prev_candle", idx });
+    return null;
+  }
   const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : 0;
   const maxEntryDriftAtr = getMaxEntryDriftAtr(getActiveSymbol(), getCurrentGranularitySec(), true);
-  if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) return null;
+  if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", {
+      reason: "entry_drift_too_large",
+      entryDriftAtr,
+      maxEntryDriftAtr
+    });
+    return null;
+  }
   const entryMode = getCurrentEntryMode();
   const timingQuality = evaluateEntryTimingQuality(dir, c, level, atrValue, {
     symbol: getActiveSymbol(),
     granSec: getCurrentGranularitySec(),
     entryMode
   });
-  if (!timingQuality.pass) return null;
+  if (!timingQuality.pass) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "timing_quality_gate", detail: timingQuality.reason || null });
+    return null;
+  }
   const recentLossPause = shouldPauseAfterRecentLosses(mtfTopDownHistory, {
     symbol: getActiveSymbol(),
     dir,
     strategyType: "mtf_top_down",
     timeframeSec: getCurrentGranularitySec()
   });
-  if (recentLossPause.block) return null;
+  if (recentLossPause.block) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "recent_loss_pause", detail: recentLossPause.reason || null });
+    return null;
+  }
 
   const hasPinBar     = isPinBar(c, dir);
   const hasBullEngulf = dir === "BULL" && isBullishEngulfing(prev, c);
@@ -7460,7 +7578,10 @@ function detectMtfTopDown(confirmationOverride = null) {
   const microBosBull  = dir === "BULL" && c.close > prev.high && c.close > c.open;
   const microBosBear  = dir === "BEAR" && c.close < prev.low  && c.close < c.open;
 
-  if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) return null;
+  if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pattern_not_confirmed" });
+    return null;
+  }
 
   const patternType = hasPinBar ? "pin_bar"
     : (hasBullEngulf || hasBearEngulf) ? "engulfing"
@@ -7488,7 +7609,10 @@ function detectMtfTopDown(confirmationOverride = null) {
   }
 
   const risk = Math.abs(entry - sl);
-  if (risk <= 0) return null;
+  if (risk <= 0) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "invalid_risk", entry, sl });
+    return null;
+  }
 
   /* Guarantee minimum R:R — profit-optimized per symbol */
   if (Math.abs(tp - entry) / risk < _mtfRR) {
@@ -7496,7 +7620,7 @@ function detectMtfTopDown(confirmationOverride = null) {
   }
   const rr = Math.abs(tp - entry) / risk;
 
-  return {
+  const signal = {
     dir, entry, sl, tp, rr, level, retestCandleIdx,
     mtfBias: computeMtfBias(),
     patternType,
@@ -7517,13 +7641,23 @@ function detectMtfTopDown(confirmationOverride = null) {
     entryBodyAtr: timingQuality.bodyAtr,
     entryCloseLocation: timingQuality.closeLocation
   };
+  stampSignalLifecycle(signal);
+  logSignalEngineDebug("MTF_SIGNAL_GENERATED", {
+    signalId: signal.signalId,
+    dir: signal.dir,
+    entry: signal.entry,
+    sl: signal.sl,
+    tp: signal.tp,
+    rr: signal.rr
+  });
+  return signal;
 }
 
 /**
  * Run the MTF Top-Down scanner and handle all alerting.
  */
 function processMtfTopDown() {
-  const setup = detectMtfSetup();
+  const setup = getMtfSetupState();
   if (setup && !_historicalProcessing) {
     const setupKey = [getActiveSymbol(), setup.dir, fmt(setup.level, 6), setup.breakoutEpoch || ""].join("|");
     if (setupKey !== lastMtfSetupAlertKey) {
@@ -7572,9 +7706,11 @@ function processMtfTopDown() {
     const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
     if (!confGate.pass) {
       addLog(`\u26a0 MTF Top-Down REJECTED \u2014 ${confGate.reason}`);
+      logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confluence_gate", detail: confGate.reason, signalId: signal.signalId });
       sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
+        signalId: signal.signalId,
         symbol: signal.symbol || getActiveSymbol(),
         timeframeSec: getCurrentGranularitySec(),
         dir: signal.dir,
@@ -7594,6 +7730,7 @@ function processMtfTopDown() {
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   mtfTopDownHistory.unshift(signal);
+  mtfSetupState = null; /* consume setup once a trade signal is produced */
   if (mtfTopDownHistory.length > MTF_TOP_DOWN_MAX_HISTORY) mtfTopDownHistory.pop();
 
   playStrategyAlert(signal.dir);
@@ -7609,6 +7746,14 @@ function processMtfTopDown() {
     + " | SL " + fmtPrice(signal.sl, sym)
     + " | TP " + fmtPrice(signal.tp, sym)
     + " | R:R 1:" + fmt(signal.rr, 1));
+  logSignalEngineDebug("MTF_SIGNAL_QUEUED", {
+    signalId: signal.signalId,
+    symbol: signal.symbol || sym,
+    dir: signal.dir,
+    entry: signal.entry,
+    sl: signal.sl,
+    tp: signal.tp
+  });
 
   showToast(
     "MTF Top-Down " + dirArrow,
@@ -7643,6 +7788,7 @@ function processMtfTopDown() {
   renderStrategyAlerts();
 
   if (autoTradeStrategyEnabled && autoTradeMtfTopDown && !_historicalProcessing) {
+    logSignalEngineDebug("MTF_AUTOTRADE_TRIGGERED", { signalId: signal.signalId, symbol: signal.symbol || sym });
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp,
       symbol: signal.symbol || sym, source: "strategy", strategyName: "mtfTopDown" });
   }
@@ -7662,9 +7808,11 @@ function monitorMtfTopDownOutcomes(candle) {
       s.result = "EXPIRED";
       changed = true;
       addLog("\u23f1 MTF Top-Down EXPIRED (timeout " + MTF_TOP_DOWN_MAX_CANDLES + " candles) \u2014 " + (s.symbol || ""));
+      logSignalEngineDebug("MTF_SIGNAL_CANCELLED", { signalId: s.signalId || null, reason: "timeout", symbol: s.symbol || "" });
       sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
+        signalId: s.signalId || null,
         symbol: s.symbol || getActiveSymbol(),
         timeframeSec: s.timeframeSec || getCurrentGranularitySec(),
         dir: s.dir,
@@ -7678,20 +7826,28 @@ function monitorMtfTopDownOutcomes(candle) {
       if (candle.high >= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.low <= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     } else {
       if (candle.low <= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.high >= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     }
@@ -9166,11 +9322,11 @@ function buildLifecycleTelegramCaption(kind, payload) {
   const dir = payload.dir || "--";
   const dirLabel = dir === "BULL" ? "🟢 BUY" : dir === "BEAR" ? "🔴 SELL" : dir;
   const titles = {
-    setup: "Setup Detected",
-    approaching: "Entry Zone Approaching",
-    active: "Entry Active",
-    tp: "TP Reached",
-    sl: "SL Hit",
+    setup: "New Trade Signal",
+    approaching: "Signal Approaching Entry",
+    active: "Trade Activated",
+    tp: "Take Profit Hit",
+    sl: "Stop Loss Hit",
     cancelled: "Trade Cancelled"
   };
   const title = titles[kind] || "Signal Update";
@@ -9178,6 +9334,7 @@ function buildLifecycleTelegramCaption(kind, payload) {
   lines.push(`📣 <b>${title}</b>`);
   lines.push("");
   lines.push(`<b>Strategy:</b> ${payload.strategyLabel || "Breakout Retest"}`);
+  if (payload.signalId) lines.push(`<b>Signal ID:</b> <code>${payload.signalId}</code>`);
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirLabel}`);
@@ -9185,6 +9342,7 @@ function buildLifecycleTelegramCaption(kind, payload) {
   if (payload.entry != null) lines.push(`<b>Entry:</b> <code>${fmtPrice(payload.entry, symbol)}</code>`);
   if (payload.sl != null) lines.push(`<b>SL:</b> <code>${fmtPrice(payload.sl, symbol)}</code>`);
   if (payload.tp != null) lines.push(`<b>TP:</b> <code>${fmtPrice(payload.tp, symbol)}</code>`);
+  if (payload.confidenceScore != null) lines.push(`<b>Confidence:</b> ${payload.confidenceScore}`);
   if (payload.entryMode) lines.push(`<b>Entry Mode:</b> ${payload.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(payload.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(payload.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(payload.distanceAtr)) lines.push(`<b>Distance Now:</b> ${fmt(payload.distanceAtr, 2)} ATR`);
@@ -9214,6 +9372,17 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   const channel = payload && payload.channel === "strategy" ? "strategy" : "trade";
   const enabled = channel === "strategy" ? telegramStrategyAutoSend : telegramAutoSend;
   if (!enabled && !force) return;
+  if (payload && payload.signalId) {
+    const dedupeKey = `${payload.signalId}|${kind}`;
+    if (!force) {
+      sendSignalLifecycleTelegram._sentKeys = sendSignalLifecycleTelegram._sentKeys || new Set();
+      if (sendSignalLifecycleTelegram._sentKeys.has(dedupeKey)) {
+        logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "dedupe", kind, signalId: payload.signalId });
+        return;
+      }
+      sendSignalLifecycleTelegram._sentKeys.add(dedupeKey);
+    }
+  }
   try {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
@@ -9224,8 +9393,18 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   try {
     await sendTelegramMessage(buildLifecycleTelegramCaption(kind, payload || {}));
     addLog(`📤 Telegram lifecycle alert sent (${kind})`);
+    logSignalEngineDebug("TELEGRAM_SENT", {
+      kind,
+      signalId: payload && payload.signalId ? payload.signalId : null,
+      channel
+    });
   } catch (err) {
     addLog(`📤 Lifecycle Telegram error: ${err.message}`);
+    logSignalEngineDebug("TELEGRAM_FAILED", {
+      kind,
+      signalId: payload && payload.signalId ? payload.signalId : null,
+      error: err.message
+    });
   }
 }
 
@@ -9236,6 +9415,7 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
   if (kind === "approaching" && breakout._approachAlertSent) return;
   if (kind === "active" && breakout._activeAlertSent) return;
   const payload = {
+    signalId: trade && trade.signalId ? trade.signalId : (breakout && breakout.signalId ? breakout.signalId : null),
     channel: "trade",
     strategyLabel: "Breakout Retest",
     symbol: getActiveSymbol(),
@@ -9264,6 +9444,7 @@ function maybeSendBreakoutCancelled(reason) {
   if (!breakout._setupAlertSent && !breakout._approachAlertSent) return;
   recordAdaptiveCancellation(reason, { strategy: "breakout_retest", dir: breakout.dir });
   sendSignalLifecycleTelegram("cancelled", {
+    signalId: breakout && breakout.signalId ? breakout.signalId : null,
     channel: "trade",
     strategyLabel: "Breakout Retest",
     symbol: getActiveSymbol(),
@@ -9427,6 +9608,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} — ${outcomeTitle}</b> — ${dir} ${sym}`);
     lines.push("");
+    if (signal.signalId) lines.push(`<b>Signal ID:</b> <code>${signal.signalId}</code>`);
     lines.push(`<b>📍 Entry:</b> ${entryStr}`);
     lines.push(`<b>🏁 Exit:</b> ${exitStr}`);
     lines.push(`<b>🛑 SL:</b> ${slStr}`);
@@ -11562,7 +11744,7 @@ function processCandle(idx) {
         addLog(`Bullish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
+      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike, signalId: generateSignalId("breakout") };
       retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
@@ -11606,7 +11788,7 @@ function processCandle(idx) {
         addLog(`Bearish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
+      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike, signalId: generateSignalId("breakout") };
       retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
@@ -12262,6 +12444,19 @@ function buildTrade(confirmCandle, confirmIdx) {
     addLog(`⚡ SCALPING MODE — quick TP at R:R ${fmt(rr, 1)}, max ${SCALP_MAX_CANDLES} candles`);
   }
 
+  if (trade) {
+    trade.strategyType = "breakout_retest";
+    stampSignalLifecycle(trade);
+    logSignalEngineDebug("TRADE_OPEN", {
+      signalId: trade.signalId || null,
+      symbol: trade.symbol || getActiveSymbol(),
+      dir: trade.dir,
+      entry: trade.entry,
+      sl: trade.sl,
+      tp: trade.tp
+    });
+  }
+
   /* Reset trailing/partial state for new trade */
   trailingSL   = null;
   partialTpHit = false;
@@ -12443,6 +12638,7 @@ function recordSignal(confirmPattern) {
   signal.entryBodyAtr = trade.entryBodyAtr;
   signal.entryCloseLocation = trade.entryCloseLocation;
   stampSignalLifecycle(signal, { atrAtSignal: trade.atrAtEntry });
+  trade.signalId = signal.signalId;
 
   /* Populate lot-size fields from account sizing */
   if (accountSize > 0 && riskPercent > 0) {
@@ -12462,6 +12658,12 @@ function recordSignal(confirmPattern) {
     if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
   } catch (e) { /* canvas tainted or unavailable */ }
   monitoringTrade = true;
+  logSignalEngineDebug("TRADE_ACTIVATED", {
+    signalId: signal.signalId || null,
+    symbol: signal.symbol,
+    dir: signal.dir,
+    entry: signal.entry
+  });
   persistSignalHistory();
   updateStatsUI();
 
@@ -14090,7 +14292,19 @@ function monitorTradeOutcome(candle) {
      sessions (loaded via restoreSignalHistory) are not incorrectly resolved
      instead of the current live trade's signal. */
   const pending = signalHistory.findLast(s => s.result === "PENDING");
-  if (!pending) { monitoringTrade = false; return; }
+  if (!pending) {
+    logSignalEngineDebug("TRADE_RELEASE", {
+      signalId: trade.signalId || null,
+      reason: "missing_pending_signal_record",
+      symbol: trade.symbol || getActiveSymbol()
+    });
+    monitoringTrade = false;
+    trade = null;
+    trailingSL = null;
+    partialTpHit = false;
+    if (phase === "TRADE") setPhase("BREAKOUT");
+    return;
+  }
 
   const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
   const currentIdx = candles.length - 1;
@@ -14414,6 +14628,24 @@ function monitorTradeOutcome(candle) {
       pending._confRecorded = true;
     }
     if (!_historicalProcessing) rebuildWalkForwardProfilesFromHistory();
+    logSignalEngineDebug("TRADE_CLOSE", {
+      signalId: pending.signalId || trade.signalId || null,
+      result: pending.result,
+      symbol: pending.symbol || trade.symbol || getActiveSymbol(),
+      exitPrice: pending.exitPrice != null ? pending.exitPrice : null
+    });
+    if (!_historicalProcessing && autoResetEnabled) {
+      logSignalEngineDebug("SYMBOL_RELEASE", {
+        signalId: pending.signalId || trade.signalId || null,
+        reason: "trade_resolved_auto_reset",
+        symbol: pending.symbol || trade.symbol || getActiveSymbol()
+      });
+      resetForNextSetup();
+    } else {
+      trade = null;
+      trailingSL = null;
+      partialTpHit = false;
+    }
   }
 }
 
@@ -16016,6 +16248,11 @@ async function sendTradeOutcomeTelegram(signal) {
     const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
+    if (result === "WIN" || result === "LOSS") {
+      sendSignalLifecycleTelegram(result === "WIN" ? "tp" : "sl", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade"));
+    } else if (result === "EXPIRED") {
+      sendSignalLifecycleTelegram("cancelled", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade", "Trade expired before TP/SL resolution."));
+    }
     const outcomeTitle = result === "WIN" ? "TP Reached" : result === "EXPIRED" ? "Trade Cancelled" : "SL Hit";
     const icon = result === "WIN" ? "✅" : result === "EXPIRED" ? "⏱" : "❌";
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
@@ -16030,6 +16267,7 @@ async function sendTradeOutcomeTelegram(signal) {
     lines.push(`${icon} <b>${outcomeTitle}</b> — ${dir} ${sym}`);
     lines.push("");
     lines.push(`<b>Pattern:</b> ${pattern}`);
+    if (signal.signalId) lines.push(`<b>Signal ID:</b> <code>${signal.signalId}</code>`);
     lines.push(`<b>Entry:</b> ${entryStr}`);
     lines.push(`<b>Exit:</b> ${exitStr}`);
     lines.push(`<b>SL:</b> ${slStr}`);
@@ -18818,6 +19056,13 @@ function resetIndicator() {
 function resetSession() {
   /* Reset core indicator state */
   resetIndicator();
+  mtfSetupState = null;
+  lastMtfSetupAlertKey = "";
+  lastMtfApproachAlertKey = "";
+  if (sendSignalLifecycleTelegram._sentKeys && sendSignalLifecycleTelegram._sentKeys.clear) {
+    sendSignalLifecycleTelegram._sentKeys.clear();
+  }
+  logSignalEngineDebug("SESSION_RESET", { action: "core_state_reset" });
 
   /* Clear signal history & stats */
   signalHistory = [];
@@ -18838,6 +19083,31 @@ function resetSession() {
   /* Clear session range trade stats */
   sessionRangeTradeWins = 0;
   sessionRangeTradeLosses = 0;
+  sessionRangeTrade = null;
+  londonSweepSignal = null;
+
+  /* Clear strategy histories, pending states, and strategy signal banners */
+  liquiditySweepHistory = [];
+  stopLossHuntHistory = [];
+  failedPinBarHistory = [];
+  fibScalpHistory = [];
+  po3History = [];
+  gridScalperMAHistory = [];
+  fvgStratHistory = [];
+  mtfTopDownHistory = [];
+  tiktokHistory = [];
+  orderblockHistory = [];
+  candleInterpHistory = [];
+  po3_4hHistory = [];
+  breakerBlockHistory = [];
+  oteGoldenPocketHistory = [];
+  orbHistory = [];
+  crtTbsHistory = [];
+  nyOpenRangeHistory = [];
+  sessionRangeHistory = [];
+  renderStrategyAlerts();
+  updateSignalBanners();
+  renderStrategyTickerBanner();
 
   /* Clear signal log UI */
   if (UI.signalLog) UI.signalLog.innerHTML = "";
@@ -18852,6 +19122,11 @@ function resetSession() {
     localStorage.removeItem(LS_PREFIX + "signalHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradeHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradePL");
+    localStorage.removeItem(LS_PREFIX + "confStats");
+    localStorage.removeItem(SIGNAL_NOTES_LS_KEY);
+    localStorage.removeItem(LS_PREFIX + "gsFlipStats");
+    localStorage.removeItem(LS_PREFIX + "gsOppSettings");
+    sessionStorage.removeItem(LS_PREFIX + "signalQueue");
   } catch (e) { /* storage not available */ }
 
   /* Reset auto-trade history */
@@ -18865,6 +19140,30 @@ function resetSession() {
   symbolTradeTimestamps.clear();
   strategyTradeTimestamps.clear();
   symbolCooldownUntil.clear();
+  for (const slot of autoTradeSlots.values()) {
+    if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
+    if (Array.isArray(slot.activeTrades)) {
+      for (const t of slot.activeTrades) {
+        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+      }
+      slot.activeTrades = [];
+    }
+    slot.inProgress = false;
+    slot.contractId = null;
+    slot.pendingContractId = null;
+    slot.fetchingMultiplier = false;
+    slot.consecutiveErrors = 0;
+  }
+  if (autoTradePendingTimer) { clearTimeout(autoTradePendingTimer); autoTradePendingTimer = null; }
+  if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
+  if (candleCountdownInterval) { clearInterval(candleCountdownInterval); candleCountdownInterval = null; }
+  if (_nyOpenRangeTimerInterval) { clearInterval(_nyOpenRangeTimerInterval); _nyOpenRangeTimerInterval = null; }
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (reconnectDebounceTimer) { clearTimeout(reconnectDebounceTimer); reconnectDebounceTimer = null; }
+  if (backtestInterval) { clearInterval(backtestInterval); backtestInterval = null; }
+  if (multiViewRefreshTimer) { clearInterval(multiViewRefreshTimer); multiViewRefreshTimer = null; }
   for (const k of Object.keys(strategyRegimePausedUntil)) delete strategyRegimePausedUntil[k];
   updateAutoTradeCurrentStakeUI();
   /* Reset session start balance so P/L recalculates from this point */
@@ -26515,6 +26814,9 @@ document.addEventListener("DOMContentLoaded", () => {
     initUI();
     initLoginGate();
     restoreSettings();
+    loadSignalEngineDebugMode();
+    window.setSignalEngineDebugMode = setSignalEngineDebugMode;
+    window.getSignalEngineDebugMode = () => signalEngineDebugMode;
     initAdaptiveRuntime();
     if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
     /* Auto-apply recommended settings on boot so the Active column
