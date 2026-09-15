@@ -368,6 +368,7 @@ test('resetSession keeps only contract-backed active trades and their pending se
     module: { exports: {} },
     resetIndicator: () => {},
     resetStrategyStateContracts: () => {},
+    resetMtfDiagnostics: () => {},
     multiPanels: new Map([['R_25', {
       mtfSetupState: { breakoutEpoch: 1 },
       mtfTerminalBreakoutEpoch: 1,
