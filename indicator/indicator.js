@@ -922,7 +922,8 @@ async function bootstrapAdaptiveIntelligence(force = false, overrides = {}) {
       return data;
     }
     adaptiveIntelligenceBootstrapCache.set(scope.key, data);
-    if (getAdaptiveBootstrapScope(overrides).key === scope.key) {
+    const liveScope = getAdaptiveBootstrapScope();
+    if (liveScope.key === scope.key) {
       adaptiveIntelligenceBootstrap = data;
       adaptiveIntelligenceBootstrapScopeKey = scope.key;
       mergeRemoteConfluenceStats(data);
