@@ -1442,7 +1442,39 @@
             </div>
           </section>
 
-          <!-- Telegram Integration -->
+
+
+          <!-- Adaptive ATR Optimization -->
+          <section class="box">
+            <h3 class="collapsible">⚙️ Adaptive ATR Optimization</h3>
+            <div class="collapsible-body">
+              <label for="adaptiveModeSelect" class="spaced-label">Adaptive Mode</label>
+              <select id="adaptiveModeSelect">
+                <option value="OFF">OFF</option>
+                <option value="SEMI_AUTO">SEMI AUTO</option>
+                <option value="FULL_AUTO">FULL AUTO</option>
+              </select>
+              <p class="hint">OFF keeps legacy static behavior. SEMI AUTO recommends values only. FULL AUTO applies optimized values within safety ranges.</p>
+              <div id="adaptiveSummaryBadges" class="adaptive-summary-badges"></div>
+              <div class="adaptive-table-wrap">
+                <table class="adaptive-table">
+                  <thead>
+                    <tr>
+                      <th>Setting</th>
+                      <th>Current Optimized</th>
+                      <th>Recommended</th>
+                      <th>Historical</th>
+                      <th>Manual</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adaptiveSettingsTableBody"></tbody>
+                </table>
+              </div>
+              <p id="adaptiveReasonText" class="hint"></p>
+            </div>
+          </section>
+
+                    <!-- Telegram Integration -->
           <section class="box">
             <h3 class="collapsible">📤 Telegram Alerts</h3>
             <div class="collapsible-body">
@@ -2179,6 +2211,8 @@
 <script src="../auth.js"></script>
 <script src="../deriv-ws.js"></script>
 <script src="../grid-scalper-ma-opposite.js"></script>
+<script src="adaptive-schema.js"></script>
+<script src="adaptive-engine.js"></script>
 <script src="indicator.js"></script>
 <script>
   /* Mobile panel toggle */

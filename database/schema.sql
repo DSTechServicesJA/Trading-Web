@@ -235,3 +235,114 @@ CREATE TABLE IF NOT EXISTS user_notification_reads (
     CONSTRAINT fk_unr_user
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Adaptive optimization profiles (per user/symbol/timeframe/strategy/regime)
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_profiles (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT UNSIGNED NOT NULL,
+    symbol            VARCHAR(32)  NOT NULL,
+    timeframe_sec     INT UNSIGNED NOT NULL,
+    strategy_key      VARCHAR(64)  NOT NULL,
+    regime            VARCHAR(32)  NOT NULL,
+    adaptive_mode     ENUM('OFF','SEMI_AUTO','FULL_AUTO') NOT NULL DEFAULT 'OFF',
+    profile_json      MEDIUMTEXT   NOT NULL,
+    confidence_score  DECIMAL(5,2) NOT NULL DEFAULT 0,
+    sample_size       INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_profile_scope (user_id, symbol, timeframe_sec, strategy_key, regime),
+    INDEX idx_adaptive_profile_user (user_id),
+    INDEX idx_adaptive_profile_symbol (symbol),
+    INDEX idx_adaptive_profile_updated (updated_at),
+
+    CONSTRAINT fk_adaptive_profile_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Adaptive metric snapshots (rolling analytics points)
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_metric_snapshots (
+    id                           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                      INT UNSIGNED NOT NULL,
+    symbol                       VARCHAR(32)  NOT NULL,
+    timeframe_sec                INT UNSIGNED NOT NULL,
+    strategy_key                 VARCHAR(64)  NOT NULL,
+    regime                       VARCHAR(32)  NOT NULL,
+    win_rate                     DECIMAL(8,6) DEFAULT NULL,
+    loss_rate                    DECIMAL(8,6) DEFAULT NULL,
+    avg_r_multiple               DECIMAL(10,4) DEFAULT NULL,
+    drawdown_r                   DECIMAL(10,4) DEFAULT NULL,
+    consecutive_losses           INT UNSIGNED DEFAULT NULL,
+    consecutive_wins             INT UNSIGNED DEFAULT NULL,
+    cancellation_rate            DECIMAL(8,6) DEFAULT NULL,
+    missed_opportunity_rate      DECIMAL(8,6) DEFAULT NULL,
+    avg_atr_expansion            DECIMAL(10,4) DEFAULT NULL,
+    entry_efficiency             DECIMAL(8,6) DEFAULT NULL,
+    confirmation_quality         DECIMAL(8,6) DEFAULT NULL,
+    retest_success_rate          DECIMAL(8,6) DEFAULT NULL,
+    sample_size                  INT UNSIGNED DEFAULT NULL,
+    confidence_score             DECIMAL(5,2) DEFAULT NULL,
+    created_at                   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_adaptive_metric_scope (user_id, symbol, timeframe_sec, strategy_key, regime),
+    INDEX idx_adaptive_metric_created (created_at),
+
+    CONSTRAINT fk_adaptive_metric_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Adaptive adjustment audit log
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_adjustment_log (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT UNSIGNED NOT NULL,
+    symbol            VARCHAR(32)  NOT NULL,
+    timeframe_sec     INT UNSIGNED NOT NULL,
+    strategy_key      VARCHAR(64)  NOT NULL,
+    regime            VARCHAR(32)  NOT NULL,
+    parameter_key     VARCHAR(64)  NOT NULL,
+    old_value         DECIMAL(12,6) DEFAULT NULL,
+    new_value         DECIMAL(12,6) DEFAULT NULL,
+    reason_text       TEXT         NOT NULL,
+    confidence_score  DECIMAL(5,2) DEFAULT NULL,
+    sample_size       INT UNSIGNED DEFAULT NULL,
+    impact_json       JSON         DEFAULT NULL,
+    revertable        TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_adaptive_adjustment_scope (user_id, symbol, timeframe_sec, strategy_key, regime),
+    INDEX idx_adaptive_adjustment_created (created_at),
+
+    CONSTRAINT fk_adaptive_adjustment_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Adaptive experiments (bandit arm tracking)
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_experiments (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT UNSIGNED NOT NULL,
+    symbol            VARCHAR(32)  NOT NULL,
+    timeframe_sec     INT UNSIGNED NOT NULL,
+    strategy_key      VARCHAR(64)  NOT NULL,
+    regime            VARCHAR(32)  NOT NULL,
+    parameter_key     VARCHAR(64)  NOT NULL,
+    arm_key           VARCHAR(64)  NOT NULL,
+    pulls             INT UNSIGNED NOT NULL DEFAULT 0,
+    cumulative_reward DECIMAL(14,6) NOT NULL DEFAULT 0,
+    avg_reward        DECIMAL(14,6) NOT NULL DEFAULT 0,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_experiment_scope (user_id, symbol, timeframe_sec, strategy_key, regime, parameter_key, arm_key),
+    INDEX idx_adaptive_experiment_scope (user_id, symbol, timeframe_sec, strategy_key, regime),
+
+    CONSTRAINT fk_adaptive_experiment_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

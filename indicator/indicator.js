@@ -457,6 +457,8 @@ const MULTI_VIEW_REFRESH_DEFAULT_MIN = 60;  /* refresh all multi-view panels hou
 const AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT = 0.18; /* intrabar entry needs at least this much progress beyond the level */
 const ENTRY_QUALITY_PROGRESS_ATR_DEFAULT    = 0.22; /* confirmed entries must displace away from the level by this ATR amount */
 const RECENT_LOSS_PAUSE_COUNT_DEFAULT       = 2;    /* pause fresh entries after repeated same-side losses */
+const ADAPTIVE_MODE_DEFAULT                = "OFF";
+const ADAPTIVE_STATE_LS_KEY                = LS_PREFIX + "adaptiveState";
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 100;   /* wait for canvas redraw before screenshot */
@@ -751,13 +753,182 @@ function formatUtcTs(ms) {
   return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
 
+function getManualAdaptiveSettings() {
+  return {
+    minProgressAtr: parseFloat(aggressiveEntryMinAtr),
+    minCloseDistanceAtr: parseFloat(entryQualityMinAtr),
+    maxEntryDistanceAtr: parseFloat(signalMaxDistanceAtr),
+    signalValidityMinutes: parseInt(signalValidityMinutes, 10),
+    lossPauseThreshold: parseInt(recentLossPauseCount, 10)
+  };
+}
+
+function initAdaptiveRuntime() {
+  if (typeof AdaptiveEngine !== "function") return;
+  try {
+    const raw = localStorage.getItem(ADAPTIVE_STATE_LS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    adaptiveRuntime = new AdaptiveEngine(parsed);
+    adaptiveRuntime.setMode(adaptiveMode);
+  } catch (err) {
+    console.warn("Adaptive runtime init failed:", err.message);
+    adaptiveRuntime = new AdaptiveEngine();
+    adaptiveRuntime.setMode(adaptiveMode);
+  }
+}
+
+function persistAdaptiveRuntime() {
+  if (!adaptiveRuntime) return;
+  try {
+    localStorage.setItem(ADAPTIVE_STATE_LS_KEY, JSON.stringify(adaptiveRuntime.exportState()));
+  } catch (err) {
+    console.warn("Adaptive runtime persist failed:", err.message);
+  }
+}
+
+function buildAdaptiveContext(overrides = {}) {
+  return {
+    symbol: overrides.symbol || getActiveSymbol(),
+    timeframeSec: overrides.timeframeSec || getCurrentGranularitySec(),
+    strategy: overrides.strategy || "breakout_retest",
+    regime: overrides.regime || getCurrentRegimeTag()
+  };
+}
+
+function getAdaptiveResolution(overrides = {}) {
+  if (!adaptiveRuntime) return null;
+  return adaptiveRuntime.resolve(buildAdaptiveContext(overrides), getManualAdaptiveSettings());
+}
+
+function getAdaptiveAppliedNumber(key, fallback, overrides = {}) {
+  const r = getAdaptiveResolution(overrides);
+  const n = r && r.applied ? parseFloat(r.applied[key]) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function processAdaptiveResolvedSignals() {
+  if (!adaptiveRuntime) return;
+  const buckets = [
+    signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
+    failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
+    sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
+    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
+    breakerBlockHistory, oteGoldenPocketHistory, crtTbsHistory
+  ].filter(Array.isArray);
+
+  let touched = false;
+  for (const arr of buckets) {
+    for (const s of arr) {
+      if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
+      const id = [s.time || "", s.symbol || "--", s.strategyType || s.type || "breakout_retest", s.entry || "", s.result].join("|");
+      if (adaptiveRuntime.wasProcessed(id) || s._adaptiveProcessed) continue;
+
+      const ctx = buildAdaptiveContext({
+        symbol: s.symbol || getActiveSymbol(),
+        timeframeSec: s.timeframeSec || getCurrentGranularitySec(),
+        strategy: s.strategyType || s.type || "breakout_retest",
+        regime: s.volatilityRegime || "TRANSITIONING"
+      });
+
+      const rr = Number.isFinite(s.rMultiple) ? s.rMultiple : (s.result === "WIN" ? (Number.isFinite(s.rr) ? s.rr : 1) : -1);
+      const atrRef = Number.isFinite(s.atrAtSignal) ? s.atrAtSignal : (Number.isFinite(s.atrAtEntry) ? s.atrAtEntry : null);
+      const atrExpansion = (Number.isFinite(atrRef) && atrRef > 0 && Number.isFinite(s.exitPrice) && Number.isFinite(s.entry))
+        ? Math.abs(s.exitPrice - s.entry) / atrRef
+        : null;
+      const progressGate = Math.max(0.0001, getAdaptiveAppliedNumber("minProgressAtr", aggressiveEntryMinAtr, ctx));
+      const entryEfficiency = Number.isFinite(s.entryProgressAtr) ? clamp01(s.entryProgressAtr / progressGate) : null;
+      const confirmationQuality = Number.isFinite(s.confluenceScore) ? clamp01(s.confluenceScore / 16) : null;
+      const earlyStopLoss = s.result === "LOSS" && Number.isFinite(s.entryIdx) && Number.isFinite(s.outcomeCandleIdx)
+        ? ((s.outcomeCandleIdx - s.entryIdx) <= 3)
+        : false;
+
+      adaptiveRuntime.recordOutcome(ctx, {
+        result: s.result,
+        rMultiple: rr,
+        atrExpansionPostSignal: atrExpansion,
+        entryEfficiency,
+        confirmationQuality,
+        retestSuccess: s.result === "WIN",
+        earlyStopLoss
+      });
+      adaptiveRuntime.markProcessed(id);
+      s._adaptiveProcessed = true;
+      touched = true;
+    }
+  }
+
+  if (touched) persistAdaptiveRuntime();
+}
+
+function renderAdaptiveSettingsUI() {
+  if (!UI.adaptiveSettingsTableBody) return;
+  const manual = getManualAdaptiveSettings();
+  const dash = adaptiveRuntime
+    ? adaptiveRuntime.getDashboard(buildAdaptiveContext(), manual)
+    : { mode: adaptiveMode, manual, optimized: manual, recommendations: {}, metrics: { sampleSize: 0, confidence: 0, winRate: 0, cancelRate: 0 }, history: {} };
+
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
+
+  const rows = [
+    ["minProgressAtr", "Min Progress ATR", 2],
+    ["minCloseDistanceAtr", "Min Close Distance ATR", 2],
+    ["maxEntryDistanceAtr", "Max Entry Distance ATR", 2],
+    ["signalValidityMinutes", "Signal Validity (min)", 0],
+    ["lossPauseThreshold", "Loss Pause Threshold", 0]
+  ];
+
+  UI.adaptiveSettingsTableBody.innerHTML = rows.map(([key, label, dp]) => {
+    const optimized = dash.optimized && Number.isFinite(dash.optimized[key]) ? dash.optimized[key] : manual[key];
+    const manualVal = Number.isFinite(manual[key]) ? manual[key] : 0;
+    const history = dash.history && dash.history[key] && dash.history[key].length ? dash.history[key][dash.history[key].length - 1].from : manualVal;
+    const reason = dash.recommendations && dash.recommendations[key] ? dash.recommendations[key] : "—";
+    const fmt = (v) => Number(v).toFixed(dp);
+    return `<tr><td>${label}</td><td>${fmt(optimized)}</td><td class="adaptive-row-reason">${reason}</td><td>${fmt(history)}</td><td>${fmt(manualVal)}</td></tr>`;
+  }).join("");
+
+  if (UI.adaptiveSummaryBadges) {
+    const m = dash.metrics || {};
+    const wr = Number.isFinite(m.winRate) ? (m.winRate * 100).toFixed(1) : "0.0";
+    const cr = Number.isFinite(m.cancelRate) ? (m.cancelRate * 100).toFixed(1) : "0.0";
+    const conf = Number.isFinite(m.confidence) ? m.confidence.toFixed(0) : "0";
+    const ss = Number.isFinite(m.sampleSize) ? m.sampleSize : 0;
+    UI.adaptiveSummaryBadges.innerHTML = `
+      <span class="status-badge enabled">Mode: ${adaptiveMode}</span>
+      <span class="status-badge bull">Win Rate: ${wr}%</span>
+      <span class="status-badge warning">Cancel Rate: ${cr}%</span>
+      <span class="status-badge ${conf >= 60 ? "bull" : "warning"}">Confidence: ${conf}%</span>
+      <span class="status-badge">Samples: ${ss}</span>
+    `;
+  }
+
+  if (UI.adaptiveReasonText) {
+    const reasons = Object.values(dash.recommendations || {}).filter(Boolean);
+    UI.adaptiveReasonText.textContent = reasons.length
+      ? reasons.slice(0, 2).join(" • ")
+      : "Adaptive engine is monitoring performance and waiting for enough samples to optimize.";
+  }
+}
+
+function recordAdaptiveCancellation(reason, overrides = {}) {
+  if (!adaptiveRuntime || adaptiveMode === "OFF") return;
+  const txt = String(reason || "");
+  adaptiveRuntime.recordCancellation(buildAdaptiveContext(overrides), {
+    missedOpportunity: /confluence|quality|rejected|late/i.test(txt),
+    wasWinningCandidate: /winning|profit/i.test(txt)
+  });
+  persistAdaptiveRuntime();
+}
+
 function getSignalValidityMs() {
-  return Math.max(1, parseInt(signalValidityMinutes, 10) || SIGNAL_DEFAULT_VALIDITY_MIN) * 60 * 1000;
+  const fallback = Math.max(1, parseInt(signalValidityMinutes, 10) || SIGNAL_DEFAULT_VALIDITY_MIN);
+  const mins = Math.max(1, Math.round(getAdaptiveAppliedNumber("signalValidityMinutes", fallback)));
+  return mins * 60 * 1000;
 }
 
 function getSignalDistanceLimitAtr() {
   const n = parseFloat(signalMaxDistanceAtr);
-  return Number.isFinite(n) && n > 0 ? n : SIGNAL_DEFAULT_MAX_DISTANCE_ATR;
+  const fallback = Number.isFinite(n) && n > 0 ? n : SIGNAL_DEFAULT_MAX_DISTANCE_ATR;
+  return getAdaptiveAppliedNumber("maxEntryDistanceAtr", fallback);
 }
 
 function getAtrReference() {
@@ -798,7 +969,9 @@ function normalizeSignalDir(dir) {
 }
 
 function getEntryProgressMinAtr(symbol, granSec, isAggressive = false) {
-  let minAtr = parseFloat(isAggressive ? aggressiveEntryMinAtr : entryQualityMinAtr);
+  const adaptiveKey = isAggressive ? "minProgressAtr" : "minCloseDistanceAtr";
+  const adaptiveFallback = parseFloat(isAggressive ? aggressiveEntryMinAtr : entryQualityMinAtr);
+  let minAtr = getAdaptiveAppliedNumber(adaptiveKey, adaptiveFallback, { symbol, timeframeSec: granSec, strategy: "breakout_retest" });
   if (!Number.isFinite(minAtr) || minAtr <= 0) {
     minAtr = isAggressive ? AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT : ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
   }
@@ -866,7 +1039,8 @@ function getSignalCreatedAtMs(signal) {
 
 function shouldPauseAfterRecentLosses(history, options = {}) {
   if (!recentLossPauseEnabled) return { block: false };
-  const required = Math.max(1, parseInt(recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+  const fallbackRequired = Math.max(1, parseInt(recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+  const required = Math.max(1, Math.round(getAdaptiveAppliedNumber("lossPauseThreshold", fallbackRequired, options)));
   const symbol = options.symbol || getActiveSymbol();
   const strategyType = options.strategyType || "breakout_retest";
   const dir = normalizeSignalDir(options.dir);
@@ -1858,6 +2032,8 @@ let signalNotes = {};                /* { signalId: noteText } */
 /* ================= FEATURE: ADAPTIVE CONFLUENCE WEIGHTING ================= */
 let adaptiveConfluenceEnabled = false;
 let confluenceFactorStats = {};      /* { factorName: { wins, losses } } */
+let adaptiveMode = ADAPTIVE_MODE_DEFAULT;
+let adaptiveRuntime = null;
 
 /* Confluence score for current setup */
 let confluenceScore = 0;
@@ -9086,6 +9262,7 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
 function maybeSendBreakoutCancelled(reason) {
   if (_historicalProcessing || !breakout) return;
   if (!breakout._setupAlertSent && !breakout._approachAlertSent) return;
+  recordAdaptiveCancellation(reason, { strategy: "breakout_retest", dir: breakout.dir });
   sendSignalLifecycleTelegram("cancelled", {
     channel: "trade",
     strategyLabel: "Breakout Retest",
@@ -14068,6 +14245,7 @@ function monitorTradeOutcome(candle) {
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       pending.exitPrice = exitPrice;
+      pending.outcomeCandleIdx = currentIdx;
       if (inProfit) {
         signalWins++;
       } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
@@ -14096,6 +14274,7 @@ function monitorTradeOutcome(candle) {
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       pending.exitPrice = exitPrice;
+      pending.outcomeCandleIdx = currentIdx;
       if (inProfit) {
         signalWins++;
       } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
@@ -14223,6 +14402,7 @@ function monitorTradeOutcome(candle) {
   }
 
   if (resolved) {
+    pending.outcomeCandleIdx = currentIdx;
     monitoringTrade = false;
     persistSignalHistory();
     updateStatsUI();
@@ -16499,6 +16679,7 @@ function saveSettings() {
       newsPauseMinutes,
       multiRLadderEnabled,
       adaptiveConfluenceEnabled,
+      adaptiveMode,
       scannerEnabled,
       scannerSymbols: JSON.stringify(scannerSymbols),
       backtestSpeedMs
@@ -16611,6 +16792,7 @@ function restoreSettings() {
 
     /* Scalping mode */
     if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
+    if (s.adaptiveMode != null) adaptiveMode = String(s.adaptiveMode).toUpperCase();
     if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
 
     if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
@@ -16675,6 +16857,7 @@ function restoreSettings() {
     if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
     if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
     if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
 
     /* Live Scalp Scanner */
     if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
@@ -17041,6 +17224,8 @@ function updateStatsUI() {
   }
 
   /* Always update aggregated signal count and banners (across all panels) */
+  processAdaptiveResolvedSignals();
+  renderAdaptiveSettingsUI();
   const allSignals = getAggregatedSignalHistory();
   if (UI.signalCount) UI.signalCount.textContent = allSignals.length;
   updateScalpStatsUI();
@@ -20636,6 +20821,8 @@ function revertAllSettings() {
   entryQualityMinAtr        = ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
   recentLossPauseEnabled  = true;
   recentLossPauseCount    = RECENT_LOSS_PAUSE_COUNT_DEFAULT;
+  adaptiveMode            = ADAPTIVE_MODE_DEFAULT;
+  if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
 
   /* Scalping & misc */
   scalpingModeEnabled  = false;
@@ -20745,6 +20932,7 @@ function revertAllSettings() {
   if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
   if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
   if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
   if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value   = autoTradeExecutionMode;
   if (UI.mt5SignalApiUrl)        UI.mt5SignalApiUrl.value          = mt5SignalApiUrl;
   if (UI.mt5StatusApiUrl)        UI.mt5StatusApiUrl.value          = mt5StatusApiUrl;
@@ -25391,6 +25579,7 @@ function syncFilterUIFromGlobals() {
   if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
   if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
   if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
 }
 
 /**
@@ -26326,6 +26515,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initUI();
     initLoginGate();
     restoreSettings();
+    initAdaptiveRuntime();
+    if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
     /* Auto-apply recommended settings on boot so the Active column
        and all filter toggles reflect the current symbol's recommendations */
     applyRecommendedSettings();
@@ -26857,6 +27048,15 @@ document.addEventListener("DOMContentLoaded", () => {
       recentLossPauseCount = Math.max(1, parseInt(UI.recentLossPauseCountInput.value, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
       UI.recentLossPauseCountInput.value = recentLossPauseCount;
       syncProfitDirToAllPanels(); saveSettings();
+    });
+  }
+  if (UI.adaptiveModeSelect) {
+    UI.adaptiveModeSelect.addEventListener("change", () => {
+      adaptiveMode = String(UI.adaptiveModeSelect.value || ADAPTIVE_MODE_DEFAULT).toUpperCase();
+      if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
+      persistAdaptiveRuntime();
+      saveSettings();
+      renderAdaptiveSettingsUI();
     });
   }
   if (UI.appIdInput) {
@@ -27804,6 +28004,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   safeRun("ready message", () => addLog("Indicator ready – press Connect to start"));
   safeRun("stats UI init", () => updateStatsUI());
+  safeRun("adaptive UI init", () => renderAdaptiveSettingsUI());
   if (initWarnings.length) {
     try { addLog("⚠️ Initialization issue detected. Some controls may not respond; check console (F12)."); } catch (_) { /* addLog itself may be unavailable */ }
   }
