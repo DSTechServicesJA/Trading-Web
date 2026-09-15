@@ -19354,7 +19354,6 @@ function resetSession() {
       slot.contractId = null;
       slot.pendingContractId = null;
     } else {
-      slot.inProgress = true;
       addLog(`📌 Session reset preserving active auto-trade tracking for ${slot.symbol || "symbol"} until settlement.`);
     }
     slot.fetchingMultiplier = false;
@@ -25697,7 +25696,18 @@ function activatePanel(p) {
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
-  mtfSetupState         = p.mtfSetupState || null;
+  if (p.mtfSetupState && typeof p.mtfSetupState === "object" && Array.isArray(candles) && candles.length > 0) {
+    const restored = Object.assign({}, p.mtfSetupState);
+    let detectedIdx = Number.isFinite(restored.breakoutEpoch)
+      ? candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch >= restored.breakoutEpoch)
+      : -1;
+    if (detectedIdx < 0) detectedIdx = candles.length - 1;
+    restored.setupDetectedIdx = detectedIdx;
+    restored.expiresAfterIdx = detectedIdx + (MTF_RETEST_LOOKBACK * 4);
+    mtfSetupState = restored;
+  } else {
+    mtfSetupState = null;
+  }
   mtfTerminalBreakoutEpoch = p.mtfTerminalBreakoutEpoch != null ? p.mtfTerminalBreakoutEpoch : null;
   candleInterpHistory   = p.candleInterpHistory   || [];
   lastCandleInterpIdx   = p.lastCandleInterpIdx   != null ? p.lastCandleInterpIdx   : -999;
