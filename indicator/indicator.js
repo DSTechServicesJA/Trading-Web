@@ -1063,6 +1063,19 @@ function shouldPauseAfterRecentLosses(history, options = {}) {
   return { block: false };
 }
 
+function isSymbolEligibleForNewSignal(symbol, strategyType = null) {
+  const sym = symbol || getActiveSymbol();
+  if (!sym) return true;
+  if (monitoringTrade && trade && (trade.symbol || sym) === sym) return false;
+  const hasPending = signalHistory.some((s) => {
+    if (!s || s.result !== "PENDING") return false;
+    if ((s.symbol || sym) !== sym) return false;
+    if (!strategyType) return true;
+    return (s.strategyType || s.type || "breakout_retest") === strategyType;
+  });
+  return !hasPending;
+}
+
 const SIGNAL_ENGINE_DEBUG_STORAGE_KEY = `${LS_PREFIX}signalEngineDebugMode`;
 let signalEngineDebugMode = false;
 
@@ -1132,6 +1145,23 @@ function stampSignalLifecycle(signal, options = {}) {
     ? signal.atrAtSignal
     : (Number.isFinite(options.atrAtSignal) && options.atrAtSignal > 0 ? options.atrAtSignal : getAtrReference());
   return signal;
+}
+
+function ensureAllKnownSignalIds() {
+  const histories = [
+    signalHistory,
+    liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
+    fibScalpHistory, po3History, gridScalperMAHistory, fvgStratHistory,
+    mtfTopDownHistory, nyOpenRangeHistory, sessionRangeHistory, tiktokHistory,
+    orderblockHistory, candleInterpHistory, po3_4hHistory, breakerBlockHistory,
+    oteGoldenPocketHistory, orbHistory, crtTbsHistory
+  ];
+  for (const history of histories) {
+    if (!Array.isArray(history)) continue;
+    for (const s of history) {
+      if (s && typeof s === "object" && !s.signalId) stampSignalLifecycle(s);
+    }
+  }
 }
 
 function getSignalDistanceFromEntry(signal, currentPrice) {
@@ -7249,6 +7279,7 @@ function processCustomStrategies() {
   processOrb();
   /* Strategy 20: CRT + TBS */
   processCrtTbs();
+  ensureAllKnownSignalIds();
 }
 
 /**
@@ -7502,6 +7533,10 @@ function detectMtfConfirmation(setupOverride = null) {
  */
 function detectMtfTopDown(confirmationOverride = null) {
   if (!mtfTopDownEnabled) return null;
+  if (!isSymbolEligibleForNewSignal(getActiveSymbol(), "mtf_top_down")) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "symbol_not_eligible" });
+    return null;
+  }
   if (!candles || candles.length < 20) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "insufficient_candles", candles: candles ? candles.length : 0 });
     return null;
@@ -9356,6 +9391,19 @@ function buildLifecycleTelegramCaption(kind, payload) {
 }
 
 async function sendSignalLifecycleTelegram(kind, payload, force = false) {
+  if (payload && !payload.signalId) {
+    const basis = [
+      payload.strategyLabel || payload.channel || "signal",
+      payload.symbol || getActiveSymbol() || "",
+      payload.timeframeSec != null ? payload.timeframeSec : getCurrentGranularitySec(),
+      payload.dir || "",
+      payload.entry != null ? fmt(payload.entry, 6) : (payload.level != null ? fmt(payload.level, 6) : ""),
+      payload.validUntilMs != null ? payload.validUntilMs : ""
+    ].join("|");
+    let hash = 0;
+    for (let i = 0; i < basis.length; i++) hash = ((hash << 5) - hash + basis.charCodeAt(i)) | 0;
+    payload.signalId = `lfc-${Math.abs(hash)}`;
+  }
   if (!telegramLifecycleAlertsEnabled && !force) return;
   const now = Date.now();
   if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled") {
@@ -12255,6 +12303,10 @@ function buildTrade(confirmCandle, confirmIdx) {
 
   const regime = getCurrentRegimeTag();
   const symbol = getActiveSymbol();
+  if (!isSymbolEligibleForNewSignal(symbol, "breakout_retest")) {
+    addLog("⚠ Trade REJECTED — symbol still has an active pending trade");
+    return;
+  }
   const granSec = getCurrentGranularitySec();
   const dynamicConfluenceMin = getDynamicMinConfluence(symbol, granSec, regime);
   if (minConfluenceEnabled) {
@@ -14646,6 +14698,12 @@ function monitorTradeOutcome(candle) {
       trailingSL = null;
       partialTpHit = false;
     }
+    const eligibleAfterClose = isSymbolEligibleForNewSignal(pending.symbol || getActiveSymbol(), "breakout_retest");
+    logSignalEngineDebug("NEW_SIGNAL_ELIGIBILITY", {
+      signalId: pending.signalId || null,
+      symbol: pending.symbol || getActiveSymbol(),
+      eligible: eligibleAfterClose
+    });
   }
 }
 
@@ -17438,6 +17496,7 @@ function restoreSignalHistory() {
       signalHistory = parsed.map(s =>
         (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
       );
+      ensureAllKnownSignalIds();
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
       signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
@@ -19016,16 +19075,90 @@ function applyRecommendedSettings() {
   updateStateUI();
 }
 
+const strategyStateRegistry = new Map();
+let strategyStateRegistryInitialized = false;
+
+function registerStrategyState(name, contract) {
+  if (!name || !contract) return;
+  strategyStateRegistry.set(name, contract);
+}
+
+function initStrategyStateRegistry() {
+  if (strategyStateRegistryInitialized) return;
+  strategyStateRegistryInitialized = true;
+
+  registerStrategyState("breakout_retest", {
+    resetCore() {
+      openingRange = null;
+      breakout = null;
+      retestInfo = null;
+      indecisionInfo = null;
+      confirmInfo = null;
+      trade = null;
+      monitoringTrade = false;
+      trailingSL = null;
+      partialTpHit = false;
+      teslaT1Hit = false;
+      teslaT2Hit = false;
+      teslaT3Hit = false;
+      teslaBEHit = false;
+      retestCount = 0;
+      mtfSetupState = null;
+      lastMtfSetupAlertKey = "";
+      lastMtfApproachAlertKey = "";
+      resetNyOpenRange();
+      resetSessionRanges();
+      setPhase("WAITING");
+    }
+  });
+
+  registerStrategyState("strategy_histories", {
+    resetSession() {
+      signalHistory = [];
+      liveScalpHistory = [];
+      liquiditySweepHistory = [];
+      stopLossHuntHistory = [];
+      failedPinBarHistory = [];
+      fibScalpHistory = [];
+      po3History = [];
+      gridScalperMAHistory = [];
+      fvgStratHistory = [];
+      mtfTopDownHistory = [];
+      tiktokHistory = [];
+      orderblockHistory = [];
+      candleInterpHistory = [];
+      po3_4hHistory = [];
+      breakerBlockHistory = [];
+      oteGoldenPocketHistory = [];
+      orbHistory = [];
+      crtTbsHistory = [];
+      nyOpenRangeHistory = [];
+      sessionRangeHistory = [];
+      lastMtfTopDownIdx = -999;
+    }
+  });
+}
+
+function resetStrategyStateContracts(mode = "core") {
+  initStrategyStateRegistry();
+  for (const contract of strategyStateRegistry.values()) {
+    try {
+      if (mode === "session" && typeof contract.resetSession === "function") {
+        contract.resetSession();
+      } else if (mode === "core" && typeof contract.resetCore === "function") {
+        contract.resetCore();
+      }
+    } catch (err) {
+      addLog(`⚠ Strategy reset contract failed: ${err.message}`);
+    }
+  }
+}
+
 function resetIndicator() {
+  initStrategyStateRegistry();
   candles = [];
   rangeStartEpoch = null;
-  openingRange = null;
-  breakout = null;
-  retestInfo = null;
-  indecisionInfo = null;
-  confirmInfo = null;
-  trade = null;
-  monitoringTrade = false;
+  resetStrategyStateContracts("core");
   /* Note: do NOT clear per-symbol autoTradeSlots here — resetIndicator is
      called during reconnect, and we need pending contract IDs to survive
      so we can re-subscribe after re-authorization. */
@@ -19041,21 +19174,13 @@ function resetIndicator() {
   adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
   stochK = []; stochD = [];
   emaMTF = []; vwapValues = [];
-  retestCount = 0;
-  trailingSL   = null;
-  partialTpHit = false;
-  teslaT1Hit = false;
-  teslaT2Hit = false;
-  teslaT3Hit = false;
-  teslaBEHit = false;
-  resetNyOpenRange();
-  setPhase("WAITING");
   updateStateUI();
 }
 
 function resetSession() {
   /* Reset core indicator state */
   resetIndicator();
+  resetStrategyStateContracts("session");
   mtfSetupState = null;
   lastMtfSetupAlertKey = "";
   lastMtfApproachAlertKey = "";

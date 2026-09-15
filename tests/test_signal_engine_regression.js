@@ -22,6 +22,14 @@ test('Reset session clears key strategy histories and lifecycle dedupe cache', (
   assert.match(source, /sendSignalLifecycleTelegram\._sentKeys\.clear\(\)/);
 });
 
+test('Reset session integration clears timers and storage-backed caches', () => {
+  assert.match(source, /if \(pingTimer\) \{ clearInterval\(pingTimer\); pingTimer = null; \}/);
+  assert.match(source, /if \(watchdogTimer\) \{ clearInterval\(watchdogTimer\); watchdogTimer = null; \}/);
+  assert.match(source, /localStorage\.removeItem\(LS_PREFIX \+ "signalHistory"\)/);
+  assert.match(source, /localStorage\.removeItem\(LS_PREFIX \+ "confStats"\)/);
+  assert.match(source, /localStorage\.removeItem\(SIGNAL_NOTES_LS_KEY\)/);
+});
+
 test('Lifecycle telegram captions include Signal ID and TP/SL categories', () => {
   assert.match(source, /Signal ID/);
   assert.match(source, /Take Profit Hit/);
