@@ -25698,13 +25698,18 @@ function activatePanel(p) {
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
   if (p.mtfSetupState && typeof p.mtfSetupState === "object" && Array.isArray(candles) && candles.length > 0) {
     const restored = Object.assign({}, p.mtfSetupState);
-    let detectedIdx = Number.isFinite(restored.breakoutEpoch)
-      ? candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch >= restored.breakoutEpoch)
-      : -1;
-    if (detectedIdx < 0) detectedIdx = candles.length - 1;
-    restored.setupDetectedIdx = detectedIdx;
-    restored.expiresAfterIdx = detectedIdx + (MTF_RETEST_LOOKBACK * 4);
-    mtfSetupState = restored;
+    if (Number.isFinite(restored.breakoutEpoch)) {
+      const detectedIdx = candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch >= restored.breakoutEpoch);
+      if (detectedIdx >= 0) {
+        restored.setupDetectedIdx = detectedIdx;
+        restored.expiresAfterIdx = detectedIdx + (MTF_RETEST_LOOKBACK * 4);
+        mtfSetupState = restored;
+      } else {
+        mtfSetupState = null;
+      }
+    } else {
+      mtfSetupState = null;
+    }
   } else {
     mtfSetupState = null;
   }
