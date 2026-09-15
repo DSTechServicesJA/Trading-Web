@@ -457,6 +457,8 @@ const MULTI_VIEW_REFRESH_DEFAULT_MIN = 60;  /* refresh all multi-view panels hou
 const AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT = 0.18; /* intrabar entry needs at least this much progress beyond the level */
 const ENTRY_QUALITY_PROGRESS_ATR_DEFAULT    = 0.22; /* confirmed entries must displace away from the level by this ATR amount */
 const RECENT_LOSS_PAUSE_COUNT_DEFAULT       = 2;    /* pause fresh entries after repeated same-side losses */
+const ADAPTIVE_MODE_DEFAULT                = "OFF";
+const ADAPTIVE_STATE_LS_KEY                = LS_PREFIX + "adaptiveState";
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 100;   /* wait for canvas redraw before screenshot */
@@ -751,13 +753,182 @@ function formatUtcTs(ms) {
   return new Date(ms).toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
 
+function getManualAdaptiveSettings() {
+  return {
+    minProgressAtr: parseFloat(aggressiveEntryMinAtr),
+    minCloseDistanceAtr: parseFloat(entryQualityMinAtr),
+    maxEntryDistanceAtr: parseFloat(signalMaxDistanceAtr),
+    signalValidityMinutes: parseInt(signalValidityMinutes, 10),
+    lossPauseThreshold: parseInt(recentLossPauseCount, 10)
+  };
+}
+
+function initAdaptiveRuntime() {
+  if (typeof AdaptiveEngine !== "function") return;
+  try {
+    const raw = localStorage.getItem(ADAPTIVE_STATE_LS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    adaptiveRuntime = new AdaptiveEngine(parsed);
+    adaptiveRuntime.setMode(adaptiveMode);
+  } catch (err) {
+    console.warn("Adaptive runtime init failed:", err.message);
+    adaptiveRuntime = new AdaptiveEngine();
+    adaptiveRuntime.setMode(adaptiveMode);
+  }
+}
+
+function persistAdaptiveRuntime() {
+  if (!adaptiveRuntime) return;
+  try {
+    localStorage.setItem(ADAPTIVE_STATE_LS_KEY, JSON.stringify(adaptiveRuntime.exportState()));
+  } catch (err) {
+    console.warn("Adaptive runtime persist failed:", err.message);
+  }
+}
+
+function buildAdaptiveContext(overrides = {}) {
+  return {
+    symbol: overrides.symbol || getActiveSymbol(),
+    timeframeSec: overrides.timeframeSec || getCurrentGranularitySec(),
+    strategy: overrides.strategy || "breakout_retest",
+    regime: overrides.regime || getCurrentRegimeTag()
+  };
+}
+
+function getAdaptiveResolution(overrides = {}) {
+  if (!adaptiveRuntime) return null;
+  return adaptiveRuntime.resolve(buildAdaptiveContext(overrides), getManualAdaptiveSettings());
+}
+
+function getAdaptiveAppliedNumber(key, fallback, overrides = {}) {
+  const r = getAdaptiveResolution(overrides);
+  const n = r && r.applied ? parseFloat(r.applied[key]) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function processAdaptiveResolvedSignals() {
+  if (!adaptiveRuntime) return;
+  const buckets = [
+    signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
+    failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
+    sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
+    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
+    breakerBlockHistory, oteGoldenPocketHistory, crtTbsHistory
+  ].filter(Array.isArray);
+
+  let touched = false;
+  for (const arr of buckets) {
+    for (const s of arr) {
+      if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
+      const id = [s.time || "", s.symbol || "--", s.strategyType || s.type || "breakout_retest", s.entry || "", s.result].join("|");
+      if (adaptiveRuntime.wasProcessed(id) || s._adaptiveProcessed) continue;
+
+      const ctx = buildAdaptiveContext({
+        symbol: s.symbol || getActiveSymbol(),
+        timeframeSec: s.timeframeSec || getCurrentGranularitySec(),
+        strategy: s.strategyType || s.type || "breakout_retest",
+        regime: s.volatilityRegime || "TRANSITIONING"
+      });
+
+      const rr = Number.isFinite(s.rMultiple) ? s.rMultiple : (s.result === "WIN" ? (Number.isFinite(s.rr) ? s.rr : 1) : -1);
+      const atrRef = Number.isFinite(s.atrAtSignal) ? s.atrAtSignal : (Number.isFinite(s.atrAtEntry) ? s.atrAtEntry : null);
+      const atrExpansion = (Number.isFinite(atrRef) && atrRef > 0 && Number.isFinite(s.exitPrice) && Number.isFinite(s.entry))
+        ? Math.abs(s.exitPrice - s.entry) / atrRef
+        : null;
+      const progressGate = Math.max(0.0001, getAdaptiveAppliedNumber("minProgressAtr", aggressiveEntryMinAtr, ctx));
+      const entryEfficiency = Number.isFinite(s.entryProgressAtr) ? clamp01(s.entryProgressAtr / progressGate) : null;
+      const confirmationQuality = Number.isFinite(s.confluenceScore) ? clamp01(s.confluenceScore / 16) : null;
+      const earlyStopLoss = s.result === "LOSS" && Number.isFinite(s.entryIdx) && Number.isFinite(s.outcomeCandleIdx)
+        ? ((s.outcomeCandleIdx - s.entryIdx) <= 3)
+        : false;
+
+      adaptiveRuntime.recordOutcome(ctx, {
+        result: s.result,
+        rMultiple: rr,
+        atrExpansionPostSignal: atrExpansion,
+        entryEfficiency,
+        confirmationQuality,
+        retestSuccess: s.result === "WIN",
+        earlyStopLoss
+      });
+      adaptiveRuntime.markProcessed(id);
+      s._adaptiveProcessed = true;
+      touched = true;
+    }
+  }
+
+  if (touched) persistAdaptiveRuntime();
+}
+
+function renderAdaptiveSettingsUI() {
+  if (!UI.adaptiveSettingsTableBody) return;
+  const manual = getManualAdaptiveSettings();
+  const dash = adaptiveRuntime
+    ? adaptiveRuntime.getDashboard(buildAdaptiveContext(), manual)
+    : { mode: adaptiveMode, manual, optimized: manual, recommendations: {}, metrics: { sampleSize: 0, confidence: 0, winRate: 0, cancelRate: 0 }, history: {} };
+
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
+
+  const rows = [
+    ["minProgressAtr", "Min Progress ATR", 2],
+    ["minCloseDistanceAtr", "Min Close Distance ATR", 2],
+    ["maxEntryDistanceAtr", "Max Entry Distance ATR", 2],
+    ["signalValidityMinutes", "Signal Validity (min)", 0],
+    ["lossPauseThreshold", "Loss Pause Threshold", 0]
+  ];
+
+  UI.adaptiveSettingsTableBody.innerHTML = rows.map(([key, label, dp]) => {
+    const optimized = dash.optimized && Number.isFinite(dash.optimized[key]) ? dash.optimized[key] : manual[key];
+    const manualVal = Number.isFinite(manual[key]) ? manual[key] : 0;
+    const history = dash.history && dash.history[key] && dash.history[key].length ? dash.history[key][dash.history[key].length - 1].from : manualVal;
+    const reason = dash.recommendations && dash.recommendations[key] ? dash.recommendations[key] : "—";
+    const fmt = (v) => Number(v).toFixed(dp);
+    return `<tr><td>${label}</td><td>${fmt(optimized)}</td><td class="adaptive-row-reason">${reason}</td><td>${fmt(history)}</td><td>${fmt(manualVal)}</td></tr>`;
+  }).join("");
+
+  if (UI.adaptiveSummaryBadges) {
+    const m = dash.metrics || {};
+    const wr = Number.isFinite(m.winRate) ? (m.winRate * 100).toFixed(1) : "0.0";
+    const cr = Number.isFinite(m.cancelRate) ? (m.cancelRate * 100).toFixed(1) : "0.0";
+    const conf = Number.isFinite(m.confidence) ? m.confidence.toFixed(0) : "0";
+    const ss = Number.isFinite(m.sampleSize) ? m.sampleSize : 0;
+    UI.adaptiveSummaryBadges.innerHTML = `
+      <span class="status-badge enabled">Mode: ${adaptiveMode}</span>
+      <span class="status-badge bull">Win Rate: ${wr}%</span>
+      <span class="status-badge warning">Cancel Rate: ${cr}%</span>
+      <span class="status-badge ${conf >= 60 ? "bull" : "warning"}">Confidence: ${conf}%</span>
+      <span class="status-badge">Samples: ${ss}</span>
+    `;
+  }
+
+  if (UI.adaptiveReasonText) {
+    const reasons = Object.values(dash.recommendations || {}).filter(Boolean);
+    UI.adaptiveReasonText.textContent = reasons.length
+      ? reasons.slice(0, 2).join(" • ")
+      : "Adaptive engine is monitoring performance and waiting for enough samples to optimize.";
+  }
+}
+
+function recordAdaptiveCancellation(reason, overrides = {}) {
+  if (!adaptiveRuntime || adaptiveMode === "OFF") return;
+  const txt = String(reason || "");
+  adaptiveRuntime.recordCancellation(buildAdaptiveContext(overrides), {
+    missedOpportunity: /confluence|quality|rejected|late/i.test(txt),
+    wasWinningCandidate: /winning|profit/i.test(txt)
+  });
+  persistAdaptiveRuntime();
+}
+
 function getSignalValidityMs() {
-  return Math.max(1, parseInt(signalValidityMinutes, 10) || SIGNAL_DEFAULT_VALIDITY_MIN) * 60 * 1000;
+  const fallback = Math.max(1, parseInt(signalValidityMinutes, 10) || SIGNAL_DEFAULT_VALIDITY_MIN);
+  const mins = Math.max(1, Math.round(getAdaptiveAppliedNumber("signalValidityMinutes", fallback)));
+  return mins * 60 * 1000;
 }
 
 function getSignalDistanceLimitAtr() {
   const n = parseFloat(signalMaxDistanceAtr);
-  return Number.isFinite(n) && n > 0 ? n : SIGNAL_DEFAULT_MAX_DISTANCE_ATR;
+  const fallback = Number.isFinite(n) && n > 0 ? n : SIGNAL_DEFAULT_MAX_DISTANCE_ATR;
+  return getAdaptiveAppliedNumber("maxEntryDistanceAtr", fallback);
 }
 
 function getAtrReference() {
@@ -798,7 +969,9 @@ function normalizeSignalDir(dir) {
 }
 
 function getEntryProgressMinAtr(symbol, granSec, isAggressive = false) {
-  let minAtr = parseFloat(isAggressive ? aggressiveEntryMinAtr : entryQualityMinAtr);
+  const adaptiveKey = isAggressive ? "minProgressAtr" : "minCloseDistanceAtr";
+  const adaptiveFallback = parseFloat(isAggressive ? aggressiveEntryMinAtr : entryQualityMinAtr);
+  let minAtr = getAdaptiveAppliedNumber(adaptiveKey, adaptiveFallback, { symbol, timeframeSec: granSec, strategy: "breakout_retest" });
   if (!Number.isFinite(minAtr) || minAtr <= 0) {
     minAtr = isAggressive ? AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT : ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
   }
@@ -866,7 +1039,8 @@ function getSignalCreatedAtMs(signal) {
 
 function shouldPauseAfterRecentLosses(history, options = {}) {
   if (!recentLossPauseEnabled) return { block: false };
-  const required = Math.max(1, parseInt(recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+  const fallbackRequired = Math.max(1, parseInt(recentLossPauseCount, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
+  const required = Math.max(1, Math.round(getAdaptiveAppliedNumber("lossPauseThreshold", fallbackRequired, options)));
   const symbol = options.symbol || getActiveSymbol();
   const strategyType = options.strategyType || "breakout_retest";
   const dir = normalizeSignalDir(options.dir);
@@ -889,11 +1063,55 @@ function shouldPauseAfterRecentLosses(history, options = {}) {
   return { block: false };
 }
 
+function isSymbolEligibleForNewSignal(symbol, strategyType = null) {
+  const sym = symbol || getActiveSymbol();
+  if (!sym) return true;
+  if (monitoringTrade && trade && (trade.symbol || sym) === sym) return false;
+  const hasPending = signalHistory.some((s) => {
+    if (!s || s.result !== "PENDING") return false;
+    if ((s.symbol || sym) !== sym) return false;
+    if (!strategyType) return true;
+    return (s.strategyType || s.type || "breakout_retest") === strategyType;
+  });
+  return !hasPending;
+}
+
+const SIGNAL_ENGINE_DEBUG_STORAGE_KEY = `${LS_PREFIX}signalEngineDebugMode`;
+let signalEngineDebugMode = false;
+
+function loadSignalEngineDebugMode() {
+  try {
+    const raw = localStorage.getItem(SIGNAL_ENGINE_DEBUG_STORAGE_KEY);
+    signalEngineDebugMode = raw === "1";
+  } catch {
+    signalEngineDebugMode = false;
+  }
+}
+
+function setSignalEngineDebugMode(enabled) {
+  signalEngineDebugMode = enabled === true;
+  try {
+    localStorage.setItem(SIGNAL_ENGINE_DEBUG_STORAGE_KEY, signalEngineDebugMode ? "1" : "0");
+  } catch { /* storage unavailable */ }
+  addLog(`🐞 Signal Engine Debug ${signalEngineDebugMode ? "ENABLED" : "DISABLED"}`);
+}
+
+function logSignalEngineDebug(stage, details = {}) {
+  if (!signalEngineDebugMode) return;
+  try {
+    const compact = JSON.stringify(details);
+    addLog(`🐞 [SignalEngine:${stage}] ${compact}`);
+  } catch {
+    addLog(`🐞 [SignalEngine:${stage}]`);
+  }
+}
+
 function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade", reason = null) {
   if (!signal) return null;
   const atrAtSignal = Number.isFinite(signal.atrAtSignal) ? signal.atrAtSignal : (Number.isFinite(signal.atrAtEntry) ? signal.atrAtEntry : getAtrReference());
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
   return {
+    signalId: signal.signalId || null,
     channel,
     strategyLabel,
     symbol: signal.symbol || getActiveSymbol(),
@@ -903,6 +1121,7 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
     entry: signal.entry,
     sl: signal.sl || signal.stopLoss || null,
     tp: signal.tp || signal.takeProfit || null,
+    confidenceScore: signal.confluenceScore != null ? signal.confluenceScore : null,
     validUntilMs: signal.validUntilMs,
     maxDistanceAtr: Number.isFinite(signal.maxEntryDistanceAtr) ? signal.maxEntryDistanceAtr : getSignalDistanceLimitAtr(),
     distanceAtr: getSignalDistanceFromEntry({ entry: signal.entry, atrAtSignal }, currentPrice),
@@ -915,6 +1134,7 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
 
 function stampSignalLifecycle(signal, options = {}) {
   if (!signal || typeof signal !== "object") return signal;
+  if (!signal.signalId) signal.signalId = generateSignalId(signal.strategyType || signal.type || "sig");
   const createdAt = Number.isFinite(signal.createdAtMs) ? signal.createdAtMs : Date.now();
   const validityMs = Number.isFinite(signal.validityMs) ? signal.validityMs : (options.validityMs || getSignalValidityMs());
   signal.createdAtMs = createdAt;
@@ -925,6 +1145,23 @@ function stampSignalLifecycle(signal, options = {}) {
     ? signal.atrAtSignal
     : (Number.isFinite(options.atrAtSignal) && options.atrAtSignal > 0 ? options.atrAtSignal : getAtrReference());
   return signal;
+}
+
+function ensureAllKnownSignalIds() {
+  const histories = [
+    signalHistory,
+    liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory,
+    fibScalpHistory, po3History, gridScalperMAHistory, fvgStratHistory,
+    mtfTopDownHistory, nyOpenRangeHistory, sessionRangeHistory, tiktokHistory,
+    orderblockHistory, candleInterpHistory, po3_4hHistory, breakerBlockHistory,
+    oteGoldenPocketHistory, orbHistory, crtTbsHistory
+  ];
+  for (const history of histories) {
+    if (!Array.isArray(history)) continue;
+    for (const s of history) {
+      if (s && typeof s === "object" && !s.signalId) stampSignalLifecycle(s);
+    }
+  }
 }
 
 function getSignalDistanceFromEntry(signal, currentPrice) {
@@ -1858,6 +2095,8 @@ let signalNotes = {};                /* { signalId: noteText } */
 /* ================= FEATURE: ADAPTIVE CONFLUENCE WEIGHTING ================= */
 let adaptiveConfluenceEnabled = false;
 let confluenceFactorStats = {};      /* { factorName: { wins, losses } } */
+let adaptiveMode = ADAPTIVE_MODE_DEFAULT;
+let adaptiveRuntime = null;
 
 /* Confluence score for current setup */
 let confluenceScore = 0;
@@ -6408,7 +6647,8 @@ function monitorGridScalperMAOutcomes(candle) {
  * Generate a unique signal ID for trade decision logging.
  */
 function generateSignalId() {
-  return `gs-${Date.now()}-${++_signalIdCounter}`;
+  const prefix = arguments.length > 0 && arguments[0] ? String(arguments[0]).replace(/[^a-z0-9_]+/ig, "_").toLowerCase() : "sig";
+  return `${prefix}-${Date.now()}-${++_signalIdCounter}`;
 }
 
 /**
@@ -7039,6 +7279,7 @@ function processCustomStrategies() {
   processOrb();
   /* Strategy 20: CRT + TBS */
   processCrtTbs();
+  ensureAllKnownSignalIds();
 }
 
 /**
@@ -7081,6 +7322,7 @@ let lastMtfTopDownIdx   = -999;     /* cooldown tracker */
 let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
 let lastMtfSetupAlertKey = "";
 let lastMtfApproachAlertKey = "";
+let mtfSetupState = null;           /* holds latest qualified setup while waiting for retest */
 
 const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
 const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
@@ -7196,6 +7438,42 @@ function detectMtfSetup() {
   return null;
 }
 
+function getMtfSetupState() {
+  const latest = detectMtfSetup();
+  const idx = candles.length - 1;
+  if (latest) {
+    mtfSetupState = Object.assign({}, latest, {
+      setupDetectedIdx: idx,
+      expiresAfterIdx: idx + (MTF_RETEST_LOOKBACK * 4)
+    });
+    logSignalEngineDebug("MTF_SETUP_DETECTED", {
+      dir: latest.dir,
+      level: latest.level,
+      breakoutEpoch: latest.breakoutEpoch,
+      setupDetectedIdx: idx
+    });
+    return mtfSetupState;
+  }
+  if (mtfSetupState && Number.isFinite(mtfSetupState.expiresAfterIdx) && idx <= mtfSetupState.expiresAfterIdx) {
+    logSignalEngineDebug("MTF_SETUP_REUSED", {
+      dir: mtfSetupState.dir,
+      level: mtfSetupState.level,
+      expiresAfterIdx: mtfSetupState.expiresAfterIdx,
+      idx
+    });
+    return mtfSetupState;
+  }
+  if (mtfSetupState) {
+    logSignalEngineDebug("MTF_SETUP_EXPIRED", {
+      dir: mtfSetupState.dir,
+      level: mtfSetupState.level,
+      idx
+    });
+  }
+  mtfSetupState = null;
+  return null;
+}
+
 /**
  * Detect a current-TF retest of the 1H broken level.
  * A retest: price returns within ATR tolerance of the level then closes
@@ -7204,11 +7482,17 @@ function detectMtfSetup() {
  * @returns {{ dir, level, retestCandleIdx }|null}
  */
 function detectMtfConfirmation(setupOverride = null) {
-  const setup = setupOverride || detectMtfSetup();
-  if (!setup) return null;
+  const setup = setupOverride || getMtfSetupState();
+  if (!setup) {
+    logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "no_setup_state" });
+    return null;
+  }
 
   const len = candles.length;
-  if (len < 5) return null;
+  if (len < 5) {
+    logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "insufficient_base_candles", len });
+    return null;
+  }
 
   const { dir, level } = setup;
   const tolerance = atrValue > 0 ? atrValue * 0.5 : level * 0.002;
@@ -7219,14 +7503,24 @@ function detectMtfConfirmation(setupOverride = null) {
     if (!c) continue;
     if (dir === "BULL") {
       if (c.low <= level + tolerance && c.close >= level) {
+        logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
         return { dir, level, retestCandleIdx: i, setup };
       }
     } else {
       if (c.high >= level - tolerance && c.close <= level) {
+        logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
         return { dir, level, retestCandleIdx: i, setup };
       }
     }
   }
+  logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", {
+    reason: "no_retest_match",
+    dir,
+    level,
+    tolerance,
+    scanStart,
+    len
+  });
   return null;
 }
 
@@ -7239,43 +7533,78 @@ function detectMtfConfirmation(setupOverride = null) {
  */
 function detectMtfTopDown(confirmationOverride = null) {
   if (!mtfTopDownEnabled) return null;
-  if (!candles || candles.length < 20) return null;
+  if (!isSymbolEligibleForNewSignal(getActiveSymbol(), "mtf_top_down")) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "symbol_not_eligible" });
+    return null;
+  }
+  if (!candles || candles.length < 20) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "insufficient_candles", candles: candles ? candles.length : 0 });
+    return null;
+  }
 
   const idx = candles.length - 1;
 
   /* Cooldown */
-  if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) return null;
+  if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "cooldown", idx, lastMtfTopDownIdx });
+    return null;
+  }
   /* One pending at a time */
-  if (mtfTopDownHistory.some(s => s.result === "PENDING")) return null;
+  if (mtfTopDownHistory.some(s => s.result === "PENDING")) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pending_signal_exists" });
+    return null;
+  }
 
   const confirmation = confirmationOverride || detectMtfConfirmation();
-  if (!confirmation) return null;
+  if (!confirmation) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "no_confirmation" });
+    return null;
+  }
 
   const { dir, level, retestCandleIdx, setup } = confirmation;
 
   /* Only act within 3 candles of the confirmed retest */
-  if (idx - retestCandleIdx > 3) return null;
+  if (idx - retestCandleIdx > 3) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confirmation_window_expired", idx, retestCandleIdx });
+    return null;
+  }
 
   const c    = candles[idx];
   const prev = candles[idx - 1];
-  if (!c || !prev) return null;
+  if (!c || !prev) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "missing_current_or_prev_candle", idx });
+    return null;
+  }
   const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : 0;
   const maxEntryDriftAtr = getMaxEntryDriftAtr(getActiveSymbol(), getCurrentGranularitySec(), true);
-  if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) return null;
+  if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", {
+      reason: "entry_drift_too_large",
+      entryDriftAtr,
+      maxEntryDriftAtr
+    });
+    return null;
+  }
   const entryMode = getCurrentEntryMode();
   const timingQuality = evaluateEntryTimingQuality(dir, c, level, atrValue, {
     symbol: getActiveSymbol(),
     granSec: getCurrentGranularitySec(),
     entryMode
   });
-  if (!timingQuality.pass) return null;
+  if (!timingQuality.pass) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "timing_quality_gate", detail: timingQuality.reason || null });
+    return null;
+  }
   const recentLossPause = shouldPauseAfterRecentLosses(mtfTopDownHistory, {
     symbol: getActiveSymbol(),
     dir,
     strategyType: "mtf_top_down",
     timeframeSec: getCurrentGranularitySec()
   });
-  if (recentLossPause.block) return null;
+  if (recentLossPause.block) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "recent_loss_pause", detail: recentLossPause.reason || null });
+    return null;
+  }
 
   const hasPinBar     = isPinBar(c, dir);
   const hasBullEngulf = dir === "BULL" && isBullishEngulfing(prev, c);
@@ -7284,7 +7613,10 @@ function detectMtfTopDown(confirmationOverride = null) {
   const microBosBull  = dir === "BULL" && c.close > prev.high && c.close > c.open;
   const microBosBear  = dir === "BEAR" && c.close < prev.low  && c.close < c.open;
 
-  if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) return null;
+  if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pattern_not_confirmed" });
+    return null;
+  }
 
   const patternType = hasPinBar ? "pin_bar"
     : (hasBullEngulf || hasBearEngulf) ? "engulfing"
@@ -7312,7 +7644,10 @@ function detectMtfTopDown(confirmationOverride = null) {
   }
 
   const risk = Math.abs(entry - sl);
-  if (risk <= 0) return null;
+  if (risk <= 0) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "invalid_risk", entry, sl });
+    return null;
+  }
 
   /* Guarantee minimum R:R — profit-optimized per symbol */
   if (Math.abs(tp - entry) / risk < _mtfRR) {
@@ -7320,7 +7655,7 @@ function detectMtfTopDown(confirmationOverride = null) {
   }
   const rr = Math.abs(tp - entry) / risk;
 
-  return {
+  const signal = {
     dir, entry, sl, tp, rr, level, retestCandleIdx,
     mtfBias: computeMtfBias(),
     patternType,
@@ -7341,13 +7676,23 @@ function detectMtfTopDown(confirmationOverride = null) {
     entryBodyAtr: timingQuality.bodyAtr,
     entryCloseLocation: timingQuality.closeLocation
   };
+  stampSignalLifecycle(signal);
+  logSignalEngineDebug("MTF_SIGNAL_GENERATED", {
+    signalId: signal.signalId,
+    dir: signal.dir,
+    entry: signal.entry,
+    sl: signal.sl,
+    tp: signal.tp,
+    rr: signal.rr
+  });
+  return signal;
 }
 
 /**
  * Run the MTF Top-Down scanner and handle all alerting.
  */
 function processMtfTopDown() {
-  const setup = detectMtfSetup();
+  const setup = getMtfSetupState();
   if (setup && !_historicalProcessing) {
     const setupKey = [getActiveSymbol(), setup.dir, fmt(setup.level, 6), setup.breakoutEpoch || ""].join("|");
     if (setupKey !== lastMtfSetupAlertKey) {
@@ -7396,9 +7741,11 @@ function processMtfTopDown() {
     const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
     if (!confGate.pass) {
       addLog(`\u26a0 MTF Top-Down REJECTED \u2014 ${confGate.reason}`);
+      logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confluence_gate", detail: confGate.reason, signalId: signal.signalId });
       sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
+        signalId: signal.signalId,
         symbol: signal.symbol || getActiveSymbol(),
         timeframeSec: getCurrentGranularitySec(),
         dir: signal.dir,
@@ -7418,6 +7765,7 @@ function processMtfTopDown() {
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   mtfTopDownHistory.unshift(signal);
+  mtfSetupState = null; /* consume setup once a trade signal is produced */
   if (mtfTopDownHistory.length > MTF_TOP_DOWN_MAX_HISTORY) mtfTopDownHistory.pop();
 
   playStrategyAlert(signal.dir);
@@ -7433,6 +7781,14 @@ function processMtfTopDown() {
     + " | SL " + fmtPrice(signal.sl, sym)
     + " | TP " + fmtPrice(signal.tp, sym)
     + " | R:R 1:" + fmt(signal.rr, 1));
+  logSignalEngineDebug("MTF_SIGNAL_QUEUED", {
+    signalId: signal.signalId,
+    symbol: signal.symbol || sym,
+    dir: signal.dir,
+    entry: signal.entry,
+    sl: signal.sl,
+    tp: signal.tp
+  });
 
   showToast(
     "MTF Top-Down " + dirArrow,
@@ -7467,6 +7823,7 @@ function processMtfTopDown() {
   renderStrategyAlerts();
 
   if (autoTradeStrategyEnabled && autoTradeMtfTopDown && !_historicalProcessing) {
+    logSignalEngineDebug("MTF_AUTOTRADE_TRIGGERED", { signalId: signal.signalId, symbol: signal.symbol || sym });
     executeAutoTrade({ dir: signal.dir, entry: signal.entry, sl: signal.sl, tp: signal.tp,
       symbol: signal.symbol || sym, source: "strategy", strategyName: "mtfTopDown" });
   }
@@ -7486,9 +7843,11 @@ function monitorMtfTopDownOutcomes(candle) {
       s.result = "EXPIRED";
       changed = true;
       addLog("\u23f1 MTF Top-Down EXPIRED (timeout " + MTF_TOP_DOWN_MAX_CANDLES + " candles) \u2014 " + (s.symbol || ""));
+      logSignalEngineDebug("MTF_SIGNAL_CANCELLED", { signalId: s.signalId || null, reason: "timeout", symbol: s.symbol || "" });
       sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
+        signalId: s.signalId || null,
         symbol: s.symbol || getActiveSymbol(),
         timeframeSec: s.timeframeSec || getCurrentGranularitySec(),
         dir: s.dir,
@@ -7502,20 +7861,28 @@ function monitorMtfTopDownOutcomes(candle) {
       if (candle.high >= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.low <= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     } else {
       if (candle.low <= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       } else if (candle.high >= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
+        logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
         if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
       }
     }
@@ -8990,11 +9357,11 @@ function buildLifecycleTelegramCaption(kind, payload) {
   const dir = payload.dir || "--";
   const dirLabel = dir === "BULL" ? "🟢 BUY" : dir === "BEAR" ? "🔴 SELL" : dir;
   const titles = {
-    setup: "Setup Detected",
-    approaching: "Entry Zone Approaching",
-    active: "Entry Active",
-    tp: "TP Reached",
-    sl: "SL Hit",
+    setup: "New Trade Signal",
+    approaching: "Signal Approaching Entry",
+    active: "Trade Activated",
+    tp: "Take Profit Hit",
+    sl: "Stop Loss Hit",
     cancelled: "Trade Cancelled"
   };
   const title = titles[kind] || "Signal Update";
@@ -9002,6 +9369,7 @@ function buildLifecycleTelegramCaption(kind, payload) {
   lines.push(`📣 <b>${title}</b>`);
   lines.push("");
   lines.push(`<b>Strategy:</b> ${payload.strategyLabel || "Breakout Retest"}`);
+  if (payload.signalId) lines.push(`<b>Signal ID:</b> <code>${payload.signalId}</code>`);
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirLabel}`);
@@ -9009,6 +9377,7 @@ function buildLifecycleTelegramCaption(kind, payload) {
   if (payload.entry != null) lines.push(`<b>Entry:</b> <code>${fmtPrice(payload.entry, symbol)}</code>`);
   if (payload.sl != null) lines.push(`<b>SL:</b> <code>${fmtPrice(payload.sl, symbol)}</code>`);
   if (payload.tp != null) lines.push(`<b>TP:</b> <code>${fmtPrice(payload.tp, symbol)}</code>`);
+  if (payload.confidenceScore != null) lines.push(`<b>Confidence:</b> ${payload.confidenceScore}`);
   if (payload.entryMode) lines.push(`<b>Entry Mode:</b> ${payload.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(payload.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(payload.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(payload.distanceAtr)) lines.push(`<b>Distance Now:</b> ${fmt(payload.distanceAtr, 2)} ATR`);
@@ -9022,6 +9391,19 @@ function buildLifecycleTelegramCaption(kind, payload) {
 }
 
 async function sendSignalLifecycleTelegram(kind, payload, force = false) {
+  if (payload && !payload.signalId) {
+    const basis = [
+      payload.strategyLabel || payload.channel || "signal",
+      payload.symbol || getActiveSymbol() || "",
+      payload.timeframeSec != null ? payload.timeframeSec : getCurrentGranularitySec(),
+      payload.dir || "",
+      payload.entry != null ? fmt(payload.entry, 6) : (payload.level != null ? fmt(payload.level, 6) : ""),
+      payload.validUntilMs != null ? payload.validUntilMs : ""
+    ].join("|");
+    let hash = 0;
+    for (let i = 0; i < basis.length; i++) hash = ((hash << 5) - hash + basis.charCodeAt(i)) | 0;
+    payload.signalId = `lfc-${Math.abs(hash)}`;
+  }
   if (!telegramLifecycleAlertsEnabled && !force) return;
   const now = Date.now();
   if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled") {
@@ -9038,6 +9420,17 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   const channel = payload && payload.channel === "strategy" ? "strategy" : "trade";
   const enabled = channel === "strategy" ? telegramStrategyAutoSend : telegramAutoSend;
   if (!enabled && !force) return;
+  if (payload && payload.signalId) {
+    const dedupeKey = `${payload.signalId}|${kind}`;
+    if (!force) {
+      sendSignalLifecycleTelegram._sentKeys = sendSignalLifecycleTelegram._sentKeys || new Set();
+      if (sendSignalLifecycleTelegram._sentKeys.has(dedupeKey)) {
+        logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "dedupe", kind, signalId: payload.signalId });
+        return;
+      }
+      sendSignalLifecycleTelegram._sentKeys.add(dedupeKey);
+    }
+  }
   try {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
@@ -9048,8 +9441,18 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   try {
     await sendTelegramMessage(buildLifecycleTelegramCaption(kind, payload || {}));
     addLog(`📤 Telegram lifecycle alert sent (${kind})`);
+    logSignalEngineDebug("TELEGRAM_SENT", {
+      kind,
+      signalId: payload && payload.signalId ? payload.signalId : null,
+      channel
+    });
   } catch (err) {
     addLog(`📤 Lifecycle Telegram error: ${err.message}`);
+    logSignalEngineDebug("TELEGRAM_FAILED", {
+      kind,
+      signalId: payload && payload.signalId ? payload.signalId : null,
+      error: err.message
+    });
   }
 }
 
@@ -9060,6 +9463,7 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
   if (kind === "approaching" && breakout._approachAlertSent) return;
   if (kind === "active" && breakout._activeAlertSent) return;
   const payload = {
+    signalId: trade && trade.signalId ? trade.signalId : (breakout && breakout.signalId ? breakout.signalId : null),
     channel: "trade",
     strategyLabel: "Breakout Retest",
     symbol: getActiveSymbol(),
@@ -9086,7 +9490,9 @@ function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
 function maybeSendBreakoutCancelled(reason) {
   if (_historicalProcessing || !breakout) return;
   if (!breakout._setupAlertSent && !breakout._approachAlertSent) return;
+  recordAdaptiveCancellation(reason, { strategy: "breakout_retest", dir: breakout.dir });
   sendSignalLifecycleTelegram("cancelled", {
+    signalId: breakout && breakout.signalId ? breakout.signalId : null,
     channel: "trade",
     strategyLabel: "Breakout Retest",
     symbol: getActiveSymbol(),
@@ -9250,6 +9656,7 @@ async function sendStrategyOutcomeTelegram(signal) {
     const lines = [];
     lines.push(`${icon} <b>${stratLabel} — ${outcomeTitle}</b> — ${dir} ${sym}`);
     lines.push("");
+    if (signal.signalId) lines.push(`<b>Signal ID:</b> <code>${signal.signalId}</code>`);
     lines.push(`<b>📍 Entry:</b> ${entryStr}`);
     lines.push(`<b>🏁 Exit:</b> ${exitStr}`);
     lines.push(`<b>🛑 SL:</b> ${slStr}`);
@@ -11385,7 +11792,7 @@ function processCandle(idx) {
         addLog(`Bullish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike };
+      breakout = { dir: "BULL", candleIdx: idx, level: openingRange.high, strong: conviction, volumeSpike, signalId: generateSignalId("breakout") };
       retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BULLISH breakout at candle #${idx}, level ${fmt(openingRange.high, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
@@ -11429,7 +11836,7 @@ function processCandle(idx) {
         addLog(`Bearish breakout at #${idx} BLOCKED by volume spike filter (candle range too small)`);
         return;
       }
-      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike };
+      breakout = { dir: "BEAR", candleIdx: idx, level: openingRange.low, strong: conviction, volumeSpike, signalId: generateSignalId("breakout") };
       retestCount = 0;  /* reset retest counter for double-retest filter */
       setPhase("RETEST");
       addLog(`BEARISH breakout at candle #${idx}, level ${fmt(openingRange.low, 4)}${conviction ? " (STRONG)" : " (WEAK)"}${volumeSpike ? " 📈 Vol Spike" : ""}`);
@@ -11896,6 +12303,10 @@ function buildTrade(confirmCandle, confirmIdx) {
 
   const regime = getCurrentRegimeTag();
   const symbol = getActiveSymbol();
+  if (!isSymbolEligibleForNewSignal(symbol, "breakout_retest")) {
+    addLog("⚠ Trade REJECTED — symbol still has an active pending trade");
+    return;
+  }
   const granSec = getCurrentGranularitySec();
   const dynamicConfluenceMin = getDynamicMinConfluence(symbol, granSec, regime);
   if (minConfluenceEnabled) {
@@ -12085,6 +12496,19 @@ function buildTrade(confirmCandle, confirmIdx) {
     addLog(`⚡ SCALPING MODE — quick TP at R:R ${fmt(rr, 1)}, max ${SCALP_MAX_CANDLES} candles`);
   }
 
+  if (trade) {
+    trade.strategyType = "breakout_retest";
+    stampSignalLifecycle(trade);
+    logSignalEngineDebug("TRADE_OPEN", {
+      signalId: trade.signalId || null,
+      symbol: trade.symbol || getActiveSymbol(),
+      dir: trade.dir,
+      entry: trade.entry,
+      sl: trade.sl,
+      tp: trade.tp
+    });
+  }
+
   /* Reset trailing/partial state for new trade */
   trailingSL   = null;
   partialTpHit = false;
@@ -12266,6 +12690,7 @@ function recordSignal(confirmPattern) {
   signal.entryBodyAtr = trade.entryBodyAtr;
   signal.entryCloseLocation = trade.entryCloseLocation;
   stampSignalLifecycle(signal, { atrAtSignal: trade.atrAtEntry });
+  trade.signalId = signal.signalId;
 
   /* Populate lot-size fields from account sizing */
   if (accountSize > 0 && riskPercent > 0) {
@@ -12285,6 +12710,12 @@ function recordSignal(confirmPattern) {
     if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
   } catch (e) { /* canvas tainted or unavailable */ }
   monitoringTrade = true;
+  logSignalEngineDebug("TRADE_ACTIVATED", {
+    signalId: signal.signalId || null,
+    symbol: signal.symbol,
+    dir: signal.dir,
+    entry: signal.entry
+  });
   persistSignalHistory();
   updateStatsUI();
 
@@ -13913,7 +14344,19 @@ function monitorTradeOutcome(candle) {
      sessions (loaded via restoreSignalHistory) are not incorrectly resolved
      instead of the current live trade's signal. */
   const pending = signalHistory.findLast(s => s.result === "PENDING");
-  if (!pending) { monitoringTrade = false; return; }
+  if (!pending) {
+    logSignalEngineDebug("TRADE_RELEASE", {
+      signalId: trade.signalId || null,
+      reason: "missing_pending_signal_record",
+      symbol: trade.symbol || getActiveSymbol()
+    });
+    monitoringTrade = false;
+    trade = null;
+    trailingSL = null;
+    partialTpHit = false;
+    if (phase === "TRADE") setPhase("BREAKOUT");
+    return;
+  }
 
   const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
   const currentIdx = candles.length - 1;
@@ -14068,6 +14511,7 @@ function monitorTradeOutcome(candle) {
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       pending.exitPrice = exitPrice;
+      pending.outcomeCandleIdx = currentIdx;
       if (inProfit) {
         signalWins++;
       } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
@@ -14096,6 +14540,7 @@ function monitorTradeOutcome(candle) {
                        (trade.dir === "BEAR" && exitPrice <= trade.entry);
       pending.result = inProfit ? "WIN" : "LOSS";
       pending.exitPrice = exitPrice;
+      pending.outcomeCandleIdx = currentIdx;
       if (inProfit) {
         signalWins++;
       } else if (Math.abs(exitPrice - trade.entry) < PRICE_EPSILON) {
@@ -14223,6 +14668,7 @@ function monitorTradeOutcome(candle) {
   }
 
   if (resolved) {
+    pending.outcomeCandleIdx = currentIdx;
     monitoringTrade = false;
     persistSignalHistory();
     updateStatsUI();
@@ -14234,6 +14680,30 @@ function monitorTradeOutcome(candle) {
       pending._confRecorded = true;
     }
     if (!_historicalProcessing) rebuildWalkForwardProfilesFromHistory();
+    logSignalEngineDebug("TRADE_CLOSE", {
+      signalId: pending.signalId || trade.signalId || null,
+      result: pending.result,
+      symbol: pending.symbol || trade.symbol || getActiveSymbol(),
+      exitPrice: pending.exitPrice != null ? pending.exitPrice : null
+    });
+    if (!_historicalProcessing && autoResetEnabled) {
+      logSignalEngineDebug("SYMBOL_RELEASE", {
+        signalId: pending.signalId || trade.signalId || null,
+        reason: "trade_resolved_auto_reset",
+        symbol: pending.symbol || trade.symbol || getActiveSymbol()
+      });
+      resetForNextSetup();
+    } else {
+      trade = null;
+      trailingSL = null;
+      partialTpHit = false;
+    }
+    const eligibleAfterClose = isSymbolEligibleForNewSignal(pending.symbol || getActiveSymbol(), "breakout_retest");
+    logSignalEngineDebug("NEW_SIGNAL_ELIGIBILITY", {
+      signalId: pending.signalId || null,
+      symbol: pending.symbol || getActiveSymbol(),
+      eligible: eligibleAfterClose
+    });
   }
 }
 
@@ -15836,6 +16306,11 @@ async function sendTradeOutcomeTelegram(signal) {
     const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
+    if (result === "WIN" || result === "LOSS") {
+      sendSignalLifecycleTelegram(result === "WIN" ? "tp" : "sl", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade"));
+    } else if (result === "EXPIRED") {
+      sendSignalLifecycleTelegram("cancelled", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade", "Trade expired before TP/SL resolution."));
+    }
     const outcomeTitle = result === "WIN" ? "TP Reached" : result === "EXPIRED" ? "Trade Cancelled" : "SL Hit";
     const icon = result === "WIN" ? "✅" : result === "EXPIRED" ? "⏱" : "❌";
     const entryStr = signal.entry != null ? fmtPrice(signal.entry, activeSym) : "--";
@@ -15850,6 +16325,7 @@ async function sendTradeOutcomeTelegram(signal) {
     lines.push(`${icon} <b>${outcomeTitle}</b> — ${dir} ${sym}`);
     lines.push("");
     lines.push(`<b>Pattern:</b> ${pattern}`);
+    if (signal.signalId) lines.push(`<b>Signal ID:</b> <code>${signal.signalId}</code>`);
     lines.push(`<b>Entry:</b> ${entryStr}`);
     lines.push(`<b>Exit:</b> ${exitStr}`);
     lines.push(`<b>SL:</b> ${slStr}`);
@@ -16499,6 +16975,7 @@ function saveSettings() {
       newsPauseMinutes,
       multiRLadderEnabled,
       adaptiveConfluenceEnabled,
+      adaptiveMode,
       scannerEnabled,
       scannerSymbols: JSON.stringify(scannerSymbols),
       backtestSpeedMs
@@ -16611,6 +17088,7 @@ function restoreSettings() {
 
     /* Scalping mode */
     if (s.scalpingModeEnabled != null) scalpingModeEnabled = s.scalpingModeEnabled;
+    if (s.adaptiveMode != null) adaptiveMode = String(s.adaptiveMode).toUpperCase();
     if (UI.scalpingModeToggle) UI.scalpingModeToggle.checked = scalpingModeEnabled;
 
     if (s.nyOpenRangeEnabled != null) nyOpenRangeEnabled = s.nyOpenRangeEnabled;
@@ -16675,6 +17153,7 @@ function restoreSettings() {
     if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
     if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
     if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
 
     /* Live Scalp Scanner */
     if (s.liveScalpEnabled != null) liveScalpEnabled = s.liveScalpEnabled;
@@ -17017,6 +17496,7 @@ function restoreSignalHistory() {
       signalHistory = parsed.map(s =>
         (s && s.result === "PENDING") ? Object.assign({}, s, { result: "EXPIRED" }) : s
       );
+      ensureAllKnownSignalIds();
       signalWins = signalHistory.filter(s => s && s.result === "WIN").length;
       signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
@@ -17041,6 +17521,8 @@ function updateStatsUI() {
   }
 
   /* Always update aggregated signal count and banners (across all panels) */
+  processAdaptiveResolvedSignals();
+  renderAdaptiveSettingsUI();
   const allSignals = getAggregatedSignalHistory();
   if (UI.signalCount) UI.signalCount.textContent = allSignals.length;
   updateScalpStatsUI();
@@ -18593,16 +19075,90 @@ function applyRecommendedSettings() {
   updateStateUI();
 }
 
+const strategyStateRegistry = new Map();
+let strategyStateRegistryInitialized = false;
+
+function registerStrategyState(name, contract) {
+  if (!name || !contract) return;
+  strategyStateRegistry.set(name, contract);
+}
+
+function initStrategyStateRegistry() {
+  if (strategyStateRegistryInitialized) return;
+  strategyStateRegistryInitialized = true;
+
+  registerStrategyState("breakout_retest", {
+    resetCore() {
+      openingRange = null;
+      breakout = null;
+      retestInfo = null;
+      indecisionInfo = null;
+      confirmInfo = null;
+      trade = null;
+      monitoringTrade = false;
+      trailingSL = null;
+      partialTpHit = false;
+      teslaT1Hit = false;
+      teslaT2Hit = false;
+      teslaT3Hit = false;
+      teslaBEHit = false;
+      retestCount = 0;
+      mtfSetupState = null;
+      lastMtfSetupAlertKey = "";
+      lastMtfApproachAlertKey = "";
+      resetNyOpenRange();
+      resetSessionRanges();
+      setPhase("WAITING");
+    }
+  });
+
+  registerStrategyState("strategy_histories", {
+    resetSession() {
+      signalHistory = [];
+      liveScalpHistory = [];
+      liquiditySweepHistory = [];
+      stopLossHuntHistory = [];
+      failedPinBarHistory = [];
+      fibScalpHistory = [];
+      po3History = [];
+      gridScalperMAHistory = [];
+      fvgStratHistory = [];
+      mtfTopDownHistory = [];
+      tiktokHistory = [];
+      orderblockHistory = [];
+      candleInterpHistory = [];
+      po3_4hHistory = [];
+      breakerBlockHistory = [];
+      oteGoldenPocketHistory = [];
+      orbHistory = [];
+      crtTbsHistory = [];
+      nyOpenRangeHistory = [];
+      sessionRangeHistory = [];
+      lastMtfTopDownIdx = -999;
+    }
+  });
+}
+
+function resetStrategyStateContracts(mode = "core") {
+  initStrategyStateRegistry();
+  for (const contract of strategyStateRegistry.values()) {
+    try {
+      if (mode === "session" && typeof contract.resetSession === "function") {
+        contract.resetSession();
+      } else if (mode === "core" && typeof contract.resetCore === "function") {
+        contract.resetCore();
+      }
+    } catch (err) {
+      addLog(`⚠ Strategy reset contract failed: ${err.message}`);
+    }
+  }
+}
+
 function resetIndicator() {
+  initStrategyStateRegistry();
   candles = [];
   rangeStartEpoch = null;
-  openingRange = null;
-  breakout = null;
-  retestInfo = null;
-  indecisionInfo = null;
-  confirmInfo = null;
-  trade = null;
-  monitoringTrade = false;
+  resetStrategyStateContracts("core");
   /* Note: do NOT clear per-symbol autoTradeSlots here — resetIndicator is
      called during reconnect, and we need pending contract IDs to survive
      so we can re-subscribe after re-authorization. */
@@ -18618,21 +19174,20 @@ function resetIndicator() {
   adxValue = 0; adxDiPlus = 0; adxDiMinus = 0;
   stochK = []; stochD = [];
   emaMTF = []; vwapValues = [];
-  retestCount = 0;
-  trailingSL   = null;
-  partialTpHit = false;
-  teslaT1Hit = false;
-  teslaT2Hit = false;
-  teslaT3Hit = false;
-  teslaBEHit = false;
-  resetNyOpenRange();
-  setPhase("WAITING");
   updateStateUI();
 }
 
 function resetSession() {
   /* Reset core indicator state */
   resetIndicator();
+  resetStrategyStateContracts("session");
+  mtfSetupState = null;
+  lastMtfSetupAlertKey = "";
+  lastMtfApproachAlertKey = "";
+  if (sendSignalLifecycleTelegram._sentKeys && sendSignalLifecycleTelegram._sentKeys.clear) {
+    sendSignalLifecycleTelegram._sentKeys.clear();
+  }
+  logSignalEngineDebug("SESSION_RESET", { action: "core_state_reset" });
 
   /* Clear signal history & stats */
   signalHistory = [];
@@ -18653,6 +19208,31 @@ function resetSession() {
   /* Clear session range trade stats */
   sessionRangeTradeWins = 0;
   sessionRangeTradeLosses = 0;
+  sessionRangeTrade = null;
+  londonSweepSignal = null;
+
+  /* Clear strategy histories, pending states, and strategy signal banners */
+  liquiditySweepHistory = [];
+  stopLossHuntHistory = [];
+  failedPinBarHistory = [];
+  fibScalpHistory = [];
+  po3History = [];
+  gridScalperMAHistory = [];
+  fvgStratHistory = [];
+  mtfTopDownHistory = [];
+  tiktokHistory = [];
+  orderblockHistory = [];
+  candleInterpHistory = [];
+  po3_4hHistory = [];
+  breakerBlockHistory = [];
+  oteGoldenPocketHistory = [];
+  orbHistory = [];
+  crtTbsHistory = [];
+  nyOpenRangeHistory = [];
+  sessionRangeHistory = [];
+  renderStrategyAlerts();
+  updateSignalBanners();
+  renderStrategyTickerBanner();
 
   /* Clear signal log UI */
   if (UI.signalLog) UI.signalLog.innerHTML = "";
@@ -18667,6 +19247,11 @@ function resetSession() {
     localStorage.removeItem(LS_PREFIX + "signalHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradeHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradePL");
+    localStorage.removeItem(LS_PREFIX + "confStats");
+    localStorage.removeItem(SIGNAL_NOTES_LS_KEY);
+    localStorage.removeItem(LS_PREFIX + "gsFlipStats");
+    localStorage.removeItem(LS_PREFIX + "gsOppSettings");
+    sessionStorage.removeItem(LS_PREFIX + "signalQueue");
   } catch (e) { /* storage not available */ }
 
   /* Reset auto-trade history */
@@ -18680,6 +19265,30 @@ function resetSession() {
   symbolTradeTimestamps.clear();
   strategyTradeTimestamps.clear();
   symbolCooldownUntil.clear();
+  for (const slot of autoTradeSlots.values()) {
+    if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
+    if (Array.isArray(slot.activeTrades)) {
+      for (const t of slot.activeTrades) {
+        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+      }
+      slot.activeTrades = [];
+    }
+    slot.inProgress = false;
+    slot.contractId = null;
+    slot.pendingContractId = null;
+    slot.fetchingMultiplier = false;
+    slot.consecutiveErrors = 0;
+  }
+  if (autoTradePendingTimer) { clearTimeout(autoTradePendingTimer); autoTradePendingTimer = null; }
+  if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
+  if (candleCountdownInterval) { clearInterval(candleCountdownInterval); candleCountdownInterval = null; }
+  if (_nyOpenRangeTimerInterval) { clearInterval(_nyOpenRangeTimerInterval); _nyOpenRangeTimerInterval = null; }
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (reconnectDebounceTimer) { clearTimeout(reconnectDebounceTimer); reconnectDebounceTimer = null; }
+  if (backtestInterval) { clearInterval(backtestInterval); backtestInterval = null; }
+  if (multiViewRefreshTimer) { clearInterval(multiViewRefreshTimer); multiViewRefreshTimer = null; }
   for (const k of Object.keys(strategyRegimePausedUntil)) delete strategyRegimePausedUntil[k];
   updateAutoTradeCurrentStakeUI();
   /* Reset session start balance so P/L recalculates from this point */
@@ -20636,6 +21245,8 @@ function revertAllSettings() {
   entryQualityMinAtr        = ENTRY_QUALITY_PROGRESS_ATR_DEFAULT;
   recentLossPauseEnabled  = true;
   recentLossPauseCount    = RECENT_LOSS_PAUSE_COUNT_DEFAULT;
+  adaptiveMode            = ADAPTIVE_MODE_DEFAULT;
+  if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
 
   /* Scalping & misc */
   scalpingModeEnabled  = false;
@@ -20745,6 +21356,7 @@ function revertAllSettings() {
   if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
   if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
   if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
   if (UI.autoTradeExecutionMode) UI.autoTradeExecutionMode.value   = autoTradeExecutionMode;
   if (UI.mt5SignalApiUrl)        UI.mt5SignalApiUrl.value          = mt5SignalApiUrl;
   if (UI.mt5StatusApiUrl)        UI.mt5StatusApiUrl.value          = mt5StatusApiUrl;
@@ -25391,6 +26003,7 @@ function syncFilterUIFromGlobals() {
   if (UI.entryQualityMinAtrInput) UI.entryQualityMinAtrInput.value = entryQualityMinAtr;
   if (UI.recentLossPauseToggle)  UI.recentLossPauseToggle.checked  = recentLossPauseEnabled;
   if (UI.recentLossPauseCountInput) UI.recentLossPauseCountInput.value = recentLossPauseCount;
+  if (UI.adaptiveModeSelect) UI.adaptiveModeSelect.value = adaptiveMode;
 }
 
 /**
@@ -26326,6 +26939,11 @@ document.addEventListener("DOMContentLoaded", () => {
     initUI();
     initLoginGate();
     restoreSettings();
+    loadSignalEngineDebugMode();
+    window.setSignalEngineDebugMode = setSignalEngineDebugMode;
+    window.getSignalEngineDebugMode = () => signalEngineDebugMode;
+    initAdaptiveRuntime();
+    if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
     /* Auto-apply recommended settings on boot so the Active column
        and all filter toggles reflect the current symbol's recommendations */
     applyRecommendedSettings();
@@ -26857,6 +27475,15 @@ document.addEventListener("DOMContentLoaded", () => {
       recentLossPauseCount = Math.max(1, parseInt(UI.recentLossPauseCountInput.value, 10) || RECENT_LOSS_PAUSE_COUNT_DEFAULT);
       UI.recentLossPauseCountInput.value = recentLossPauseCount;
       syncProfitDirToAllPanels(); saveSettings();
+    });
+  }
+  if (UI.adaptiveModeSelect) {
+    UI.adaptiveModeSelect.addEventListener("change", () => {
+      adaptiveMode = String(UI.adaptiveModeSelect.value || ADAPTIVE_MODE_DEFAULT).toUpperCase();
+      if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
+      persistAdaptiveRuntime();
+      saveSettings();
+      renderAdaptiveSettingsUI();
     });
   }
   if (UI.appIdInput) {
@@ -27804,6 +28431,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   safeRun("ready message", () => addLog("Indicator ready – press Connect to start"));
   safeRun("stats UI init", () => updateStatsUI());
+  safeRun("adaptive UI init", () => renderAdaptiveSettingsUI());
   if (initWarnings.length) {
     try { addLog("⚠️ Initialization issue detected. Some controls may not respond; check console (F12)."); } catch (_) { /* addLog itself may be unavailable */ }
   }

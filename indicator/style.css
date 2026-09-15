@@ -3979,3 +3979,48 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   color: #ef4444 !important;
   opacity: 0.6;
 }
+
+.adaptive-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.adaptive-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+.adaptive-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.adaptive-table th,
+.adaptive-table td {
+  padding: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.adaptive-table th {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.adaptive-table td:last-child,
+.adaptive-table th:last-child {
+  text-align: right;
+}
+
+.adaptive-row-reason {
+  color: #f59e0b;
+  font-size: 0.72rem;
+}
