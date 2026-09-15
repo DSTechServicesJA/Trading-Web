@@ -786,6 +786,202 @@ function persistAdaptiveRuntime() {
   }
 }
 
+
+let adaptiveIntelligenceClient = null;
+let adaptiveIntelligenceBootstrap = null;
+let adaptiveIntelligenceBootstrapPromise = null;
+
+function initAdaptiveIntelligenceClient() {
+  if (typeof AdaptiveIntelligenceClient !== "function") return;
+  adaptiveIntelligenceClient = new AdaptiveIntelligenceClient({
+    auth: (typeof ITGuruAuth !== "undefined") ? ITGuruAuth : null
+  });
+}
+
+function getAdaptiveMarketCategory(symbol, timeframeSec) {
+  if (typeof AdaptiveIntelligenceUtils !== "undefined" && AdaptiveIntelligenceUtils.getMarketCategory) {
+    return AdaptiveIntelligenceUtils.getMarketCategory(symbol, timeframeSec);
+  }
+  const mt = getMarketType(symbol);
+  if (mt === "boom") return "BOOM_INDICES";
+  if (mt === "crash") return "CRASH_INDICES";
+  if (mt === "jump") return "JUMP_INDICES";
+  if (mt === "step") return "STEP_INDICES";
+  if (mt === "commodity") return "COMMODITIES";
+  if (mt === "forex") {
+    return /^frx(EURUSD|GBPUSD|USDJPY|AUDUSD|NZDUSD|USDCHF|USDCAD)/i.test(symbol || "")
+      ? "FOREX_MAJORS"
+      : "FOREX_CROSSES";
+  }
+  return /^1HZ/i.test(symbol || "") ? "VOLATILITY_1S" : "VOLATILITY_STANDARD";
+}
+
+function getAdaptiveMtfStatus(signal) {
+  if (!signal) return "UNKNOWN";
+  if (signal.mtfStatus) return String(signal.mtfStatus).toUpperCase();
+  if (signal.type === "mtf_top_down" || signal.strategyType === "mtf_top_down") return "CONFIRMED";
+  if (signal.htfTrend && signal.dir && signal.htfTrend === signal.dir) return "CONFIRMED";
+  return "UNKNOWN";
+}
+
+function mergeRemoteConfluenceStats(data) {
+  if (!data || !Array.isArray(data.factor_stats)) return;
+  let touched = false;
+  for (const row of data.factor_stats) {
+    if (!row || row.factor_key == null) continue;
+    confluenceFactorStats[row.factor_key] = {
+      wins: Number(row.wins || 0),
+      losses: Number(row.losses || 0),
+      currentWeight: Number(row.current_weight || 0),
+      confidenceScore: Number(row.confidence_score || 0),
+      sampleSize: Number(row.sample_size || 0)
+    };
+    touched = true;
+  }
+  if (touched) renderAdaptiveConfluenceTable();
+}
+
+async function bootstrapAdaptiveIntelligence(force = false) {
+  if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
+  if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return null;
+  if (adaptiveIntelligenceBootstrapPromise && !force) return adaptiveIntelligenceBootstrapPromise;
+  adaptiveIntelligenceBootstrapPromise = adaptiveIntelligenceClient.bootstrap({
+    symbol: getActiveSymbol(),
+    timeframe_sec: getCurrentGranularitySec(),
+    strategy_key: (trade && (trade.strategyType || trade.type)) || "breakout_retest"
+  }).then((data) => {
+    adaptiveIntelligenceBootstrap = data;
+    mergeRemoteConfluenceStats(data);
+    return data;
+  }).catch((err) => {
+    console.warn("Adaptive intelligence bootstrap failed:", err.message);
+    return null;
+  }).finally(() => {
+    adaptiveIntelligenceBootstrapPromise = null;
+  });
+  return adaptiveIntelligenceBootstrapPromise;
+}
+
+function buildAdaptiveQualificationPayload(signal, strategyLabel, overrides = {}) {
+  const s = signal || {};
+  if (!s.signalId) stampSignalLifecycle(s);
+  const strategy = overrides.strategy || s.strategyType || s.type || "breakout_retest";
+  const symbol = overrides.symbol || s.symbol || getActiveSymbol();
+  const timeframeSec = overrides.timeframeSec || s.timeframeSec || getCurrentGranularitySec();
+  const mtfStatus = overrides.mtfStatus || getAdaptiveMtfStatus(s);
+  const factors = (typeof AdaptiveIntelligenceUtils !== "undefined" && AdaptiveIntelligenceUtils.normalizeFactors)
+    ? AdaptiveIntelligenceUtils.normalizeFactors(s._confFactors || [], mtfStatus)
+    : (s._confFactors || []);
+  const rawScore = Number.isFinite(s.confluenceScore) ? s.confluenceScore : (Number.isFinite(s.conf) ? s.conf : (Array.isArray(s._confFactors) ? s._confFactors.length : 0));
+  return {
+    signal_id: s.signalId,
+    symbol,
+    market_category: getAdaptiveMarketCategory(symbol, timeframeSec),
+    strategy_key: strategy,
+    strategy_label: strategyLabel || strategy,
+    direction: s.dir || overrides.direction || null,
+    signal_timestamp: s.time || new Date().toISOString(),
+    timeframe_sec: timeframeSec,
+    confluence_score: rawScore,
+    confluence_max: Number.isFinite(s.conf) ? 7 : 16,
+    confluence_factors_present: factors,
+    mtf_status: mtfStatus
+  };
+}
+
+function decorateAdaptiveTelegramCaption(caption, decision) {
+  if (!decision || !caption) return caption;
+  const finalScore = Number.isFinite(decision.final_confidence_score) ? decision.final_confidence_score.toFixed(1) : "0.0";
+  let label = "🧠 Qualified";
+  if (decision.qualification_band === "HIGH_CONFIDENCE") label = "🔥 High Confidence";
+  else if (decision.qualification_band === "WATCHLIST") label = "👀 Watchlist";
+  else if (decision.qualification_band === "REJECT") label = "⛔ Rejected";
+  return `<b>${label}</b> — ${finalScore}%
+
+${caption}`;
+}
+
+async function qualifySignalForTelegram(signal, strategyLabel, force = false, overrides = {}) {
+  if (force) return { allowed: true, decision: null };
+  if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
+  if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return { allowed: true, decision: null };
+  try {
+    const decision = await adaptiveIntelligenceClient.qualifySignal(buildAdaptiveQualificationPayload(signal, strategyLabel, overrides));
+    if (signal && decision) signal._adaptiveDecision = decision;
+    if (!decision) return { allowed: true, decision: null };
+    const action = String(decision.telegram_action || "").toUpperCase();
+    if (action === "REJECT") {
+      addLog(`🧠 Adaptive Intelligence rejected Telegram signal (${decision.final_confidence_score}% confidence)`);
+      return { allowed: false, decision };
+    }
+    if (action === "WATCHLIST_ONLY") {
+      addLog(`🧠 Adaptive Intelligence kept signal on watchlist only (${decision.final_confidence_score}% confidence)`);
+      return { allowed: false, decision };
+    }
+    if (action === "SEND_HIGH_CONFIDENCE") {
+      addLog(`🧠 Adaptive Intelligence approved HIGH confidence Telegram signal (${decision.final_confidence_score}% confidence)`);
+    }
+    return { allowed: true, decision };
+  } catch (err) {
+    console.warn("Adaptive signal qualification failed:", err.message);
+    addLog(`🧠 Adaptive Intelligence fallback — ${err.message}`);
+    return { allowed: true, decision: null };
+  }
+}
+
+function findPendingTradeSignal(symbol) {
+  const target = symbol || getActiveSymbol();
+  return signalHistory.findLast((s) => s && s.result === "PENDING" && (!target || (s.symbol || getActiveSymbol()) === target));
+}
+
+function buildAdaptiveTradePayloadFromSignal(signal, overrides = {}) {
+  if (!signal || typeof AdaptiveIntelligenceUtils === "undefined" || !AdaptiveIntelligenceUtils.buildTradePayload) return null;
+  const symbol = overrides.symbol || signal.symbol || getActiveSymbol();
+  const timeframeSec = overrides.timeframeSec || signal.timeframeSec || getCurrentGranularitySec();
+  return AdaptiveIntelligenceUtils.buildTradePayload(signal, signal._adaptiveDecision || null, {
+    symbol,
+    strategy: overrides.strategy || signal.strategyType || signal.type || "breakout_retest",
+    strategyLabel: overrides.strategyLabel || signal.strategyType || signal.type || "breakout_retest",
+    timeframeSec,
+    marketCategory: overrides.marketCategory || getAdaptiveMarketCategory(symbol, timeframeSec),
+    mtfStatus: overrides.mtfStatus || getAdaptiveMtfStatus(signal)
+  });
+}
+
+function syncPersistentAdaptiveTradeHistory() {
+  if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
+  const buckets = [
+    signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
+    failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
+    sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
+    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
+    breakerBlockHistory, oteGoldenPocketHistory, orbHistory, crtTbsHistory
+  ].filter(Array.isArray);
+
+  for (const bucket of buckets) {
+    for (const signal of bucket) {
+      if (!signal || signal._adaptiveTradeSynced || signal._adaptiveTradeSyncing) continue;
+      const result = String(signal.result || "").toUpperCase();
+      if (!["WIN", "LOSS", "EXPIRED", "CANCELLED"].includes(result)) continue;
+      if (!signal.signalId) stampSignalLifecycle(signal);
+      const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
+      const payload = buildAdaptiveTradePayloadFromSignal(cloned);
+      if (!payload) continue;
+      signal._adaptiveTradeSyncing = true;
+      adaptiveIntelligenceClient.recordTrade(payload)
+        .then(() => {
+          signal._adaptiveTradeSynced = true;
+        })
+        .catch((err) => {
+          console.warn("Adaptive trade sync failed:", err.message);
+        })
+        .finally(() => {
+          signal._adaptiveTradeSyncing = false;
+        });
+    }
+  }
+}
+
 function buildAdaptiveContext(overrides = {}) {
   return {
     symbol: overrides.symbol || getActiveSymbol(),
@@ -9429,10 +9625,6 @@ function buildScalpTelegramCaption(scalp) {
 async function sendTelegramScalpAlert(scalp, force = false) {
   if (!telegramScalpAutoSend && !force) return;
 
-  /* Sync credentials from DOM */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  /* Check credentials are available */
   try {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
@@ -9441,10 +9633,15 @@ async function sendTelegramScalpAlert(scalp, force = false) {
     return;
   }
 
+  const qualification = await qualifySignalForTelegram(scalp, "Live Scalp", force, {
+    strategy: "live_scalp",
+    mtfStatus: getAdaptiveMtfStatus(scalp)
+  });
+  if (!qualification.allowed) return;
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending scalp…";
-  const caption = buildScalpTelegramCaption(scalp);
+  const caption = decorateAdaptiveTelegramCaption(buildScalpTelegramCaption(scalp), qualification.decision);
   try {
-    /* In multi-panel mode, capture the correct panel's chart (not whatever is currently in globals) */
     const panel = (scalp.symbol && multiPanels.has(scalp.symbol)) ? multiPanels.get(scalp.symbol) : null;
     const blob = await captureTelegramScreenshot(panel);
     if (blob) {
@@ -9452,6 +9649,7 @@ async function sendTelegramScalpAlert(scalp, force = false) {
     } else {
       await sendTelegramMessage(caption);
     }
+    scalp._sentViaTelegram = true;
     addLog("📤 Scalp Telegram alert sent successfully");
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Scalp sent!";
@@ -10069,10 +10267,6 @@ function maybeSendBreakoutCancelled(reason) {
 async function sendTelegramStrategyAlert(signal, force = false) {
   if (!telegramStrategyAutoSend && !force) return;
 
-  /* Sync credentials from DOM */
-  /* #14: credentials kept in sync by the DOM input listener — no need to re-read here */
-
-  /* Check credentials are available */
   try {
     const { token, chatId } = getTelegramCredentials();
     validateTelegramCredentials(token, chatId);
@@ -10081,11 +10275,15 @@ async function sendTelegramStrategyAlert(signal, force = false) {
     return;
   }
 
+  const qualification = await qualifySignalForTelegram(signal, signal.type || signal.strategyType || "strategy", force, {
+    strategy: signal.strategyType || signal.type || "strategy"
+  });
+  if (!qualification.allowed) return;
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending strategy alert…";
   stampSignalLifecycle(signal);
-  const caption = buildStrategyTelegramCaption(signal);
+  const caption = decorateAdaptiveTelegramCaption(buildStrategyTelegramCaption(signal), qualification.decision);
   try {
-    /* In multi-panel mode, capture the correct panel's chart */
     const panel = (signal.symbol && multiPanels.has(signal.symbol)) ? multiPanels.get(signal.symbol) : null;
     const blob = await captureTelegramScreenshot(panel);
     if (blob) {
@@ -10093,6 +10291,7 @@ async function sendTelegramStrategyAlert(signal, force = false) {
     } else {
       await sendTelegramMessage(caption);
     }
+    signal._sentViaTelegram = true;
     addLog(`📤 Strategy Telegram alert sent (${signal.type})`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Strategy alert sent!";
@@ -17039,32 +17238,35 @@ async function testTelegramConnection() {
  * Shows status in the signal log and the Telegram status label.
  */
 async function sendTelegramAlert() {
-  /* Sync variables from DOM before sending */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
   if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
 
-  /* In multi-panel mode, delegate to the panel-specific sender
-     so the chart screenshot and caption always match the focused panel */
   if (focusedPanelSymbol && multiPanels.has(focusedPanelSymbol)) {
     return sendPanelTelegramAlert(focusedPanelSymbol);
   }
 
+  const pending = findPendingTradeSignal();
+  const qualification = pending
+    ? await qualifySignalForTelegram(pending, "Breakout Retest", false, { strategy: "breakout_retest" })
+    : { allowed: true, decision: null };
+  if (!qualification.allowed) return;
+
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending…";
   if (trade) stampSignalLifecycle(trade);
   try {
-    const caption = buildTelegramCaption();
+    const caption = decorateAdaptiveTelegramCaption(buildTelegramCaption(), qualification.decision);
     const blob = await captureTelegramScreenshot();
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
       await sendTelegramMessage(caption);
     }
+    if (pending) pending._sentViaTelegram = true;
     addLog("📤 Telegram alert sent successfully");
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Sent!";
       UI.telegramStatus.className = "hint telegram-status telegram-ok";
     }
-    /* Persist credentials on success */
     saveSettings();
   } catch (err) {
     addLog(`📤 Telegram error: ${err.message}`);
@@ -17074,7 +17276,6 @@ async function sendTelegramAlert() {
       UI.telegramStatus.className = "hint telegram-status telegram-err";
     }
   }
-  /* Clear status after 5 seconds */
   setTimeout(() => {
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "";
@@ -17092,14 +17293,20 @@ async function sendPanelTelegramAlert(symbol) {
   const p = multiPanels.get(symbol);
   if (!p) return;
 
-  /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
   if (UI.telegramChatId) telegramChatId = UI.telegramChatId.value;
 
-  /* Build caption from panel state (without touching globals) */
-  const caption = buildPanelTelegramCaption(p);
+  const pending = Array.isArray(p.signalHistory) ? [...p.signalHistory].reverse().find((s) => s && s.result === "PENDING") : null;
+  const qualification = pending
+    ? await qualifySignalForTelegram(pending, "Breakout Retest", false, {
+        symbol,
+        timeframeSec: p.granularity || getCurrentGranularitySec(),
+        strategy: pending.strategyType || pending.type || "breakout_retest"
+      })
+    : { allowed: true, decision: null };
+  if (!qualification.allowed) return;
 
-  /* Capture screenshot from the panel's mini-chart canvas */
+  const caption = decorateAdaptiveTelegramCaption(buildPanelTelegramCaption(p), qualification.decision);
   const blob = await captureTelegramScreenshot(p);
 
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending ${getSymbolLabel(symbol)}…`;
@@ -17110,6 +17317,7 @@ async function sendPanelTelegramAlert(symbol) {
     } else {
       await sendTelegramMessage(caption);
     }
+    if (pending) pending._sentViaTelegram = true;
     addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = `✅ Sent ${getSymbolLabel(symbol)}!`;
@@ -17123,7 +17331,6 @@ async function sendPanelTelegramAlert(symbol) {
       UI.telegramStatus.className = "hint telegram-status telegram-err";
     }
   }
-  /* Clear status */
   setTimeout(() => {
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "";
@@ -18107,6 +18314,7 @@ function updateStatsUI() {
 
   /* Always update aggregated signal count and banners (across all panels) */
   processAdaptiveResolvedSignals();
+  syncPersistentAdaptiveTradeHistory();
   renderAdaptiveSettingsUI();
   const allSignals = getAggregatedSignalHistory();
   if (UI.signalCount) UI.signalCount.textContent = allSignals.length;
@@ -25844,7 +26052,7 @@ function initLoginGate() {
       onLogin: () => {
         localStorage.removeItem("itguru_deriv_token");
         /* Refresh user data (role + strategies) from server */
-        ITGuruAuth.verify().then(() => applyStrategyAccess());
+        ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
       }
     });
 
@@ -25861,7 +26069,7 @@ function initLoginGate() {
        Client-side JWT expiry is already checked in isLoggedIn(), so we don't
        force a logout here — a transient server error should not kick the user out. */
     if (ITGuruAuth.isLoggedIn()) {
-      ITGuruAuth.verify().then(() => applyStrategyAccess());
+      ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
     }
     return;
   }

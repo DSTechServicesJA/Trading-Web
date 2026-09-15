@@ -346,3 +346,222 @@ CREATE TABLE IF NOT EXISTS adaptive_experiments (
     CONSTRAINT fk_adaptive_experiment_user
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Persistent adaptive intelligence trade history
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_trade_history (
+    id                           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                      INT UNSIGNED NOT NULL,
+    trade_id                     VARCHAR(100) NOT NULL,
+    signal_id                    VARCHAR(100) DEFAULT NULL,
+    symbol                       VARCHAR(32)  NOT NULL,
+    market_category              VARCHAR(32)  NOT NULL,
+    strategy_key                 VARCHAR(64)  NOT NULL,
+    strategy_label               VARCHAR(100) NOT NULL DEFAULT '',
+    direction                    ENUM('BULL','BEAR','NEUTRAL') NOT NULL DEFAULT 'NEUTRAL',
+    signal_timestamp             DATETIME     NOT NULL,
+    entry_timestamp              DATETIME     DEFAULT NULL,
+    exit_timestamp               DATETIME     DEFAULT NULL,
+    entry_price                  DECIMAL(18,8) DEFAULT NULL,
+    stop_loss                    DECIMAL(18,8) DEFAULT NULL,
+    take_profit                  DECIMAL(18,8) DEFAULT NULL,
+    exit_price                   DECIMAL(18,8) DEFAULT NULL,
+    result                       ENUM('WIN','LOSS','CANCELLED') NOT NULL,
+    r_multiple                   DECIMAL(12,4) DEFAULT NULL,
+    profit_points                DECIMAL(18,8) DEFAULT NULL,
+    telegram_sent                TINYINT(1)   NOT NULL DEFAULT 0,
+    telegram_decision            VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
+    confidence_score             DECIMAL(5,2) DEFAULT NULL,
+    signal_score                 DECIMAL(5,2) DEFAULT NULL,
+    historical_reliability_score DECIMAL(5,2) DEFAULT NULL,
+    market_category_score        DECIMAL(5,2) DEFAULT NULL,
+    strategy_reliability_score   DECIMAL(5,2) DEFAULT NULL,
+    qualification_band           VARCHAR(32)  NOT NULL DEFAULT 'UNQUALIFIED',
+    confluence_factors_json      JSON         NOT NULL,
+    confluence_factors_raw_json  JSON         DEFAULT NULL,
+    mtf_status                   VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
+    notes_json                   JSON         DEFAULT NULL,
+    created_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_trade_user_trade  (user_id, trade_id),
+    UNIQUE KEY uq_adaptive_trade_user_signal (user_id, signal_id),
+    INDEX idx_adaptive_trade_scope           (user_id, market_category, strategy_key, symbol),
+    INDEX idx_adaptive_trade_result          (result),
+    INDEX idx_adaptive_trade_created         (created_at),
+
+    CONSTRAINT fk_adaptive_trade_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Persistent confluence factor statistics
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_factor_stats (
+    id                     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                INT UNSIGNED NOT NULL,
+    market_category        VARCHAR(32)  NOT NULL,
+    strategy_key           VARCHAR(64)  NOT NULL DEFAULT '*',
+    symbol_scope           VARCHAR(32)  NOT NULL DEFAULT '*',
+    factor_key             VARCHAR(64)  NOT NULL,
+    wins                   INT UNSIGNED NOT NULL DEFAULT 0,
+    losses                 INT UNSIGNED NOT NULL DEFAULT 0,
+    cancelled              INT UNSIGNED NOT NULL DEFAULT 0,
+    win_rate               DECIMAL(8,6) NOT NULL DEFAULT 0,
+    sample_size            INT UNSIGNED NOT NULL DEFAULT 0,
+    r_multiple_sum         DECIMAL(14,4) NOT NULL DEFAULT 0,
+    avg_r_multiple         DECIMAL(12,4) NOT NULL DEFAULT 0,
+    confidence_score       DECIMAL(5,2) NOT NULL DEFAULT 0,
+    base_weight            DECIMAL(6,2) NOT NULL DEFAULT 5,
+    current_weight         DECIMAL(6,2) NOT NULL DEFAULT 5,
+    trend_direction        ENUM('UP','DOWN','FLAT') NOT NULL DEFAULT 'FLAT',
+    last_adjusted_at       TIMESTAMP NULL DEFAULT NULL,
+    last_adjustment_reason VARCHAR(255) DEFAULT NULL,
+    last_trade_id          VARCHAR(100) DEFAULT NULL,
+    last_signal_id         VARCHAR(100) DEFAULT NULL,
+    last_result            VARCHAR(32)  DEFAULT NULL,
+    last_updated           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_factor_scope (user_id, market_category, strategy_key, symbol_scope, factor_key),
+    INDEX idx_adaptive_factor_lookup    (user_id, market_category, strategy_key, symbol_scope),
+    INDEX idx_adaptive_factor_weight    (current_weight),
+    INDEX idx_adaptive_factor_updated   (last_updated),
+
+    CONSTRAINT fk_adaptive_factor_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Cached learning profiles by category / strategy / symbol
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_learning_profiles (
+    id                    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id               INT UNSIGNED NOT NULL,
+    scope_type            ENUM('category','strategy','symbol') NOT NULL,
+    market_category       VARCHAR(32)  NOT NULL,
+    strategy_key          VARCHAR(64)  NOT NULL DEFAULT '*',
+    symbol_scope          VARCHAR(32)  NOT NULL DEFAULT '*',
+    trade_count           INT UNSIGNED NOT NULL DEFAULT 0,
+    wins                  INT UNSIGNED NOT NULL DEFAULT 0,
+    losses                INT UNSIGNED NOT NULL DEFAULT 0,
+    cancelled             INT UNSIGNED NOT NULL DEFAULT 0,
+    r_multiple_sum        DECIMAL(14,4) NOT NULL DEFAULT 0,
+    profit_points_sum     DECIMAL(18,8) NOT NULL DEFAULT 0,
+    win_rate              DECIMAL(8,6) NOT NULL DEFAULT 0,
+    loss_rate             DECIMAL(8,6) NOT NULL DEFAULT 0,
+    avg_r_multiple        DECIMAL(12,4) NOT NULL DEFAULT 0,
+    confidence_score      DECIMAL(5,2) NOT NULL DEFAULT 0,
+    qualification_threshold DECIMAL(5,2) NOT NULL DEFAULT 80,
+    learning_profile_json JSON         DEFAULT NULL,
+    last_trade_id         VARCHAR(100) DEFAULT NULL,
+    last_signal_id        VARCHAR(100) DEFAULT NULL,
+    last_result           VARCHAR(32)  DEFAULT NULL,
+    created_at            TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_learning_scope (user_id, market_category, strategy_key, symbol_scope),
+    INDEX idx_adaptive_learning_lookup    (user_id, market_category, strategy_key, symbol_scope),
+    INDEX idx_adaptive_learning_updated   (updated_at),
+
+    CONSTRAINT fk_adaptive_learning_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Category/strategy/symbol qualification rules
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_qualification_rules (
+    id                            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                       INT UNSIGNED NOT NULL,
+    market_category               VARCHAR(32)  NOT NULL DEFAULT '*',
+    strategy_key                  VARCHAR(64)  NOT NULL DEFAULT '*',
+    symbol_scope                  VARCHAR(32)  NOT NULL DEFAULT '*',
+    reject_below                  DECIMAL(5,2) NOT NULL DEFAULT 65,
+    watchlist_below               DECIMAL(5,2) NOT NULL DEFAULT 80,
+    high_confidence_min           DECIMAL(5,2) NOT NULL DEFAULT 90,
+    min_sample_size               INT UNSIGNED NOT NULL DEFAULT 10,
+    min_weight_adjustment_samples INT UNSIGNED NOT NULL DEFAULT 15,
+    max_weight_step               DECIMAL(6,2) NOT NULL DEFAULT 1,
+    base_weight_default           DECIMAL(6,2) NOT NULL DEFAULT 5,
+    confidence_blend_signal       DECIMAL(8,6) NOT NULL DEFAULT 0.30,
+    confidence_blend_history      DECIMAL(8,6) NOT NULL DEFAULT 0.30,
+    confidence_blend_market       DECIMAL(8,6) NOT NULL DEFAULT 0.20,
+    confidence_blend_strategy     DECIMAL(8,6) NOT NULL DEFAULT 0.20,
+    watchlist_sends_to_telegram   TINYINT(1)   NOT NULL DEFAULT 0,
+    enabled                       TINYINT(1)   NOT NULL DEFAULT 1,
+    created_at                    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_rule_scope (user_id, market_category, strategy_key, symbol_scope),
+    INDEX idx_adaptive_rule_lookup    (user_id, market_category, strategy_key, symbol_scope),
+
+    CONSTRAINT fk_adaptive_rule_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Signal qualification decisions audit
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_signal_decisions (
+    id                           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                      INT UNSIGNED NOT NULL,
+    signal_id                    VARCHAR(100) NOT NULL,
+    symbol                       VARCHAR(32)  NOT NULL,
+    market_category              VARCHAR(32)  NOT NULL,
+    strategy_key                 VARCHAR(64)  NOT NULL,
+    direction                    ENUM('BULL','BEAR','NEUTRAL') NOT NULL DEFAULT 'NEUTRAL',
+    signal_timestamp             DATETIME     NOT NULL,
+    telegram_action              VARCHAR(32)  NOT NULL,
+    qualification_band           VARCHAR(32)  NOT NULL,
+    signal_score                 DECIMAL(5,2) NOT NULL,
+    historical_reliability_score DECIMAL(5,2) NOT NULL,
+    market_category_score        DECIMAL(5,2) NOT NULL,
+    strategy_reliability_score   DECIMAL(5,2) NOT NULL,
+    final_confidence_score       DECIMAL(5,2) NOT NULL,
+    factors_json                 JSON         NOT NULL,
+    mtf_status                   VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
+    rule_snapshot_json           JSON         DEFAULT NULL,
+    decision_trace_json          JSON         DEFAULT NULL,
+    created_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_adaptive_signal_decision (user_id, signal_id),
+    INDEX idx_adaptive_signal_scope        (user_id, market_category, strategy_key, symbol),
+    INDEX idx_adaptive_signal_created      (created_at),
+
+    CONSTRAINT fk_adaptive_signal_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Unified audit log for adaptive intelligence changes
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS adaptive_learning_audit_log (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    actor_user_id       INT UNSIGNED DEFAULT NULL,
+    actor_role          VARCHAR(20)  NOT NULL DEFAULT 'system',
+    target_user_id      INT UNSIGNED DEFAULT NULL,
+    action_type         VARCHAR(64)  NOT NULL,
+    entity_type         VARCHAR(64)  NOT NULL,
+    entity_key          VARCHAR(120) NOT NULL,
+    market_category     VARCHAR(32)  DEFAULT NULL,
+    strategy_key        VARCHAR(64)  DEFAULT NULL,
+    symbol_scope        VARCHAR(32)  DEFAULT NULL,
+    previous_value_json JSON         DEFAULT NULL,
+    new_value_json      JSON         DEFAULT NULL,
+    reason_text         TEXT         NOT NULL,
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_adaptive_audit_target  (target_user_id, created_at),
+    INDEX idx_adaptive_audit_actor   (actor_user_id, created_at),
+    INDEX idx_adaptive_audit_scope   (market_category, strategy_key, symbol_scope),
+
+    CONSTRAINT fk_adaptive_audit_actor
+        FOREIGN KEY (actor_user_id) REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_adaptive_audit_target
+        FOREIGN KEY (target_user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

@@ -237,6 +237,107 @@
       </div>
     </section>
 
+    <section class="profiles-section" id="adaptiveSection">
+      <h1>🧠 Adaptive Intelligence Administration</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        Review persistent trade learning, category-isolated factor statistics, adaptive weights,
+        qualification rules, signal decisions, and audit history. Admin overrides are logged.
+      </p>
+
+      <div class="toolbar adaptive-toolbar">
+        <input type="number" id="adaptiveUserId" class="search-input" placeholder="User ID" min="1" />
+        <select id="adaptiveCategoryFilter" class="filter-select">
+          <option value="">All Categories</option>
+          <option value="VOLATILITY_1S">VOLATILITY_1S</option>
+          <option value="VOLATILITY_STANDARD">VOLATILITY_STANDARD</option>
+          <option value="BOOM_INDICES">BOOM_INDICES</option>
+          <option value="CRASH_INDICES">CRASH_INDICES</option>
+          <option value="JUMP_INDICES">JUMP_INDICES</option>
+          <option value="STEP_INDICES">STEP_INDICES</option>
+          <option value="FOREX_MAJORS">FOREX_MAJORS</option>
+          <option value="FOREX_CROSSES">FOREX_CROSSES</option>
+          <option value="COMMODITIES">COMMODITIES</option>
+        </select>
+        <input type="text" id="adaptiveStrategyFilter" class="search-input" placeholder="Strategy key" />
+        <input type="text" id="adaptiveSymbolFilter" class="search-input" placeholder="Symbol" />
+        <button id="adaptiveRefreshBtn" type="button" class="btn-primary">🔄 Refresh Learning</button>
+        <button id="adaptiveExportBtn" type="button" class="btn-ghost">📤 Export</button>
+        <button id="adaptiveResetBtn" type="button" class="btn-danger">♻ Reset Scope</button>
+      </div>
+
+      <div class="stats-bar" id="adaptiveSummaryCards"></div>
+
+      <div class="modal-card" style="max-width:none;">
+        <h3 style="margin-bottom:10px;">Qualification Rule Editor</h3>
+        <div class="adaptive-grid-form">
+          <label>Reject Below %<input type="number" id="adaptiveRuleReject" min="0" max="100" step="0.1" /></label>
+          <label>Watchlist Below %<input type="number" id="adaptiveRuleWatchlist" min="0" max="100" step="0.1" /></label>
+          <label>High Confidence %<input type="number" id="adaptiveRuleHigh" min="0" max="100" step="0.1" /></label>
+          <label>Min Samples<input type="number" id="adaptiveRuleSamples" min="1" step="1" /></label>
+          <label>Weight Sample Gate<input type="number" id="adaptiveRuleWeightSamples" min="1" step="1" /></label>
+          <label>Max Weight Step<input type="number" id="adaptiveRuleWeightStep" min="0.1" max="5" step="0.1" /></label>
+          <label>Signal Blend<input type="number" id="adaptiveRuleSignalBlend" min="0" max="1" step="0.01" /></label>
+          <label>History Blend<input type="number" id="adaptiveRuleHistoryBlend" min="0" max="1" step="0.01" /></label>
+          <label>Market Blend<input type="number" id="adaptiveRuleMarketBlend" min="0" max="1" step="0.01" /></label>
+          <label>Strategy Blend<input type="number" id="adaptiveRuleStrategyBlend" min="0" max="1" step="0.01" /></label>
+        </div>
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button id="adaptiveSaveRuleBtn" type="button" class="btn-primary">💾 Save Rule</button>
+          <label class="remember-me-row"><input type="checkbox" id="adaptiveRuleWatchlistTelegram" /> Send watchlist items to Telegram</label>
+        </div>
+        <div id="adaptiveRuleStatus" class="form-error"></div>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <h3 class="adaptive-subtitle">Trade History</h3>
+        <table class="profiles-table">
+          <thead><tr><th>Created</th><th>User</th><th>Trade ID</th><th>Symbol</th><th>Category</th><th>Strategy</th><th>Result</th><th>R</th><th>Telegram</th><th>Confidence</th><th>Action</th></tr></thead>
+          <tbody id="adaptiveTradesBody"><tr><td colspan="11" class="table-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <h3 class="adaptive-subtitle">Factor Statistics & Adaptive Weights</h3>
+        <table class="profiles-table">
+          <thead><tr><th>Factor</th><th>User</th><th>Category</th><th>Scope</th><th>W</th><th>L</th><th>Win %</th><th>Samples</th><th>Avg R</th><th>Confidence</th><th>Weight</th><th>Trend</th><th>Action</th></tr></thead>
+          <tbody id="adaptiveFactorsBody"><tr><td colspan="13" class="table-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <h3 class="adaptive-subtitle">Learning Profiles</h3>
+        <table class="profiles-table">
+          <thead><tr><th>Scope</th><th>User</th><th>Category</th><th>Strategy</th><th>Symbol</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Confidence</th><th>Last Updated</th></tr></thead>
+          <tbody id="adaptiveProfilesBody"><tr><td colspan="10" class="table-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <h3 class="adaptive-subtitle">Signal Decisions</h3>
+        <table class="profiles-table">
+          <thead><tr><th>Created</th><th>User</th><th>Signal</th><th>Category</th><th>Strategy</th><th>Action</th><th>Band</th><th>Signal</th><th>History</th><th>Market</th><th>Strategy</th><th>Final</th></tr></thead>
+          <tbody id="adaptiveDecisionsBody"><tr><td colspan="12" class="table-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <h3 class="adaptive-subtitle">Audit Log</h3>
+        <table class="profiles-table">
+          <thead><tr><th>Created</th><th>Actor</th><th>Target User</th><th>Action</th><th>Entity</th><th>Scope</th><th>Reason</th></tr></thead>
+          <tbody id="adaptiveAuditBody"><tr><td colspan="7" class="table-empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="modal-card" style="max-width:none;">
+        <h3 style="margin-bottom:10px;">Import / Export</h3>
+        <textarea id="adaptiveImportExport" rows="10" style="width:100%;resize:vertical;background:var(--bg-surface);color:var(--text);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:8px;font-family:var(--font-mono);font-size:12px;"></textarea>
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button id="adaptiveImportBtn" type="button" class="btn-primary">📥 Import Trade History</button>
+        </div>
+        <div id="adaptiveImportStatus" class="form-error"></div>
+      </div>
+    </section>
+
   </main>
 </div>
 

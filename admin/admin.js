@@ -158,6 +158,8 @@ async function initApp(user) {
   bindProfileModals();
   await loadNotifications();
   bindNotifications();
+  await loadAdaptiveDashboard();
+  bindAdaptiveAdmin();
 }
 
 /* ═══════════════════════════════════════════════
@@ -1421,5 +1423,374 @@ function bindNotifications() {
       sendBtn.disabled = false;
       sendBtn.textContent = "📤 Send Notification";
     }
+  });
+}
+
+
+/* ═══════════════════════════════════════════════
+   Adaptive Intelligence Administration
+   ═══════════════════════════════════════════════ */
+let adaptiveDashboardState = null;
+
+function getAdaptiveFilters() {
+  return {
+    user_id: (el('adaptiveUserId')?.value || '').trim(),
+    market_category: (el('adaptiveCategoryFilter')?.value || '').trim(),
+    strategy_key: (el('adaptiveStrategyFilter')?.value || '').trim(),
+    symbol: (el('adaptiveSymbolFilter')?.value || '').trim(),
+  };
+}
+
+function buildAdaptiveDashboardQuery() {
+  const params = new URLSearchParams();
+  const filters = getAdaptiveFilters();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v) params.set(k, v);
+  }
+  return params.toString();
+}
+
+function adaptiveActionLabel(action) {
+  const value = String(action || '').toUpperCase();
+  if (value.includes('HIGH')) return '<span class="badge-admin-profile">🔥 High</span>';
+  if (value.includes('WATCHLIST')) return '<span class="badge-user-profile">👀 Watchlist</span>';
+  if (value.includes('REJECT')) return '<span class="badge-danger-soft">⛔ Reject</span>';
+  return `<span class="badge-user-profile">${escHtml(value || '—')}</span>`;
+}
+
+async function loadAdaptiveDashboard() {
+  const summary = el('adaptiveSummaryCards');
+  if (summary) summary.innerHTML = '<div class="stat-card"><div class="stat-label">Adaptive Intelligence</div><div class="stat-value">Loading…</div></div>';
+  try {
+    const query = buildAdaptiveDashboardQuery();
+    const resp = await apiRequest('/admin/adaptive?action=dashboard' + (query ? `&${query}` : ''));
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Failed to load adaptive dashboard');
+    adaptiveDashboardState = data;
+    renderAdaptiveDashboard(data);
+  } catch (e) {
+    if (summary) summary.innerHTML = `<div class="stat-card"><div class="stat-label">Adaptive Intelligence</div><div class="stat-value" style="color:var(--danger-soft)">${escHtml(e.message)}</div></div>`;
+  }
+}
+
+function renderAdaptiveDashboard(data) {
+  renderAdaptiveSummary(data.summary || {});
+  renderAdaptiveRuleEditor(data.rules || []);
+  renderAdaptiveTrades(data.trades || []);
+  renderAdaptiveFactors(data.factor_stats || []);
+  renderAdaptiveProfiles(data.profiles || []);
+  renderAdaptiveDecisions(data.decisions || []);
+  renderAdaptiveAudit(data.audits || []);
+}
+
+function renderAdaptiveSummary(summary) {
+  const elSummary = el('adaptiveSummaryCards');
+  if (!elSummary) return;
+  const tradeCount = Number(summary.trade_count || 0);
+  const wins = Number(summary.wins || 0);
+  const losses = Number(summary.losses || 0);
+  const cancelled = Number(summary.cancelled || 0);
+  const winRate = wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0';
+  const avgR = Number(summary.avg_r_multiple || 0).toFixed(2);
+  const avgConf = Number(summary.avg_confidence || 0).toFixed(1);
+  elSummary.innerHTML = [
+    ['Trades', tradeCount],
+    ['Wins', wins],
+    ['Losses', losses],
+    ['Cancelled', cancelled],
+    ['Win Rate', `${winRate}%`],
+    ['Avg R', avgR],
+    ['Avg Confidence', `${avgConf}%`]
+  ].map(([label, value]) => `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join('');
+}
+
+function findBestRule(rules) {
+  const filters = getAdaptiveFilters();
+  const category = filters.market_category || '*';
+  const strategy = filters.strategy_key || '*';
+  const symbol = filters.symbol || '*';
+  return rules.find((r) => r.market_category === category && r.strategy_key === strategy && r.symbol_scope === symbol)
+    || rules.find((r) => r.market_category === category && r.strategy_key === '*' && r.symbol_scope === '*')
+    || rules.find((r) => r.market_category === '*' && r.strategy_key === '*' && r.symbol_scope === '*')
+    || null;
+}
+
+function renderAdaptiveRuleEditor(rules) {
+  const rule = findBestRule(rules) || {};
+  setRuleField('adaptiveRuleReject', rule.reject_below, 65);
+  setRuleField('adaptiveRuleWatchlist', rule.watchlist_below, 80);
+  setRuleField('adaptiveRuleHigh', rule.high_confidence_min, 90);
+  setRuleField('adaptiveRuleSamples', rule.min_sample_size, 10);
+  setRuleField('adaptiveRuleWeightSamples', rule.min_weight_adjustment_samples, 15);
+  setRuleField('adaptiveRuleWeightStep', rule.max_weight_step, 1);
+  setRuleField('adaptiveRuleSignalBlend', rule.confidence_blend_signal, 0.30);
+  setRuleField('adaptiveRuleHistoryBlend', rule.confidence_blend_history, 0.30);
+  setRuleField('adaptiveRuleMarketBlend', rule.confidence_blend_market, 0.20);
+  setRuleField('adaptiveRuleStrategyBlend', rule.confidence_blend_strategy, 0.20);
+  const watchlistCb = el('adaptiveRuleWatchlistTelegram');
+  if (watchlistCb) watchlistCb.checked = !!Number(rule.watchlist_sends_to_telegram || 0);
+}
+
+function setRuleField(id, value, fallback) {
+  const target = el(id);
+  if (target) target.value = value != null ? value : fallback;
+}
+
+function renderAdaptiveTrades(rows) {
+  const tbody = el('adaptiveTradesBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="11" class="table-empty">No adaptive trade history found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td class="ts">${fmtDateTime(row.created_at)}</td>
+      <td class="ts">${escHtml(row.user_id)}</td>
+      <td class="ts">${escHtml(row.trade_id)}</td>
+      <td>${escHtml(row.symbol)}</td>
+      <td class="ts">${escHtml(row.market_category)}</td>
+      <td class="ts">${escHtml(row.strategy_key)}</td>
+      <td>${escHtml(row.result)}</td>
+      <td class="ts">${row.r_multiple != null ? Number(row.r_multiple).toFixed(2) : '—'}</td>
+      <td>${adaptiveActionLabel(row.telegram_decision || (row.telegram_sent ? 'sent' : 'not_sent'))}</td>
+      <td class="ts">${row.confidence_score != null ? Number(row.confidence_score).toFixed(1) + '%' : '—'}</td>
+      <td class="actions-cell"><button type="button" class="btn-icon btn-sm btn-danger" data-adaptive-delete-trade="${row.id}">🗑️</button></td>
+    </tr>`).join('');
+  tbody.querySelectorAll('[data-adaptive-delete-trade]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this adaptive trade record and rebuild its category aggregates?')) return;
+    const resp = await apiRequest('/admin/adaptive?action=trade&id=' + encodeURIComponent(btn.dataset.adaptiveDeleteTrade), { method: 'DELETE' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return alert(data.error || 'Failed to delete trade');
+    await loadAdaptiveDashboard();
+  }));
+}
+
+function renderAdaptiveFactors(rows) {
+  const tbody = el('adaptiveFactorsBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="13" class="table-empty">No factor statistics found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => {
+    const winRate = Number(row.win_rate || 0) * 100;
+    const weight = Number(row.current_weight || 0);
+    const weightColor = weight >= 7 ? 'var(--success)' : weight >= 4 ? 'var(--warning)' : 'var(--danger)';
+    return `
+      <tr>
+        <td><strong>${escHtml(row.factor_key)}</strong></td>
+        <td class="ts">${escHtml(row.user_id)}</td>
+        <td class="ts">${escHtml(row.market_category)}</td>
+        <td class="ts">${escHtml(row.strategy_key)} / ${escHtml(row.symbol_scope)}</td>
+        <td>${row.wins}</td>
+        <td>${row.losses}</td>
+        <td>${winRate.toFixed(1)}%</td>
+        <td>${row.sample_size}</td>
+        <td>${Number(row.avg_r_multiple || 0).toFixed(2)}</td>
+        <td>${Number(row.confidence_score || 0).toFixed(1)}%</td>
+        <td><div class="adaptive-weight-bar"><span style="width:${Math.min(100, weight * 10)}%;background:${weightColor};"></span></div><small>${weight.toFixed(2)}</small></td>
+        <td>${escHtml(row.trend_direction || 'FLAT')}</td>
+        <td class="actions-cell"><button type="button" class="btn-icon btn-sm" data-adaptive-edit-factor="${row.id}" data-weight="${weight}" data-confidence="${Number(row.confidence_score || 0)}">✏️</button></td>
+      </tr>`;
+  }).join('');
+  tbody.querySelectorAll('[data-adaptive-edit-factor]').forEach((btn) => btn.addEventListener('click', async () => {
+    const weight = prompt('New adaptive weight', btn.dataset.weight || '5');
+    if (weight == null) return;
+    const confidence = prompt('New confidence score', btn.dataset.confidence || '0');
+    if (confidence == null) return;
+    const userId = (el('adaptiveUserId')?.value || '').trim();
+    if (!userId) return alert('Set a User ID filter before editing factor statistics.');
+    const resp = await apiRequest('/admin/adaptive?action=factor', {
+      method: 'PATCH',
+      body: JSON.stringify({ id: Number(btn.dataset.adaptiveEditFactor), user_id: Number(userId), current_weight: Number(weight), confidence_score: Number(confidence) })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return alert(data.error || 'Failed to update factor stat');
+    await loadAdaptiveDashboard();
+  }));
+}
+
+function renderAdaptiveProfiles(rows) {
+  const tbody = el('adaptiveProfilesBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="table-empty">No learning profiles found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escHtml(row.scope_type)}</td>
+      <td class="ts">${escHtml(row.user_id)}</td>
+      <td class="ts">${escHtml(row.market_category)}</td>
+      <td class="ts">${escHtml(row.strategy_key)}</td>
+      <td>${escHtml(row.symbol_scope)}</td>
+      <td>${row.trade_count}</td>
+      <td>${(Number(row.win_rate || 0) * 100).toFixed(1)}%</td>
+      <td>${Number(row.avg_r_multiple || 0).toFixed(2)}</td>
+      <td>${Number(row.confidence_score || 0).toFixed(1)}%</td>
+      <td class="ts">${fmtDateTime(row.updated_at)}</td>
+    </tr>`).join('');
+}
+
+function renderAdaptiveDecisions(rows) {
+  const tbody = el('adaptiveDecisionsBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="table-empty">No signal decisions logged yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td class="ts">${fmtDateTime(row.created_at)}</td>
+      <td class="ts">${escHtml(row.user_id)}</td>
+      <td class="ts">${escHtml(row.signal_id)}</td>
+      <td class="ts">${escHtml(row.market_category)}</td>
+      <td class="ts">${escHtml(row.strategy_key)}</td>
+      <td>${adaptiveActionLabel(row.telegram_action)}</td>
+      <td>${escHtml(row.qualification_band)}</td>
+      <td>${Number(row.signal_score || 0).toFixed(1)}</td>
+      <td>${Number(row.historical_reliability_score || 0).toFixed(1)}</td>
+      <td>${Number(row.market_category_score || 0).toFixed(1)}</td>
+      <td>${Number(row.strategy_reliability_score || 0).toFixed(1)}</td>
+      <td><strong>${Number(row.final_confidence_score || 0).toFixed(1)}%</strong></td>
+    </tr>`).join('');
+}
+
+function renderAdaptiveAudit(rows) {
+  const tbody = el('adaptiveAuditBody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No adaptive audit entries found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td class="ts">${fmtDateTime(row.created_at)}</td>
+      <td class="ts">${escHtml(row.actor_role)} ${row.actor_user_id ? '#' + escHtml(row.actor_user_id) : ''}</td>
+      <td class="ts">${row.target_user_id ? escHtml(row.target_user_id) : '—'}</td>
+      <td>${escHtml(row.action_type)}</td>
+      <td>${escHtml(row.entity_type)} / ${escHtml(row.entity_key)}</td>
+      <td class="ts">${escHtml(row.market_category || '—')} / ${escHtml(row.strategy_key || '—')} / ${escHtml(row.symbol_scope || '—')}</td>
+      <td>${escHtml(row.reason_text)}</td>
+    </tr>`).join('');
+}
+
+async function saveAdaptiveRule() {
+  const status = el('adaptiveRuleStatus');
+  if (status) status.textContent = '';
+  const filters = getAdaptiveFilters();
+  if (!filters.user_id) {
+    if (status) status.textContent = 'User ID is required to save a rule.';
+    return;
+  }
+  try {
+    const resp = await apiRequest('/admin/adaptive?action=rules', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        user_id: Number(filters.user_id),
+        market_category: filters.market_category || '*',
+        strategy_key: filters.strategy_key || '*',
+        symbol_scope: filters.symbol || '*',
+        reject_below: Number(el('adaptiveRuleReject')?.value || 65),
+        watchlist_below: Number(el('adaptiveRuleWatchlist')?.value || 80),
+        high_confidence_min: Number(el('adaptiveRuleHigh')?.value || 90),
+        min_sample_size: Number(el('adaptiveRuleSamples')?.value || 10),
+        min_weight_adjustment_samples: Number(el('adaptiveRuleWeightSamples')?.value || 15),
+        max_weight_step: Number(el('adaptiveRuleWeightStep')?.value || 1),
+        confidence_blend_signal: Number(el('adaptiveRuleSignalBlend')?.value || 0.30),
+        confidence_blend_history: Number(el('adaptiveRuleHistoryBlend')?.value || 0.30),
+        confidence_blend_market: Number(el('adaptiveRuleMarketBlend')?.value || 0.20),
+        confidence_blend_strategy: Number(el('adaptiveRuleStrategyBlend')?.value || 0.20),
+        watchlist_sends_to_telegram: el('adaptiveRuleWatchlistTelegram')?.checked ? 1 : 0
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Failed to save rule');
+    if (status) status.textContent = '✅ Rule saved.';
+    status && (status.style.color = 'var(--success-soft)');
+    await loadAdaptiveDashboard();
+  } catch (e) {
+    if (status) {
+      status.textContent = e.message;
+      status.style.color = 'var(--danger-soft)';
+    }
+  }
+}
+
+async function exportAdaptiveData() {
+  const area = el('adaptiveImportExport');
+  try {
+    const query = buildAdaptiveDashboardQuery();
+    const resp = await apiRequest('/admin/adaptive?action=export' + (query ? `&${query}` : ''), { method: 'GET' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Failed to export adaptive data');
+    if (area) area.value = JSON.stringify(data.data || {}, null, 2);
+  } catch (e) {
+    if (area) area.value = `Export failed: ${e.message}`;
+  }
+}
+
+async function importAdaptiveData() {
+  const area = el('adaptiveImportExport');
+  const status = el('adaptiveImportStatus');
+  if (status) status.textContent = '';
+  const filters = getAdaptiveFilters();
+  if (!filters.user_id) {
+    if (status) status.textContent = 'User ID is required to import adaptive data.';
+    return;
+  }
+  try {
+    const parsed = JSON.parse(area?.value || '{}');
+    const resp = await apiRequest('/admin/adaptive?action=import', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: Number(filters.user_id), data: parsed })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Failed to import adaptive data');
+    if (status) {
+      status.textContent = `✅ Imported ${data.inserted || 0} trades.`;
+      status.style.color = 'var(--success-soft)';
+    }
+    await loadAdaptiveDashboard();
+  } catch (e) {
+    if (status) {
+      status.textContent = e.message;
+      status.style.color = 'var(--danger-soft)';
+    }
+  }
+}
+
+async function resetAdaptiveScope() {
+  const filters = getAdaptiveFilters();
+  if (!filters.user_id) return alert('User ID is required to reset adaptive learning.');
+  const deleteHistory = confirm('Delete the scoped trade history as well?
+Press OK to delete history, Cancel to rebuild weights from preserved trades.');
+  try {
+    const resp = await apiRequest('/admin/adaptive?action=reset', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: Number(filters.user_id),
+        market_category: filters.market_category || '',
+        delete_history: deleteHistory ? 1 : 0
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Failed to reset adaptive learning');
+    await loadAdaptiveDashboard();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function bindAdaptiveAdmin() {
+  el('adaptiveRefreshBtn')?.addEventListener('click', loadAdaptiveDashboard);
+  el('adaptiveExportBtn')?.addEventListener('click', exportAdaptiveData);
+  el('adaptiveImportBtn')?.addEventListener('click', importAdaptiveData);
+  el('adaptiveResetBtn')?.addEventListener('click', resetAdaptiveScope);
+  el('adaptiveSaveRuleBtn')?.addEventListener('click', saveAdaptiveRule);
+  ['adaptiveUserId','adaptiveCategoryFilter','adaptiveStrategyFilter','adaptiveSymbolFilter'].forEach((id) => {
+    const node = el(id);
+    if (node) node.addEventListener('change', loadAdaptiveDashboard);
   });
 }
