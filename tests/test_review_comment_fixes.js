@@ -275,6 +275,60 @@ test('bootstrapAdaptiveIntelligence does not let an older forced refresh overwri
   assert.deepEqual(Object.keys(context.confluenceFactorStats), ['New']);
 });
 
+test('bootstrapAdaptiveIntelligence reuses the current cached scope without rerendering unchanged confluence stats', async () => {
+  const harness = [
+    extractFunction('getAdaptiveBootstrapLatestSignal'),
+    extractFunction('getAdaptiveBootstrapStrategy'),
+    extractFunction('getAdaptiveBootstrapScope'),
+    extractFunction('mergeRemoteConfluenceStats'),
+    extractFunction('bootstrapAdaptiveIntelligence'),
+    'module.exports = { bootstrapAdaptiveIntelligence };'
+  ].join('\n');
+  const cached = { factor_stats: [{ factor_key: 'Scoped', wins: 2, losses: 1 }] };
+  const renders = [];
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      bootstrap: async () => {
+        throw new Error('should not fetch when cache exists');
+      }
+    },
+    adaptiveIntelligenceBootstrap: cached,
+    adaptiveIntelligenceBootstrapScopeKey: 'R_25|60|grid_scalper_v2',
+    adaptiveIntelligenceBootstrapCache: new Map([['R_25|60|grid_scalper_v2', cached]]),
+    adaptiveIntelligenceBootstrapPromises: new Map(),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    adaptiveIntelligenceBootstrapRequestSeq: 0,
+    confluenceFactorStats: {
+      Scoped: { wins: 2, losses: 1, currentWeight: 1, confidenceScore: 50, sampleSize: 3 }
+    },
+    renderAdaptiveConfluenceTable: () => renders.push('rendered'),
+    syncPersistentAdaptiveTradeHistory: () => {},
+    initAdaptiveIntelligenceClient: () => {},
+    getActiveSymbol: () => 'R_25',
+    getCurrentGranularitySec: () => 60,
+    getAggregatedStrategyHistory: () => [],
+    multiPanels: new Map([['R_25', { symbol: 'R_25' }]]),
+    gridScalperV2History: [{ symbol: 'R_25', strategyType: 'grid_scalper_v2', epoch: 25 }],
+    trade: null,
+    sessionRangeTrade: null,
+    nyOpenRangeTrade: null,
+    Number,
+    Object,
+    Date,
+    Promise,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { bootstrapAdaptiveIntelligence } = context.module.exports;
+
+  const result = await bootstrapAdaptiveIntelligence();
+  assert.equal(result, cached);
+  assert.equal(renders.length, 0);
+});
+
 test('sendSignalLifecycleTelegram keeps terminal TP alerts as terminal alerts', async () => {
   const fnSource = extractFunction('sendSignalLifecycleTelegram');
   const harness = `${fnSource}\nmodule.exports = { sendSignalLifecycleTelegram };`;
@@ -328,18 +382,65 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
   const globalTrade = { dir: 'BEAR', entry: 200, sl: 205, tp: 190 };
   let qualifiedSignal = null;
+  let activePanelSymbol = 'R_100';
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
-    multiPanels: new Map([['R_25', { sessionRangeTrade: panelTrade }]]),
+    multiPanels: new Map([['R_25', { symbol: 'R_25', sessionRangeTrade: panelTrade }]]),
     sessionRangeTrade: globalTrade,
     getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
     validateTelegramCredentials: () => {},
     getActiveSymbol: () => 'R_100',
     getSymbolLabel: (symbol) => symbol,
-    getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
+    getActiveConfluenceFactors: () => activePanelSymbol === 'R_25' ? ['Panel Factor'] : ['Wrong Panel Factor'],
     qualifySignalForTelegram: async (signal) => {
       qualifiedSignal = signal;
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' } },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({ activePanelSymbol }),
+    activatePanel: (panel) => { activePanelSymbol = panel.symbol; },
+    _restoreChartGlobals: (snapshot) => { activePanelSymbol = snapshot.activePanelSymbol; },
+    buildSessionRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => {},
+    sendTelegramMessage: async () => {},
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  await sendTelegramSessionRangeAlert('LONDON_SWEEP', 'R_25');
+
+  assert.equal(qualifiedSignal.entry, 100);
+  assert.deepEqual(qualifiedSignal._confFactors, ['Panel Factor']);
+  assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
+  assert.equal(panelTrade._sentViaTelegram, true);
+  assert.equal(panelTrade._telegramDelivered, true);
+  assert.equal(globalTrade._telegramDelivered, undefined);
+});
+
+test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  let qualified = false;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: new Map(),
+    sessionRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async () => {
+      qualified = true;
       return { allowed: true, decision: { action: 'SEND' } };
     },
     UI: { telegramStatus: { textContent: '', className: '' } },
@@ -361,33 +462,70 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   const { sendTelegramSessionRangeAlert } = context.module.exports;
 
   await sendTelegramSessionRangeAlert('LONDON_SWEEP', 'R_25');
-
-  assert.equal(qualifiedSignal.entry, 100);
-  assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
-  assert.equal(panelTrade._sentViaTelegram, true);
-  assert.equal(panelTrade._telegramDelivered, true);
-  assert.equal(globalTrade._telegramDelivered, undefined);
+  assert.equal(qualified, false);
 });
 
-test('sendTelegramNyOpenRangeAlert updates the originating panel trade instead of the active global trade', async () => {
+test('sendTelegramNyOpenRangeAlert uses the originating panel breakout and confluence factors', async () => {
   const fnSource = extractFunction('sendTelegramNyOpenRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramNyOpenRangeAlert };`;
-  const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
-  const globalTrade = { dir: 'BEAR', entry: 200, sl: 205, tp: 190 };
   let qualifiedSignal = null;
+  let activePanelSymbol = 'R_100';
   const context = {
     module: { exports: {} },
     telegramStrategyAutoSend: true,
-    multiPanels: new Map([['R_25', { nyOpenRangeTrade: panelTrade }]]),
-    nyOpenRangeTrade: globalTrade,
-    nyOpenRangeBreakout: null,
+    multiPanels: new Map([['R_25', { symbol: 'R_25', nyOpenRangeTrade: null, nyOpenRangeBreakout: { dir: 'BULL', level: 100 } }]]),
+    nyOpenRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
+    nyOpenRangeBreakout: { dir: 'BEAR', level: 200 },
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => activePanelSymbol === 'R_25' ? ['Panel Factor'] : ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async (signal) => {
+      qualifiedSignal = signal;
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' } },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({ activePanelSymbol }),
+    activatePanel: (panel) => { activePanelSymbol = panel.symbol; },
+    _restoreChartGlobals: (snapshot) => { activePanelSymbol = snapshot.activePanelSymbol; },
+    buildNyOpenRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => {},
+    sendTelegramMessage: async () => {},
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramNyOpenRangeAlert } = context.module.exports;
+
+  await sendTelegramNyOpenRangeAlert('BREAKOUT', 'R_25');
+
+  assert.equal(qualifiedSignal.dir, 'BULL');
+  assert.deepEqual(qualifiedSignal._confFactors, ['Panel Factor']);
+});
+
+test('sendTelegramNyOpenRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
+  const fnSource = extractFunction('sendTelegramNyOpenRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramNyOpenRangeAlert };`;
+  let qualified = false;
+  const context = {
+    module: { exports: {} },
+    telegramStrategyAutoSend: true,
+    multiPanels: new Map(),
+    nyOpenRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
+    nyOpenRangeBreakout: { dir: 'BEAR', level: 200 },
     getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
     validateTelegramCredentials: () => {},
     getActiveSymbol: () => 'R_100',
     getSymbolLabel: (symbol) => symbol,
     getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
-    qualifySignalForTelegram: async (signal) => {
-      qualifiedSignal = signal;
+    qualifySignalForTelegram: async () => {
+      qualified = true;
       return { allowed: true, decision: { action: 'SEND' } };
     },
     UI: { telegramStatus: { textContent: '', className: '' } },
@@ -409,12 +547,7 @@ test('sendTelegramNyOpenRangeAlert updates the originating panel trade instead o
   const { sendTelegramNyOpenRangeAlert } = context.module.exports;
 
   await sendTelegramNyOpenRangeAlert('BREAKOUT', 'R_25');
-
-  assert.equal(qualifiedSignal.entry, 100);
-  assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
-  assert.equal(panelTrade._sentViaTelegram, true);
-  assert.equal(panelTrade._telegramDelivered, true);
-  assert.equal(globalTrade._telegramDelivered, undefined);
+  assert.equal(qualified, false);
 });
 
 test('sendTradeOutcomeTelegram retries after a failed fallback send', async () => {
