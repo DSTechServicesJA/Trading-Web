@@ -117,6 +117,164 @@ test('mergeRemoteConfluenceStats replaces stale scope data and keeps the first s
   assert.equal(renders.length, 1);
 });
 
+test('mergeRemoteConfluenceStats re-renders cleared state for empty bootstrap replacements', () => {
+  const fnSource = extractFunction('mergeRemoteConfluenceStats');
+  const harness = `${fnSource}\nmodule.exports = { mergeRemoteConfluenceStats };`;
+  const renders = [];
+  const context = {
+    module: { exports: {} },
+    confluenceFactorStats: {
+      Legacy: { wins: 99, losses: 1, currentWeight: 9, confidenceScore: 99, sampleSize: 100 }
+    },
+    Number,
+    Object,
+    renderAdaptiveConfluenceTable: () => renders.push('rendered')
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { mergeRemoteConfluenceStats } = context.module.exports;
+
+  mergeRemoteConfluenceStats({ factor_stats: [] });
+
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), []);
+  assert.equal(renders.length, 1);
+});
+
+test('bootstrapAdaptiveIntelligence keeps requests scoped and ignores stale responses after a panel switch', async () => {
+  const harness = [
+    extractFunction('getAdaptiveBootstrapLatestSignal'),
+    extractFunction('getAdaptiveBootstrapStrategy'),
+    extractFunction('getAdaptiveBootstrapScope'),
+    extractFunction('mergeRemoteConfluenceStats'),
+    extractFunction('bootstrapAdaptiveIntelligence'),
+    'module.exports = { bootstrapAdaptiveIntelligence, getAdaptiveBootstrapScope };'
+  ].join('\n');
+  const renders = [];
+  const syncs = [];
+  const requests = [];
+  const resolvers = [];
+  let activeSymbol = 'R_25';
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      bootstrap: ({ symbol, strategy_key }) => {
+        requests.push({ symbol, strategy_key });
+        return new Promise((resolve) => resolvers.push(resolve));
+      }
+    },
+    adaptiveIntelligenceBootstrap: null,
+    adaptiveIntelligenceBootstrapPromise: null,
+    adaptiveIntelligenceBootstrapScopeKey: '',
+    adaptiveIntelligenceBootstrapCache: new Map(),
+    adaptiveIntelligenceBootstrapPromises: new Map(),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    adaptiveIntelligenceBootstrapRequestSeq: 0,
+    confluenceFactorStats: {},
+    renderAdaptiveConfluenceTable: () => renders.push(activeSymbol),
+    syncPersistentAdaptiveTradeHistory: () => syncs.push(activeSymbol),
+    initAdaptiveIntelligenceClient: () => {},
+    getActiveSymbol: () => activeSymbol,
+    getCurrentGranularitySec: () => 60,
+    getAggregatedStrategyHistory: () => {
+      if (activeSymbol === 'R_25') return [{ symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }];
+      return [{ symbol: 'R_50', strategyType: 'session_range', epoch: 50 }];
+    },
+    multiPanels: new Map(),
+    gridScalperV2History: [],
+    trade: { symbol: 'R_100', strategyType: 'breakout_retest', epoch: 1000 },
+    sessionRangeTrade: null,
+    nyOpenRangeTrade: null,
+    Number,
+    Object,
+    Date,
+    Promise,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { bootstrapAdaptiveIntelligence, getAdaptiveBootstrapScope } = context.module.exports;
+
+  const firstPromise = bootstrapAdaptiveIntelligence();
+  activeSymbol = 'R_50';
+  const secondPromise = bootstrapAdaptiveIntelligence();
+
+  assert.notEqual(firstPromise, secondPromise);
+  assert.deepEqual(requests, [
+    { symbol: 'R_25', strategy_key: 'mtf_top_down' },
+    { symbol: 'R_50', strategy_key: 'session_range' }
+  ]);
+  assert.equal(getAdaptiveBootstrapScope().strategy, 'session_range');
+
+  resolvers[0]({ factor_stats: [{ factor_key: 'MTF Confirmation', wins: 2, losses: 0 }] });
+  await firstPromise;
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), []);
+  assert.equal(renders.length, 0);
+
+  resolvers[1]({ factor_stats: [{ factor_key: 'London Sweep', wins: 4, losses: 1 }] });
+  await secondPromise;
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), ['London Sweep']);
+  assert.equal(context.confluenceFactorStats['London Sweep'].wins, 4);
+  assert.deepEqual(renders, ['R_50']);
+  assert.deepEqual(syncs, ['R_50']);
+});
+
+test('bootstrapAdaptiveIntelligence does not let an older forced refresh overwrite a newer scoped response', async () => {
+  const harness = [
+    extractFunction('getAdaptiveBootstrapLatestSignal'),
+    extractFunction('getAdaptiveBootstrapStrategy'),
+    extractFunction('getAdaptiveBootstrapScope'),
+    extractFunction('mergeRemoteConfluenceStats'),
+    extractFunction('bootstrapAdaptiveIntelligence'),
+    'module.exports = { bootstrapAdaptiveIntelligence };'
+  ].join('\n');
+  const resolvers = [];
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      bootstrap: () => new Promise((resolve) => resolvers.push(resolve))
+    },
+    adaptiveIntelligenceBootstrap: null,
+    adaptiveIntelligenceBootstrapPromise: null,
+    adaptiveIntelligenceBootstrapScopeKey: '',
+    adaptiveIntelligenceBootstrapCache: new Map(),
+    adaptiveIntelligenceBootstrapPromises: new Map(),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    adaptiveIntelligenceBootstrapRequestSeq: 0,
+    confluenceFactorStats: {},
+    renderAdaptiveConfluenceTable: () => {},
+    syncPersistentAdaptiveTradeHistory: () => {},
+    initAdaptiveIntelligenceClient: () => {},
+    getActiveSymbol: () => 'R_25',
+    getCurrentGranularitySec: () => 60,
+    getAggregatedStrategyHistory: () => [{ symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }],
+    multiPanels: new Map(),
+    gridScalperV2History: [],
+    trade: null,
+    sessionRangeTrade: null,
+    nyOpenRangeTrade: null,
+    Number,
+    Object,
+    Date,
+    Promise,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { bootstrapAdaptiveIntelligence } = context.module.exports;
+
+  const firstPromise = bootstrapAdaptiveIntelligence();
+  const secondPromise = bootstrapAdaptiveIntelligence(true);
+  resolvers[0]({ factor_stats: [{ factor_key: 'Old', wins: 1, losses: 0 }] });
+  await firstPromise;
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), []);
+
+  resolvers[1]({ factor_stats: [{ factor_key: 'New', wins: 3, losses: 1 }] });
+  await secondPromise;
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), ['New']);
+});
+
 test('sendSignalLifecycleTelegram keeps terminal TP alerts as terminal alerts', async () => {
   const fnSource = extractFunction('sendSignalLifecycleTelegram');
   const harness = `${fnSource}\nmodule.exports = { sendSignalLifecycleTelegram };`;
@@ -162,6 +320,101 @@ test('sendSignalLifecycleTelegram keeps terminal TP alerts as terminal alerts', 
 
   assert.equal(sent, true);
   assert.deepEqual(seenKinds, ['tp']);
+});
+
+test('sendTelegramSessionRangeAlert updates the originating panel trade instead of the active global trade', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const globalTrade = { dir: 'BEAR', entry: 200, sl: 205, tp: 190 };
+  let qualifiedSignal = null;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: new Map([['R_25', { sessionRangeTrade: panelTrade }]]),
+    sessionRangeTrade: globalTrade,
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async (signal) => {
+      qualifiedSignal = signal;
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' } },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({}),
+    activatePanel: () => {},
+    _restoreChartGlobals: () => {},
+    buildSessionRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => {},
+    sendTelegramMessage: async () => {},
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  await sendTelegramSessionRangeAlert('LONDON_SWEEP', 'R_25');
+
+  assert.equal(qualifiedSignal.entry, 100);
+  assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
+  assert.equal(panelTrade._sentViaTelegram, true);
+  assert.equal(panelTrade._telegramDelivered, true);
+  assert.equal(globalTrade._telegramDelivered, undefined);
+});
+
+test('sendTelegramNyOpenRangeAlert updates the originating panel trade instead of the active global trade', async () => {
+  const fnSource = extractFunction('sendTelegramNyOpenRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramNyOpenRangeAlert };`;
+  const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const globalTrade = { dir: 'BEAR', entry: 200, sl: 205, tp: 190 };
+  let qualifiedSignal = null;
+  const context = {
+    module: { exports: {} },
+    telegramStrategyAutoSend: true,
+    multiPanels: new Map([['R_25', { nyOpenRangeTrade: panelTrade }]]),
+    nyOpenRangeTrade: globalTrade,
+    nyOpenRangeBreakout: null,
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async (signal) => {
+      qualifiedSignal = signal;
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' } },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({}),
+    activatePanel: () => {},
+    _restoreChartGlobals: () => {},
+    buildNyOpenRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => {},
+    sendTelegramMessage: async () => {},
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramNyOpenRangeAlert } = context.module.exports;
+
+  await sendTelegramNyOpenRangeAlert('BREAKOUT', 'R_25');
+
+  assert.equal(qualifiedSignal.entry, 100);
+  assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
+  assert.equal(panelTrade._sentViaTelegram, true);
+  assert.equal(panelTrade._telegramDelivered, true);
+  assert.equal(globalTrade._telegramDelivered, undefined);
 });
 
 test('sendTradeOutcomeTelegram retries after a failed fallback send', async () => {

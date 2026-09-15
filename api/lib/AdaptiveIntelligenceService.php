@@ -170,13 +170,14 @@ function adaptiveNormalizeDbTimestamp(mixed $value, ?string $fallback = null): s
         $raw = $fallback ?? gmdate('Y-m-d H:i:s');
     }
 
+    $utc = new DateTimeZone('UTC');
     try {
-        $dt = new DateTimeImmutable($raw);
+        $dt = new DateTimeImmutable($raw, $utc);
     } catch (Throwable) {
-        $dt = new DateTimeImmutable($fallback ?? 'now', new DateTimeZone('UTC'));
+        $dt = new DateTimeImmutable($fallback ?? 'now', $utc);
     }
 
-    return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    return $dt->setTimezone($utc)->format('Y-m-d H:i:s');
 }
 
 function adaptiveAcquireUserTradeLock(PDO $pdo, int $userId): void
@@ -1208,6 +1209,10 @@ function adaptiveRebuildUserHistory(PDO $pdo, int $userId, ?string $category = n
     }
 
     foreach ($tradeStmt->fetchAll() as $row) {
+        $notes = json_decode((string) $row['notes_json'], true);
+        if (($notes['trust_source'] ?? null) === 'UNTRUSTED_CLIENT_REPORTED') {
+            continue;
+        }
         $trade = [
             'trade_id' => $row['trade_id'],
             'signal_id' => $row['signal_id'],
