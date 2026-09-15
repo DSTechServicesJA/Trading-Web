@@ -8161,12 +8161,13 @@ function processMtfTopDown() {
     candles: candles ? candles.length : 0,
     granularitySec: getCurrentGranularitySec()
   });
-  captureMtfHtfDiagnostics(symbol);
   markMtfPipelineStage("candle_aggregation", {
     symbol,
     ltfCandles: candles ? candles.length : 0,
     requiredWarmup: MTF_REQUIRED_BASE_CANDLES
   });
+  captureMtfHtfDiagnostics(symbol);
+  if (!mtfTopDownEnabled) return;
   const setup = getMtfSetupState();
   if (setup && !_historicalProcessing) {
     const setupKey = [getActiveSymbol(), setup.dir, fmt(setup.level, 6), setup.breakoutEpoch || ""].join("|");
@@ -8256,16 +8257,16 @@ function processMtfTopDown() {
     }
   }
 
-  markMtfPipelineStage("signal_queue", {
-    symbol: signal.symbol || symbol,
-    signalId: signal.signalId,
-    status: "queued"
-  });
   lastMtfTopDownIdx = signal.candleIdx;
   markMtfPipelineStage("signal_validation", {
     symbol: signal.symbol || symbol,
     signalId: signal.signalId,
     status: "passed"
+  });
+  markMtfPipelineStage("signal_queue", {
+    symbol: signal.symbol || symbol,
+    signalId: signal.signalId,
+    status: "queued"
   });
 
   /* Always compute and store confluence score on the signal for UI display */
