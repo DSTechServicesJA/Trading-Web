@@ -3561,6 +3561,26 @@ body.light-theme .strat-enable-row input[type="checkbox"]:checked {
   font-size: 0.7rem;
 }
 
+.mtf-debug-table-wrap {
+  overflow-x: auto;
+}
+.mtf-debug-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+.mtf-debug-table th,
+.mtf-debug-table td {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.mtf-debug-table th {
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
 /* Ensure backtest buttons stay contained */
 #backtestStartBtn:disabled,
 #backtestStopBtn:disabled {

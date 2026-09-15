@@ -62,6 +62,11 @@ test('symbol eligibility re-opens after TP/SL loop resolution', () => {
 
   context.signalHistory[0].result = 'LOSS';
   assert.equal(isSymbolEligibleForNewSignal('R_100', 'breakout_retest'), true);
+
+  context.monitoringTrade = true;
+  context.trade = { symbol: 'R_100' };
+  context.signalHistory = [];
+  assert.equal(isSymbolEligibleForNewSignal('R_100', 'mtf_top_down'), true);
 });
 
 test('strategy reset contracts clear strategy registries/caches', () => {
@@ -130,4 +135,71 @@ test('strategy reset contracts clear strategy registries/caches', () => {
   assert.equal(context.mtfTopDownHistory.length, 0);
   assert.equal(context.breakerBlockHistory.length, 0);
   assert.equal(context.lastMtfTopDownIdx, -999);
+});
+
+test('MTF pipeline warmup uses expanded fetch count and session reset clears diagnostics', () => {
+  assert.match(source, /const MTF_HISTORY_FETCH_COUNT = Math\.max\(100, MTF_REQUIRED_BASE_CANDLES \+ 32\)/);
+  assert.match(source, /count: MTF_HISTORY_FETCH_COUNT/);
+  assert.match(source, /resetMtfDiagnostics\(\);/);
+});
+
+test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
+  const fnSource = extractFunction('detectMtfTopDown');
+  const harness = `${fnSource}\nmodule.exports = { detectMtfTopDown };`;
+  const candles = Array.from({ length: 170 }, (_, i) => ({
+    open: 100 + i * 0.01,
+    high: 100 + i * 0.01 + 0.2,
+    low: 100 + i * 0.01 - 0.2,
+    close: 100 + i * 0.01 + 0.05,
+    epoch: i * 60
+  }));
+  candles[candles.length - 2] = { open: 101, high: 101.1, low: 100.7, close: 100.8, epoch: (candles.length - 2) * 60 };
+  candles[candles.length - 1] = { open: 100.9, high: 101.6, low: 100.8, close: 101.4, epoch: (candles.length - 1) * 60 };
+  const state = { conditions: {} };
+  const context = {
+    module: { exports: {} },
+    mtfTopDownEnabled: true,
+    candles,
+    atrValue: 0.5,
+    lastMtfTopDownIdx: -999,
+    mtfTopDownHistory: [],
+    monitoringTrade: false,
+    trade: null,
+    MTF_REQUIRED_BASE_CANDLES: 132,
+    MTF_TOP_DOWN_COOLDOWN: 5,
+    MTF_BIAS_TF_MULT: 16,
+    MTF_BIAS_LOOKBACK: 6,
+    MTF_SL_ATR_BUFFER: 0.3,
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    isSymbolEligibleForNewSignal: () => true,
+    markMtfPipelineStage: () => {},
+    recordMtfRejection: () => {},
+    checkMtfFilterFeasibility: () => ({ pass: true, reasons: [] }),
+    detectMtfConfirmation: () => ({ dir: 'BULL', level: 101, retestCandleIdx: candles.length - 2, setup: { breakoutEpoch: 1000 } }),
+    getMaxEntryDriftAtr: () => 25,
+    getCurrentEntryMode: () => 'close',
+    evaluateEntryTimingQuality: () => ({ pass: true, progressAtr: 0.5, bodyAtr: 0.3, closeLocation: 0.8 }),
+    shouldPauseAfterRecentLosses: () => ({ block: false }),
+    isPinBar: () => false,
+    isBullishEngulfing: () => false,
+    isBearishEngulfing: () => false,
+    getVolatilityAdjustedStopBufferAtr: () => 0.1,
+    getStrategyProfitParams: () => ({ rrMTFMin: 2, slBufferMult: 1 }),
+    synthesizeTfCandles: () => [{ high: 103, low: 99 }, { high: 104, low: 98 }],
+    computeMtfBias: () => 'BULL',
+    getCurrentRegimeTag: () => 'TRENDING',
+    getSignalValidityMs: () => 120000,
+    getSignalDistanceLimitAtr: () => 2,
+    stampSignalLifecycle: (signal) => { signal.signalId = 'sig-1'; return signal; },
+    getMtfPipelineState: () => state,
+    logSignalEngineDebug: () => {}
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { detectMtfTopDown } = context.module.exports;
+  const signal = detectMtfTopDown({ dir: 'BULL', level: 101, retestCandleIdx: candles.length - 2, setup: { breakoutEpoch: 1000 } });
+  assert.equal(signal.type, 'mtf_top_down');
+  assert.equal(signal.signalId, 'sig-1');
+  assert.equal(signal.dir, 'BULL');
 });

@@ -712,6 +712,10 @@
                   <span class="strat-enable-name">MTF Top-Down</span>
                   <span class="strat-enable-badge off" id="stratBadge-mtfTopDown">OFF</span>
                 </label>
+                <label class="toggle-row toggle-row-sub">
+                  <input type="checkbox" id="mtfDebugToggle" />
+                  Show MTF Debug Panel
+                </label>
 
                 <label class="strat-enable-row">
                   <input type="checkbox" id="candleInterpToggle" />
@@ -1842,6 +1846,28 @@
           <section class="box" id="scannerPanel" style="display:none;">
             <div class="section-header"><span class="icon">📡</span><h3>Symbol Scanner (Feature 8)</h3></div>
             <div id="scannerGrid" class="scanner-grid"></div>
+          </section>
+          <section class="box" id="mtfDebugPanel" style="display:none;">
+            <div class="section-header"><span class="icon">🧪</span><h3>MTF Debug Panel</h3></div>
+            <div class="mtf-debug-table-wrap">
+              <table class="mtf-debug-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Strategy</th>
+                    <th>MTF</th>
+                    <th>LTF Signal</th>
+                    <th>HTF Confirmation</th>
+                    <th>Rejection Reason</th>
+                    <th>Alignment</th>
+                    <th>Last Update</th>
+                  </tr>
+                </thead>
+                <tbody id="mtfDebugBody">
+                  <tr><td colspan="8" class="hint">No MTF diagnostics yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <!-- Live Scalp Stats -->

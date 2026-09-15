@@ -1082,12 +1082,13 @@ function shouldPauseAfterRecentLosses(history, options = {}) {
 function isSymbolEligibleForNewSignal(symbol, strategyType = null) {
   const sym = symbol || getActiveSymbol();
   if (!sym) return true;
-  if (monitoringTrade && trade && (trade.symbol || sym) === sym) return false;
+  const normalizedType = strategyType || null;
+  if (normalizedType === "breakout_retest" && monitoringTrade && trade && (trade.symbol || sym) === sym) return false;
   const hasPending = signalHistory.some((s) => {
     if (!s || s.result !== "PENDING") return false;
     if ((s.symbol || sym) !== sym) return false;
-    if (!strategyType) return true;
-    return (s.strategyType || s.type || "breakout_retest") === strategyType;
+    if (!normalizedType) return true;
+    return (s.strategyType || s.type || "breakout_retest") === normalizedType;
   });
   return !hasPending;
 }
@@ -7358,6 +7359,197 @@ const MTF_BIAS_LOOKBACK        = 6;   /* synthesised 4H bars for bias */
 const MTF_SETUP_LOOKBACK       = 12;  /* synthesised 1H bars for setup range */
 const MTF_SL_ATR_BUFFER        = 0.3; /* ATR buffer beyond wick for SL */
 const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest */
+const MTF_DEBUG_STORAGE_KEY    = `${LS_PREFIX}mtfDebugMode`;
+const MTF_REQUIRED_BASE_CANDLES = Math.max(
+  (MTF_BIAS_LOOKBACK + 2) * MTF_BIAS_TF_MULT,
+  (MTF_SETUP_LOOKBACK + 2) * MTF_SETUP_TF_MULT
+) + 4;
+const MTF_HISTORY_FETCH_COUNT = Math.max(100, MTF_REQUIRED_BASE_CANDLES + 32);
+let mtfDebugMode = false;
+let mtfDebugRows = [];
+let mtfDebugClock = 0;
+const mtfPipelineStats = new Map();
+
+function loadMtfDebugMode() {
+  try {
+    const raw = localStorage.getItem(MTF_DEBUG_STORAGE_KEY);
+    if (raw === null) return;
+    mtfDebugMode = raw === "1";
+  } catch {
+    /* keep existing value */
+  }
+}
+
+function setMtfDebugMode(enabled) {
+  mtfDebugMode = enabled === true;
+  try {
+    localStorage.setItem(MTF_DEBUG_STORAGE_KEY, mtfDebugMode ? "1" : "0");
+  } catch { /* storage unavailable */ }
+  if (UI.mtfDebugToggle) UI.mtfDebugToggle.checked = mtfDebugMode;
+  if (UI.mtfDebugPanel) UI.mtfDebugPanel.style.display = mtfDebugMode ? "" : "none";
+  if (mtfDebugMode) renderMtfDebugPanel();
+}
+
+function getMtfPipelineState(symbol) {
+  const sym = symbol || getActiveSymbol() || "UNKNOWN";
+  if (!mtfPipelineStats.has(sym)) {
+    mtfPipelineStats.set(sym, {
+      symbol: sym,
+      availableTimeframes: [],
+      htf: {},
+      alignment: {},
+      conditions: {},
+      rejectionCounts: {},
+      lastRejection: null,
+      lastSignal: null,
+      pipeline: {},
+      waitingForClose: null,
+      updatedAtMs: 0
+    });
+  }
+  return mtfPipelineStats.get(sym);
+}
+
+function markMtfPipelineStage(stage, details = {}) {
+  const state = getMtfPipelineState(details.symbol || getActiveSymbol());
+  state.pipeline[stage] = {
+    at: Date.now(),
+    details: Object.assign({}, details)
+  };
+  state.updatedAtMs = Date.now();
+}
+
+function recordMtfRejection(reason, details = {}) {
+  const state = getMtfPipelineState(details.symbol || getActiveSymbol());
+  state.rejectionCounts[reason] = (state.rejectionCounts[reason] || 0) + 1;
+  state.lastRejection = Object.assign({ reason, at: Date.now() }, details);
+  if (details.conditions && typeof details.conditions === "object") {
+    state.conditions = Object.assign({}, details.conditions);
+  }
+  markMtfPipelineStage("signal_validation", Object.assign({ status: "rejected", reason }, details));
+}
+
+function getMtfRejectionBreakdown(state) {
+  const counts = state && state.rejectionCounts ? state.rejectionCounts : {};
+  const entries = Object.entries(counts);
+  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+  return entries.sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({
+    reason,
+    count,
+    percent: total > 0 ? Math.round((count / total) * 100) : 0
+  }));
+}
+
+function renderMtfDebugPanel() {
+  if (!UI.mtfDebugBody || !UI.mtfDebugPanel) return;
+  UI.mtfDebugPanel.style.display = mtfDebugMode ? "" : "none";
+  if (!mtfDebugMode) return;
+  const rows = mtfDebugRows.length > 0 ? mtfDebugRows.slice(0, 40) : [];
+  if (rows.length === 0) {
+    UI.mtfDebugBody.innerHTML = '<tr><td colspan="8" class="hint">No MTF diagnostics yet.</td></tr>';
+    return;
+  }
+  UI.mtfDebugBody.innerHTML = rows.map((row) => {
+    const htfStatus = row.htfSummary || "--";
+    const reason = row.rejectionReason || "--";
+    return `<tr>
+      <td>${row.symbol || "--"}</td>
+      <td>${row.strategy || "MTF Top-Down"}</td>
+      <td>${row.mtfStatus || "--"}</td>
+      <td>${row.ltfSignal || "--"}</td>
+      <td>${htfStatus}</td>
+      <td>${reason}</td>
+      <td>${row.alignment || "--"}</td>
+      <td>${row.time || "--"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function pushMtfDebugRow(row) {
+  mtfDebugClock++;
+  mtfDebugRows.unshift(Object.assign({ _id: mtfDebugClock }, row));
+  if (mtfDebugRows.length > 80) mtfDebugRows.length = 80;
+  renderMtfDebugPanel();
+}
+
+function resetMtfDiagnostics() {
+  mtfPipelineStats.clear();
+  mtfDebugRows = [];
+  renderMtfDebugPanel();
+}
+
+function getMtfTfMap() {
+  return [
+    { label: "1m", sec: 60 },
+    { label: "5m", sec: 300 },
+    { label: "15m", sec: 900 },
+    { label: "30m", sec: 1800 },
+    { label: "1h", sec: 3600 }
+  ];
+}
+
+function captureMtfHtfDiagnostics(symbol) {
+  const state = getMtfPipelineState(symbol);
+  const ltf = candles && candles.length > 0 ? candles[candles.length - 1] : null;
+  const gran = getCurrentGranularitySec();
+  const tfMap = getMtfTfMap();
+  state.availableTimeframes = tfMap.map(tf => tf.label);
+  state.htf = {};
+  state.alignment = {};
+
+  for (const tf of tfMap) {
+    const ratio = Math.max(1, Math.round(tf.sec / gran));
+    const bars = ratio === 1
+      ? (candles || []).map((c) => Object.assign({ _count: 1 }, c))
+      : synthesizeTfCandles(ratio, { includeMeta: true });
+    const closedBars = ratio === 1
+      ? bars
+      : synthesizeTfCandles(ratio, { includeMeta: true, closedOnly: true });
+    const lastBar = bars.length > 0 ? bars[bars.length - 1] : null;
+    const lastClosed = closedBars.length > 0 ? closedBars[closedBars.length - 1] : null;
+    const complete = !!(lastBar && ratio > 1 && lastBar._count >= ratio);
+    state.htf[tf.label] = {
+      ratio,
+      candles: bars.length,
+      closedCandles: closedBars.length,
+      lastEpoch: lastBar ? lastBar.epoch : null,
+      lastClosedEpoch: lastClosed ? lastClosed.epoch : null,
+      complete
+    };
+    const ltfEpoch = ltf && Number.isFinite(ltf.epoch) ? ltf.epoch : null;
+    let aligned = false;
+    let htfEpoch = null;
+    if (ltfEpoch != null) {
+      const bucketStart = Math.floor(ltfEpoch / tf.sec) * tf.sec;
+      const matched = bars.find(b => b && b.epoch === bucketStart) || null;
+      aligned = !!matched;
+      htfEpoch = matched ? matched.epoch : bucketStart;
+    }
+    state.alignment[tf.label] = { ltfEpoch, htfEpoch, aligned };
+  }
+
+  state.waitingForClose = {
+    enabled: candleCloseOnlyEnabled === true,
+    lastLtfEpoch: ltf ? ltf.epoch : null
+  };
+  markMtfPipelineStage("higher_timeframe_retrieval", {
+    symbol: state.symbol,
+    availableTimeframes: state.availableTimeframes,
+    htf: state.htf,
+    waitingForClose: state.waitingForClose
+  });
+}
+
+function checkMtfFilterFeasibility() {
+  const prof = getStrategyProfitParams();
+  const rr = prof && Number.isFinite(prof.rrMTFMin) ? prof.rrMTFMin : 0;
+  const maxDrift = getMaxEntryDriftAtr(getActiveSymbol(), getCurrentGranularitySec(), true);
+  const reasons = [];
+  if (!Number.isFinite(rr) || rr <= 0) reasons.push("invalid_rr_threshold");
+  if (!Number.isFinite(maxDrift) || maxDrift <= 0) reasons.push("invalid_entry_drift_threshold");
+  if (!Number.isFinite(MTF_RETEST_LOOKBACK) || MTF_RETEST_LOOKBACK < 1) reasons.push("invalid_retest_window");
+  return { pass: reasons.length === 0, reasons, rr, maxDrift };
+}
 
 /**
  * Synthesise higher-timeframe candles by grouping `ratio` consecutive base
@@ -7375,6 +7567,7 @@ const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest *
 function synthesizeTfCandles(ratio, options = {}) {
   if (!candles || candles.length < ratio || ratio < 2) return candles ? candles.slice() : [];
   const closedOnly = options.closedOnly === true;
+  const includeMeta = options.includeMeta === true;
   /* Determine the base granularity from the UI selector (seconds) */
   const gran = getCurrentGranularitySec();
   const bucketSize = ratio * gran;  /* bucket width in seconds */
@@ -7396,6 +7589,7 @@ function synthesizeTfCandles(ratio, options = {}) {
   if (closedOnly) {
     while (out.length > 0 && out[out.length - 1]._count < ratio) out.pop();
   }
+  if (includeMeta) return out;
   return out.map(({ _count, ...bar }) => bar);
 }
 
@@ -7440,26 +7634,67 @@ function computeMtfBias() {
  */
 function detectMtfSetup() {
   const bias = computeMtfBias();
-  if (bias === "NEUTRAL") return null;
+  if (bias === "NEUTRAL") {
+    recordMtfRejection("neutral_bias", { symbol: getActiveSymbol(), conditions: { bias: "FAIL" } });
+    return null;
+  }
 
   const setupBars = synthesizeTfCandles(MTF_SETUP_TF_MULT, { closedOnly: true });
-  if (setupBars.length < MTF_SETUP_LOOKBACK + 2) return null;
+  if (setupBars.length < MTF_SETUP_LOOKBACK + 2) {
+    recordMtfRejection("insufficient_htf_setup_bars", {
+      symbol: getActiveSymbol(),
+      setupBars: setupBars.length,
+      required: MTF_SETUP_LOOKBACK + 2,
+      conditions: { bias: "PASS", setupBars: "FAIL" }
+    });
+    return null;
+  }
 
   /* Consolidation range: all but last two bars */
   const rangeBars = setupBars.slice(-MTF_SETUP_LOOKBACK - 2, -2);
   const rangeHigh = Math.max(...rangeBars.map(c => c.high));
   const rangeLow  = Math.min(...rangeBars.map(c => c.low));
-  if (rangeHigh <= rangeLow) return null;
+  if (rangeHigh <= rangeLow) {
+    recordMtfRejection("invalid_setup_range", {
+      symbol: getActiveSymbol(),
+      rangeHigh,
+      rangeLow,
+      conditions: { bias: "PASS", setupBars: "PASS", range: "FAIL" }
+    });
+    return null;
+  }
 
   const last = setupBars[setupBars.length - 1];
   const breakoutEpoch = last ? last.epoch : null;
 
   if (bias === "BULL" && last.close > rangeHigh) {
+    markMtfPipelineStage("mtf_confirmation", {
+      symbol: getActiveSymbol(),
+      bias,
+      rangeHigh,
+      rangeLow,
+      breakoutEpoch
+    });
     return { dir: "BULL", level: rangeHigh, rangeHigh, rangeLow, breakoutEpoch };
   }
   if (bias === "BEAR" && last.close < rangeLow) {
+    markMtfPipelineStage("mtf_confirmation", {
+      symbol: getActiveSymbol(),
+      bias,
+      rangeHigh,
+      rangeLow,
+      breakoutEpoch
+    });
     return { dir: "BEAR", level: rangeLow, rangeHigh, rangeLow, breakoutEpoch };
   }
+  recordMtfRejection("setup_breakout_not_confirmed", {
+    symbol: getActiveSymbol(),
+    bias,
+    lastClose: last ? last.close : null,
+    rangeHigh,
+    rangeLow,
+    conditions: { bias: "PASS", setupBars: "PASS", breakout: "FAIL" }
+  });
   return null;
 }
 
@@ -7535,20 +7770,55 @@ function getMtfSetupState() {
  * @returns {{ dir, level, retestCandleIdx }|null}
  */
 function detectMtfConfirmation(setupOverride = null) {
+  const symbol = getActiveSymbol();
+  const diag = getMtfPipelineState(symbol);
   const setup = setupOverride || getMtfSetupState();
   if (!setup) {
     logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "no_setup_state" });
+    recordMtfRejection("no_setup_state", { symbol, conditions: { setupState: "FAIL" } });
     return null;
   }
 
   const len = candles.length;
   if (len < 5) {
     logSignalEngineDebug("MTF_CONFIRMATION_BLOCKED", { reason: "insufficient_base_candles", len });
+    recordMtfRejection("insufficient_base_candles", {
+      symbol,
+      len,
+      conditions: { setupState: "PASS", baseCandles: "FAIL" }
+    });
     return null;
   }
 
   const { dir, level } = setup;
   const tolerance = atrValue > 0 ? atrValue * 0.5 : level * 0.002;
+  const latest = candles[len - 1];
+  const gran = getCurrentGranularitySec();
+  const htfSec = Math.max(gran, gran * MTF_SETUP_TF_MULT);
+  const ltfEpoch = latest && Number.isFinite(latest.epoch) ? latest.epoch : null;
+  const htfEpoch = ltfEpoch != null ? Math.floor(ltfEpoch / htfSec) * htfSec : null;
+  const aligned = ltfEpoch != null && htfEpoch != null ? ltfEpoch >= htfEpoch && ltfEpoch < (htfEpoch + htfSec) : false;
+  diag.conditions = {
+    setupState: "PASS",
+    baseCandles: "PASS",
+    ltfHtfAlignment: aligned ? "PASS" : "FAIL"
+  };
+  markMtfPipelineStage("mtf_confirmation", {
+    symbol,
+    ltfEpoch,
+    htfEpoch,
+    aligned,
+    dir,
+    level,
+    tolerance
+  });
+  logSignalEngineDebug("MTF_ALIGNMENT", {
+    symbol,
+    gran,
+    ltfEpoch,
+    htfEpoch,
+    aligned
+  });
 
   const scanStart = Math.max(0, len - 1 - MTF_RETEST_LOOKBACK);
   for (let i = scanStart; i < len - 1; i++) {
@@ -7557,11 +7827,15 @@ function detectMtfConfirmation(setupOverride = null) {
     if (dir === "BULL") {
       if (c.low <= level + tolerance && c.close >= level) {
         logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
+        diag.conditions.retestTouch = "PASS";
+        diag.conditions.retestClose = "PASS";
         return { dir, level, retestCandleIdx: i, setup };
       }
     } else {
       if (c.high >= level - tolerance && c.close <= level) {
         logSignalEngineDebug("MTF_CONFIRMATION_MATCH", { dir, level, retestCandleIdx: i, tolerance });
+        diag.conditions.retestTouch = "PASS";
+        diag.conditions.retestClose = "PASS";
         return { dir, level, retestCandleIdx: i, setup };
       }
     }
@@ -7574,6 +7848,16 @@ function detectMtfConfirmation(setupOverride = null) {
     scanStart,
     len
   });
+  recordMtfRejection("no_retest_match", {
+    symbol,
+    dir,
+    level,
+    tolerance,
+    ltfEpoch,
+    htfEpoch,
+    aligned,
+    conditions: Object.assign({}, diag.conditions, { retestTouch: "FAIL", retestClose: "FAIL" })
+  });
   return null;
 }
 
@@ -7585,102 +7869,188 @@ function detectMtfConfirmation(setupOverride = null) {
  * @returns {Object|null}
  */
 function detectMtfTopDown(confirmationOverride = null) {
+  const symbol = getActiveSymbol();
+  const baseConditions = {};
   if (!mtfTopDownEnabled) return null;
-  if (!isSymbolEligibleForNewSignal(getActiveSymbol(), "mtf_top_down")) {
+  markMtfPipelineStage("data_feed", {
+    symbol,
+    candles: candles ? candles.length : 0,
+    granularitySec: getCurrentGranularitySec()
+  });
+  if (!isSymbolEligibleForNewSignal(symbol, "mtf_top_down")) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "symbol_not_eligible" });
+    recordMtfRejection("symbol_not_eligible", { symbol, conditions: { symbolEligibility: "FAIL" } });
     return null;
   }
-  if (!candles || candles.length < 20) {
-    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "insufficient_candles", candles: candles ? candles.length : 0 });
+  baseConditions.symbolEligibility = "PASS";
+  if (!candles || candles.length < MTF_REQUIRED_BASE_CANDLES) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "insufficient_candles", candles: candles ? candles.length : 0, required: MTF_REQUIRED_BASE_CANDLES });
+    recordMtfRejection("insufficient_candles", {
+      symbol,
+      candles: candles ? candles.length : 0,
+      required: MTF_REQUIRED_BASE_CANDLES,
+      conditions: Object.assign({}, baseConditions, { warmup: "FAIL" })
+    });
     return null;
   }
+  baseConditions.warmup = "PASS";
 
   const idx = candles.length - 1;
+  const feasibility = checkMtfFilterFeasibility();
+  if (!feasibility.pass) {
+    recordMtfRejection("impossible_filter", {
+      symbol,
+      reasons: feasibility.reasons.slice(),
+      conditions: Object.assign({}, baseConditions, { feasibility: "FAIL" })
+    });
+    return null;
+  }
+  baseConditions.feasibility = "PASS";
 
-  /* Cooldown */
   if (idx - lastMtfTopDownIdx < MTF_TOP_DOWN_COOLDOWN) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "cooldown", idx, lastMtfTopDownIdx });
+    recordMtfRejection("cooldown", {
+      symbol,
+      idx,
+      lastMtfTopDownIdx,
+      conditions: Object.assign({}, baseConditions, { cooldown: "FAIL" })
+    });
     return null;
   }
-  /* One pending at a time */
+  baseConditions.cooldown = "PASS";
   if (mtfTopDownHistory.some(s => s.result === "PENDING")) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pending_signal_exists" });
+    recordMtfRejection("pending_signal_exists", {
+      symbol,
+      conditions: Object.assign({}, baseConditions, { pendingGate: "FAIL" })
+    });
     return null;
   }
+  baseConditions.pendingGate = "PASS";
 
   const confirmation = confirmationOverride || detectMtfConfirmation();
   if (!confirmation) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "no_confirmation" });
+    recordMtfRejection("no_confirmation", {
+      symbol,
+      conditions: Object.assign({}, baseConditions, { confirmation: "FAIL" })
+    });
     return null;
   }
+  baseConditions.confirmation = "PASS";
 
   const { dir, level, retestCandleIdx, setup } = confirmation;
-
-  /* Only act within 3 candles of the confirmed retest */
   if (idx - retestCandleIdx > 3) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confirmation_window_expired", idx, retestCandleIdx });
+    recordMtfRejection("confirmation_window_expired", {
+      symbol,
+      idx,
+      retestCandleIdx,
+      conditions: Object.assign({}, baseConditions, { confirmationWindow: "FAIL" })
+    });
     return null;
   }
+  baseConditions.confirmationWindow = "PASS";
 
-  const c    = candles[idx];
+  const c = candles[idx];
   const prev = candles[idx - 1];
   if (!c || !prev) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "missing_current_or_prev_candle", idx });
+    recordMtfRejection("missing_candle_context", {
+      symbol,
+      idx,
+      conditions: Object.assign({}, baseConditions, { candleContext: "FAIL" })
+    });
     return null;
   }
+  baseConditions.candleContext = "PASS";
   const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : 0;
-  const maxEntryDriftAtr = getMaxEntryDriftAtr(getActiveSymbol(), getCurrentGranularitySec(), true);
+  const maxEntryDriftAtr = getMaxEntryDriftAtr(symbol, getCurrentGranularitySec(), true);
   if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", {
       reason: "entry_drift_too_large",
       entryDriftAtr,
       maxEntryDriftAtr
     });
+    recordMtfRejection("entry_drift_too_large", {
+      symbol,
+      entryDriftAtr,
+      maxEntryDriftAtr,
+      conditions: Object.assign({}, baseConditions, { entryDrift: "FAIL" })
+    });
     return null;
   }
+  baseConditions.entryDrift = "PASS";
   const entryMode = getCurrentEntryMode();
   const timingQuality = evaluateEntryTimingQuality(dir, c, level, atrValue, {
-    symbol: getActiveSymbol(),
+    symbol,
     granSec: getCurrentGranularitySec(),
     entryMode
   });
   if (!timingQuality.pass) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "timing_quality_gate", detail: timingQuality.reason || null });
+    recordMtfRejection("timing_quality_gate", {
+      symbol,
+      detail: timingQuality.reason || null,
+      conditions: Object.assign({}, baseConditions, { timingQuality: "FAIL" })
+    });
     return null;
   }
+  baseConditions.timingQuality = "PASS";
   const recentLossPause = shouldPauseAfterRecentLosses(mtfTopDownHistory, {
-    symbol: getActiveSymbol(),
+    symbol,
     dir,
     strategyType: "mtf_top_down",
     timeframeSec: getCurrentGranularitySec()
   });
   if (recentLossPause.block) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "recent_loss_pause", detail: recentLossPause.reason || null });
+    recordMtfRejection("recent_loss_pause", {
+      symbol,
+      detail: recentLossPause.reason || null,
+      conditions: Object.assign({}, baseConditions, { recentLossPause: "FAIL" })
+    });
     return null;
   }
+  baseConditions.recentLossPause = "PASS";
 
-  const hasPinBar     = isPinBar(c, dir);
+  const hasPinBar = isPinBar(c, dir);
   const hasBullEngulf = dir === "BULL" && isBullishEngulfing(prev, c);
   const hasBearEngulf = dir === "BEAR" && isBearishEngulfing(prev, c);
-  /* Micro BOS: current close surpasses the previous candle on the breakout side */
-  const microBosBull  = dir === "BULL" && c.close > prev.high && c.close > c.open;
-  const microBosBear  = dir === "BEAR" && c.close < prev.low  && c.close < c.open;
-
+  const microBosBull = dir === "BULL" && c.close > prev.high && c.close > c.open;
+  const microBosBear = dir === "BEAR" && c.close < prev.low && c.close < c.open;
   if (!hasPinBar && !hasBullEngulf && !hasBearEngulf && !microBosBull && !microBosBear) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "pattern_not_confirmed" });
+    recordMtfRejection("pattern_not_confirmed", {
+      symbol,
+      conditions: Object.assign({}, baseConditions, {
+        pinBar: "FAIL",
+        engulfing: "FAIL",
+        microBos: "FAIL"
+      })
+    });
     return null;
   }
+  baseConditions.pinBar = hasPinBar ? "PASS" : "FAIL";
+  baseConditions.engulfing = (hasBullEngulf || hasBearEngulf) ? "PASS" : "FAIL";
+  baseConditions.microBos = (microBosBull || microBosBear) ? "PASS" : "FAIL";
 
   const patternType = hasPinBar ? "pin_bar"
     : (hasBullEngulf || hasBearEngulf) ? "engulfing"
     : "micro_bos";
 
-  const entry    = c.close;
-  const slBuffer = atrValue * (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(getActiveSymbol(), getCurrentGranularitySec(), { volumeSpike: true }));
+  const entry = c.close;
+  const slBuffer = atrValue * (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(symbol, getCurrentGranularitySec(), { volumeSpike: true }));
   const _profParams = getStrategyProfitParams();
   const _mtfRR = _profParams.rrMTFMin;
-
-  /* Pre-compute the 4H synthesised slice once for both TP directions */
+  markMtfPipelineStage("indicator_calculation", {
+    symbol,
+    atrValue,
+    entryDriftAtr,
+    maxEntryDriftAtr,
+    timingQuality,
+    rrTarget: _mtfRR
+  });
   const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
   let sl, tp;
 
@@ -7699,10 +8069,16 @@ function detectMtfTopDown(confirmationOverride = null) {
   const risk = Math.abs(entry - sl);
   if (risk <= 0) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "invalid_risk", entry, sl });
+    recordMtfRejection("invalid_risk", {
+      symbol,
+      entry,
+      sl,
+      conditions: Object.assign({}, baseConditions, { risk: "FAIL" })
+    });
     return null;
   }
+  baseConditions.risk = "PASS";
 
-  /* Guarantee minimum R:R — profit-optimized per symbol */
   if (Math.abs(tp - entry) / risk < _mtfRR) {
     tp = dir === "BULL" ? entry + risk * _mtfRR : entry - risk * _mtfRR;
   }
@@ -7713,24 +8089,37 @@ function detectMtfTopDown(confirmationOverride = null) {
     mtfBias: computeMtfBias(),
     patternType,
     candleIdx: idx,
-    epoch:  c.epoch,
-    symbol: getActiveSymbol(),
+    epoch: c.epoch,
+    symbol,
     timeframeSec: getCurrentGranularitySec(),
     result: "PENDING",
-    type:   "mtf_top_down",
+    type: "mtf_top_down",
     strategyType: "mtf_top_down",
     breakoutEpoch: setup && setup.breakoutEpoch != null ? setup.breakoutEpoch : null,
     volatilityRegime: getCurrentRegimeTag(),
     validUntilMs: Date.now() + getSignalValidityMs(),
     maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
     entryDriftAtr,
-    stopBufferAtr: (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(getActiveSymbol(), getCurrentGranularitySec(), { volumeSpike: true })) * (_profParams.slBufferMult || 1),
+    stopBufferAtr: (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(symbol, getCurrentGranularitySec(), { volumeSpike: true })) * (_profParams.slBufferMult || 1),
     entryMode,
     entryProgressAtr: timingQuality.progressAtr,
     entryBodyAtr: timingQuality.bodyAtr,
     entryCloseLocation: timingQuality.closeLocation
   };
   stampSignalLifecycle(signal);
+  const state = getMtfPipelineState(symbol);
+  state.conditions = Object.assign({}, baseConditions, { signalGenerated: "PASS" });
+  state.lastSignal = signal;
+  markMtfPipelineStage("signal_queue", {
+    symbol,
+    signalId: signal.signalId,
+    status: "queued"
+  });
+  logSignalEngineDebug("MTF_CONDITION_BREAKDOWN", {
+    symbol,
+    signalId: signal.signalId,
+    conditions: state.conditions
+  });
   logSignalEngineDebug("MTF_SIGNAL_GENERATED", {
     signalId: signal.signalId,
     dir: signal.dir,
@@ -7746,6 +8135,13 @@ function detectMtfTopDown(confirmationOverride = null) {
  * Run the MTF Top-Down scanner and handle all alerting.
  */
 function processMtfTopDown() {
+  const symbol = getActiveSymbol();
+  captureMtfHtfDiagnostics(symbol);
+  markMtfPipelineStage("candle_aggregation", {
+    symbol,
+    ltfCandles: candles ? candles.length : 0,
+    requiredWarmup: MTF_REQUIRED_BASE_CANDLES
+  });
   const setup = getMtfSetupState();
   if (setup && !_historicalProcessing) {
     const setupKey = [getActiveSymbol(), setup.dir, fmt(setup.level, 6), setup.breakoutEpoch || ""].join("|");
@@ -7787,7 +8183,26 @@ function processMtfTopDown() {
     }
   }
   const signal = detectMtfTopDown(confirmation);
-  if (!signal) return;
+  if (!signal) {
+    const state = getMtfPipelineState(symbol);
+    const breakdown = getMtfRejectionBreakdown(state);
+    const topReason = breakdown.length > 0 ? `${breakdown[0].reason} (${breakdown[0].percent}%)` : "none";
+    if (mtfDebugMode) {
+      const alignFail = Object.entries(state.alignment || {}).filter(([, v]) => v && v.aligned === false).map(([k]) => k);
+      pushMtfDebugRow({
+        symbol,
+        strategy: "MTF Top-Down",
+        mtfStatus: "REJECTED",
+        ltfSignal: "FAIL",
+        htfSummary: `${Object.keys(state.htf || {}).length} TF`,
+        rejectionReason: state.lastRejection ? state.lastRejection.reason : "unknown",
+        alignment: alignFail.length > 0 ? `MISS:${alignFail.join(",")}` : "PASS",
+        time: new Date().toISOString().slice(11, 19)
+      });
+    }
+    logSignalEngineDebug("MTF_REJECTION_STATS", { symbol, topReason, breakdown: breakdown.slice(0, 5) });
+    return;
+  }
   stampSignalLifecycle(signal);
 
   /* Min Confluence Gate */
@@ -7796,6 +8211,12 @@ function processMtfTopDown() {
     if (!confGate.pass) {
       addLog(`\u26a0 MTF Top-Down REJECTED \u2014 ${confGate.reason}`);
       logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "confluence_gate", detail: confGate.reason, signalId: signal.signalId });
+      recordMtfRejection("confluence_gate", {
+        symbol: signal.symbol || symbol,
+        signalId: signal.signalId,
+        detail: confGate.reason,
+        conditions: Object.assign({}, getMtfPipelineState(signal.symbol || symbol).conditions || {}, { confluenceGate: "FAIL" })
+      });
       sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
@@ -7811,6 +8232,11 @@ function processMtfTopDown() {
   }
 
   lastMtfTopDownIdx = signal.candleIdx;
+  markMtfPipelineStage("signal_validation", {
+    symbol: signal.symbol || symbol,
+    signalId: signal.signalId,
+    status: "passed"
+  });
 
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
@@ -7844,6 +8270,28 @@ function processMtfTopDown() {
     sl: signal.sl,
     tp: signal.tp
   });
+  markMtfPipelineStage("notification_layer", {
+    symbol: signal.symbol || sym,
+    signalId: signal.signalId,
+    notificationsEnabled,
+    telegramAutoSend: telegramStrategyAutoSend
+  });
+  if (mtfDebugMode) {
+    const state = getMtfPipelineState(signal.symbol || sym);
+    const alignSummary = Object.entries(state.alignment || {}).map(([k, v]) => `${k}:${v && v.aligned ? "OK" : "MISS"}`).join(" ");
+    const htfSummary = Object.entries(state.htf || {}).map(([k, v]) => `${k}:${v.closedCandles || 0}${v.complete ? "" : "*"}`).join(" ");
+    const rejectReason = state.lastRejection ? state.lastRejection.reason : "none";
+    pushMtfDebugRow({
+      symbol: signal.symbol || sym,
+      strategy: "MTF Top-Down",
+      mtfStatus: "PASS",
+      ltfSignal: `${signal.dir} ${signal.patternType}`,
+      htfSummary,
+      rejectionReason: rejectReason,
+      alignment: alignSummary || "--",
+      time: new Date().toISOString().slice(11, 19)
+    });
+  }
 
   showToast(
     "MTF Top-Down " + dirArrow,
@@ -7948,6 +8396,16 @@ function monitorMtfTopDownOutcomes(candle) {
       if (s.result === "EXPIRED" && !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
+    }
+    const symbol = getActiveSymbol();
+    const hasPending = mtfTopDownHistory.some(s => s && s.result === "PENDING");
+    logSignalEngineDebug("MTF_SYMBOL_LOCK_STATUS", {
+      symbol,
+      locked: hasPending,
+      reason: hasPending ? "pending_signal_exists" : "all_signals_resolved_or_expired"
+    });
+    if (!hasPending) {
+      markMtfPipelineStage("signal_validation", { symbol, lockReleased: true, reason: "mtf_outcome_resolved" });
     }
     renderStrategyAlerts();
     /* Feature 13: record confluence factor outcomes for adaptive weighting */
@@ -13617,7 +14075,12 @@ function executeAutoTrade(signal, _capturedWs) {
   if (cooldownUntil > Date.now()) {
     const leftSec = Math.ceil((cooldownUntil - Date.now()) / 1000);
     addLog(`⚠ Auto-trade skipped — cooldown active on ${symbol} (${leftSec}s left)`);
+    logSignalEngineDebug("SYMBOL_LOCKED", { symbol, reason: "cooldown_after_loss", cooldownUntil, leftSec });
     return;
+  } else if (symbolCooldownUntil.has(symbol)) {
+    symbolCooldownUntil.delete(symbol);
+    addLog(`🔓 ${symbol} cooldown expired — symbol eligible again`);
+    logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol, reason: "cooldown_expired" });
   }
 
   const freq = canPlaceByFrequency(symbol, signal.strategyName || null);
@@ -14122,12 +14585,18 @@ function resolveAutoTradeHistoryEntry(profit, result, symbol, tradeId) {
     autoTradeCurrentStake = baseStake;  /* reset to base stake on every loss */
     addLog(`🔁 Auto-trade stake reset to $${fmt(baseStake, 2)} after loss`);
     if (pending.symbol) {
-      symbolCooldownUntil.set(pending.symbol, Date.now() + AUTO_TRADE_COOLDOWN_AFTER_LOSS_MS);
+      const until = Date.now() + AUTO_TRADE_COOLDOWN_AFTER_LOSS_MS;
+      symbolCooldownUntil.set(pending.symbol, until);
+      addLog(`🔒 ${pending.symbol} cooldown locked after SL (${Math.ceil(AUTO_TRADE_COOLDOWN_AFTER_LOSS_MS / 1000)}s)`);
+      logSignalEngineDebug("SYMBOL_LOCKED", { symbol: pending.symbol, reason: "loss", cooldownUntil: until, outcome: result });
     }
     /* Loss cluster protection — pause after N consecutive losses */
     if (autoTradeLossCount >= AUTO_TRADE_MAX_LOSSES) {
       autoTradeHalted = true;
       addLog(`🛑 Auto-trade paused — ${AUTO_TRADE_MAX_LOSSES} consecutive losses reached. Reset session to resume.`);
+    }
+    if (pending.symbol && (result === "WIN" || result === "CANCELLED")) {
+      logSignalEngineDebug("SYMBOL_UNLOCKED", { symbol: pending.symbol, reason: result.toLowerCase(), outcome: result });
     }
   }
   updateAutoTradeCurrentStakeUI();
@@ -17022,6 +17491,7 @@ function saveSettings() {
       teslaScalingEnabled,
       teslaScalingPlan,
       mtfTopDownEnabled,
+      mtfDebugMode,
       autoTradeMtfTopDown,
       candleInterpEnabled,
       autoTradeCandleInterp,
@@ -17274,6 +17744,9 @@ function restoreSettings() {
     /* Strategy 11: MTF Top-Down */
     if (s.mtfTopDownEnabled != null) mtfTopDownEnabled = s.mtfTopDownEnabled;
     if (UI.mtfTopDownToggle) UI.mtfTopDownToggle.checked = mtfTopDownEnabled;
+    if (s.mtfDebugMode != null) mtfDebugMode = s.mtfDebugMode === true;
+    if (UI.mtfDebugToggle) UI.mtfDebugToggle.checked = mtfDebugMode;
+    if (UI.mtfDebugPanel) UI.mtfDebugPanel.style.display = mtfDebugMode ? "" : "none";
     if (s.autoTradeMtfTopDown != null) autoTradeMtfTopDown = s.autoTradeMtfTopDown;
     if (UI.autoTradeMtfTopDownToggle) UI.autoTradeMtfTopDownToggle.checked = autoTradeMtfTopDown;
 
@@ -19275,6 +19748,7 @@ function resetSession() {
     p.lastMtfSetupAlertKey = "";
     p.lastMtfApproachAlertKey = "";
   }
+  resetMtfDiagnostics();
   if (sendSignalLifecycleTelegram._sentKeys && sendSignalLifecycleTelegram._sentKeys.clear) {
     sendSignalLifecycleTelegram._sentKeys.clear();
   }
@@ -20085,7 +20559,7 @@ function subscribeCandles(socket, symbol, gran) {
   socket.send(JSON.stringify({
     ticks_history: symbol,
     adjust_start_time: 1,
-    count: 100,
+    count: MTF_HISTORY_FETCH_COUNT,
     end: "latest",
     granularity: gran,
     style: "candles",
@@ -20282,6 +20756,13 @@ function connect() {
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
       if (candles.length > 0) {
         addLog(`📊 ${symbol}: received ${candles.length} historical candles (first ${fmt(candles[0].close, 2)} @ ${candles[0].epoch}, last ${fmt(candles[candles.length - 1].close, 2)} @ ${candles[candles.length - 1].epoch})`);
+        if (mtfTopDownEnabled) {
+          captureMtfHtfDiagnostics(symbol);
+          const state = getMtfPipelineState(symbol);
+          const missing = Object.entries(state.htf || {}).filter(([, v]) => !v || v.closedCandles <= 0).map(([tf]) => tf);
+          if (missing.length > 0) addLog(`⚠️ MTF HTF data missing for ${symbol}: ${missing.join(", ")}`);
+          logSignalEngineDebug("MTF_HTF_AVAILABILITY", { symbol, availableTimeframes: state.availableTimeframes, htf: state.htf, missing });
+        }
       } else {
         addLog(`⚠️ ${symbol}: historical candle request returned 0 candles — no data to compute indicators`);
       }
@@ -26440,6 +26921,13 @@ function connectPanel(p) {
         open: +c.open, high: +c.high, low: +c.low, close: +c.close, epoch: c.epoch
       }));
       if (candles.length > 0) rangeStartEpoch = candles[0].epoch;
+      if (mtfTopDownEnabled) {
+        captureMtfHtfDiagnostics(p.symbol);
+        const state = getMtfPipelineState(p.symbol);
+        const missing = Object.entries(state.htf || {}).filter(([, v]) => !v || v.closedCandles <= 0).map(([tf]) => tf);
+        if (missing.length > 0) addLog(`⚠️ MTF HTF data missing for ${p.symbol}: ${missing.join(", ")}`);
+        logSignalEngineDebug("MTF_HTF_AVAILABILITY", { symbol: p.symbol, availableTimeframes: state.availableTimeframes, htf: state.htf, missing });
+      }
       computeEMAs();
       processAllCandles();
       remapPendingSignalIndices();
@@ -27113,8 +27601,12 @@ document.addEventListener("DOMContentLoaded", () => {
     initLoginGate();
     restoreSettings();
     loadSignalEngineDebugMode();
+    loadMtfDebugMode();
     window.setSignalEngineDebugMode = setSignalEngineDebugMode;
     window.getSignalEngineDebugMode = () => signalEngineDebugMode;
+    window.setMtfDebugMode = setMtfDebugMode;
+    window.getMtfDebugMode = () => mtfDebugMode;
+    renderMtfDebugPanel();
     initAdaptiveRuntime();
     if (adaptiveRuntime) adaptiveRuntime.setMode(adaptiveMode);
     /* Auto-apply recommended settings on boot so the Active column
@@ -27964,6 +28456,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if (UI.autoTradeMtfTopDownToggle) {
     UI.autoTradeMtfTopDownToggle.addEventListener("change", () => {
       autoTradeMtfTopDown = UI.autoTradeMtfTopDownToggle.checked;
+      saveSettings();
+    });
+  }
+  if (UI.mtfDebugToggle) {
+    UI.mtfDebugToggle.addEventListener("change", () => {
+      setMtfDebugMode(UI.mtfDebugToggle.checked);
       saveSettings();
     });
   }
