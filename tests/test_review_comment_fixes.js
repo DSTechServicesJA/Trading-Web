@@ -498,3 +498,113 @@ test('resetSession keeps only contract-backed active trades and their pending se
   assert.equal(sentKeys.cleared, true);
   assert.equal(inFlightKeys.cleared, true);
 });
+
+test('processMtfTopDown keeps debug diagnostics but skips strategy processing when disabled', () => {
+  const fnSource = extractFunction('processMtfTopDown');
+  const harness = `${fnSource}\nmodule.exports = { processMtfTopDown };`;
+  const stageOrder = [];
+  let setupCalls = 0;
+  let confirmationCalls = 0;
+  let signalCalls = 0;
+  const context = {
+    module: { exports: {} },
+    mtfTopDownEnabled: false,
+    mtfDebugMode: true,
+    candles: [{ close: 101 }],
+    MTF_REQUIRED_BASE_CANDLES: 120,
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    markMtfPipelineStage: (stage) => stageOrder.push(stage),
+    captureMtfHtfDiagnostics: () => stageOrder.push('higher_timeframe_retrieval'),
+    getMtfSetupState: () => { setupCalls++; return null; },
+    detectMtfConfirmation: () => { confirmationCalls++; return null; },
+    detectMtfTopDown: () => { signalCalls++; return null; }
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processMtfTopDown } = context.module.exports;
+
+  processMtfTopDown();
+
+  assert.deepEqual(stageOrder, ['data_feed', 'candle_aggregation', 'higher_timeframe_retrieval']);
+  assert.equal(setupCalls, 0);
+  assert.equal(confirmationCalls, 0);
+  assert.equal(signalCalls, 0);
+});
+
+test('processMtfTopDown records signal validation before queueing successful signals', () => {
+  const fnSource = extractFunction('processMtfTopDown');
+  const harness = `${fnSource}\nmodule.exports = { processMtfTopDown };`;
+  const stageOrder = [];
+  const context = {
+    module: { exports: {} },
+    mtfTopDownEnabled: true,
+    mtfDebugMode: false,
+    candles: [{ close: 101 }],
+    MTF_REQUIRED_BASE_CANDLES: 120,
+    MTF_TOP_DOWN_MAX_HISTORY: 10,
+    mtfTopDownHistory: [],
+    mtfSetupState: null,
+    mtfTerminalBreakoutEpoch: null,
+    lastMtfTopDownIdx: -1,
+    _historicalProcessing: false,
+    telegramStrategyAutoSend: false,
+    notificationsEnabled: false,
+    autoTradeStrategyEnabled: false,
+    autoTradeMtfTopDown: false,
+    window: {},
+    Notification: { permission: 'default' },
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    markMtfPipelineStage: (stage) => stageOrder.push(stage),
+    captureMtfHtfDiagnostics: () => stageOrder.push('higher_timeframe_retrieval'),
+    getMtfSetupState: () => null,
+    detectMtfConfirmation: () => null,
+    detectMtfTopDown: () => ({
+      symbol: 'R_100',
+      signalId: 'sig-1',
+      candleIdx: 7,
+      dir: 'BULL',
+      entry: 100,
+      level: 100,
+      sl: 99,
+      tp: 102,
+      rr: 2,
+      mtfBias: 'BULL',
+      patternType: 'pin_bar'
+    }),
+    stampSignalLifecycle: () => {},
+    minConfluenceEnabled: false,
+    computeConfluenceScore: () => 11,
+    getActiveConfluenceFactors: () => ['factor'],
+    playStrategyAlert: () => {},
+    addLog: () => {},
+    fmtPrice: (value) => String(value),
+    fmt: (value, dp) => Number(value).toFixed(dp),
+    logSignalEngineDebug: () => {},
+    showToast: () => {},
+    throttledNotification: () => {},
+    sendSignalLifecycleTelegram: () => {},
+    buildLifecyclePayloadFromSignal: () => ({}),
+    renderStrategyAlerts: () => {},
+    executeAutoTrade: () => {},
+    Date,
+    Object,
+    setTimeout
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processMtfTopDown } = context.module.exports;
+
+  processMtfTopDown();
+
+  assert.deepEqual(stageOrder.slice(0, 5), [
+    'data_feed',
+    'candle_aggregation',
+    'higher_timeframe_retrieval',
+    'signal_validation',
+    'signal_queue'
+  ]);
+  assert.equal(context.lastMtfTopDownIdx, 7);
+  assert.equal(context.mtfTopDownHistory.length, 1);
+});
