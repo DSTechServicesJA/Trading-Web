@@ -820,17 +820,33 @@ function processAdaptiveResolvedSignals() {
   for (const arr of buckets) {
     for (const s of arr) {
       if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
-      const id = [s.time || "", s.symbol || "--", s.strategyType || s.type || "breakout_retest", s.entry || "", s.result].join("|");
+      if (!s.signalId) stampSignalLifecycle(s);
+      const id = s.signalId
+        ? `sid:${s.signalId}`
+        : [s.time || "", s.symbol || "--", s.strategyType || s.type || "breakout_retest", s.entry || "", s.result].join("|");
       if (adaptiveRuntime.wasProcessed(id) || s._adaptiveProcessed) continue;
 
       const ctx = buildAdaptiveContext({
         symbol: s.symbol || getActiveSymbol(),
         timeframeSec: s.timeframeSec || getCurrentGranularitySec(),
         strategy: s.strategyType || s.type || "breakout_retest",
-        regime: s.volatilityRegime || "TRANSITIONING"
+        regime: s.adaptiveRegime || s.volatilityRegime || getCurrentRegimeTag()
       });
+      s.adaptiveRegime = ctx.regime;
 
-      const rr = Number.isFinite(s.rMultiple) ? s.rMultiple : (s.result === "WIN" ? (Number.isFinite(s.rr) ? s.rr : 1) : -1);
+      const isBreakeven = isBreakevenSignal(s);
+      const entry = Number.isFinite(s.entry) ? s.entry : null;
+      const sl = Number.isFinite(s.sl) ? s.sl : null;
+      const exit = Number.isFinite(s.exitPrice)
+        ? s.exitPrice
+        : (s.result === "WIN" ? (Number.isFinite(s.tp) ? s.tp : null) : (Number.isFinite(s.sl) ? s.sl : null));
+      const risk = (entry != null && sl != null) ? Math.abs(entry - sl) : null;
+      let rr = Number.isFinite(s.rMultiple) ? s.rMultiple : null;
+      if (!Number.isFinite(rr) && risk != null && risk > 0 && exit != null) {
+        const pnl = s.dir === "BEAR" ? (entry - exit) : (exit - entry);
+        rr = pnl / risk;
+      }
+      if (!Number.isFinite(rr)) rr = isBreakeven ? 0 : (s.result === "WIN" ? (Number.isFinite(s.rr) ? s.rr : 1) : -1);
       const atrRef = Number.isFinite(s.atrAtSignal) ? s.atrAtSignal : (Number.isFinite(s.atrAtEntry) ? s.atrAtEntry : null);
       const atrExpansion = (Number.isFinite(atrRef) && atrRef > 0 && Number.isFinite(s.exitPrice) && Number.isFinite(s.entry))
         ? Math.abs(s.exitPrice - s.entry) / atrRef
@@ -7323,6 +7339,7 @@ let autoTradeMtfTopDown = true;     /* auto-trade sub-toggle */
 let lastMtfSetupAlertKey = "";
 let lastMtfApproachAlertKey = "";
 let mtfSetupState = null;           /* holds latest qualified setup while waiting for retest */
+let mtfTerminalBreakoutEpoch = null;/* suppresses re-arming on already-consumed/expired HTF breakout */
 
 const MTF_TOP_DOWN_COOLDOWN    = 5;   /* min candles between signals */
 const MTF_TOP_DOWN_MAX_HISTORY = 30;  /* max stored alerts */
@@ -7441,11 +7458,46 @@ function detectMtfSetup() {
 function getMtfSetupState() {
   const latest = detectMtfSetup();
   const idx = candles.length - 1;
+  if (mtfSetupState && Number.isFinite(mtfSetupState.expiresAfterIdx) && idx > mtfSetupState.expiresAfterIdx) {
+    logSignalEngineDebug("MTF_SETUP_EXPIRED", {
+      dir: mtfSetupState.dir,
+      level: mtfSetupState.level,
+      breakoutEpoch: mtfSetupState.breakoutEpoch,
+      idx
+    });
+    if (mtfSetupState.breakoutEpoch != null) mtfTerminalBreakoutEpoch = mtfSetupState.breakoutEpoch;
+    mtfSetupState = null;
+  }
   if (latest) {
+    const sameSetup = mtfSetupState &&
+      mtfSetupState.breakoutEpoch != null &&
+      latest.breakoutEpoch != null &&
+      mtfSetupState.breakoutEpoch === latest.breakoutEpoch &&
+      mtfSetupState.dir === latest.dir;
+    if (sameSetup) {
+      logSignalEngineDebug("MTF_SETUP_REUSED", {
+        dir: mtfSetupState.dir,
+        level: mtfSetupState.level,
+        breakoutEpoch: mtfSetupState.breakoutEpoch,
+        expiresAfterIdx: mtfSetupState.expiresAfterIdx,
+        idx
+      });
+      return mtfSetupState;
+    }
+    if (latest.breakoutEpoch != null && mtfTerminalBreakoutEpoch != null && latest.breakoutEpoch === mtfTerminalBreakoutEpoch) {
+      logSignalEngineDebug("MTF_SETUP_TERMINAL", {
+        dir: latest.dir,
+        level: latest.level,
+        breakoutEpoch: latest.breakoutEpoch,
+        idx
+      });
+      return null;
+    }
     mtfSetupState = Object.assign({}, latest, {
       setupDetectedIdx: idx,
       expiresAfterIdx: idx + (MTF_RETEST_LOOKBACK * 4)
     });
+    mtfTerminalBreakoutEpoch = null;
     logSignalEngineDebug("MTF_SETUP_DETECTED", {
       dir: latest.dir,
       level: latest.level,
@@ -7458,19 +7510,12 @@ function getMtfSetupState() {
     logSignalEngineDebug("MTF_SETUP_REUSED", {
       dir: mtfSetupState.dir,
       level: mtfSetupState.level,
+      breakoutEpoch: mtfSetupState.breakoutEpoch,
       expiresAfterIdx: mtfSetupState.expiresAfterIdx,
       idx
     });
     return mtfSetupState;
   }
-  if (mtfSetupState) {
-    logSignalEngineDebug("MTF_SETUP_EXPIRED", {
-      dir: mtfSetupState.dir,
-      level: mtfSetupState.level,
-      idx
-    });
-  }
-  mtfSetupState = null;
   return null;
 }
 
@@ -7667,6 +7712,7 @@ function detectMtfTopDown(confirmationOverride = null) {
     type:   "mtf_top_down",
     strategyType: "mtf_top_down",
     breakoutEpoch: setup && setup.breakoutEpoch != null ? setup.breakoutEpoch : null,
+    volatilityRegime: getCurrentRegimeTag(),
     validUntilMs: Date.now() + getSignalValidityMs(),
     maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
     entryDriftAtr,
@@ -7765,6 +7811,7 @@ function processMtfTopDown() {
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = (telegramStrategyAutoSend && !_historicalProcessing);
   mtfTopDownHistory.unshift(signal);
+  if (mtfSetupState && mtfSetupState.breakoutEpoch != null) mtfTerminalBreakoutEpoch = mtfSetupState.breakoutEpoch;
   mtfSetupState = null; /* consume setup once a trade signal is produced */
   if (mtfTopDownHistory.length > MTF_TOP_DOWN_MAX_HISTORY) mtfTopDownHistory.pop();
 
@@ -9404,7 +9451,7 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
     for (let i = 0; i < basis.length; i++) hash = ((hash << 5) - hash + basis.charCodeAt(i)) | 0;
     payload.signalId = `lfc-${Math.abs(hash)}`;
   }
-  if (!telegramLifecycleAlertsEnabled && !force) return;
+  if (!telegramLifecycleAlertsEnabled && !force) return false;
   const now = Date.now();
   if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled") {
     kind = "cancelled";
@@ -9419,16 +9466,17 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   }
   const channel = payload && payload.channel === "strategy" ? "strategy" : "trade";
   const enabled = channel === "strategy" ? telegramStrategyAutoSend : telegramAutoSend;
-  if (!enabled && !force) return;
+  if (!enabled && !force) return false;
+  let dedupeKey = null;
   if (payload && payload.signalId) {
-    const dedupeKey = `${payload.signalId}|${kind}`;
+    dedupeKey = `${payload.signalId}|${kind}`;
     if (!force) {
       sendSignalLifecycleTelegram._sentKeys = sendSignalLifecycleTelegram._sentKeys || new Set();
-      if (sendSignalLifecycleTelegram._sentKeys.has(dedupeKey)) {
+      sendSignalLifecycleTelegram._inFlightKeys = sendSignalLifecycleTelegram._inFlightKeys || new Set();
+      if (sendSignalLifecycleTelegram._sentKeys.has(dedupeKey) || sendSignalLifecycleTelegram._inFlightKeys.has(dedupeKey)) {
         logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "dedupe", kind, signalId: payload.signalId });
-        return;
+        return false;
       }
-      sendSignalLifecycleTelegram._sentKeys.add(dedupeKey);
     }
   }
   try {
@@ -9436,10 +9484,20 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
     validateTelegramCredentials(token, chatId);
   } catch (err) {
     addLog(`📤 Lifecycle Telegram skipped: ${err.message}`);
-    return;
+    return false;
   }
+  if (!force && dedupeKey) {
+    sendSignalLifecycleTelegram._inFlightKeys = sendSignalLifecycleTelegram._inFlightKeys || new Set();
+    sendSignalLifecycleTelegram._inFlightKeys.add(dedupeKey);
+  }
+  let sent = false;
   try {
     await sendTelegramMessage(buildLifecycleTelegramCaption(kind, payload || {}));
+    if (!force && dedupeKey) {
+      sendSignalLifecycleTelegram._sentKeys = sendSignalLifecycleTelegram._sentKeys || new Set();
+      sendSignalLifecycleTelegram._sentKeys.add(dedupeKey);
+    }
+    sent = true;
     addLog(`📤 Telegram lifecycle alert sent (${kind})`);
     logSignalEngineDebug("TELEGRAM_SENT", {
       kind,
@@ -9453,7 +9511,12 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
       signalId: payload && payload.signalId ? payload.signalId : null,
       error: err.message
     });
+  } finally {
+    if (!force && dedupeKey && sendSignalLifecycleTelegram._inFlightKeys) {
+      sendSignalLifecycleTelegram._inFlightKeys.delete(dedupeKey);
+    }
   }
+  return sent;
 }
 
 function maybeSendBreakoutLifecycleAlert(kind, extra = {}) {
@@ -16306,10 +16369,15 @@ async function sendTradeOutcomeTelegram(signal) {
     const activeSym = signal.symbol || getActiveSymbol() || "";
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
     const result = signal.result;
+    let lifecycleDelivered = false;
     if (result === "WIN" || result === "LOSS") {
-      sendSignalLifecycleTelegram(result === "WIN" ? "tp" : "sl", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade"));
+      lifecycleDelivered = await sendSignalLifecycleTelegram(result === "WIN" ? "tp" : "sl", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade"));
     } else if (result === "EXPIRED") {
-      sendSignalLifecycleTelegram("cancelled", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade", "Trade expired before TP/SL resolution."));
+      lifecycleDelivered = await sendSignalLifecycleTelegram("cancelled", buildLifecyclePayloadFromSignal(signal, "Breakout Retest", "trade", "Trade expired before TP/SL resolution."));
+    }
+    if (lifecycleDelivered) {
+      addLog(`📤 Telegram breakout outcome skipped (lifecycle already sent: ${result})`);
+      return;
     }
     const outcomeTitle = result === "WIN" ? "TP Reached" : result === "EXPIRED" ? "Trade Cancelled" : "SL Hit";
     const icon = result === "WIN" ? "✅" : result === "EXPIRED" ? "⏱" : "❌";
@@ -19104,6 +19172,7 @@ function initStrategyStateRegistry() {
       teslaBEHit = false;
       retestCount = 0;
       mtfSetupState = null;
+      mtfTerminalBreakoutEpoch = null;
       lastMtfSetupAlertKey = "";
       lastMtfApproachAlertKey = "";
       resetNyOpenRange();
@@ -19182,10 +19251,14 @@ function resetSession() {
   resetIndicator();
   resetStrategyStateContracts("session");
   mtfSetupState = null;
+  mtfTerminalBreakoutEpoch = null;
   lastMtfSetupAlertKey = "";
   lastMtfApproachAlertKey = "";
   if (sendSignalLifecycleTelegram._sentKeys && sendSignalLifecycleTelegram._sentKeys.clear) {
     sendSignalLifecycleTelegram._sentKeys.clear();
+  }
+  if (sendSignalLifecycleTelegram._inFlightKeys && sendSignalLifecycleTelegram._inFlightKeys.clear) {
+    sendSignalLifecycleTelegram._inFlightKeys.clear();
   }
   logSignalEngineDebug("SESSION_RESET", { action: "core_state_reset" });
 
@@ -19267,15 +19340,22 @@ function resetSession() {
   symbolCooldownUntil.clear();
   for (const slot of autoTradeSlots.values()) {
     if (slot.pendingTimer) { clearTimeout(slot.pendingTimer); slot.pendingTimer = null; }
-    if (Array.isArray(slot.activeTrades)) {
-      for (const t of slot.activeTrades) {
-        if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+    const hasTrackedContracts = (Array.isArray(slot.activeTrades) && slot.activeTrades.length > 0)
+      || !!slot.contractId
+      || !!slot.pendingContractId;
+    if (!hasTrackedContracts) {
+      if (Array.isArray(slot.activeTrades)) {
+        for (const t of slot.activeTrades) {
+          if (t.pendingTimer) { clearTimeout(t.pendingTimer); t.pendingTimer = null; }
+        }
+        slot.activeTrades = [];
       }
-      slot.activeTrades = [];
+      slot.inProgress = false;
+      slot.contractId = null;
+      slot.pendingContractId = null;
+    } else {
+      addLog(`📌 Session reset preserving active auto-trade tracking for ${slot.symbol || "symbol"} until settlement.`);
     }
-    slot.inProgress = false;
-    slot.contractId = null;
-    slot.pendingContractId = null;
     slot.fetchingMultiplier = false;
     slot.consecutiveErrors = 0;
   }
@@ -25479,6 +25559,8 @@ function createPanelState(symbol) {
     lastScalpCandleIdx: -999,
     orderblockHistory: [],
     lastOrderblockIdx: -999,
+    mtfSetupState: null,
+    mtfTerminalBreakoutEpoch: null,
     connectTime: null,
     pingTimer: null,
     connected: false,
@@ -25614,6 +25696,24 @@ function activatePanel(p) {
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
   lastMtfTopDownIdx     = p.lastMtfTopDownIdx     != null ? p.lastMtfTopDownIdx     : -999;
+  if (p.mtfSetupState && typeof p.mtfSetupState === "object" && Array.isArray(candles) && candles.length > 0) {
+    const restored = Object.assign({}, p.mtfSetupState);
+    if (Number.isFinite(restored.breakoutEpoch)) {
+      const detectedIdx = candles.findIndex(c => c && Number.isFinite(c.epoch) && c.epoch >= restored.breakoutEpoch);
+      if (detectedIdx >= 0) {
+        restored.setupDetectedIdx = detectedIdx;
+        restored.expiresAfterIdx = detectedIdx + (MTF_RETEST_LOOKBACK * 4);
+        mtfSetupState = restored;
+      } else {
+        mtfSetupState = null;
+      }
+    } else {
+      mtfSetupState = null;
+    }
+  } else {
+    mtfSetupState = null;
+  }
+  mtfTerminalBreakoutEpoch = p.mtfTerminalBreakoutEpoch != null ? p.mtfTerminalBreakoutEpoch : null;
   candleInterpHistory   = p.candleInterpHistory   || [];
   lastCandleInterpIdx   = p.lastCandleInterpIdx   != null ? p.lastCandleInterpIdx   : -999;
   orderblockHistory     = p.orderblockHistory     || [];
@@ -25770,6 +25870,8 @@ function savePanel(p) {
   p.lastFvgStratIdx       = lastFvgStratIdx;
   p.mtfTopDownHistory     = mtfTopDownHistory;
   p.lastMtfTopDownIdx     = lastMtfTopDownIdx;
+  p.mtfSetupState         = mtfSetupState;
+  p.mtfTerminalBreakoutEpoch = mtfTerminalBreakoutEpoch;
   p.candleInterpHistory   = candleInterpHistory;
   p.lastCandleInterpIdx   = lastCandleInterpIdx;
   p.orderblockHistory     = orderblockHistory;
