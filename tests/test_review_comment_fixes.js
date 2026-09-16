@@ -1996,13 +1996,14 @@ test('processAdaptiveResolvedSignals skips unscoped outcomes instead of restampi
   assert.equal(records.length, 0);
 });
 
-test('ensureAllKnownSignalIds preserves missing adaptive scopes while migrating legacy IDs', () => {
+test('ensureAllKnownSignalIds backfills pending scopes without rewriting resolved legacy scopes', () => {
   const harness = [
     extractFunction('stampSignalLifecycle'),
     extractFunction('ensureAllKnownSignalIds'),
     'module.exports = { ensureAllKnownSignalIds };'
   ].join('\n');
   const legacyPo3 = { result: 'WIN', type: 'power_of_3' };
+  const liveOrderblock = { result: 'PENDING', type: 'orderblock' };
   const scopedCrt = { result: 'LOSS', type: 'crt_tbs', adaptiveScopeKey: 'user:alice' };
   const context = {
     module: { exports: {} },
@@ -2024,7 +2025,7 @@ test('ensureAllKnownSignalIds preserves missing adaptive scopes while migrating 
     nyOpenRangeHistory: [],
     sessionRangeHistory: [],
     tiktokHistory: [],
-    orderblockHistory: [],
+    orderblockHistory: [liveOrderblock],
     candleInterpHistory: [],
     po3_4hHistory: [],
     breakerBlockHistory: [],
@@ -2041,8 +2042,78 @@ test('ensureAllKnownSignalIds preserves missing adaptive scopes while migrating 
   assert.equal(ensureAllKnownSignalIds(), true);
   assert.equal(legacyPo3.signalId, 'power_of_3-generated');
   assert.equal(legacyPo3.adaptiveScopeKey, undefined);
+  assert.equal(liveOrderblock.signalId, 'orderblock-generated');
+  assert.equal(liveOrderblock.adaptiveScopeKey, 'user:bob');
   assert.equal(scopedCrt.signalId, 'crt_tbs-generated');
   assert.equal(scopedCrt.adaptiveScopeKey, 'user:alice');
+});
+
+test('retryDeferredConfluenceOutcomes replays resolved signals after switching back to their adaptive scope', () => {
+  const harness = `${extractFunction('retryDeferredConfluenceOutcomes')}\nmodule.exports = { retryDeferredConfluenceOutcomes };`;
+  const breakoutSignal = {
+    result: 'WIN',
+    adaptiveScopeKey: 'user:alice',
+    _confFactors: ['Breakout']
+  };
+  const orderblockSignal = {
+    result: 'LOSS',
+    adaptiveScopeKey: 'user:alice',
+    _confFactors: ['Orderblock']
+  };
+  const bobSignal = {
+    result: 'WIN',
+    adaptiveScopeKey: 'user:bob',
+    _confFactors: ['Bob']
+  };
+  const calls = [];
+  let scope = 'user:bob';
+  const context = {
+    module: { exports: {} },
+    adaptiveConfluenceEnabled: true,
+    getAdaptiveRuntimeScopeKey: () => scope,
+    recordConfluenceOutcome: (factors, result, scopeKey) => {
+      calls.push({ factors, result, scopeKey });
+      return true;
+    },
+    signalHistory: [breakoutSignal],
+    mtfTopDownHistory: [],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [orderblockSignal, bobSignal],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    crtTbsHistory: [],
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { retryDeferredConfluenceOutcomes } = context.module.exports;
+
+  assert.equal(retryDeferredConfluenceOutcomes(), true);
+  assert.equal(breakoutSignal._confRecorded, undefined);
+  assert.equal(orderblockSignal._confRecorded, undefined);
+  assert.equal(bobSignal._confRecorded, true);
+
+  scope = 'user:alice';
+  assert.equal(retryDeferredConfluenceOutcomes(), true);
+  assert.equal(breakoutSignal._confRecorded, true);
+  assert.equal(orderblockSignal._confRecorded, true);
+  assert.deepEqual(calls, [
+    { factors: ['Bob'], result: 'WIN', scopeKey: 'user:bob' },
+    { factors: ['Breakout'], result: 'WIN', scopeKey: 'user:alice' },
+    { factors: ['Orderblock'], result: 'LOSS', scopeKey: 'user:alice' }
+  ]);
 });
 
 test('strategy processors stamp new signals before adaptive sync and learning gates use scope', () => {

@@ -1734,7 +1734,34 @@ function ensureAllKnownSignalIds() {
     if (!Array.isArray(history)) continue;
     for (const s of history) {
       if (s && typeof s === "object" && !s.signalId) {
-        stampSignalLifecycle(s, { assignScope: false });
+        stampSignalLifecycle(s, { assignScope: s.result === "PENDING" });
+        touched = true;
+      }
+    }
+  }
+  return touched;
+}
+
+function retryDeferredConfluenceOutcomes() {
+  if (!adaptiveConfluenceEnabled) return false;
+  const currentScopeKey = String(getAdaptiveRuntimeScopeKey() || "").trim();
+  if (!currentScopeKey) return false;
+  const buckets = [
+    signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
+    failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
+    sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
+    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
+    breakerBlockHistory, oteGoldenPocketHistory, crtTbsHistory
+  ].filter(Array.isArray);
+  let touched = false;
+  for (const arr of buckets) {
+    for (const s of arr) {
+      if (!s || (s.result !== "WIN" && s.result !== "LOSS") || s._confRecorded) continue;
+      if (!Array.isArray(s._confFactors) || s._confFactors.length === 0) continue;
+      const signalScopeKey = String(s.adaptiveScopeKey || "").trim();
+      if (!signalScopeKey || signalScopeKey !== currentScopeKey) continue;
+      if (recordConfluenceOutcome(s._confFactors, s.result, signalScopeKey)) {
+        s._confRecorded = true;
         touched = true;
       }
     }
@@ -19103,6 +19130,7 @@ function updateStatsUI() {
 
   /* Always update aggregated signal count and banners (across all panels) */
   bootstrapAdaptiveIntelligence();
+  retryDeferredConfluenceOutcomes();
   processAdaptiveResolvedSignals();
   syncPersistentAdaptiveTradeHistory();
   renderAdaptiveSettingsUI();
