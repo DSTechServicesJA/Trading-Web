@@ -558,7 +558,7 @@ function adaptiveExportUserTrades(PDO $pdo, int $userId, array $filters = []): a
 
     $category = trim((string) ($filters['market_category'] ?? ''));
     if ($category !== '') {
-        $where[] = 'market_category = ?';
+        $where[] = "market_category IN (?, '*')";
         $params[] = strtoupper($category);
     }
     $strategy = trim((string) ($filters['strategy_key'] ?? ''));

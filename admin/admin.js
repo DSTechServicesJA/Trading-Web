@@ -1645,7 +1645,9 @@ async function loadAdaptiveDashboard(preferredUserId = adaptiveSelectedUserId) {
 }
 
 async function loadAdaptiveProfileIndex(preferredUserId = adaptiveSelectedUserId, pageOverride = null) {
-  const page = Number.isFinite(Number(pageOverride)) && Number(pageOverride) > 0 ? Number(pageOverride) : 1;
+  const page = Number.isFinite(Number(pageOverride)) && Number(pageOverride) > 0
+    ? Number(pageOverride)
+    : (adaptiveDashboardState.profileIndex?.page || 1);
   const tbody = el('adaptiveProfilesIndexBody');
   if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="table-empty">Loading intelligence profiles…</td></tr>';
   try {
@@ -2335,7 +2337,7 @@ function bindAdaptiveAdmin() {
   el('adaptiveHistoryCloseBtn')?.addEventListener('click', () => { el('adaptiveHistoryModal').style.display = 'none'; });
   ['adaptiveProfileStatusFilter', 'adaptiveProfilePlanFilter', 'adaptiveLearningStatusFilter', 'adaptiveCategoryFilter'].forEach((id) => {
     const node = el(id);
-    if (node) node.addEventListener('change', () => loadAdaptiveDashboard(adaptiveSelectedUserId));
+    if (node) node.addEventListener('change', () => loadAdaptiveProfileIndex(adaptiveSelectedUserId, 1));
   });
   ['adaptiveStrategyFilter', 'adaptiveSymbolFilter'].forEach((id) => {
     const node = el(id);
@@ -2344,6 +2346,6 @@ function bindAdaptiveAdmin() {
   const search = el('adaptiveProfileSearch');
   if (search) search.addEventListener('input', () => {
     clearTimeout(adaptiveProfileSearchTimer);
-    adaptiveProfileSearchTimer = setTimeout(() => loadAdaptiveDashboard(adaptiveSelectedUserId), 250);
+    adaptiveProfileSearchTimer = setTimeout(() => loadAdaptiveProfileIndex(adaptiveSelectedUserId, 1), 250);
   });
 }

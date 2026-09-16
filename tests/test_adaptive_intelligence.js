@@ -11,6 +11,24 @@ const adminControllerSource = fs.readFileSync(path.resolve(__dirname, '../api/ad
 const adminStyleSource = fs.readFileSync(path.resolve(__dirname, '../admin/style.css'), 'utf8');
 const schemaSource = fs.readFileSync(path.resolve(__dirname, '../database/schema.sql'), 'utf8');
 
+function extractNamedFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `Expected function ${name} to exist`);
+  const bodyStart = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    const char = source[i];
+    if (char === '{') depth++;
+    if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(start, i + 1);
+      }
+    }
+  }
+  throw new Error(`Failed to extract function ${name}`);
+}
+
 test('market categories remain isolated by symbol family', () => {
   assert.equal(utils.getMarketCategory('1HZ100V', 1), 'VOLATILITY_1S');
   assert.equal(utils.getMarketCategory('R_100', 60), 'VOLATILITY_STANDARD');
@@ -190,4 +208,18 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
   assert.match(adminControllerSource, /adaptiveAcquireUserTradeLock\(/);
   assert.match(schemaSource, /INFORMATION_SCHEMA\.COLUMNS/);
   assert.match(adminStyleSource, /\.adaptive-profile-table-wrap \{\s*overflow-x: auto;/);
+});
+
+test('adaptive admin number formatters keep fallback for null and empty values', () => {
+  const finiteFn = extractNamedFunction(adminSource, 'adaptiveFiniteNumber');
+  const numberFn = extractNamedFunction(adminSource, 'adaptiveNumber');
+  const pctFn = extractNamedFunction(adminSource, 'adaptivePct');
+  const factory = new Function(`${finiteFn}\n${numberFn}\n${pctFn}\nreturn { adaptiveNumber, adaptivePct };`);
+  const { adaptiveNumber, adaptivePct } = factory();
+
+  assert.equal(adaptiveNumber(null, 2, '—'), '—');
+  assert.equal(adaptiveNumber('', 2, '—'), '—');
+  assert.equal(adaptiveNumber('0', 2, '—'), '0.00');
+  assert.equal(adaptivePct(undefined, 1, 'N/A'), 'N/A');
+  assert.equal(adaptivePct('0', 1, 'N/A'), '0.0%');
 });
