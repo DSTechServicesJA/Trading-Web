@@ -237,6 +237,101 @@
       </div>
     </section>
 
+    <!-- ── NOTIFICATION PREFERENCES SECTION ── -->
+    <section class="profiles-section" id="notifPrefsSection">
+      <h1>🔔 Notification Preferences</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        View and modify each user's independent Telegram notification toggles
+        (Trade Setup, Trade Activated, Take Profit, Stop Loss, Trade Cancelled,
+        Trade Expired, Market Alerts, Scanner Alerts, High Confidence Only).
+      </p>
+
+      <div class="stats-bar" id="notifPrefStatsBar"></div>
+
+      <div class="toolbar">
+        <input type="text" id="notifPrefSearch" class="search-input" placeholder="🔍 Search username…" />
+        <button id="notifPrefApplyDefaultsBtn" type="button" class="btn-ghost" title="Create default preferences for any user missing them">🧩 Apply Defaults to Missing</button>
+        <button id="notifPrefBulkUpdateBtn" type="button" class="btn-primary" title="Apply the same preference changes to all selected users">✏️ Bulk Update Selected</button>
+        <button id="refreshNotifPrefsBtn" type="button" class="btn-ghost">🔄 Refresh</button>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <table class="profiles-table" id="notifPrefsTable">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="notifPrefSelectAll" /></th>
+              <th>User</th>
+              <th>Setup</th>
+              <th>Activated</th>
+              <th>TP</th>
+              <th>SL</th>
+              <th>Cancelled</th>
+              <th>Expired</th>
+              <th>Market</th>
+              <th>Scanner</th>
+              <th>High-Conf Only</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="notifPrefsTableBody">
+            <tr><td colspan="12" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── TELEGRAM DELIVERY LOG SECTION ── -->
+    <section class="profiles-section" id="telegramDeliveryLogSection">
+      <h1>📨 Telegram Delivery Log</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        Diagnose missing notifications: every Telegram delivery attempt (sent,
+        failed, or skipped due to a user preference) is recorded here with the
+        signal ID, notification type, and Telegram response/error detail.
+      </p>
+
+      <div class="stats-bar" id="tgDeliveryStatsBar"></div>
+
+      <div class="toolbar">
+        <input type="text" id="tgDeliveryUserFilter" class="search-input" placeholder="User ID filter…" />
+        <select id="tgDeliveryTypeFilter" class="filter-select">
+          <option value="">All Types</option>
+          <option value="setup">Setup</option>
+          <option value="active">Activated</option>
+          <option value="tp">Take Profit</option>
+          <option value="sl">Stop Loss</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="expired">Expired</option>
+        </select>
+        <select id="tgDeliveryStatusFilter" class="filter-select">
+          <option value="">All Statuses</option>
+          <option value="sent">Sent</option>
+          <option value="failed">Failed</option>
+          <option value="skipped">Skipped</option>
+        </select>
+        <button id="refreshTgDeliveryLogBtn" type="button" class="btn-ghost">🔄 Refresh</button>
+      </div>
+
+      <div class="profiles-table-wrapper">
+        <table class="profiles-table" id="tgDeliveryLogTable">
+          <thead>
+            <tr>
+              <th>Sent At</th>
+              <th>User</th>
+              <th>Signal ID</th>
+              <th>Type</th>
+              <th>Strategy</th>
+              <th>Symbol</th>
+              <th>Status</th>
+              <th>Response / Error</th>
+            </tr>
+          </thead>
+          <tbody id="tgDeliveryLogTableBody">
+            <tr><td colspan="8" class="table-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="profiles-section adaptive-admin-shell" id="adaptiveSection">
       <div class="adaptive-hero">
         <div>

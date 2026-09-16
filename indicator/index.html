@@ -1544,6 +1544,25 @@
             </div>
           </section>
 
+          <!-- Per-User Notification Preferences (server-persisted) -->
+          <section class="box">
+            <h3 class="collapsible">🔔 Notification Preferences</h3>
+            <div class="collapsible-body">
+              <p class="hint">Independently enable or disable each Telegram notification type. These settings are saved to your account and survive refresh, logout, and restart.</p>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefTradeSetup" data-notif-pref="telegram_trade_setup" checked /> 📈 Trade Setup Detected</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefTradeActivation" data-notif-pref="telegram_trade_activation" checked /> ✅ Trade Activated</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefTakeProfit" data-notif-pref="telegram_take_profit" checked /> 🎯 Take Profit Hit</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefStopLoss" data-notif-pref="telegram_stop_loss" checked /> 🛑 Stop Loss Hit</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefTradeCancelled" data-notif-pref="telegram_trade_cancelled" checked /> ❌ Trade Cancelled</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefTradeExpired" data-notif-pref="telegram_trade_expired" checked /> ⌛ Trade Expired</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefMarketAlerts" data-notif-pref="telegram_market_alerts" checked /> 📊 Market Status Alerts</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefScannerAlerts" data-notif-pref="telegram_scanner_alerts" checked /> ▶️ Scanner Started / Stopped</label>
+              <label class="toggle-row"><input type="checkbox" id="notifPrefHighConfidenceOnly" data-notif-pref="telegram_high_confidence_only" /> 🧠 High Confidence Signals Only</label>
+              <p id="notifPrefStatus" class="hint telegram-status"></p>
+            </div>
+          </section>
+
+
         </div><!-- /tab-settings -->
 
         <!-- ===== TAB: STATE ===== -->

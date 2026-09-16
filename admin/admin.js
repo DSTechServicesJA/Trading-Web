@@ -158,6 +158,10 @@ async function initApp(user) {
   bindProfileModals();
   await loadNotifications();
   bindNotifications();
+  await loadNotificationPreferences();
+  bindNotificationPreferences();
+  await loadTelegramDeliveryLog();
+  bindTelegramDeliveryLog();
   await loadAdaptiveDashboard();
   bindAdaptiveAdmin();
 }
@@ -1424,6 +1428,233 @@ function bindNotifications() {
       sendBtn.textContent = "📤 Send Notification";
     }
   });
+}
+
+
+/* ═══════════════════════════════════════════════
+   Notification Preferences (per-user Telegram toggles)
+   ═══════════════════════════════════════════════ */
+const NOTIF_PREF_COLUMNS = [
+  ["telegram_trade_setup", "Setup"],
+  ["telegram_trade_activation", "Activated"],
+  ["telegram_take_profit", "TP"],
+  ["telegram_stop_loss", "SL"],
+  ["telegram_trade_cancelled", "Cancelled"],
+  ["telegram_trade_expired", "Expired"],
+  ["telegram_market_alerts", "Market"],
+  ["telegram_scanner_alerts", "Scanner"],
+  ["telegram_high_confidence_only", "High-Conf Only"],
+];
+let notifPrefUsersCache = [];
+
+async function loadNotificationPreferences() {
+  const tbody = el("notifPrefsTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="12" class="table-empty">Loading…</td></tr>`;
+  try {
+    const resp = await apiRequest("/admin/notification_preferences");
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      tbody.innerHTML = `<tr><td colspan="12" class="table-empty" style="color:var(--danger-soft)">Error: ${escHtml(err.error || "Failed to load preferences")}</td></tr>`;
+      return;
+    }
+    const data = await resp.json();
+    notifPrefUsersCache = data.users || [];
+    renderNotifPrefStats(data.stats || {}, data.total_users || 0);
+    renderNotifPrefsTable(notifPrefUsersCache);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="12" class="table-empty" style="color:var(--danger-soft)">Network error — ${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderNotifPrefStats(stats, totalUsers) {
+  const bar = el("notifPrefStatsBar");
+  if (!bar) return;
+  bar.innerHTML = `<div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value">${totalUsers}</div></div>` +
+    NOTIF_PREF_COLUMNS.map(([col, label]) =>
+      `<div class="stat-card"><div class="stat-label">${escHtml(label)} Enabled</div><div class="stat-value">${stats[col] || 0}</div></div>`
+    ).join("");
+}
+
+function renderNotifPrefsTable(users) {
+  const tbody = el("notifPrefsTableBody");
+  if (!tbody) return;
+  const q = (el("notifPrefSearch")?.value || "").trim().toLowerCase();
+  const filtered = q ? users.filter(u => u.username.toLowerCase().includes(q)) : users;
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="12" class="table-empty">No users found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  for (const u of filtered) {
+    const tr = document.createElement("tr");
+    const checks = NOTIF_PREF_COLUMNS.map(([col]) =>
+      `<td><input type="checkbox" data-pref-col="${col}" data-user-id="${u.user_id}" ${u.preferences[col] ? "checked" : ""} /></td>`
+    ).join("");
+    tr.innerHTML = `
+      <td><input type="checkbox" class="notif-pref-row-select" data-user-id="${u.user_id}" /></td>
+      <td>${escHtml(u.username)}${u.is_default ? ' <span class="field-hint">(default)</span>' : ""}</td>
+      ${checks}
+      <td class="actions-cell">
+        <button type="button" class="btn-icon btn-sm" data-preset-action="reset" data-user-id="${u.user_id}" title="Reset to defaults">↺</button>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll("[data-pref-col]").forEach(cb => {
+    cb.addEventListener("change", async () => {
+      const userId = cb.dataset.userId;
+      const col = cb.dataset.prefCol;
+      try {
+        const resp = await apiRequest(`/admin/notification_preferences?id=${encodeURIComponent(userId)}`, {
+          method: "POST",
+          body: JSON.stringify({ [col]: cb.checked }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || "Failed to update preference");
+          cb.checked = !cb.checked;
+        }
+      } catch (ex) {
+        alert("Network error — " + ex.message);
+        cb.checked = !cb.checked;
+      }
+    });
+  });
+
+  tbody.querySelectorAll("[data-preset-action='reset']").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const userId = btn.dataset.userId;
+      if (!confirm("Reset this user's notification preferences to defaults?")) return;
+      try {
+        const resp = await apiRequest(`/admin/notification_preferences?action=reset&id=${encodeURIComponent(userId)}`, { method: "POST" });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || "Failed to reset preferences");
+          return;
+        }
+        await loadNotificationPreferences();
+      } catch (ex) {
+        alert("Network error — " + ex.message);
+      }
+    });
+  });
+}
+
+function bindNotificationPreferences() {
+  el("refreshNotifPrefsBtn")?.addEventListener("click", () => loadNotificationPreferences());
+  el("notifPrefSearch")?.addEventListener("input", () => renderNotifPrefsTable(notifPrefUsersCache));
+
+  el("notifPrefApplyDefaultsBtn")?.addEventListener("click", async () => {
+    try {
+      const resp = await apiRequest("/admin/notification_preferences?action=apply_defaults", { method: "POST" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) { alert(data.error || "Failed to apply defaults"); return; }
+      alert(`Applied defaults to ${data.applied_count || 0} user(s).`);
+      await loadNotificationPreferences();
+    } catch (ex) {
+      alert("Network error — " + ex.message);
+    }
+  });
+
+  el("notifPrefSelectAll")?.addEventListener("change", (e) => {
+    document.querySelectorAll(".notif-pref-row-select").forEach(cb => { cb.checked = e.target.checked; });
+  });
+
+  el("notifPrefBulkUpdateBtn")?.addEventListener("click", async () => {
+    const selected = Array.from(document.querySelectorAll(".notif-pref-row-select:checked")).map(cb => Number(cb.dataset.userId));
+    if (!selected.length) { alert("Select at least one user (checkbox in the first column)."); return; }
+    const col = prompt(
+      "Preference column to update:\n" + NOTIF_PREF_COLUMNS.map(([c, l]) => `${c} (${l})`).join("\n")
+    );
+    if (!col) return;
+    if (!NOTIF_PREF_COLUMNS.some(([c]) => c === col)) { alert("Unknown preference column."); return; }
+    const enable = confirm("Click OK to ENABLE this preference for the selected users, or Cancel to DISABLE it.");
+    try {
+      const resp = await apiRequest("/admin/notification_preferences?action=bulk_update", {
+        method: "POST",
+        body: JSON.stringify({ user_ids: selected, updates: { [col]: enable } }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) { alert(data.error || "Bulk update failed"); return; }
+      alert(`Updated ${data.updated_count || 0} user(s).`);
+      await loadNotificationPreferences();
+    } catch (ex) {
+      alert("Network error — " + ex.message);
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════
+   Telegram Delivery Log
+   ═══════════════════════════════════════════════ */
+async function loadTelegramDeliveryLog() {
+  const tbody = el("tgDeliveryLogTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="8" class="table-empty">Loading…</td></tr>`;
+
+  const params = new URLSearchParams();
+  const userId = el("tgDeliveryUserFilter")?.value.trim();
+  const type = el("tgDeliveryTypeFilter")?.value;
+  const status = el("tgDeliveryStatusFilter")?.value;
+  if (userId) params.set("user_id", userId);
+  if (type) params.set("notification_type", type);
+  if (status) params.set("status", status);
+
+  try {
+    const resp = await apiRequest(`/admin/telegram_delivery_log${params.toString() ? "?" + params.toString() : ""}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      tbody.innerHTML = `<tr><td colspan="8" class="table-empty" style="color:var(--danger-soft)">Error: ${escHtml(err.error || "Failed to load delivery log")}</td></tr>`;
+      return;
+    }
+    const data = await resp.json();
+    renderTgDeliveryStats(data.stats || {});
+    renderTgDeliveryLogTable(data.entries || []);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="table-empty" style="color:var(--danger-soft)">Network error — ${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderTgDeliveryStats(stats) {
+  const bar = el("tgDeliveryStatsBar");
+  if (!bar) return;
+  bar.innerHTML = `
+    <div class="stat-card"><div class="stat-label">✅ Sent</div><div class="stat-value">${stats.sent || 0}</div></div>
+    <div class="stat-card"><div class="stat-label">❌ Failed</div><div class="stat-value">${stats.failed || 0}</div></div>
+    <div class="stat-card"><div class="stat-label">⏭️ Skipped</div><div class="stat-value">${stats.skipped || 0}</div></div>`;
+}
+
+function renderTgDeliveryLogTable(entries) {
+  const tbody = el("tgDeliveryLogTableBody");
+  if (!tbody) return;
+  if (!entries.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="table-empty">No delivery log entries yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  for (const e2 of entries) {
+    const tr = document.createElement("tr");
+    const statusBadge = e2.status === "sent" ? "✅ Sent" : e2.status === "failed" ? "❌ Failed" : "⏭️ Skipped";
+    const detail = e2.status === "failed" ? (e2.error_detail || "") : (e2.telegram_response || e2.error_detail || "");
+    tr.innerHTML = `
+      <td class="ts">${fmtDate(e2.sent_at)}</td>
+      <td>${escHtml(e2.username || "(deleted user)")}</td>
+      <td class="ts">${escHtml(e2.signal_id || "—")}</td>
+      <td>${escHtml(e2.notification_type)}</td>
+      <td>${escHtml(e2.strategy || "—")}</td>
+      <td>${escHtml(e2.symbol || "—")}</td>
+      <td>${statusBadge}</td>
+      <td class="ts" title="${escHtml(detail)}">${escHtml(detail.length > 80 ? detail.slice(0, 80) + "…" : detail)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function bindTelegramDeliveryLog() {
+  el("refreshTgDeliveryLogBtn")?.addEventListener("click", () => loadTelegramDeliveryLog());
+  el("tgDeliveryUserFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
+  el("tgDeliveryTypeFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
+  el("tgDeliveryStatusFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
 }
 
 
