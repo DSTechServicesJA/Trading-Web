@@ -199,9 +199,13 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
   assert.match(adminSource, /sourceInput\.match\(/);
   assert.match(adminSource, /payload\.source_user_id = Number\(sourceIdMatch\[1\]\)/);
   assert.match(adminSource, /data-adaptive-user-id="\$\{row\.user_id\}" tabindex="0" role="button"/);
+  assert.match(adminSource, /aria-pressed="\$\{selected \? 'true' : 'false'\}"/);
   assert.match(serviceSource, /sort_key/);
   assert.match(serviceSource, /sort_direction/);
   assert.match(serviceSource, /market_category IN \(\?, '\*'\)/);
+  assert.match(serviceSource, /\$trustedTradeFilterSql = "COALESCE\(JSON_UNQUOTE\(JSON_EXTRACT\(notes_json, '\$\.trust_source'\)\), ''\) <> 'UNTRUSTED_CLIENT_REPORTED'"/);
+  assert.match(serviceSource, /\$tradeWhere = \['user_id = \?', \$trustedTradeFilterSql\]/);
+  assert.match(serviceSource, /adaptive_signal_decisions ' \. \$decisionSql/);
   assert.match(serviceSource, /adaptiveExportUserTrades/);
   assert.match(serviceSource, /adaptiveExportUserTrades[\s\S]*UNTRUSTED_CLIENT_REPORTED/);
   assert.match(serviceSource, /UNTRUSTED_CLIENT_REPORTED/);

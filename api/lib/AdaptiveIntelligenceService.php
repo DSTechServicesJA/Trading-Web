@@ -1430,19 +1430,20 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $categoryValue = $category !== '' ? strtoupper($category) : null;
     $strategyValue = $strategy !== '' ? $strategy : null;
     $symbolValue = $symbol !== '' ? $symbol : null;
+    $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
 
     $ruleWhere = ['user_id = ?'];
     $ruleParams = [$userId];
     if ($categoryValue !== null) {
-        $ruleWhere[] = 'market_category = ?';
+        $ruleWhere[] = "market_category IN (?, '*')";
         $ruleParams[] = $categoryValue;
     }
     if ($strategyValue !== null) {
-        $ruleWhere[] = 'strategy_key = ?';
+        $ruleWhere[] = "strategy_key IN (?, '*')";
         $ruleParams[] = $strategyValue;
     }
     if ($symbolValue !== null) {
-        $ruleWhere[] = 'symbol_scope = ?';
+        $ruleWhere[] = "symbol_scope IN (?, '*')";
         $ruleParams[] = $symbolValue;
     }
     $ruleSql = 'WHERE ' . implode(' AND ', $ruleWhere);
@@ -1463,7 +1464,7 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     }
     $factorSql = 'WHERE ' . implode(' AND ', $factorWhere);
 
-    $tradeWhere = ['user_id = ?'];
+    $tradeWhere = ['user_id = ?', $trustedTradeFilterSql];
     $tradeParams = [$userId];
     if ($categoryValue !== null) {
         $tradeWhere[] = 'market_category = ?';
@@ -1478,6 +1479,21 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
         $tradeParams[] = $symbolValue;
     }
     $tradeSql = 'WHERE ' . implode(' AND ', $tradeWhere);
+    $decisionWhere = ['user_id = ?'];
+    $decisionParams = [$userId];
+    if ($categoryValue !== null) {
+        $decisionWhere[] = 'market_category = ?';
+        $decisionParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $decisionWhere[] = 'strategy_key = ?';
+        $decisionParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $decisionWhere[] = 'symbol = ?';
+        $decisionParams[] = $symbolValue;
+    }
+    $decisionSql = 'WHERE ' . implode(' AND ', $decisionWhere);
 
     $rulesStmt = $pdo->prepare('SELECT * FROM adaptive_qualification_rules ' . $ruleSql . ' ORDER BY market_category, strategy_key, symbol_scope LIMIT 250');
     $rulesStmt->execute($ruleParams);
@@ -1495,8 +1511,8 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $tradesStmt->execute($tradeParams);
     $trades = $tradesStmt->fetchAll();
 
-    $decisionStmt = $pdo->prepare('SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at FROM adaptive_signal_decisions ' . $tradeSql . ' ORDER BY created_at DESC LIMIT 30');
-    $decisionStmt->execute($tradeParams);
+    $decisionStmt = $pdo->prepare('SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at FROM adaptive_signal_decisions ' . $decisionSql . ' ORDER BY created_at DESC LIMIT 30');
+    $decisionStmt->execute($decisionParams);
     $decisions = $decisionStmt->fetchAll();
 
     $auditWhere = ['target_user_id = ?'];
