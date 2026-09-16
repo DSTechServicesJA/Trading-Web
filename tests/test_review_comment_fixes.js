@@ -384,6 +384,13 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   let qualifiedSignal = null;
   let qualificationOverrides = null;
   let activePanelSymbol = 'R_100';
+  let screenshotContext = null;
+  let captionContext = null;
+  const ui = {
+    telegramStatus: { textContent: '', className: '' },
+    symbolSelect: { value: 'R_100' },
+    granSelect: { value: '60' }
+  };
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
@@ -402,12 +409,26 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
       qualificationOverrides = overrides;
       return { allowed: true, decision: { action: 'SEND' } };
     },
-    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
-    captureTelegramScreenshot: async () => null,
+    UI: ui,
+    captureTelegramScreenshot: async () => {
+      screenshotContext = {
+        activePanelSymbol,
+        symbol: ui.symbolSelect.value,
+        gran: ui.granSelect.value
+      };
+      return null;
+    },
     _snapshotChartGlobals: () => ({ activePanelSymbol }),
     activatePanel: (panel) => { activePanelSymbol = panel.symbol; },
     _restoreChartGlobals: (snapshot) => { activePanelSymbol = snapshot.activePanelSymbol; },
-    buildSessionRangeTelegramCaption: () => 'caption',
+    buildSessionRangeTelegramCaption: () => {
+      captionContext = {
+        activePanelSymbol,
+        symbol: ui.symbolSelect.value,
+        gran: ui.granSelect.value
+      };
+      return 'caption';
+    },
     decorateAdaptiveTelegramCaption: (caption) => caption,
     sendTelegramPhoto: async () => {},
     sendTelegramMessage: async () => {},
@@ -424,7 +445,13 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
 
   assert.equal(qualifiedSignal.entry, 100);
   assert.deepEqual(qualifiedSignal._confFactors, ['Panel Factor']);
+  assert.equal(qualificationOverrides.symbol, 'R_25');
   assert.equal(qualificationOverrides.timeframeSec, 300);
+  assert.deepEqual(screenshotContext, { activePanelSymbol: 'R_25', symbol: 'R_25', gran: '300' });
+  assert.deepEqual(captionContext, { activePanelSymbol: 'R_25', symbol: 'R_25', gran: '300' });
+  assert.equal(ui.symbolSelect.value, 'R_100');
+  assert.equal(ui.granSelect.value, '60');
+  assert.equal(activePanelSymbol, 'R_100');
   assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
   assert.equal(panelTrade._sentViaTelegram, true);
   assert.equal(panelTrade._telegramDelivered, true);

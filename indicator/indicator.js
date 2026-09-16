@@ -10947,18 +10947,21 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     time: new Date().toISOString(),
     _confFactors: scopedConfluenceFactors
   }, scopedTrade || {});
+  const isScopedTradeStillCurrent = () => {
+    if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return false;
+    if (!scopedTrade) return true;
+    return panel ? panel.sessionRangeTrade === scopedTrade : sessionRangeTrade === scopedTrade;
+  };
   const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol, timeframeSec: scopedTimeframeSec });
-  if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return;
-  const scopedTradeStillCurrent = !scopedTrade || (panel ? panel.sessionRangeTrade === scopedTrade : sessionRangeTrade === scopedTrade);
-  if (!scopedTradeStillCurrent) return;
+  if (!isScopedTradeStillCurrent()) return;
   if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
-    const blob = await captureTelegramScreenshot(panel || null);
     let caption;
+    let blob;
     if (panel) {
       const snap = _snapshotChartGlobals();
       const prevPanelSymbol = _multiPanelProcessing;
@@ -10971,6 +10974,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         _multiPanelGran = panel.gran || null;
         if (UI.symbolSelect) UI.symbolSelect.value = panel.symbol;
         if (UI.granSelect && Number.isFinite(panel.gran)) UI.granSelect.value = String(panel.gran);
+        blob = await captureTelegramScreenshot(panel);
         caption = buildSessionRangeTelegramCaption(signalType);
       } finally {
         _multiPanelProcessing = prevPanelSymbol;
@@ -10980,9 +10984,11 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         if (UI.granSelect && prevUiGran !== null) UI.granSelect.value = prevUiGran;
       }
     } else {
+      blob = await captureTelegramScreenshot(null);
       caption = buildSessionRangeTelegramCaption(signalType);
     }
     caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
+    if (!isScopedTradeStillCurrent()) return;
     if (blob) {
       await sendTelegramPhoto(blob, caption);
     } else {
@@ -10990,7 +10996,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     }
     pseudoSignal._sentViaTelegram = true;
     pseudoSignal._telegramDelivered = true;
-    if (scopedTrade) {
+    if (scopedTrade && isScopedTradeStillCurrent()) {
       scopedTrade._sentViaTelegram = true;
       scopedTrade._telegramDelivered = true;
     }
