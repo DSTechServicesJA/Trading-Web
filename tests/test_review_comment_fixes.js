@@ -384,6 +384,7 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   let qualifiedSignal = null;
   let qualificationOverrides = null;
   let activePanelSymbol = 'R_100';
+  let captureArg = undefined;
   let screenshotContext = null;
   let captionContext = null;
   const ui = {
@@ -410,12 +411,16 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
       return { allowed: true, decision: { action: 'SEND' } };
     },
     UI: ui,
-    captureTelegramScreenshot: async () => {
+    captureTelegramScreenshot: async (panelArg) => {
+      captureArg = panelArg;
       screenshotContext = {
         activePanelSymbol,
         symbol: ui.symbolSelect.value,
         gran: ui.granSelect.value
       };
+      activePanelSymbol = 'R_100';
+      ui.symbolSelect.value = 'R_100';
+      ui.granSelect.value = '60';
       return null;
     },
     _snapshotChartGlobals: () => ({ activePanelSymbol }),
@@ -447,6 +452,7 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   assert.deepEqual(qualifiedSignal._confFactors, ['Panel Factor']);
   assert.equal(qualificationOverrides.symbol, 'R_25');
   assert.equal(qualificationOverrides.timeframeSec, 300);
+  assert.equal(captureArg, null);
   assert.deepEqual(screenshotContext, { activePanelSymbol: 'R_25', symbol: 'R_25', gran: '300' });
   assert.deepEqual(captionContext, { activePanelSymbol: 'R_25', symbol: 'R_25', gran: '300' });
   assert.equal(ui.symbolSelect.value, 'R_100');
@@ -568,6 +574,7 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
   const replacementTrade = { dir: 'BEAR', entry: 120, sl: 125, tp: 110 };
   let sent = false;
   let builtCaption = false;
+  let timeoutCalls = 0;
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
@@ -599,7 +606,10 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
     sendTelegramMessage: async () => { sent = true; },
     addLog: () => {},
     TELEGRAM_STATUS_CLEAR_MS: 1,
-    setTimeout: () => {},
+    setTimeout: (fn) => {
+      timeoutCalls++;
+      fn();
+    },
     Date
   };
   vm.createContext(context);
@@ -614,6 +624,9 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
   assert.equal(globalTrade._telegramDelivered, false);
   assert.equal(replacementTrade._adaptiveDecision, undefined);
   assert.equal(replacementTrade._telegramDelivered, undefined);
+  assert.equal(timeoutCalls, 1);
+  assert.equal(context.UI.telegramStatus.textContent, '');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
 });
 
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
