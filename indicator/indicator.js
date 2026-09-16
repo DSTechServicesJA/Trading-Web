@@ -10961,21 +10961,28 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   const pendingStatusText = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   let trackedTelegramStatus = null;
   const trackedTelegramStatusOwner = {};
+  const trackedTelegramStatusGeneration = ((UI.telegramStatus && Number(UI.telegramStatus._sessionRangeStatusGeneration)) || 0) + 1;
   const setTrackedTelegramStatus = (text, className = "hint telegram-status") => {
     if (!UI.telegramStatus) return;
     UI.telegramStatus.textContent = text;
     UI.telegramStatus.className = className;
     UI.telegramStatus._sessionRangeStatusOwner = trackedTelegramStatusOwner;
-    trackedTelegramStatus = { text, className, owner: trackedTelegramStatusOwner };
+    UI.telegramStatus._sessionRangeStatusGeneration = trackedTelegramStatusGeneration;
+    trackedTelegramStatus = { owner: trackedTelegramStatusOwner, generation: trackedTelegramStatusGeneration };
   };
   const clearTrackedTelegramStatus = () => {
-    if (!UI.telegramStatus || !trackedTelegramStatus) return;
-    if (UI.telegramStatus.textContent !== trackedTelegramStatus.text) return;
-    if (UI.telegramStatus.className !== trackedTelegramStatus.className) return;
-    if (UI.telegramStatus._sessionRangeStatusOwner && UI.telegramStatus._sessionRangeStatusOwner !== trackedTelegramStatus.owner) return;
+    if (!trackedTelegramStatus) return;
+    const trackedStatus = trackedTelegramStatus;
+    trackedTelegramStatus = null;
+    if (!UI.telegramStatus) return;
+    if (UI.telegramStatus._sessionRangeStatusOwner !== trackedStatus.owner) return;
+    if (Number(UI.telegramStatus._sessionRangeStatusGeneration || 0) !== trackedStatus.generation) return;
     UI.telegramStatus.textContent = "";
     UI.telegramStatus.className = "hint telegram-status";
-    if (UI.telegramStatus._sessionRangeStatusOwner === trackedTelegramStatus.owner) delete UI.telegramStatus._sessionRangeStatusOwner;
+    delete UI.telegramStatus._sessionRangeStatusOwner;
+    if (Number(UI.telegramStatus._sessionRangeStatusGeneration || 0) === trackedStatus.generation) {
+      delete UI.telegramStatus._sessionRangeStatusGeneration;
+    }
   };
   setTrackedTelegramStatus(pendingStatusText);
   try {

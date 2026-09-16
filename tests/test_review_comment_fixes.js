@@ -464,15 +464,18 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   assert.equal(globalTrade._telegramDelivered, undefined);
 });
 
-test('sendTelegramSessionRangeAlert restores panel context before awaiting the screenshot result', async () => {
+test('sendTelegramSessionRangeAlert restores panel context and aborts delivery when the panel goes stale before screenshot resolves', async () => {
   const fnSource = extractFunction('sendTelegramSessionRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
   const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const replacementTrade = { dir: 'BEAR', entry: 120, sl: 125, tp: 110 };
+  const panels = new Map([['R_25', { symbol: 'R_25', gran: 300, sessionRangeTrade: panelTrade }]]);
   let activePanelSymbol = 'R_100';
   let captureArg = undefined;
   let screenshotContext = null;
   let captionContext = null;
   let resolveScreenshot;
+  let sendCount = 0;
   const ui = {
     telegramStatus: { textContent: '', className: '' },
     symbolSelect: { value: 'R_100' },
@@ -481,7 +484,7 @@ test('sendTelegramSessionRangeAlert restores panel context before awaiting the s
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
-    multiPanels: new Map([['R_25', { symbol: 'R_25', gran: 300, sessionRangeTrade: panelTrade }]]),
+    multiPanels: panels,
     sessionRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
     getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
     validateTelegramCredentials: () => {},
@@ -516,8 +519,8 @@ test('sendTelegramSessionRangeAlert restores panel context before awaiting the s
       return 'caption';
     },
     decorateAdaptiveTelegramCaption: (caption) => caption,
-    sendTelegramPhoto: async () => {},
-    sendTelegramMessage: async () => {},
+    sendTelegramPhoto: async () => { sendCount++; },
+    sendTelegramMessage: async () => { sendCount++; },
     addLog: () => {},
     TELEGRAM_STATUS_CLEAR_MS: 1,
     setTimeout: () => {},
@@ -540,12 +543,17 @@ test('sendTelegramSessionRangeAlert restores panel context before awaiting the s
   activePanelSymbol = 'R_50';
   ui.symbolSelect.value = 'R_50';
   ui.granSelect.value = '900';
+  panels.get('R_25').sessionRangeTrade = replacementTrade;
+  panels.delete('R_25');
   resolveScreenshot();
   await sendPromise;
 
   assert.equal(ui.symbolSelect.value, 'R_50');
   assert.equal(ui.granSelect.value, '900');
   assert.equal(activePanelSymbol, 'R_50');
+  assert.equal(sendCount, 0);
+  assert.equal(ui.telegramStatus.textContent, '');
+  assert.equal(ui.telegramStatus.className, 'hint telegram-status');
 });
 
 test('sendTelegramSessionRangeAlert aborts delivery if the panel is removed during async qualification', async () => {
