@@ -17777,7 +17777,7 @@ function _snapshotChartGlobals() {
     macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
     stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
     minConfluenceEnabled, minConfluenceValue,
-    requiredConfluences: requiredConfluences.slice(),
+    requiredConfluences: Array.isArray(requiredConfluences) ? requiredConfluences.slice() : [],
     doubleRetestEnabled, confirmBarEnabled, divergenceFilterEnabled,
     adxHardGateEnabled, adxMaxThreshold,
     breakoutDistEnabled, breakoutDistATR,
