@@ -382,22 +382,27 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
   const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
   const globalTrade = { dir: 'BEAR', entry: 200, sl: 205, tp: 190 };
   let qualifiedSignal = null;
+  let qualificationOverrides = null;
   let activePanelSymbol = 'R_100';
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
-    multiPanels: new Map([['R_25', { symbol: 'R_25', sessionRangeTrade: panelTrade }]]),
+    multiPanels: new Map([['R_25', { symbol: 'R_25', gran: 300, sessionRangeTrade: panelTrade }]]),
     sessionRangeTrade: globalTrade,
     getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
     validateTelegramCredentials: () => {},
+    getCurrentGranularitySec: () => 60,
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
     getActiveSymbol: () => 'R_100',
     getSymbolLabel: (symbol) => symbol,
     getActiveConfluenceFactors: () => activePanelSymbol === 'R_25' ? ['Panel Factor'] : ['Wrong Panel Factor'],
-    qualifySignalForTelegram: async (signal) => {
+    qualifySignalForTelegram: async (signal, _label, _force, overrides) => {
       qualifiedSignal = signal;
+      qualificationOverrides = overrides;
       return { allowed: true, decision: { action: 'SEND' } };
     },
-    UI: { telegramStatus: { textContent: '', className: '' } },
+    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
     captureTelegramScreenshot: async () => null,
     _snapshotChartGlobals: () => ({ activePanelSymbol }),
     activatePanel: (panel) => { activePanelSymbol = panel.symbol; },
@@ -419,10 +424,61 @@ test('sendTelegramSessionRangeAlert updates the originating panel trade instead 
 
   assert.equal(qualifiedSignal.entry, 100);
   assert.deepEqual(qualifiedSignal._confFactors, ['Panel Factor']);
+  assert.equal(qualificationOverrides.timeframeSec, 300);
   assert.deepEqual(panelTrade._adaptiveDecision, { action: 'SEND' });
   assert.equal(panelTrade._sentViaTelegram, true);
   assert.equal(panelTrade._telegramDelivered, true);
   assert.equal(globalTrade._telegramDelivered, undefined);
+});
+
+test('sendTelegramSessionRangeAlert aborts delivery if the panel is removed during async qualification', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const panel = { symbol: 'R_25', gran: 300, sessionRangeTrade: panelTrade };
+  const panels = new Map([['R_25', panel]]);
+  let activePanelSymbol = 'R_100';
+  let sent = false;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: panels,
+    sessionRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getCurrentGranularitySec: () => 60,
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => activePanelSymbol === 'R_25' ? ['Panel Factor'] : ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async () => {
+      panels.delete('R_25');
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({ activePanelSymbol }),
+    activatePanel: (nextPanel) => { activePanelSymbol = nextPanel.symbol; },
+    _restoreChartGlobals: (snapshot) => { activePanelSymbol = snapshot.activePanelSymbol; },
+    buildSessionRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => { sent = true; },
+    sendTelegramMessage: async () => { sent = true; },
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  await sendTelegramSessionRangeAlert('LONDON_SWEEP', 'R_25');
+
+  assert.equal(sent, false);
+  assert.equal(panelTrade._adaptiveDecision, undefined);
+  assert.equal(panelTrade._telegramDelivered, false);
 });
 
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
@@ -437,6 +493,8 @@ test('sendTelegramSessionRangeAlert skips removed panels instead of falling back
     getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
     validateTelegramCredentials: () => {},
     getActiveSymbol: () => 'R_100',
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
     getSymbolLabel: (symbol) => symbol,
     getActiveConfluenceFactors: () => ['Wrong Panel Factor'],
     qualifySignalForTelegram: async () => {

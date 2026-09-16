@@ -10903,6 +10903,8 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!telegramSessionRangeAutoSend) return;
   const panel = panelSymbol ? multiPanels.get(panelSymbol) : null;
   if (panelSymbol && !panel) return;
+  const scopedSymbol = panelSymbol || getActiveSymbol();
+  const scopedTimeframeSec = panel && Number.isFinite(panel.gran) ? panel.gran : getCurrentGranularitySec();
   const scopedTrade = panel ? (panel.sessionRangeTrade || null) : sessionRangeTrade;
   if (scopedTrade) {
     if (scopedTrade._sentViaTelegram !== true) scopedTrade._sentViaTelegram = false;
@@ -10912,10 +10914,16 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     if (typeof getActiveConfluenceFactors !== "function") return [];
     if (!panel) return getActiveConfluenceFactors();
     const snap = _snapshotChartGlobals();
+    const prevPanelSymbol = _multiPanelProcessing;
+    const prevPanelGran = _multiPanelGran;
     try {
       activatePanel(panel);
+      _multiPanelProcessing = panel.symbol;
+      _multiPanelGran = panel.gran || null;
       return getActiveConfluenceFactors();
     } finally {
+      _multiPanelProcessing = prevPanelSymbol;
+      _multiPanelGran = prevPanelGran;
       _restoreChartGlobals(snap);
     }
   })();
@@ -10931,7 +10939,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   const pseudoSignal = Object.assign({
     type: "session_range",
     strategyType: "session_range",
-    symbol: panelSymbol || getActiveSymbol(),
+    symbol: scopedSymbol,
     dir: (scopedTrade && scopedTrade.dir) || null,
     entry: scopedTrade && scopedTrade.entry,
     sl: scopedTrade && scopedTrade.sl,
@@ -10939,7 +10947,8 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     time: new Date().toISOString(),
     _confFactors: scopedConfluenceFactors
   }, scopedTrade || {});
-  const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol });
+  const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol, timeframeSec: scopedTimeframeSec });
+  if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return;
   if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 
@@ -10950,9 +10959,24 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
     let caption;
     if (panel) {
       const snap = _snapshotChartGlobals();
-      activatePanel(panel);
-      caption = buildSessionRangeTelegramCaption(signalType);
-      _restoreChartGlobals(snap);
+      const prevPanelSymbol = _multiPanelProcessing;
+      const prevPanelGran = _multiPanelGran;
+      const prevUiSymbol = UI.symbolSelect ? UI.symbolSelect.value : null;
+      const prevUiGran = UI.granSelect ? UI.granSelect.value : null;
+      try {
+        activatePanel(panel);
+        _multiPanelProcessing = panel.symbol;
+        _multiPanelGran = panel.gran || null;
+        if (UI.symbolSelect) UI.symbolSelect.value = panel.symbol;
+        if (UI.granSelect && Number.isFinite(panel.gran)) UI.granSelect.value = String(panel.gran);
+        caption = buildSessionRangeTelegramCaption(signalType);
+      } finally {
+        _multiPanelProcessing = prevPanelSymbol;
+        _multiPanelGran = prevPanelGran;
+        _restoreChartGlobals(snap);
+        if (UI.symbolSelect && prevUiSymbol !== null) UI.symbolSelect.value = prevUiSymbol;
+        if (UI.granSelect && prevUiGran !== null) UI.granSelect.value = prevUiGran;
+      }
     } else {
       caption = buildSessionRangeTelegramCaption(signalType);
     }
@@ -17728,26 +17752,50 @@ function _snapshotChartGlobals() {
     candles, rangeStartEpoch, openingRange, breakout,
     retestInfo, indecisionInfo, confirmInfo, trade, phase,
     monitoringTrade, emaFast, emaSlow, emaHTF,
+    emaMTF, vwapValues, retestCount,
     atrValue, atrValues, rsiValues,
     macdLine, macdSignal, macdHistogram,
     bbUpper, bbLower, bbMiddle, bbWidth,
     adxValue, adxDiPlus, adxDiMinus, stochK, stochD,
-    trailingSL, partialTpHit, confluenceScore,
+    trailingSL, partialTpHit, teslaT1Hit, teslaT2Hit, teslaT3Hit, teslaBEHit, confluenceScore,
     mtfSetupState, mtfTerminalBreakoutEpoch, lastMtfSetupAlertKey, lastMtfApproachAlertKey,
     signalHistory, signalWins, signalLosses, signalBreakevens,
     liveScalpHistory, lastScalpCandleIdx, ws,
+    liquiditySweepHistory, lastLiquiditySweepIdx, stopLossHuntHistory, lastStopLossHuntIdx,
+    failedPinBarHistory, lastFailedPinBarIdx, fibScalpHistory, lastFibScalpIdx,
+    po3History, lastPo3Idx, gridScalperMAHistory, lastGridScalperMAIdx,
+    fvgStratHistory, lastFvgStratIdx, mtfTopDownHistory, lastMtfTopDownIdx,
+    candleInterpHistory, lastCandleInterpIdx, orderblockHistory, lastOrderblockIdx,
+    tiktokHistory, lastTiktokIdx, po3_4hHistory, lastPo3_4hIdx,
+    breakerBlockHistory, lastBreakerBlockIdx, oteGoldenPocketHistory, lastOteGoldenPocketIdx,
     autoResetEnabled, emaFilterEnabled, htfFilterEnabled,
     atrToleranceEnabled, trailingStopEnabled, partialTpEnabled,
     falseBreakoutEnabled, minRREnabled, minRRValue, pureTrailingEnabled,
+    teslaScalingEnabled, teslaScalingPlan,
     rsiFilterEnabled, volumeSpikeEnabled, sessionFilterEnabled,
     sessionFilterMode, fibRetestEnabled,
     macdFilterEnabled, bbSqueezeFilterEnabled, adxFilterEnabled,
     stochFilterEnabled, scalpingModeEnabled, nyOpenRangeEnabled,
+    minConfluenceEnabled, minConfluenceValue,
+    requiredConfluences: Array.isArray(requiredConfluences) ? requiredConfluences.slice() : [],
+    doubleRetestEnabled, confirmBarEnabled, divergenceFilterEnabled,
+    adxHardGateEnabled, adxMaxThreshold,
+    breakoutDistEnabled, breakoutDistATR,
+    timeDecayEnabled, timeDecayCandles,
+    consecutiveDirEnabled,
+    vwapFilterEnabled,
+    stochCrossEnabled,
+    rangeSizeEnabled, rangeSizeMin, rangeSizeMax,
+    hhhlEnabled, followThroughEnabled, mtfStructureEnabled,
+    aggressiveEntryEnabled, aggressiveEntryMinAtr,
+    entryQualityFilterEnabled, entryQualityMinAtr,
+    recentLossPauseEnabled, recentLossPauseCount,
     nyOpenRange, nyOpenRangeBreakout, nyOpenRangeRetest,
     nyOpenRangeTrade, nyOpenRangePhase, RANGE_MINUTES,
+    nyOpenRangeTradeWins, nyOpenRangeTradeLosses, nyOpenRangeHistory,
     sessionRangesEnabled, sessionRangeAsian, sessionRangeLondon,
     sessionRangeNY, asianRangeTight, londonSweepSignal,
-    sessionRangeTrade,
+    sessionRangeTrade, sessionRangeHistory,
     sessionRangeTradeWins, sessionRangeTradeLosses
   };
 }
@@ -17759,12 +17807,14 @@ function _restoreChartGlobals(s) {
   confirmInfo = s.confirmInfo; trade = s.trade; phase = s.phase;
   monitoringTrade = s.monitoringTrade;
   emaFast = s.emaFast; emaSlow = s.emaSlow; emaHTF = s.emaHTF;
+  emaMTF = s.emaMTF; vwapValues = s.vwapValues; retestCount = s.retestCount;
   atrValue = s.atrValue; atrValues = s.atrValues; rsiValues = s.rsiValues;
   macdLine = s.macdLine; macdSignal = s.macdSignal; macdHistogram = s.macdHistogram;
   bbUpper = s.bbUpper; bbLower = s.bbLower; bbMiddle = s.bbMiddle; bbWidth = s.bbWidth;
   adxValue = s.adxValue; adxDiPlus = s.adxDiPlus; adxDiMinus = s.adxDiMinus;
   stochK = s.stochK; stochD = s.stochD;
   trailingSL = s.trailingSL; partialTpHit = s.partialTpHit;
+  teslaT1Hit = s.teslaT1Hit; teslaT2Hit = s.teslaT2Hit; teslaT3Hit = s.teslaT3Hit; teslaBEHit = s.teslaBEHit;
   confluenceScore = s.confluenceScore;
   mtfSetupState = s.mtfSetupState;
   mtfTerminalBreakoutEpoch = s.mtfTerminalBreakoutEpoch;
@@ -17773,25 +17823,57 @@ function _restoreChartGlobals(s) {
   signalHistory = s.signalHistory; signalWins = s.signalWins; signalLosses = s.signalLosses; signalBreakevens = s.signalBreakevens || 0;
   liveScalpHistory = s.liveScalpHistory; lastScalpCandleIdx = s.lastScalpCandleIdx;
   ws = s.ws;
+  liquiditySweepHistory = s.liquiditySweepHistory; lastLiquiditySweepIdx = s.lastLiquiditySweepIdx;
+  stopLossHuntHistory = s.stopLossHuntHistory; lastStopLossHuntIdx = s.lastStopLossHuntIdx;
+  failedPinBarHistory = s.failedPinBarHistory; lastFailedPinBarIdx = s.lastFailedPinBarIdx;
+  fibScalpHistory = s.fibScalpHistory; lastFibScalpIdx = s.lastFibScalpIdx;
+  po3History = s.po3History; lastPo3Idx = s.lastPo3Idx;
+  gridScalperMAHistory = s.gridScalperMAHistory; lastGridScalperMAIdx = s.lastGridScalperMAIdx;
+  fvgStratHistory = s.fvgStratHistory; lastFvgStratIdx = s.lastFvgStratIdx;
+  mtfTopDownHistory = s.mtfTopDownHistory; lastMtfTopDownIdx = s.lastMtfTopDownIdx;
+  candleInterpHistory = s.candleInterpHistory; lastCandleInterpIdx = s.lastCandleInterpIdx;
+  orderblockHistory = s.orderblockHistory; lastOrderblockIdx = s.lastOrderblockIdx;
+  tiktokHistory = s.tiktokHistory; lastTiktokIdx = s.lastTiktokIdx;
+  po3_4hHistory = s.po3_4hHistory; lastPo3_4hIdx = s.lastPo3_4hIdx;
+  breakerBlockHistory = s.breakerBlockHistory; lastBreakerBlockIdx = s.lastBreakerBlockIdx;
+  oteGoldenPocketHistory = s.oteGoldenPocketHistory; lastOteGoldenPocketIdx = s.lastOteGoldenPocketIdx;
   autoResetEnabled = s.autoResetEnabled; emaFilterEnabled = s.emaFilterEnabled;
   htfFilterEnabled = s.htfFilterEnabled; atrToleranceEnabled = s.atrToleranceEnabled;
   trailingStopEnabled = s.trailingStopEnabled; partialTpEnabled = s.partialTpEnabled;
   falseBreakoutEnabled = s.falseBreakoutEnabled; minRREnabled = s.minRREnabled;
   minRRValue = s.minRRValue; pureTrailingEnabled = s.pureTrailingEnabled;
+  teslaScalingEnabled = s.teslaScalingEnabled; teslaScalingPlan = s.teslaScalingPlan;
   rsiFilterEnabled = s.rsiFilterEnabled; volumeSpikeEnabled = s.volumeSpikeEnabled;
   sessionFilterEnabled = s.sessionFilterEnabled; sessionFilterMode = s.sessionFilterMode;
   fibRetestEnabled = s.fibRetestEnabled;
   macdFilterEnabled = s.macdFilterEnabled; bbSqueezeFilterEnabled = s.bbSqueezeFilterEnabled;
   adxFilterEnabled = s.adxFilterEnabled; stochFilterEnabled = s.stochFilterEnabled;
   scalpingModeEnabled = s.scalpingModeEnabled; nyOpenRangeEnabled = s.nyOpenRangeEnabled;
+  minConfluenceEnabled = s.minConfluenceEnabled; minConfluenceValue = s.minConfluenceValue;
+  requiredConfluences = Array.isArray(s.requiredConfluences) ? s.requiredConfluences.slice() : [];
+  doubleRetestEnabled = s.doubleRetestEnabled; confirmBarEnabled = s.confirmBarEnabled; divergenceFilterEnabled = s.divergenceFilterEnabled;
+  adxHardGateEnabled = s.adxHardGateEnabled; adxMaxThreshold = s.adxMaxThreshold;
+  breakoutDistEnabled = s.breakoutDistEnabled; breakoutDistATR = s.breakoutDistATR;
+  timeDecayEnabled = s.timeDecayEnabled; timeDecayCandles = s.timeDecayCandles;
+  consecutiveDirEnabled = s.consecutiveDirEnabled;
+  vwapFilterEnabled = s.vwapFilterEnabled;
+  stochCrossEnabled = s.stochCrossEnabled;
+  rangeSizeEnabled = s.rangeSizeEnabled; rangeSizeMin = s.rangeSizeMin; rangeSizeMax = s.rangeSizeMax;
+  hhhlEnabled = s.hhhlEnabled; followThroughEnabled = s.followThroughEnabled; mtfStructureEnabled = s.mtfStructureEnabled;
+  aggressiveEntryEnabled = s.aggressiveEntryEnabled; aggressiveEntryMinAtr = s.aggressiveEntryMinAtr;
+  entryQualityFilterEnabled = s.entryQualityFilterEnabled; entryQualityMinAtr = s.entryQualityMinAtr;
+  recentLossPauseEnabled = s.recentLossPauseEnabled; recentLossPauseCount = s.recentLossPauseCount;
   nyOpenRange = s.nyOpenRange; nyOpenRangeBreakout = s.nyOpenRangeBreakout;
   nyOpenRangeRetest = s.nyOpenRangeRetest; nyOpenRangeTrade = s.nyOpenRangeTrade;
   nyOpenRangePhase = s.nyOpenRangePhase; RANGE_MINUTES = s.RANGE_MINUTES;
+  nyOpenRangeTradeWins = s.nyOpenRangeTradeWins;
+  nyOpenRangeTradeLosses = s.nyOpenRangeTradeLosses;
+  nyOpenRangeHistory = s.nyOpenRangeHistory;
   sessionRangesEnabled = s.sessionRangesEnabled;
   sessionRangeAsian = s.sessionRangeAsian; sessionRangeLondon = s.sessionRangeLondon;
   sessionRangeNY = s.sessionRangeNY; asianRangeTight = s.asianRangeTight;
   londonSweepSignal = s.londonSweepSignal;
-  sessionRangeTrade = s.sessionRangeTrade;
+  sessionRangeTrade = s.sessionRangeTrade; sessionRangeHistory = s.sessionRangeHistory;
   sessionRangeTradeWins = s.sessionRangeTradeWins;
   sessionRangeTradeLosses = s.sessionRangeTradeLosses;
 }
