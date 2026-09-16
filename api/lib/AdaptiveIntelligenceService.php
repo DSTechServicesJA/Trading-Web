@@ -298,6 +298,247 @@ function adaptiveEnsureDefaultRules(PDO $pdo, int $userId): void
     }
 }
 
+function adaptiveHealthScore(array $row): float
+{
+    $sample = max(0, (int) ($row['sample_size'] ?? (($row['wins'] ?? 0) + ($row['losses'] ?? 0))));
+    $winRate = isset($row['win_rate']) ? (float) $row['win_rate'] : ($sample > 0 ? ((int) ($row['wins'] ?? 0) / max(1, $sample)) : 0.0);
+    $avgR = isset($row['avg_r_multiple']) ? (float) $row['avg_r_multiple'] : 0.0;
+    return ($avgR * 100.0) + ($winRate * 100.0) + min(25.0, $sample / 4.0);
+}
+
+function adaptiveLatestTimestamp(?string ...$values): ?string
+{
+    $latest = null;
+    $latestTs = 0;
+    foreach ($values as $value) {
+        if ($value === null || trim($value) === '') {
+            continue;
+        }
+        $ts = strtotime($value);
+        if ($ts !== false && $ts >= $latestTs) {
+            $latestTs = $ts;
+            $latest = $value;
+        }
+    }
+    return $latest;
+}
+
+function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount, int $factorCount = 0): string
+{
+    if ($tradeCount <= 0) {
+        return 'NOT_STARTED';
+    }
+    if ($lockedFactorCount > 0) {
+        if ($factorCount > $lockedFactorCount) {
+            return 'MIXED';
+        }
+        return 'LOCKED';
+    }
+    return 'AUTO_LEARNING';
+}
+
+function adaptiveLearningStatusLabel(string $code): string
+{
+    return match ($code) {
+        'LOCKED' => 'Locked',
+        'MIXED' => 'Mixed',
+        'AUTO_LEARNING' => 'Auto Learning',
+        default => 'Not Started',
+    };
+}
+
+/**
+ * @param array<int,array<string,mixed>> $users
+ * @return array<int,array<string,mixed>>
+ */
+function adaptiveHydrateUserSummaries(PDO $pdo, array $users): array
+{
+    if (!$users) {
+        return [];
+    }
+
+    $ids = array_map(static fn(array $row): int => (int) $row['id'], $users);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $summaryById = [];
+
+    foreach ($users as $user) {
+        $id = (int) $user['id'];
+        $summaryById[$id] = [
+            'user_id' => $id,
+            'name' => (string) ($user['display_name'] ?? $user['username']),
+            'username' => (string) $user['username'],
+            'email' => $user['email'] ?? null,
+            'subscription_plan' => $user['subscription_plan'] ?? null,
+            'subscription_status' => $user['subscription_status'] ?? 'inactive',
+            'status' => $user['status'] ?? 'active',
+            'assigned_strategies' => [],
+            'assigned_adaptive_profiles' => 0,
+            'learning_profile_count' => 0,
+            'market_categories_enabled' => [],
+            'learning_status' => 'Not Started',
+            'learning_status_code' => 'NOT_STARTED',
+            'last_updated' => $user['updated_at'] ?? $user['created_at'] ?? null,
+            'active_confidence_threshold' => 90.0,
+            'telegram_qualification_threshold' => 80.0,
+            'rule_count' => 0,
+            'enabled_rule_count' => 0,
+            'factor_count' => 0,
+            'locked_factor_count' => 0,
+            'trade_count' => 0,
+            'wins' => 0,
+            'losses' => 0,
+            'win_rate' => 0.0,
+            'avg_r_multiple' => null,
+            'avg_confidence' => null,
+        ];
+    }
+
+    $st = $pdo->prepare("SELECT user_id, strategy_key FROM strategy_access WHERE user_id IN ($placeholders) ORDER BY strategy_key");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $summaryById[(int) $row['user_id']]['assigned_strategies'][] = (string) $row['strategy_key'];
+    }
+
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS profile_count, MAX(updated_at) AS updated_at FROM adaptive_profiles WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $id = (int) $row['user_id'];
+        $summaryById[$id]['assigned_adaptive_profiles'] = (int) $row['profile_count'];
+        $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
+    }
+
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS learning_profile_count, MAX(updated_at) AS updated_at FROM adaptive_learning_profiles WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $id = (int) $row['user_id'];
+        $summaryById[$id]['learning_profile_count'] = (int) $row['learning_profile_count'];
+        $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
+    }
+
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS trade_count, SUM(result = 'WIN') AS wins, SUM(result = 'LOSS') AS losses, AVG(CASE WHEN result IN ('WIN','LOSS') THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence, MAX(updated_at) AS updated_at FROM adaptive_trade_history WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $id = (int) $row['user_id'];
+        $wins = (int) ($row['wins'] ?? 0);
+        $losses = (int) ($row['losses'] ?? 0);
+        $sample = $wins + $losses;
+        $summaryById[$id]['trade_count'] = (int) ($row['trade_count'] ?? 0);
+        $summaryById[$id]['wins'] = $wins;
+        $summaryById[$id]['losses'] = $losses;
+        $summaryById[$id]['win_rate'] = $sample > 0 ? round(($wins / $sample) * 100, 1) : 0.0;
+        $summaryById[$id]['avg_r_multiple'] = $row['avg_r_multiple'] !== null ? round((float) $row['avg_r_multiple'], 2) : null;
+        $summaryById[$id]['avg_confidence'] = $row['avg_confidence'] !== null ? round((float) $row['avg_confidence'], 1) : null;
+        $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
+    }
+
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS factor_count, SUM(locked_by_admin = 1) AS locked_factor_count, MAX(updated_at) AS updated_at FROM adaptive_factor_stats WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $id = (int) $row['user_id'];
+        $summaryById[$id]['factor_count'] = (int) ($row['factor_count'] ?? 0);
+        $summaryById[$id]['locked_factor_count'] = (int) ($row['locked_factor_count'] ?? 0);
+        $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
+    }
+
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS rule_count, SUM(enabled = 1) AS enabled_rule_count, MAX(CASE WHEN market_category = '*' AND strategy_key = '*' AND symbol_scope = '*' THEN high_confidence_min END) AS active_confidence_threshold, MAX(CASE WHEN market_category = '*' AND strategy_key = '*' AND symbol_scope = '*' THEN watchlist_below END) AS telegram_qualification_threshold, MAX(updated_at) AS updated_at FROM adaptive_qualification_rules WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $id = (int) $row['user_id'];
+        $summaryById[$id]['rule_count'] = (int) ($row['rule_count'] ?? 0);
+        $summaryById[$id]['enabled_rule_count'] = (int) ($row['enabled_rule_count'] ?? 0);
+        if ($row['active_confidence_threshold'] !== null) {
+            $summaryById[$id]['active_confidence_threshold'] = round((float) $row['active_confidence_threshold'], 1);
+        }
+        if ($row['telegram_qualification_threshold'] !== null) {
+            $summaryById[$id]['telegram_qualification_threshold'] = round((float) $row['telegram_qualification_threshold'], 1);
+        }
+        $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
+    }
+
+    $st = $pdo->prepare("SELECT user_id, market_category FROM adaptive_qualification_rules WHERE user_id IN ($placeholders) AND enabled = 1 AND market_category <> '*' GROUP BY user_id, market_category ORDER BY market_category");
+    $st->execute($ids);
+    foreach ($st->fetchAll() as $row) {
+        $summaryById[(int) $row['user_id']]['market_categories_enabled'][] = (string) $row['market_category'];
+    }
+
+    foreach ($summaryById as &$summary) {
+        $statusCode = adaptiveLearningStatusCode((int) $summary['trade_count'], (int) $summary['locked_factor_count'], (int) $summary['factor_count']);
+        $summary['learning_status_code'] = $statusCode;
+        $summary['learning_status'] = adaptiveLearningStatusLabel($statusCode);
+    }
+    unset($summary);
+
+    return array_values($summaryById);
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): array
+{
+    $page = max(1, (int) ($filters['page'] ?? 1));
+    $perPage = min(50, max(5, (int) ($filters['per_page'] ?? 10)));
+    $offset = ($page - 1) * $perPage;
+    $search = trim((string) ($filters['search'] ?? ''));
+    $status = trim((string) ($filters['status'] ?? ''));
+    $plan = trim((string) ($filters['plan'] ?? ''));
+    $category = trim((string) ($filters['market_category'] ?? ''));
+    $learningStatus = trim((string) ($filters['learning_status'] ?? ''));
+
+    $where = [];
+    $params = [];
+    if ($search !== '') {
+        $like = '%' . $search . '%';
+        $where[] = '(u.username LIKE ? OR u.display_name LIKE ? OR u.email LIKE ?)';
+        array_push($params, $like, $like, $like);
+    }
+    if (in_array($status, ['active', 'locked'], true)) {
+        $where[] = 'u.status = ?';
+        $params[] = $status;
+    }
+    if (in_array($plan, ['trial', 'weekly', 'monthly'], true)) {
+        $where[] = 'u.subscription_plan = ?';
+        $params[] = $plan;
+    }
+    if ($category !== '') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = u.id AND ar.enabled = 1 AND ar.market_category = ?)';
+        $params[] = strtoupper($category);
+    }
+    if ($learningStatus === 'NOT_STARTED') {
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+    } elseif ($learningStatus === 'AUTO_LEARNING') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+    } elseif ($learningStatus === 'LOCKED') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+    } elseif ($learningStatus === 'MIXED') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+    }
+
+    $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $count = $pdo->prepare("SELECT COUNT(*) FROM users u $whereSql");
+    $count->execute($params);
+    $total = (int) $count->fetchColumn();
+
+    $queryParams = array_merge($params, [$perPage, $offset]);
+    $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u $whereSql ORDER BY COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
+    $stmt->execute($queryParams);
+    $users = $stmt->fetchAll();
+    $rows = adaptiveHydrateUserSummaries($pdo, $users);
+
+    return [
+        'rows' => $rows,
+        'page' => $page,
+        'per_page' => $perPage,
+        'total' => $total,
+        'last_page' => (int) max(1, ceil($total / $perPage)),
+    ];
+}
+
 /**
  * @return array<string,mixed>
  */
@@ -655,13 +896,20 @@ function adaptiveUpsertFactorStat(PDO $pdo, int $userId, array $scope, string $f
 {
     $existing = adaptiveFetchFactorStat($pdo, $userId, $scope['market_category'], $scope['strategy_key'], $scope['symbol_scope'], $factor);
     $next = adaptiveComputeWeightUpdate($existing, $trade, $rule, $factor);
+    $isLocked = !empty($existing['locked_by_admin']);
+    if ($isLocked && $existing) {
+        $next['base_weight'] = round((float) ($existing['base_weight'] ?? $next['base_weight']), 2);
+        $next['current_weight'] = round((float) ($existing['current_weight'] ?? $next['current_weight']), 2);
+        $next['trend_direction'] = 'FLAT';
+        $next['reason'] = (string) (($existing['locked_reason'] ?? '') !== '' ? $existing['locked_reason'] : 'Admin locked adaptive weight');
+    }
 
     $stmt = $pdo->prepare(
         'INSERT INTO adaptive_factor_stats
         (user_id, market_category, strategy_key, symbol_scope, factor_key, wins, losses, cancelled, win_rate, sample_size,
-         r_multiple_sum, avg_r_multiple, confidence_score, base_weight, current_weight, trend_direction, last_adjustment_reason,
-         last_trade_id, last_signal_id, last_result)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         r_multiple_sum, avg_r_multiple, confidence_score, base_weight, current_weight, locked_by_admin, locked_reason, locked_at,
+         locked_by_user_id, trend_direction, last_adjustment_reason, last_trade_id, last_signal_id, last_result)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            wins = VALUES(wins),
            losses = VALUES(losses),
@@ -673,6 +921,10 @@ function adaptiveUpsertFactorStat(PDO $pdo, int $userId, array $scope, string $f
            confidence_score = VALUES(confidence_score),
            base_weight = VALUES(base_weight),
            current_weight = VALUES(current_weight),
+           locked_by_admin = VALUES(locked_by_admin),
+           locked_reason = VALUES(locked_reason),
+           locked_at = VALUES(locked_at),
+           locked_by_user_id = VALUES(locked_by_user_id),
            trend_direction = VALUES(trend_direction),
            last_adjustment_reason = VALUES(last_adjustment_reason),
            last_trade_id = VALUES(last_trade_id),
@@ -697,6 +949,10 @@ function adaptiveUpsertFactorStat(PDO $pdo, int $userId, array $scope, string $f
         $next['confidence_score'],
         $next['base_weight'],
         $next['current_weight'],
+        $isLocked ? 1 : 0,
+        $existing['locked_reason'] ?? null,
+        $existing['locked_at'] ?? null,
+        $existing['locked_by_user_id'] ?? null,
         $next['trend_direction'],
         $next['reason'],
         $trade['trade_id'],
@@ -705,7 +961,7 @@ function adaptiveUpsertFactorStat(PDO $pdo, int $userId, array $scope, string $f
     ]);
 
     $prevWeight = isset($existing['current_weight']) ? (float) $existing['current_weight'] : $next['base_weight'];
-    if (round($prevWeight, 2) !== round((float) $next['current_weight'], 2)) {
+    if (!$isLocked && round($prevWeight, 2) !== round((float) $next['current_weight'], 2)) {
         adaptiveAudit(
             $pdo,
             $actorUserId,
@@ -1100,6 +1356,287 @@ function adaptiveBootstrap(PDO $pdo, int $userId, array $filters = []): array
         'recent_trades' => $trades,
         'recent_decisions' => $decisions,
     ];
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = []): array
+{
+    $stmt = $pdo->prepare('SELECT id, username, display_name, email, subscription_plan, subscription_status, status, updated_at, created_at FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        throw new RuntimeException('User not found');
+    }
+
+    adaptiveEnsureDefaultRules($pdo, $userId);
+    $profileRows = adaptiveHydrateUserSummaries($pdo, [$user]);
+    $profile = $profileRows[0] ?? null;
+    if (!$profile) {
+        throw new RuntimeException('User profile summary unavailable');
+    }
+
+    $category = trim((string) ($filters['market_category'] ?? ''));
+    $strategy = trim((string) ($filters['strategy_key'] ?? ''));
+    $symbol = trim((string) ($filters['symbol'] ?? ''));
+    $categoryValue = $category !== '' ? strtoupper($category) : null;
+    $strategyValue = $strategy !== '' ? $strategy : null;
+    $symbolValue = $symbol !== '' ? $symbol : null;
+
+    $ruleWhere = ['user_id = ?'];
+    $ruleParams = [$userId];
+    if ($categoryValue !== null) {
+        $ruleWhere[] = 'market_category = ?';
+        $ruleParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $ruleWhere[] = 'strategy_key = ?';
+        $ruleParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $ruleWhere[] = 'symbol_scope = ?';
+        $ruleParams[] = $symbolValue;
+    }
+    $ruleSql = 'WHERE ' . implode(' AND ', $ruleWhere);
+
+    $factorWhere = ['user_id = ?'];
+    $factorParams = [$userId];
+    if ($categoryValue !== null) {
+        $factorWhere[] = 'market_category = ?';
+        $factorParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $factorWhere[] = 'strategy_key = ?';
+        $factorParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $factorWhere[] = 'symbol_scope = ?';
+        $factorParams[] = $symbolValue;
+    }
+    $factorSql = 'WHERE ' . implode(' AND ', $factorWhere);
+
+    $tradeWhere = ['user_id = ?'];
+    $tradeParams = [$userId];
+    if ($categoryValue !== null) {
+        $tradeWhere[] = 'market_category = ?';
+        $tradeParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $tradeWhere[] = 'strategy_key = ?';
+        $tradeParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $tradeWhere[] = 'symbol = ?';
+        $tradeParams[] = $symbolValue;
+    }
+    $tradeSql = 'WHERE ' . implode(' AND ', $tradeWhere);
+
+    $rulesStmt = $pdo->prepare('SELECT * FROM adaptive_qualification_rules ' . $ruleSql . ' ORDER BY market_category, strategy_key, symbol_scope LIMIT 250');
+    $rulesStmt->execute($ruleParams);
+    $rules = $rulesStmt->fetchAll();
+
+    $factorStmt = $pdo->prepare('SELECT * FROM adaptive_factor_stats ' . $factorSql . ' ORDER BY sample_size DESC, current_weight DESC, factor_key ASC LIMIT 250');
+    $factorStmt->execute($factorParams);
+    $factorStats = $factorStmt->fetchAll();
+
+    $adaptiveProfileStmt = $pdo->prepare('SELECT symbol, timeframe_sec, strategy_key, regime, adaptive_mode, confidence_score, sample_size, updated_at FROM adaptive_profiles WHERE user_id = ? ORDER BY updated_at DESC LIMIT 12');
+    $adaptiveProfileStmt->execute([$userId]);
+    $adaptiveProfiles = $adaptiveProfileStmt->fetchAll();
+
+    $tradesStmt = $pdo->prepare('SELECT id, trade_id, symbol, market_category, strategy_key, result, r_multiple, confidence_score, created_at FROM adaptive_trade_history ' . $tradeSql . ' ORDER BY created_at DESC LIMIT 30');
+    $tradesStmt->execute($tradeParams);
+    $trades = $tradesStmt->fetchAll();
+
+    $decisionStmt = $pdo->prepare('SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at FROM adaptive_signal_decisions ' . $tradeSql . ' ORDER BY created_at DESC LIMIT 30');
+    $decisionStmt->execute($tradeParams);
+    $decisions = $decisionStmt->fetchAll();
+
+    $auditWhere = ['target_user_id = ?'];
+    $auditParams = [$userId];
+    if ($categoryValue !== null) {
+        $auditWhere[] = 'market_category = ?';
+        $auditParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $auditWhere[] = 'strategy_key = ?';
+        $auditParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $auditWhere[] = 'symbol_scope = ?';
+        $auditParams[] = $symbolValue;
+    }
+    $auditStmt = $pdo->prepare('SELECT * FROM adaptive_learning_audit_log WHERE ' . implode(' AND ', $auditWhere) . ' ORDER BY created_at DESC LIMIT 100');
+    $auditStmt->execute($auditParams);
+    $audits = $auditStmt->fetchAll();
+
+    $categoryStmt = $pdo->prepare('SELECT market_category, COUNT(*) AS trade_count, SUM(result = "WIN") AS wins, SUM(result = "LOSS") AS losses, AVG(CASE WHEN result IN ("WIN","LOSS") THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence FROM adaptive_trade_history ' . $tradeSql . ' GROUP BY market_category ORDER BY market_category');
+    $categoryStmt->execute($tradeParams);
+    $categoryRows = $categoryStmt->fetchAll();
+
+    $strategyStmt = $pdo->prepare('SELECT market_category, strategy_key, COUNT(*) AS trade_count, SUM(result = "WIN") AS wins, SUM(result = "LOSS") AS losses, AVG(CASE WHEN result IN ("WIN","LOSS") THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence, AVG(CASE WHEN result IN ("WIN","LOSS") THEN IF(result = "WIN", 1, 0) END) AS win_rate FROM adaptive_trade_history ' . $tradeSql . ' GROUP BY market_category, strategy_key ORDER BY market_category, strategy_key');
+    $strategyStmt->execute($tradeParams);
+    $strategyRows = $strategyStmt->fetchAll();
+
+    $strategiesByCategory = [];
+    foreach ($strategyRows as $row) {
+        $strategiesByCategory[$row['market_category']][] = $row;
+    }
+
+    $categoryAnalytics = [];
+    foreach ($categoryRows as $row) {
+        $categoryKey = (string) $row['market_category'];
+        $wins = (int) ($row['wins'] ?? 0);
+        $losses = (int) ($row['losses'] ?? 0);
+        $sample = $wins + $losses;
+        $strategies = $strategiesByCategory[$categoryKey] ?? [];
+        usort($strategies, static fn(array $a, array $b): int => adaptiveHealthScore($b) <=> adaptiveHealthScore($a));
+        $best = $strategies[0] ?? null;
+        $worst = $strategies ? $strategies[count($strategies) - 1] : null;
+        $categoryAnalytics[] = [
+            'market_category' => $categoryKey,
+            'trade_count' => (int) ($row['trade_count'] ?? 0),
+            'wins' => $wins,
+            'losses' => $losses,
+            'win_rate' => $sample > 0 ? round(($wins / $sample) * 100, 1) : 0.0,
+            'avg_r_multiple' => $row['avg_r_multiple'] !== null ? round((float) $row['avg_r_multiple'], 2) : null,
+            'confidence' => $row['avg_confidence'] !== null ? round((float) $row['avg_confidence'], 1) : null,
+            'best_strategy' => $best ? [
+                'strategy_key' => $best['strategy_key'],
+                'win_rate' => $best['win_rate'] !== null ? round((float) $best['win_rate'] * 100, 1) : 0.0,
+                'avg_r_multiple' => $best['avg_r_multiple'] !== null ? round((float) $best['avg_r_multiple'], 2) : null,
+                'trade_count' => (int) ($best['trade_count'] ?? 0),
+            ] : null,
+            'worst_strategy' => $worst ? [
+                'strategy_key' => $worst['strategy_key'],
+                'win_rate' => $worst['win_rate'] !== null ? round((float) $worst['win_rate'] * 100, 1) : 0.0,
+                'avg_r_multiple' => $worst['avg_r_multiple'] !== null ? round((float) $worst['avg_r_multiple'], 2) : null,
+                'trade_count' => (int) ($worst['trade_count'] ?? 0),
+            ] : null,
+        ];
+    }
+
+    return [
+        'profile' => $profile,
+        'adaptive_profiles' => $adaptiveProfiles,
+        'rules' => $rules,
+        'factor_stats' => $factorStats,
+        'trades' => $trades,
+        'decisions' => $decisions,
+        'audits' => $audits,
+        'category_analytics' => $categoryAnalytics,
+    ];
+}
+
+/**
+ * @return array<int,array<string,mixed>>
+ */
+function adaptiveFactorHistory(PDO $pdo, int $userId, array $filters = []): array
+{
+    $factorKey = trim((string) ($filters['factor_key'] ?? ''));
+    if ($factorKey === '') {
+        throw new InvalidArgumentException('factor_key is required');
+    }
+    $where = ['target_user_id = ?', 'entity_key = ?'];
+    $params = [$userId, $factorKey];
+    $category = trim((string) ($filters['market_category'] ?? ''));
+    $strategy = trim((string) ($filters['strategy_key'] ?? ''));
+    $symbol = trim((string) ($filters['symbol_scope'] ?? ''));
+    if ($category !== '') {
+        $where[] = 'market_category = ?';
+        $params[] = strtoupper($category);
+    }
+    if ($strategy !== '') {
+        $where[] = 'strategy_key = ?';
+        $params[] = $strategy;
+    }
+    if ($symbol !== '') {
+        $where[] = 'symbol_scope = ?';
+        $params[] = $symbol;
+    }
+    $stmt = $pdo->prepare('SELECT * FROM adaptive_learning_audit_log WHERE ' . implode(' AND ', $where) . ' ORDER BY created_at DESC LIMIT 100');
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function adaptiveCloneRulesFromUser(PDO $pdo, int $adminUserId, int $targetUserId, int $sourceUserId, string $reason = 'Cloned adaptive qualification rules'): int
+{
+    if ($targetUserId === $sourceUserId) {
+        throw new InvalidArgumentException('Source and target users must differ');
+    }
+
+    adaptiveEnsureDefaultRules($pdo, $sourceUserId);
+    $select = $pdo->prepare('SELECT market_category, strategy_key, symbol_scope, reject_below, watchlist_below, high_confidence_min, min_sample_size, min_weight_adjustment_samples, max_weight_step, base_weight_default, confidence_blend_signal, confidence_blend_history, confidence_blend_market, confidence_blend_strategy, watchlist_sends_to_telegram, enabled FROM adaptive_qualification_rules WHERE user_id = ? ORDER BY market_category, strategy_key, symbol_scope');
+    $select->execute([$sourceUserId]);
+    $rows = $select->fetchAll();
+    if (!$rows) {
+        throw new RuntimeException('Source user has no adaptive rules to clone');
+    }
+
+    $pdo->prepare('DELETE FROM adaptive_qualification_rules WHERE user_id = ?')->execute([$targetUserId]);
+    $insert = $pdo->prepare('INSERT INTO adaptive_qualification_rules (user_id, market_category, strategy_key, symbol_scope, reject_below, watchlist_below, high_confidence_min, min_sample_size, min_weight_adjustment_samples, max_weight_step, base_weight_default, confidence_blend_signal, confidence_blend_history, confidence_blend_market, confidence_blend_strategy, watchlist_sends_to_telegram, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    foreach ($rows as $row) {
+        $insert->execute([
+            $targetUserId,
+            $row['market_category'],
+            $row['strategy_key'],
+            $row['symbol_scope'],
+            $row['reject_below'],
+            $row['watchlist_below'],
+            $row['high_confidence_min'],
+            $row['min_sample_size'],
+            $row['min_weight_adjustment_samples'],
+            $row['max_weight_step'],
+            $row['base_weight_default'],
+            $row['confidence_blend_signal'],
+            $row['confidence_blend_history'],
+            $row['confidence_blend_market'],
+            $row['confidence_blend_strategy'],
+            $row['watchlist_sends_to_telegram'],
+            $row['enabled'],
+        ]);
+    }
+
+    adaptiveAudit($pdo, $adminUserId, 'admin', $targetUserId, 'ADMIN_CLONE_RULES', 'qualification_rule_set', 'rules_from_user_' . $sourceUserId, null, null, null, ['source_user_id' => $sourceUserId], ['cloned_rule_count' => count($rows)], $reason);
+    return count($rows);
+}
+
+function adaptiveAssignDefaultProfile(PDO $pdo, int $adminUserId, int $targetUserId, string $reason = 'Assigned default adaptive profile'): int
+{
+    $pdo->prepare('DELETE FROM adaptive_qualification_rules WHERE user_id = ?')->execute([$targetUserId]);
+    adaptiveEnsureDefaultRules($pdo, $targetUserId);
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM adaptive_qualification_rules WHERE user_id = ?');
+    $countStmt->execute([$targetUserId]);
+    $count = (int) $countStmt->fetchColumn();
+    adaptiveAudit($pdo, $adminUserId, 'admin', $targetUserId, 'ADMIN_ASSIGN_DEFAULTS', 'qualification_rule_set', 'default_profile', null, null, null, null, ['rule_count' => $count], $reason);
+    return $count;
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function adaptiveResetFactorStat(PDO $pdo, int $adminUserId, int $targetUserId, int $factorId, string $reason = 'Admin reset adaptive factor'): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM adaptive_factor_stats WHERE id = ? AND user_id = ? LIMIT 1');
+    $stmt->execute([$factorId, $targetUserId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        throw new RuntimeException('Factor stat not found');
+    }
+
+    $next = $row;
+    $next['current_weight'] = $row['base_weight'];
+    $next['locked_by_admin'] = 0;
+    $next['locked_reason'] = null;
+    $next['locked_at'] = null;
+    $next['locked_by_user_id'] = null;
+    $next['trend_direction'] = 'FLAT';
+    $next['last_adjustment_reason'] = 'Admin reset to base weight';
+
+    $upd = $pdo->prepare('UPDATE adaptive_factor_stats SET current_weight = base_weight, locked_by_admin = 0, locked_reason = NULL, locked_at = NULL, locked_by_user_id = NULL, trend_direction = "FLAT", last_adjustment_reason = ? , updated_at = CURRENT_TIMESTAMP, last_updated = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?');
+    $upd->execute([$next['last_adjustment_reason'], $factorId, $targetUserId]);
+    adaptiveAudit($pdo, $adminUserId, 'admin', $targetUserId, 'ADMIN_FACTOR_RESET', 'factor_stat', (string) $row['factor_key'], (string) $row['market_category'], (string) $row['strategy_key'], (string) $row['symbol_scope'], $row, $next, $reason);
+    return $next;
 }
 
 /**

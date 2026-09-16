@@ -17,11 +17,29 @@ $adminUserId = (int) ($GLOBALS['adminUserId'] ?? 0);
 
 try {
     if ($method === 'GET') {
-        if ($action === 'dashboard') {
-            jsonResponse(adaptiveAdminDashboard($pdo, $_GET));
+        if ($action === 'profiles') {
+            jsonResponse(adaptiveListUserIntelligenceProfiles($pdo, $_GET));
+        }
+        if ($action === 'detail' || $action === 'dashboard') {
+            $targetUserId = (int) ($_GET['user_id'] ?? 0);
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            jsonResponse(adaptiveUserIntelligenceDetail($pdo, $targetUserId, $_GET));
+        }
+        if ($action === 'history') {
+            $targetUserId = (int) ($_GET['user_id'] ?? 0);
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            jsonResponse(['history' => adaptiveFactorHistory($pdo, $targetUserId, $_GET)]);
         }
         if ($action === 'export') {
-            $payload = adaptiveAdminDashboard($pdo, $_GET);
+            $targetUserId = (int) ($_GET['user_id'] ?? 0);
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            $payload = adaptiveUserIntelligenceDetail($pdo, $targetUserId, $_GET);
             jsonResponse(['exported_at' => gmdate('c'), 'data' => $payload]);
         }
         jsonResponse(['error' => 'Unsupported action'], 400);
@@ -97,7 +115,7 @@ try {
             if (!$current) {
                 jsonResponse(['error' => 'Factor stat not found'], 404);
             }
-            $allowed = ['wins','losses','cancelled','sample_size','avg_r_multiple','confidence_score','base_weight','current_weight','trend_direction','last_adjustment_reason'];
+            $allowed = ['wins','losses','cancelled','sample_size','avg_r_multiple','confidence_score','base_weight','current_weight','trend_direction','last_adjustment_reason','locked_by_admin','locked_reason'];
             $set = [];
             $params = [];
             foreach ($allowed as $field) {
@@ -110,9 +128,22 @@ try {
                 jsonResponse(['error' => 'No updatable factor fields provided'], 400);
             }
             $params[] = $factorId;
+            if (array_key_exists('locked_by_admin', $body)) {
+                $set[] = 'locked_at = ' . (!empty($body['locked_by_admin']) ? 'CURRENT_TIMESTAMP' : 'NULL');
+                $set[] = 'locked_by_user_id = ' . (!empty($body['locked_by_admin']) ? (int) $adminUserId : 'NULL');
+            }
             $stmt = $pdo->prepare('UPDATE adaptive_factor_stats SET ' . implode(', ', $set) . ', updated_at = CURRENT_TIMESTAMP, last_updated = CURRENT_TIMESTAMP WHERE id = ?');
             $stmt->execute($params);
-            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], 'ADMIN_FACTOR_OVERRIDE', 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, array_merge($current, array_intersect_key($body, array_flip($allowed))), (string) ($body['reason'] ?? 'Admin updated factor statistics'));
+            $nextValue = array_merge($current, array_intersect_key($body, array_flip($allowed)));
+            if (array_key_exists('locked_by_admin', $body)) {
+                $nextValue['locked_at'] = !empty($body['locked_by_admin']) ? gmdate('Y-m-d H:i:s') : null;
+                $nextValue['locked_by_user_id'] = !empty($body['locked_by_admin']) ? $adminUserId : null;
+            }
+            $actionType = 'ADMIN_FACTOR_OVERRIDE';
+            if (array_key_exists('locked_by_admin', $body)) {
+                $actionType = !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_UNLOCK';
+            }
+            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], $actionType, 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
             jsonResponse(['message' => 'Factor statistics updated']);
         }
 
@@ -163,6 +194,49 @@ try {
             adaptiveAudit($pdo, $adminUserId, 'admin', $targetUserId, 'ADMIN_RESET_LEARNING', 'adaptive_engine', $category !== '' ? strtoupper($category) : 'ALL', $category !== '' ? strtoupper($category) : null, null, null, null, ['delete_history' => !empty($body['delete_history'])], (string) ($body['reason'] ?? 'Admin reset adaptive learning model'));
             $pdo->commit();
             jsonResponse(['message' => 'Adaptive learning state reset']);
+        }
+
+        if ($action === 'clone_rules') {
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            $sourceUserId = (int) ($body['source_user_id'] ?? 0);
+            if ($sourceUserId <= 0 && !empty($body['source_username'])) {
+                $lookup = $pdo->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+                $lookup->execute([trim((string) $body['source_username'])]);
+                $sourceUserId = (int) ($lookup->fetchColumn() ?: 0);
+            }
+            if ($sourceUserId <= 0) {
+                jsonResponse(['error' => 'source_user_id or source_username is required'], 400);
+            }
+            $pdo->beginTransaction();
+            $count = adaptiveCloneRulesFromUser($pdo, $adminUserId, $targetUserId, $sourceUserId, (string) ($body['reason'] ?? 'Admin cloned adaptive rules from another user'));
+            $pdo->commit();
+            jsonResponse(['message' => 'Rules cloned', 'cloned_rule_count' => $count]);
+        }
+
+        if ($action === 'defaults') {
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            $pdo->beginTransaction();
+            $count = adaptiveAssignDefaultProfile($pdo, $adminUserId, $targetUserId, (string) ($body['reason'] ?? 'Admin assigned default adaptive profile'));
+            $pdo->commit();
+            jsonResponse(['message' => 'Default adaptive profile assigned', 'rule_count' => $count]);
+        }
+
+        if ($action === 'reset_factor') {
+            if ($targetUserId <= 0) {
+                jsonResponse(['error' => 'user_id is required'], 400);
+            }
+            $factorId = (int) ($body['id'] ?? 0);
+            if ($factorId <= 0) {
+                jsonResponse(['error' => 'id is required'], 400);
+            }
+            $pdo->beginTransaction();
+            $row = adaptiveResetFactorStat($pdo, $adminUserId, $targetUserId, $factorId, (string) ($body['reason'] ?? 'Admin reset adaptive factor to base weight'));
+            $pdo->commit();
+            jsonResponse(['message' => 'Adaptive factor reset', 'factor' => $row]);
         }
 
         if ($action === 'import') {
