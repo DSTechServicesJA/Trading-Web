@@ -203,6 +203,7 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
   assert.match(serviceSource, /sort_direction/);
   assert.match(serviceSource, /market_category IN \(\?, '\*'\)/);
   assert.match(serviceSource, /adaptiveExportUserTrades/);
+  assert.match(serviceSource, /adaptiveExportUserTrades[\s\S]*UNTRUSTED_CLIENT_REPORTED/);
   assert.match(serviceSource, /UNTRUSTED_CLIENT_REPORTED/);
   assert.match(adminControllerSource, /adaptiveExportUserTrades\(/);
   assert.match(adminControllerSource, /adaptiveAcquireUserTradeLock\(/);

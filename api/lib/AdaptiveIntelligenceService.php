@@ -572,6 +572,7 @@ function adaptiveExportUserTrades(PDO $pdo, int $userId, array $filters = []): a
         $params[] = $symbol;
     }
 
+    $where[] = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
     $stmt = $pdo->prepare('SELECT * FROM adaptive_trade_history WHERE ' . implode(' AND ', $where) . ' ORDER BY created_at DESC, id DESC');
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
