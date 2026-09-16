@@ -347,7 +347,7 @@ function renderTable(users) {
     }
 
     tr.innerHTML = `
-      <td><strong>${escHtml(u.username)}</strong></td>
+      <td><strong>${escHtml(u.username)}</strong><div class="ts">ID: ${escHtml(String(u.id))}</div></td>
       <td class="ts">${escHtml(u.email || "—")}</td>
       <td><span class="badge badge-${escHtml(u.role)}">${escHtml(u.role)}</span></td>
       <td><span class="badge badge-${escHtml(u.status)}">${escHtml(u.status)}</span></td>
