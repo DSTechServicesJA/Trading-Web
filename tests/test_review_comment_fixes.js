@@ -75,6 +75,7 @@ test('qualifySignalForTelegram fails closed when the adaptive service errors', a
       qualifySignal: async () => { throw new Error('db offline'); }
     },
     initAdaptiveIntelligenceClient: () => {},
+    hydrateAdaptiveRuntimeFromDb: () => {},
     buildAdaptiveQualificationPayload: () => ({ signal_id: 'sig-1' }),
     addLog: () => {},
     console
@@ -174,6 +175,7 @@ test('bootstrapAdaptiveIntelligence keeps requests scoped and ignores stale resp
     renderAdaptiveConfluenceTable: () => renders.push(activeSymbol),
     syncPersistentAdaptiveTradeHistory: () => syncs.push(activeSymbol),
     initAdaptiveIntelligenceClient: () => {},
+    hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => activeSymbol,
     getCurrentGranularitySec: () => 60,
     getAggregatedStrategyHistory: () => {
@@ -246,6 +248,7 @@ test('bootstrapAdaptiveIntelligence does not let an older forced refresh overwri
     renderAdaptiveConfluenceTable: () => {},
     syncPersistentAdaptiveTradeHistory: () => {},
     initAdaptiveIntelligenceClient: () => {},
+    hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => 'R_25',
     getCurrentGranularitySec: () => 60,
     getAggregatedStrategyHistory: () => [{ symbol: 'R_25', strategyType: 'mtf_top_down', epoch: 25 }],
@@ -306,6 +309,7 @@ test('bootstrapAdaptiveIntelligence reuses the current cached scope without rere
     renderAdaptiveConfluenceTable: () => renders.push('rendered'),
     syncPersistentAdaptiveTradeHistory: () => {},
     initAdaptiveIntelligenceClient: () => {},
+    hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => 'R_25',
     getCurrentGranularitySec: () => 60,
     getAggregatedStrategyHistory: () => [],
