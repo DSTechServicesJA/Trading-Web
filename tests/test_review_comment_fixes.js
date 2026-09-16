@@ -1602,6 +1602,61 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
   assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 3, losses: 1 } });
 });
 
+test('initAdaptiveRuntime refreshes the confluence table after loading scoped stats', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getAdaptiveRuntimeStorageKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('loadConfluenceStats'),
+    extractFunction('resetAdaptiveRuntimeSyncState'),
+    extractFunction('initAdaptiveRuntime'),
+    'module.exports = { initAdaptiveRuntime };'
+  ].join('\n');
+  const store = new Map();
+  const renders = [];
+  function AdaptiveEngine(state) {
+    this.state = state;
+    this.setMode = () => {};
+  }
+  const context = {
+    module: { exports: {} },
+    ADAPTIVE_STATE_LS_KEY: 'tg_adaptiveState',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    LS_PREFIX: 'tg_',
+    adaptiveRuntime: null,
+    adaptiveRuntimeStorageScopeKey: '__guest__',
+    adaptiveMode: 'FULL_AUTO',
+    adaptiveRuntimeDbHydrated: false,
+    adaptiveIntelligenceBootstrap: null,
+    adaptiveIntelligenceBootstrapPromise: null,
+    adaptiveIntelligenceBootstrapScopeKey: '',
+    adaptiveIntelligenceBootstrapCache: new Map(),
+    adaptiveIntelligenceBootstrapPromises: new Map(),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    confluenceFactorStats: {},
+    AdaptiveEngine,
+    ITGuruAuth: { getUser: () => ({ username: 'alice' }) },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    renderAdaptiveConfluenceTable: () => renders.push('rendered'),
+    encodeURIComponent,
+    JSON,
+    String,
+    console
+  };
+  store.set('tg_confStats::user%3Aalice', JSON.stringify({ 'EMA Aligned': { wins: 4, losses: 2 } }));
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { initAdaptiveRuntime } = context.module.exports;
+
+  initAdaptiveRuntime(true);
+
+  assert.equal(renders.length, 1);
+  assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 4, losses: 2 } });
+});
+
 test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authenticated user changes', () => {
   const harness = [
     extractFunction('getAdaptiveRuntimeScopeKey'),
@@ -1709,7 +1764,7 @@ test('confluence stats persistence is scoped per authenticated user', () => {
   vm.runInContext(harness, context);
   const { recordConfluenceOutcome, loadConfluenceStats, getConfluenceStatsStorageKey } = context.module.exports;
 
-  recordConfluenceOutcome(['EMA Aligned'], 'WIN');
+  recordConfluenceOutcome(['EMA Aligned'], 'WIN', 'user:alice');
   assert.equal(store.has('tg_confStats'), false);
   assert.ok(store.has('tg_confStats::user%3Aalice'));
   assert.equal(getConfluenceStatsStorageKey(), 'tg_confStats::user%3Aalice');
@@ -1763,6 +1818,103 @@ test('recordConfluenceOutcome ignores stale outcomes after an auth scope change'
   assert.equal(store.size, 0);
 });
 
+test('recordConfluenceOutcome ignores unscoped outcomes', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('recordConfluenceOutcome'),
+    'module.exports = { recordConfluenceOutcome };'
+  ].join('\n');
+  const store = new Map();
+  const context = {
+    module: { exports: {} },
+    LS_PREFIX: 'tg_',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    adaptiveConfluenceEnabled: true,
+    confluenceFactorStats: {},
+    ITGuruAuth: { getUser: () => ({ username: 'bob' }) },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    encodeURIComponent,
+    JSON,
+    Number,
+    String
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { recordConfluenceOutcome } = context.module.exports;
+
+  recordConfluenceOutcome(['EMA Aligned'], 'WIN');
+
+  assert.deepEqual(context.confluenceFactorStats, {});
+  assert.equal(store.size, 0);
+});
+
+test('syncPersistentAdaptiveTradeHistory only uploads outcomes from the active adaptive scope', async () => {
+  const harness = [
+    extractFunction('shouldSyncAdaptiveTradeSignal'),
+    extractFunction('ensureAdaptiveTradeResolutionTimestamp'),
+    extractFunction('syncPersistentAdaptiveTradeHistory'),
+    'module.exports = { syncPersistentAdaptiveTradeHistory };'
+  ].join('\n');
+  const uploads = [];
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      recordTrade: async (payload) => { uploads.push(payload); }
+    },
+    getAdaptiveRuntimeScopeKey: () => 'user:bob',
+    generateSignalId: (prefix) => `${prefix}-generated`,
+    buildAdaptiveTradePayloadFromSignal: (signal) => ({ signalId: signal.signalId, scope: signal.adaptiveScopeKey }),
+    backtestMode: false,
+    signalHistory: [
+      { result: 'WIN', adaptiveScopeKey: 'user:alice', strategyType: 'breakout_retest' },
+      { result: 'WIN', strategyType: 'po3' },
+      { result: 'WIN', adaptiveScopeKey: 'user:bob', strategyType: 'mtf_top_down' }
+    ],
+    mtfTopDownHistory: [],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    gridScalperV2History: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    orbHistory: [],
+    crtTbsHistory: [],
+    Date,
+    String,
+    Number,
+    Math,
+    Object,
+    Array,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { syncPersistentAdaptiveTradeHistory } = context.module.exports;
+
+  syncPersistentAdaptiveTradeHistory();
+  await Promise.resolve();
+
+  assert.equal(uploads.length, 1);
+  assert.deepEqual(uploads[0], { signalId: 'mtf_top_down-generated', scope: 'user:bob' });
+  assert.equal(context.signalHistory[1].signalId, undefined);
+});
+
 test('processAdaptiveResolvedSignals stops when the auth scope changes mid-run', () => {
   const harness = `${extractFunction('processAdaptiveResolvedSignals')}\nmodule.exports = { processAdaptiveResolvedSignals };`;
   const context = {
@@ -1797,6 +1949,51 @@ test('processAdaptiveResolvedSignals stops when the auth scope changes mid-run',
   const { processAdaptiveResolvedSignals } = context.module.exports;
 
   assert.doesNotThrow(() => processAdaptiveResolvedSignals());
+});
+
+test('processAdaptiveResolvedSignals skips unscoped outcomes instead of restamping them to the current scope', () => {
+  const harness = `${extractFunction('processAdaptiveResolvedSignals')}\nmodule.exports = { processAdaptiveResolvedSignals };`;
+  const records = [];
+  const context = {
+    module: { exports: {} },
+    adaptiveRuntime: {
+      wasProcessed: () => false,
+      recordOutcome: (...args) => records.push(args),
+      markProcessed: () => {},
+      ensureProfile: () => ({})
+    },
+    ensureAdaptiveRuntimeScope: () => true,
+    getAdaptiveRuntimeScopeKey: () => 'user:bob',
+    signalHistory: [{ result: 'WIN', strategyType: 'breakout_retest' }],
+    mtfTopDownHistory: [],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    crtTbsHistory: [],
+    stampSignalLifecycle: () => { throw new Error('should not stamp unscoped signals'); },
+    syncAdaptiveProfileToDb: () => { throw new Error('should not sync unscoped signals'); },
+    persistAdaptiveRuntime: () => { throw new Error('should not persist unscoped signals'); },
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processAdaptiveResolvedSignals } = context.module.exports;
+
+  assert.doesNotThrow(() => processAdaptiveResolvedSignals());
+  assert.equal(records.length, 0);
 });
 
 test('hydrateAdaptiveRuntimeFromDb ignores stale async responses after auth scope changes', async () => {

@@ -817,6 +817,7 @@ function initAdaptiveRuntime(force = false) {
   }
   adaptiveRuntimeStorageScopeKey = scopeKey;
   loadConfluenceStats(scopeKey);
+  if (typeof renderAdaptiveConfluenceTable === "function") renderAdaptiveConfluenceTable();
 }
 
 function ensureAdaptiveRuntimeScope() {
@@ -1269,6 +1270,7 @@ function buildAdaptiveTradePayloadFromSignal(signal, overrides = {}) {
 
 function syncPersistentAdaptiveTradeHistory() {
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
+  const currentScopeKey = getAdaptiveRuntimeScopeKey();
   const buckets = [
     signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
     failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
@@ -1281,13 +1283,15 @@ function syncPersistentAdaptiveTradeHistory() {
   for (const bucket of buckets) {
     for (const signal of bucket) {
       if (!signal) continue;
+      const signalScopeKey = String(signal.adaptiveScopeKey || "").trim();
+      if (!signalScopeKey || signalScopeKey !== currentScopeKey) continue;
       if (backtestMode) {
         signal._adaptiveTradeLocalOnly = true;
         continue;
       }
       if (!shouldSyncAdaptiveTradeSignal(signal, now)) continue;
       const result = String(signal.result || "").toUpperCase();
-      if (!signal.signalId) stampSignalLifecycle(signal);
+      if (!signal.signalId) signal.signalId = generateSignalId(signal.strategyType || signal.type || "sig");
       ensureAdaptiveTradeResolutionTimestamp(signal);
       const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
       const payload = buildAdaptiveTradePayloadFromSignal(cloned);
@@ -1348,6 +1352,7 @@ function processAdaptiveResolvedSignals() {
   if (!adaptiveRuntime) return;
   if (!ensureAdaptiveRuntimeScope()) return;
   if (!adaptiveRuntime) return;
+  const currentScopeKey = getAdaptiveRuntimeScopeKey();
   const buckets = [
     signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
     failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
@@ -1360,6 +1365,8 @@ function processAdaptiveResolvedSignals() {
   for (const arr of buckets) {
     for (const s of arr) {
       if (!s || (s.result !== "WIN" && s.result !== "LOSS")) continue;
+      const signalScopeKey = String(s.adaptiveScopeKey || "").trim();
+      if (!signalScopeKey || signalScopeKey !== currentScopeKey) continue;
       if (!s.signalId) stampSignalLifecycle(s);
       const id = s.signalId
         ? `sid:${s.signalId}`
@@ -24688,7 +24695,7 @@ function renderPLBreakdown() {
 function recordConfluenceOutcome(factors, result, scopeKey = null) {
   if (!adaptiveConfluenceEnabled || !factors || !factors.length) return;
   const currentScopeKey = getAdaptiveRuntimeScopeKey();
-  const targetScopeKey = scopeKey == null ? currentScopeKey : String(scopeKey || "");
+  const targetScopeKey = String(scopeKey || "");
   if (!targetScopeKey || targetScopeKey !== currentScopeKey) return;
   for (const factor of factors) {
     if (!confluenceFactorStats[factor]) confluenceFactorStats[factor] = { wins: 0, losses: 0 };
