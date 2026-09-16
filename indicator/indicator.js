@@ -10975,6 +10975,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         if (UI.symbolSelect) UI.symbolSelect.value = panel.symbol;
         if (UI.granSelect && Number.isFinite(panel.gran)) UI.granSelect.value = String(panel.gran);
         blob = await captureTelegramScreenshot(panel);
+        if (!isScopedTradeStillCurrent()) return;
         caption = buildSessionRangeTelegramCaption(signalType);
       } finally {
         _multiPanelProcessing = prevPanelSymbol;
@@ -10985,6 +10986,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
       }
     } else {
       blob = await captureTelegramScreenshot(null);
+      if (!isScopedTradeStillCurrent()) return;
       caption = buildSessionRangeTelegramCaption(signalType);
     }
     caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
