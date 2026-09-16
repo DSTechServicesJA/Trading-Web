@@ -2004,6 +2004,7 @@ test('ensureAllKnownSignalIds backfills pending scopes without rewriting resolve
   ].join('\n');
   const legacyPo3 = { result: 'WIN', type: 'power_of_3' };
   const liveOrderblock = { result: 'PENDING', type: 'orderblock' };
+  const scopedPendingOrb = { signalId: 'orb-existing', result: 'PENDING', type: 'orb' };
   const scopedCrt = { result: 'LOSS', type: 'crt_tbs', adaptiveScopeKey: 'user:alice' };
   const context = {
     module: { exports: {} },
@@ -2030,7 +2031,7 @@ test('ensureAllKnownSignalIds backfills pending scopes without rewriting resolve
     po3_4hHistory: [],
     breakerBlockHistory: [],
     oteGoldenPocketHistory: [],
-    orbHistory: [],
+    orbHistory: [scopedPendingOrb],
     crtTbsHistory: [scopedCrt],
     Number,
     Date
@@ -2044,6 +2045,8 @@ test('ensureAllKnownSignalIds backfills pending scopes without rewriting resolve
   assert.equal(legacyPo3.adaptiveScopeKey, undefined);
   assert.equal(liveOrderblock.signalId, 'orderblock-generated');
   assert.equal(liveOrderblock.adaptiveScopeKey, 'user:bob');
+  assert.equal(scopedPendingOrb.signalId, 'orb-existing');
+  assert.equal(scopedPendingOrb.adaptiveScopeKey, 'user:bob');
   assert.equal(scopedCrt.signalId, 'crt_tbs-generated');
   assert.equal(scopedCrt.adaptiveScopeKey, 'user:alice');
 });
@@ -2064,6 +2067,11 @@ test('retryDeferredConfluenceOutcomes replays resolved signals after switching b
     result: 'WIN',
     adaptiveScopeKey: 'user:bob',
     _confFactors: ['Bob']
+  };
+  const orbSignal = {
+    result: 'WIN',
+    adaptiveScopeKey: 'user:alice',
+    _confFactors: ['ORB']
   };
   const calls = [];
   let scope = 'user:bob';
@@ -2091,6 +2099,7 @@ test('retryDeferredConfluenceOutcomes replays resolved signals after switching b
     orderblockHistory: [orderblockSignal, bobSignal],
     tiktokHistory: [],
     po3_4hHistory: [],
+    orbHistory: [orbSignal],
     breakerBlockHistory: [],
     oteGoldenPocketHistory: [],
     crtTbsHistory: [],
@@ -2109,10 +2118,12 @@ test('retryDeferredConfluenceOutcomes replays resolved signals after switching b
   assert.equal(retryDeferredConfluenceOutcomes(), true);
   assert.equal(breakoutSignal._confRecorded, true);
   assert.equal(orderblockSignal._confRecorded, true);
+  assert.equal(orbSignal._confRecorded, true);
   assert.deepEqual(calls, [
     { factors: ['Bob'], result: 'WIN', scopeKey: 'user:bob' },
     { factors: ['Breakout'], result: 'WIN', scopeKey: 'user:alice' },
-    { factors: ['Orderblock'], result: 'LOSS', scopeKey: 'user:alice' }
+    { factors: ['Orderblock'], result: 'LOSS', scopeKey: 'user:alice' },
+    { factors: ['ORB'], result: 'WIN', scopeKey: 'user:alice' }
   ]);
 });
 

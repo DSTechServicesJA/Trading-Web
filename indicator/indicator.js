@@ -1733,7 +1733,7 @@ function ensureAllKnownSignalIds() {
   for (const history of histories) {
     if (!Array.isArray(history)) continue;
     for (const s of history) {
-      if (s && typeof s === "object" && !s.signalId) {
+      if (s && typeof s === "object" && (!s.signalId || (s.result === "PENDING" && !s.adaptiveScopeKey))) {
         stampSignalLifecycle(s, { assignScope: s.result === "PENDING" });
         touched = true;
       }
@@ -1750,7 +1750,7 @@ function retryDeferredConfluenceOutcomes() {
     signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
     failedPinBarHistory, fibScalpHistory, po3History, nyOpenRangeHistory,
     sessionRangeHistory, gridScalperMAHistory, fvgStratHistory, liveScalpHistory,
-    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory,
+    candleInterpHistory, orderblockHistory, tiktokHistory, po3_4hHistory, orbHistory,
     breakerBlockHistory, oteGoldenPocketHistory, crtTbsHistory
   ].filter(Array.isArray);
   let touched = false;
