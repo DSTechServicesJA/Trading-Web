@@ -10949,6 +10949,8 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   }, scopedTrade || {});
   const qualification = await qualifySignalForTelegram(pseudoSignal, "Session Range", false, { strategy: "session_range", symbol: pseudoSignal.symbol, timeframeSec: scopedTimeframeSec });
   if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return;
+  const scopedTradeStillCurrent = !scopedTrade || (panel ? panel.sessionRangeTrade === scopedTrade : sessionRangeTrade === scopedTrade);
+  if (!scopedTradeStillCurrent) return;
   if (scopedTrade && qualification.decision) scopedTrade._adaptiveDecision = qualification.decision;
   if (!qualification.allowed) return;
 

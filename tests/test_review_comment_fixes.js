@@ -481,6 +481,59 @@ test('sendTelegramSessionRangeAlert aborts delivery if the panel is removed duri
   assert.equal(panelTrade._telegramDelivered, false);
 });
 
+test('sendTelegramSessionRangeAlert aborts delivery if panel trade is replaced during async qualification', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  const panelTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const replacementTrade = { dir: 'BEAR', entry: 120, sl: 125, tp: 110 };
+  const panel = { symbol: 'R_25', gran: 300, sessionRangeTrade: panelTrade };
+  const panels = new Map([['R_25', panel]]);
+  let activePanelSymbol = 'R_100';
+  let sent = false;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: panels,
+    sessionRangeTrade: { dir: 'BEAR', entry: 200, sl: 205, tp: 190 },
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getCurrentGranularitySec: () => 60,
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => activePanelSymbol === 'R_25' ? ['Panel Factor'] : ['Wrong Panel Factor'],
+    qualifySignalForTelegram: async () => {
+      panel.sessionRangeTrade = replacementTrade;
+      return { allowed: true, decision: { action: 'SEND' } };
+    },
+    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
+    captureTelegramScreenshot: async () => null,
+    _snapshotChartGlobals: () => ({ activePanelSymbol }),
+    activatePanel: (nextPanel) => { activePanelSymbol = nextPanel.symbol; },
+    _restoreChartGlobals: (snapshot) => { activePanelSymbol = snapshot.activePanelSymbol; },
+    buildSessionRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => { sent = true; },
+    sendTelegramMessage: async () => { sent = true; },
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  await sendTelegramSessionRangeAlert('LONDON_SWEEP', 'R_25');
+
+  assert.equal(sent, false);
+  assert.equal(panelTrade._adaptiveDecision, undefined);
+  assert.equal(panelTrade._telegramDelivered, false);
+  assert.equal(replacementTrade._adaptiveDecision, undefined);
+  assert.equal(replacementTrade._telegramDelivered, undefined);
+});
+
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
   const fnSource = extractFunction('sendTelegramSessionRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
