@@ -1,0 +1,93 @@
+<?php
+/**
+ * /api/admin/telegram_delivery_log.php
+ * ──────────────────────────────────────
+ * Admin-only view of the Telegram notification delivery log.
+ *
+ * GET /api/admin/telegram_delivery_log
+ *   Optional filters: ?user_id=, ?notification_type=, ?status=, ?signal_id=,
+ *   ?limit= (default 100, max 500), ?offset=
+ *
+ * Returns rows joined with the username for readability.
+ *
+ * All requests require Authorization: ****** (admin role).
+ */
+
+declare(strict_types=1);
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/auth_guard.php';
+
+$method = $_SERVER['REQUEST_METHOD'];
+
+if ($method === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+if ($method !== 'GET') {
+    jsonResponse(['error' => 'Method not allowed'], 405);
+}
+
+try {
+    $pdo = getDB();
+
+    $where  = [];
+    $params = [];
+
+    if (!empty($_GET['user_id'])) {
+        $where[] = 'l.user_id = ?';
+        $params[] = (int) $_GET['user_id'];
+    }
+    if (!empty($_GET['notification_type'])) {
+        $where[] = 'l.notification_type = ?';
+        $params[] = (string) $_GET['notification_type'];
+    }
+    if (!empty($_GET['status']) && in_array($_GET['status'], ['sent', 'failed', 'skipped'], true)) {
+        $where[] = 'l.status = ?';
+        $params[] = (string) $_GET['status'];
+    }
+    if (!empty($_GET['signal_id'])) {
+        $where[] = 'l.signal_id = ?';
+        $params[] = (string) $_GET['signal_id'];
+    }
+
+    $limit  = max(1, min(500, (int) ($_GET['limit'] ?? 100)));
+    $offset = max(0, (int) ($_GET['offset'] ?? 0));
+
+    $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+    $stmt = $pdo->prepare(
+        "SELECT l.id, l.user_id, u.username, l.signal_id, l.notification_type, l.strategy,
+                l.symbol, l.status, l.telegram_response, l.error_detail, l.sent_at
+           FROM telegram_delivery_log l
+           LEFT JOIN users u ON u.id = l.user_id
+           $whereSql
+          ORDER BY l.sent_at DESC, l.id DESC
+          LIMIT $limit OFFSET $offset"
+    );
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM telegram_delivery_log l $whereSql");
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
+    $statStmt = $pdo->query(
+        "SELECT status, COUNT(*) AS c FROM telegram_delivery_log GROUP BY status"
+    )->fetchAll();
+    $statusCounts = ['sent' => 0, 'failed' => 0, 'skipped' => 0];
+    foreach ($statStmt as $s) {
+        $statusCounts[$s['status']] = (int) $s['c'];
+    }
+
+    jsonResponse([
+        'entries' => $rows,
+        'total'   => $total,
+        'limit'   => $limit,
+        'offset'  => $offset,
+        'stats'   => $statusCounts,
+    ]);
+} catch (\Throwable $e) {
+    error_log('Admin telegram_delivery_log GET error: ' . $e->getMessage());
+    jsonResponse(['error' => 'Failed to load delivery log'], 500);
+}

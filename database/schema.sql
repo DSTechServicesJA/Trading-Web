@@ -237,6 +237,60 @@ CREATE TABLE IF NOT EXISTS user_notification_reads (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ──────────────────────────────────────────────
+-- Per-user Telegram/notification preferences.
+-- One row per user; independent toggles per notification type so, e.g.,
+-- "Trade Setup Detected" and "Trade Cancelled" can be enabled/disabled
+-- independently of each other. Missing rows fall back to defaults
+-- (all enabled except high-confidence-only) at the API layer.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+    id                              INT UNSIGNED   AUTO_INCREMENT PRIMARY KEY,
+    user_id                         INT UNSIGNED   NOT NULL,
+    telegram_trade_setup            TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_trade_activation       TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_take_profit            TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_stop_loss              TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_trade_cancelled        TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_trade_expired          TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_market_alerts          TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_scanner_alerts         TINYINT(1)     NOT NULL DEFAULT 1,
+    telegram_high_confidence_only   TINYINT(1)     NOT NULL DEFAULT 0,
+    created_at                      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                      TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_unp_user (user_id),
+
+    CONSTRAINT fk_unp_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Telegram delivery log — one row per notification delivery attempt.
+-- Used by the admin "Telegram Delivery Log" page to diagnose missing
+-- notifications (e.g. blocked by preference, rate-limited, or failed).
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS telegram_delivery_log (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT UNSIGNED    DEFAULT NULL,
+    signal_id         VARCHAR(120)    DEFAULT NULL,
+    notification_type VARCHAR(40)     NOT NULL,
+    strategy          VARCHAR(60)     DEFAULT NULL,
+    symbol            VARCHAR(40)     DEFAULT NULL,
+    status            ENUM('sent','failed','skipped') NOT NULL,
+    telegram_response  TEXT           DEFAULT NULL,
+    error_detail      TEXT            DEFAULT NULL,
+    sent_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_tdl_user       (user_id),
+    INDEX idx_tdl_signal     (signal_id),
+    INDEX idx_tdl_type       (notification_type),
+    INDEX idx_tdl_sent_at    (sent_at),
+
+    CONSTRAINT fk_tdl_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
 -- Adaptive optimization profiles (per user/symbol/timeframe/strategy/regime)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS adaptive_profiles (

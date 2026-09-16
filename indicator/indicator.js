@@ -453,6 +453,7 @@ const ENTRY_DRIFT_ATR_DEFAULT      = 0.9;  /* reject confirmations that close to
 const MTF_ENTRY_DRIFT_ATR_DEFAULT  = 1.1;  /* MTF setups get slightly more room before being considered stale */
 const SIGNAL_DEFAULT_VALIDITY_MIN   = 60;   /* Telegram signal validity / expiry window */
 const SIGNAL_DEFAULT_MAX_DISTANCE_ATR = 0.9; /* invalidate alerts once price has stretched too far from entry */
+const HIGH_CONFIDENCE_TELEGRAM_THRESHOLD = 75; /* min confidenceScore required when "High Confidence Only" preference is on */
 const MULTI_VIEW_REFRESH_DEFAULT_MIN = 60;  /* refresh all multi-view panels hourly by default */
 const AGGRESSIVE_ENTRY_PROGRESS_ATR_DEFAULT = 0.18; /* intrabar entry needs at least this much progress beyond the level */
 const ENTRY_QUALITY_PROGRESS_ATR_DEFAULT    = 0.22; /* confirmed entries must displace away from the level by this ATR amount */
@@ -2460,6 +2461,139 @@ let telegramStrategyOutcomeSend  = false;  /* auto-send WIN/LOSS outcome for cus
 let telegramShadowOutcomeSend    = false;  /* auto-send shadow (counterfactual) outcome — what opposite direction would have done */
 let telegramProfitExitAlertEnabled = false;  /* auto-send alert when trade that reached 1:1 profit reverses back to entry */
 let telegramLifecycleAlertsEnabled = true;   /* early setup / approach / cancelled alerts */
+
+/* ── Per-user, server-persisted notification preferences ──
+   Each notification type is independently toggle-able (e.g. Trade Setup and
+   Trade Cancelled are NOT tied together). Defaults are all-on except the
+   "high confidence only" filter, which is opt-in. */
+const NOTIFICATION_PREFERENCE_API_URL = "../api/notification_preferences";
+const TELEGRAM_DELIVERY_LOG_API_URL   = "../api/telegram/delivery_log";
+const NOTIFICATION_PREFERENCE_DEFAULTS = {
+  telegram_trade_setup: true,
+  telegram_trade_activation: true,
+  telegram_take_profit: true,
+  telegram_stop_loss: true,
+  telegram_trade_cancelled: true,
+  telegram_trade_expired: true,
+  telegram_market_alerts: true,
+  telegram_scanner_alerts: true,
+  telegram_high_confidence_only: false
+};
+let notificationPreferences = Object.assign({}, NOTIFICATION_PREFERENCE_DEFAULTS);
+
+/* Maps a lifecycle "kind" (setup/approaching/active/tp/sl/cancelled/expired)
+   to its independent preference column. */
+const LIFECYCLE_KIND_TO_NOTIFICATION_PREF = {
+  setup: "telegram_trade_setup",
+  approaching: "telegram_trade_setup",
+  active: "telegram_trade_activation",
+  tp: "telegram_take_profit",
+  sl: "telegram_stop_loss",
+  cancelled: "telegram_trade_cancelled",
+  expired: "telegram_trade_expired"
+};
+
+function isNotificationKindEnabled(kind) {
+  const prefKey = LIFECYCLE_KIND_TO_NOTIFICATION_PREF[kind];
+  if (!prefKey) return true;
+  return notificationPreferences[prefKey] !== false;
+}
+
+/**
+ * Load the caller's saved notification preferences from the server.
+ * Falls back to defaults (all enabled, except high-confidence-only) when
+ * logged out or the request fails, so behavior degrades gracefully.
+ */
+async function loadNotificationPreferences() {
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+  try {
+    const resp = await profileApiFetch(NOTIFICATION_PREFERENCE_API_URL);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data && data.preferences) {
+      notificationPreferences = Object.assign({}, NOTIFICATION_PREFERENCE_DEFAULTS, data.preferences);
+    }
+  } catch (e) {
+    addLog("⚠️ Could not load notification preferences from server");
+  }
+}
+
+/**
+ * Persist a partial notification-preference update to the server and apply
+ * it locally immediately. Settings survive refresh/logout/restart because
+ * they live in `user_notification_preferences`, not localStorage.
+ */
+async function saveNotificationPreferences(partial) {
+  notificationPreferences = Object.assign({}, notificationPreferences, partial);
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+  try {
+    await profileApiFetch(NOTIFICATION_PREFERENCE_API_URL, {
+      method: "POST",
+      body: JSON.stringify(partial)
+    });
+  } catch (e) {
+    addLog("⚠️ Could not save notification preferences to server");
+  }
+}
+
+/**
+ * Best-effort record of a Telegram notification delivery attempt for the
+ * admin "Telegram Delivery Log" page. Never throws — logging failures must
+ * not interrupt the notification pipeline itself.
+ */
+async function recordTelegramDeliveryLog(kind, payload, status, extra = {}) {
+  if (typeof ITGuruAuth === "undefined" || !ITGuruAuth.isLoggedIn()) return;
+  try {
+    await profileApiFetch(TELEGRAM_DELIVERY_LOG_API_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        signal_id: payload && payload.signalId != null ? String(payload.signalId) : null,
+        notification_type: kind,
+        strategy: payload && payload.strategyLabel ? payload.strategyLabel : null,
+        symbol: payload && payload.symbol ? payload.symbol : null,
+        status,
+        telegram_response: extra.response != null ? String(extra.response) : null,
+        error_detail: extra.error != null ? String(extra.error) : null
+      })
+    });
+  } catch (e) { /* logging is best-effort only */ }
+}
+
+/**
+ * Reflect the currently-loaded notificationPreferences into the settings
+ * checkboxes (data-notif-pref attribute maps checkbox → preference column).
+ */
+function renderNotificationPreferencesUI() {
+  document.querySelectorAll("[data-notif-pref]").forEach((el) => {
+    const key = el.getAttribute("data-notif-pref");
+    if (key in notificationPreferences) {
+      el.checked = !!notificationPreferences[key];
+    }
+  });
+}
+
+/**
+ * Wire each notification-preference checkbox to independently save its own
+ * column — e.g. toggling "Trade Setup Detected" never touches "Trade
+ * Cancelled" and vice versa.
+ */
+function wireNotificationPreferenceToggles() {
+  document.querySelectorAll("[data-notif-pref]").forEach((el) => {
+    if (el._notifPrefWired) return;
+    el._notifPrefWired = true;
+    const key = el.getAttribute("data-notif-pref");
+    el.addEventListener("change", () => {
+      saveNotificationPreferences({ [key]: el.checked });
+      if (UI.notifPrefStatus) {
+        UI.notifPrefStatus.textContent = "✅ Saved";
+        setTimeout(() => { if (UI.notifPrefStatus) UI.notifPrefStatus.textContent = ""; }, 2000);
+      }
+    });
+  });
+  renderNotificationPreferencesUI();
+}
+
+
 let signalValidityMinutes = SIGNAL_DEFAULT_VALIDITY_MIN;
 let signalMaxDistanceAtr = SIGNAL_DEFAULT_MAX_DISTANCE_ATR;
 let telegramDeliveryHudEl = null;
@@ -8567,7 +8701,10 @@ function processMtfTopDown() {
         detail: confGate.reason,
         conditions: Object.assign({}, getMtfPipelineState(signal.symbol || symbol).conditions || {}, { confluenceGate: "FAIL" })
       });
-      if (signal._sentViaTelegram === true) sendSignalLifecycleTelegram("cancelled", {
+      /* Root-cause fix: previously gated on signal._sentViaTelegram, which is
+         never true at this point (the signal has not been telegram-sent yet),
+         so this cancellation alert could never fire. */
+      sendSignalLifecycleTelegram("cancelled", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
         signalId: signal.signalId,
@@ -8625,6 +8762,18 @@ function processMtfTopDown() {
     sl: signal.sl,
     tp: signal.tp
   });
+  /* Root-cause fix: the "Trade Activated" lifecycle notification must not
+     depend on the initial "Trade Setup Detected" Telegram send succeeding.
+     MTF trades enter at market (entry = close of the trigger candle), so the
+     signal is activated the instant it is queued — send this independently
+     so a failed/disabled/filtered setup alert can never suppress it (and,
+     downstream, the TP/SL/Cancelled/Expired alerts that used to be gated on
+     the setup alert's success flag). */
+  logSignalEngineDebug("MTF_SIGNAL_ACTIVATED", { signalId: signal.signalId, symbol: signal.symbol || sym, dir: signal.dir, entry: signal.entry });
+  sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
+    signal.entryMode === "aggressive_intrabar"
+      ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
+      : "Entry activated after the lower-timeframe trigger candle closed."));
   markMtfPipelineStage("notification_layer", {
     symbol: signal.symbol || sym,
     signalId: signal.signalId,
@@ -8694,8 +8843,11 @@ function monitorMtfTopDownOutcomes(candle) {
       s.result = "EXPIRED";
       changed = true;
       addLog("\u23f1 MTF Top-Down EXPIRED (timeout " + MTF_TOP_DOWN_MAX_CANDLES + " candles) \u2014 " + (s.symbol || ""));
-      logSignalEngineDebug("MTF_SIGNAL_CANCELLED", { signalId: s.signalId || null, reason: "timeout", symbol: s.symbol || "" });
-      if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("cancelled", {
+      logSignalEngineDebug("MTF_SIGNAL_EXPIRED", { signalId: s.signalId || null, reason: "timeout", symbol: s.symbol || "" });
+      /* Root-cause fix: no longer gated on s._sentViaTelegram — the Expired
+         lifecycle alert must fire even if the initial setup/strategy alert
+         never succeeded or was filtered out. */
+      sendSignalLifecycleTelegram("expired", {
         channel: "strategy",
         strategyLabel: "MTF Top-Down",
         signalId: s.signalId || null,
@@ -8713,35 +8865,35 @@ function monitorMtfTopDownOutcomes(candle) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
-        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
       } else if (candle.low <= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
-        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
       }
     } else {
       if (candle.low <= s.tp) {
         s.result = "WIN"; changed = true;
         addLog("\u23f1 MTF Top-Down \u2705 WIN \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.tp, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "WIN", via: "tp", symbol: s.symbol || "" });
-        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
+        sendSignalLifecycleTelegram("tp", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
       } else if (candle.high >= s.sl) {
         s.result = "LOSS"; changed = true;
         addLog("\u23f1 MTF Top-Down \u274c LOSS \u2014 " + (s.symbol || "") + " @ " + fmtPrice(s.sl, s.symbol));
         logSignalEngineDebug("MTF_SIGNAL_RESOLVED", { signalId: s.signalId || null, result: "LOSS", via: "sl", symbol: s.symbol || "" });
-        if (s._sentViaTelegram === true) sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
-        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent && s._sentViaTelegram === true) sendStrategyOutcomeTelegram(s);
+        sendSignalLifecycleTelegram("sl", buildLifecyclePayloadFromSignal(s, "MTF Top-Down", "strategy"));
+        if (telegramStrategyOutcomeSend && !s._stratOutcomeSent) sendStrategyOutcomeTelegram(s);
       }
     }
   }
   if (changed) {
-    /* Send EXPIRED notifications (WIN/LOSS are sent inline above). */
+    /* Send EXPIRED outcome summaries (WIN/LOSS outcome summaries are sent inline above). */
     for (const s of mtfTopDownHistory) {
-      if (s.result === "EXPIRED" && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+      if (s.result === "EXPIRED" && !s._stratOutcomeSent && telegramStrategyOutcomeSend) {
         sendStrategyOutcomeTelegram(s);
       }
     }
@@ -10225,7 +10377,8 @@ function buildLifecycleTelegramCaption(kind, payload) {
     active: "Trade Activated",
     tp: "Take Profit Hit",
     sl: "Stop Loss Hit",
-    cancelled: "Trade Cancelled"
+    cancelled: "Trade Cancelled",
+    expired: "Trade Expired"
   };
   const title = titles[kind] || "Signal Update";
   const lines = [];
@@ -10270,7 +10423,7 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   if (!telegramLifecycleAlertsEnabled && !force) return false;
   const now = Date.now();
   if (payload && Number.isFinite(payload.validUntilMs) && now > payload.validUntilMs && kind !== "cancelled" && kind !== "tp" && kind !== "sl") {
-    kind = "cancelled";
+    kind = "expired";
     payload = Object.assign({}, payload, { reason: payload.reason || "Signal validity window expired before entry." });
   }
   if (payload && Number.isFinite(payload.distanceAtr) && Number.isFinite(payload.maxDistanceAtr)
@@ -10279,6 +10432,20 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
     payload = Object.assign({}, payload, {
       reason: `Price stretched ${fmt(payload.distanceAtr, 2)} ATR from entry (limit ${fmt(payload.maxDistanceAtr, 2)} ATR).`
     });
+  }
+  /* Per-user notification-type toggle. Each lifecycle stage (setup,
+     activation, TP, SL, cancelled, expired) is independently gated so, e.g.,
+     disabling "Trade Cancelled" never blocks "Trade Setup" and vice versa. */
+  if (!force && !isNotificationKindEnabled(kind)) {
+    logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "preference_disabled", kind, signalId: payload && payload.signalId ? payload.signalId : null });
+    recordTelegramDeliveryLog(kind, payload || {}, "skipped", { error: "Blocked by user notification preference" });
+    return false;
+  }
+  if (!force && (kind === "setup" || kind === "active") && notificationPreferences.telegram_high_confidence_only
+      && Number.isFinite(payload && payload.confidenceScore) && payload.confidenceScore < HIGH_CONFIDENCE_TELEGRAM_THRESHOLD) {
+    logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "high_confidence_only", kind, confidenceScore: payload.confidenceScore });
+    recordTelegramDeliveryLog(kind, payload || {}, "skipped", { error: "Blocked by high-confidence-only preference" });
+    return false;
   }
   const channel = payload && payload.channel === "strategy" ? "strategy" : "trade";
   const enabled = channel === "strategy" ? telegramStrategyAutoSend : telegramAutoSend;
@@ -10308,7 +10475,7 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
   }
   let sent = false;
   try {
-    await sendTelegramMessage(buildLifecycleTelegramCaption(kind, payload || {}));
+    const resultData = await sendTelegramMessage(buildLifecycleTelegramCaption(kind, payload || {}));
     if (!force && dedupeKey) {
       sendSignalLifecycleTelegram._sentKeys = sendSignalLifecycleTelegram._sentKeys || new Set();
       sendSignalLifecycleTelegram._sentKeys.add(dedupeKey);
@@ -10320,6 +10487,7 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
       signalId: payload && payload.signalId ? payload.signalId : null,
       channel
     });
+    recordTelegramDeliveryLog(kind, payload || {}, "sent", { response: resultData && resultData.ok ? "ok" : JSON.stringify(resultData || {}) });
   } catch (err) {
     addLog(`📤 Lifecycle Telegram error: ${err.message}`);
     logSignalEngineDebug("TELEGRAM_FAILED", {
@@ -10327,6 +10495,7 @@ async function sendSignalLifecycleTelegram(kind, payload, force = false) {
       signalId: payload && payload.signalId ? payload.signalId : null,
       error: err.message
     });
+    recordTelegramDeliveryLog(kind, payload || {}, "failed", { error: err.message });
   } finally {
     if (!force && dedupeKey && sendSignalLifecycleTelegram._inFlightKeys) {
       sendSignalLifecycleTelegram._inFlightKeys.delete(dedupeKey);
@@ -10419,12 +10588,6 @@ async function sendTelegramStrategyAlert(signal, force = false) {
     }
     signal._sentViaTelegram = true;
     signal._telegramDelivered = true;
-    if ((signal.strategyType === "mtf_top_down" || signal.type === "mtf_top_down") && !_historicalProcessing && !signal._adaptiveLifecycleActiveSent) {
-      signal._adaptiveLifecycleActiveSent = await sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
-        signal.entryMode === "aggressive_intrabar"
-          ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
-          : "Entry activated after the lower-timeframe trigger candle closed."));
-    }
     addLog(`📤 Strategy Telegram alert sent (${signal.type})`);
     if (UI.telegramStatus) {
       UI.telegramStatus.textContent = "✅ Strategy alert sent!";
@@ -10452,6 +10615,17 @@ async function sendTelegramStrategyAlert(signal, force = false) {
  */
 async function sendStrategyOutcomeTelegram(signal) {
   if (!telegramStrategyOutcomeSend) return;
+
+  /* Per-user notification-type toggle: EXPIRED outcome summaries respect
+     telegram_trade_expired; WIN/LOSS respect telegram_take_profit /
+     telegram_stop_loss so this optional stats message never bypasses the
+     same independent toggles that gate the lifecycle alerts. */
+  const outcomePrefKind = signal.result === "EXPIRED" ? "expired" : signal.result === "WIN" ? "tp" : "sl";
+  if (!isNotificationKindEnabled(outcomePrefKind)) {
+    logSignalEngineDebug("TELEGRAM_SKIPPED", { reason: "preference_disabled", kind: outcomePrefKind, signalId: signal.signalId || null });
+    signal._stratOutcomeSent = true;
+    return;
+  }
 
   /* Sync credentials from DOM and validate BEFORE marking the signal as sent,
      so that a bad-credential failure leaves _stratOutcomeSent = false and allows
@@ -10503,7 +10677,7 @@ async function sendStrategyOutcomeTelegram(signal) {
       const tpStr    = signal.tp    != null ? fmtPrice(signal.tp, activeSym)    : "--";
       const rrStr    = signal.rr    != null ? "1:" + fmt(signal.rr, 1)          : "--";
       const lines = [];
-      lines.push(`⏱ <b>${stratLabel} — Trade Cancelled</b> — ${dir} ${sym}`);
+      lines.push(`⌛ <b>${stratLabel} — Trade Expired</b> — ${dir} ${sym}`);
       lines.push("");
       lines.push(`Setup timed out — no TP or SL was hit.`);
       lines.push(`<b>📍 Entry:</b> ${entryStr}`);
@@ -26419,6 +26593,7 @@ function initLoginGate() {
         localStorage.removeItem("itguru_deriv_token");
         /* Refresh user data (role + strategies) from server */
         ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
+        loadNotificationPreferences().then(renderNotificationPreferencesUI);
       }
     });
 
@@ -26436,6 +26611,7 @@ function initLoginGate() {
        force a logout here — a transient server error should not kick the user out. */
     if (ITGuruAuth.isLoggedIn()) {
       ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
+      loadNotificationPreferences().then(renderNotificationPreferencesUI);
     }
     return;
   }
@@ -29356,6 +29532,7 @@ document.addEventListener("DOMContentLoaded", () => {
       saveSettings();
     });
   }
+  wireNotificationPreferenceToggles();
   if (UI.signalValidityMinutesInput) {
     UI.signalValidityMinutesInput.value = signalValidityMinutes;
     UI.signalValidityMinutesInput.addEventListener("change", () => {
