@@ -787,6 +787,109 @@ function persistAdaptiveRuntime() {
   }
 }
 
+/* ── Adaptive Confluence Weights: database persistence ──────────────────
+ * The AdaptiveEngine above only mutates in-memory + localStorage state.
+ * localStorage is per-browser and is wiped by cache clears/new devices, so
+ * without the sync below adaptive learning never truly survives restarts,
+ * deployments, or cache clears. These helpers push/pull per
+ * symbol+strategy+timeframe+regime profiles to/from the `adaptive_profiles`
+ * table via /api/adaptive/profiles so learning is durable and shared across
+ * sessions for the logged-in user. */
+let adaptiveRuntimeDbHydrated = false;
+const _adaptiveAppliedLogCache = new Map();
+
+function syncAdaptiveProfileToDb(ctx, profile) {
+  if (!ctx || !profile) return;
+  if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
+  if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
+  const prevWeights = profile._lastSyncedSettings || {};
+  const payload = {
+    symbol: ctx.symbol,
+    timeframe_sec: ctx.timeframeSec,
+    strategy_key: ctx.strategy,
+    regime: ctx.regime,
+    adaptive_mode: adaptiveMode,
+    profile: {
+      settings: profile.settings,
+      stats: profile.stats,
+      history: profile.history,
+      lastRecommendation: profile.lastRecommendation
+    },
+    confidence_score: Number.isFinite(profile.confidence) ? profile.confidence : 0,
+    sample_size: Number.isFinite(profile.sampleSize) ? profile.sampleSize : 0
+  };
+  adaptiveIntelligenceClient.saveAdaptiveProfile(payload)
+    .then(() => {
+      for (const key of Object.keys(profile.settings || {})) {
+        const oldVal = prevWeights[key];
+        const newVal = profile.settings[key];
+        if (oldVal !== undefined && oldVal !== newVal) {
+          console.log(`[Adaptive] Weight updated: strategy=${ctx.strategy} symbol=${ctx.symbol} factor=${key} old=${oldVal} new=${newVal}`);
+        }
+      }
+      profile._lastSyncedSettings = Object.assign({}, profile.settings);
+    })
+    .catch((err) => console.warn("[Adaptive] Weight sync to database failed:", err.message));
+}
+
+async function hydrateAdaptiveRuntimeFromDb() {
+  if (adaptiveRuntimeDbHydrated) return;
+  if (!adaptiveRuntime) return;
+  if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
+  if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
+  adaptiveRuntimeDbHydrated = true;
+  try {
+    const rows = await adaptiveIntelligenceClient.getAdaptiveProfiles();
+    if (!Array.isArray(rows) || !rows.length) {
+      console.log("[Adaptive] Loaded weight: none found in database (starting fresh)");
+      return;
+    }
+    let loaded = 0;
+    const strategies = new Set();
+    const symbols = new Set();
+    for (const row of rows) {
+      if (!row || !row.symbol || !row.strategy_key || !row.profile || typeof row.profile !== "object") continue;
+      const tf = String(parseInt(row.timeframe_sec, 10) || 60);
+      const strategy = String(row.strategy_key);
+      const regime = String(row.regime || "TRANSITIONING");
+      const symbol = String(row.symbol);
+      const remoteUpdatedMs = row.updated_at ? Date.parse(row.updated_at) : 0;
+
+      if (!adaptiveRuntime.state.symbolProfiles[symbol]) adaptiveRuntime.state.symbolProfiles[symbol] = {};
+      if (!adaptiveRuntime.state.symbolProfiles[symbol][tf]) adaptiveRuntime.state.symbolProfiles[symbol][tf] = {};
+      if (!adaptiveRuntime.state.symbolProfiles[symbol][tf][strategy]) adaptiveRuntime.state.symbolProfiles[symbol][tf][strategy] = {};
+      const localProfile = adaptiveRuntime.state.symbolProfiles[symbol][tf][strategy][regime];
+      const localUpdatedMs = localProfile ? (localProfile.lastUpdatedAt || 0) : 0;
+      /* Ignore corrupted records instead of letting a bad row crash hydration. */
+      if (!row.profile.settings || typeof row.profile.settings !== "object") continue;
+      if (localProfile && localUpdatedMs > remoteUpdatedMs) continue; // this browser already has newer data
+
+      const confidence = Number.isFinite(Number(row.confidence_score)) ? Number(row.confidence_score) : 0;
+      const sampleSize = Number.isFinite(Number(row.sample_size)) ? Number(row.sample_size) : 0;
+      const merged = {
+        key: [symbol, tf, strategy, regime].join("|"),
+        context: { symbol, timeframeSec: parseInt(tf, 10) || 60, strategy, regime },
+        settings: row.profile.settings,
+        stats: row.profile.stats || {},
+        history: row.profile.history || {},
+        lastRecommendation: row.profile.lastRecommendation || {},
+        confidence,
+        sampleSize,
+        lastUpdatedAt: Number.isFinite(remoteUpdatedMs) && remoteUpdatedMs > 0 ? remoteUpdatedMs : Date.now(),
+        _lastSyncedSettings: Object.assign({}, row.profile.settings)
+      };
+      adaptiveRuntime.state.symbolProfiles[symbol][tf][strategy][regime] = merged;
+      loaded++;
+      strategies.add(strategy);
+      symbols.add(symbol);
+      console.log(`[Adaptive] Loaded weight: strategy=${strategy} symbol=${symbol} regime=${regime} confidence=${confidence.toFixed ? confidence.toFixed(2) : confidence}`);
+    }
+    if (loaded > 0) persistAdaptiveRuntime();
+    console.log(`Adaptive Weights Loaded: Strategies: ${strategies.size} | Symbols: ${symbols.size} | Records: ${loaded}`);
+  } catch (err) {
+    console.warn("[Adaptive] Failed to load weights from database:", err.message);
+  }
+}
 
 let adaptiveIntelligenceClient = null;
 let adaptiveIntelligenceBootstrap = null;
@@ -828,6 +931,48 @@ function getAdaptiveMtfStatus(signal) {
   if (signal.type === "mtf_top_down" || signal.strategyType === "mtf_top_down") return "CONFIRMED";
   if (signal.htfTrend && signal.dir && signal.htfTrend === signal.dir) return "CONFIRMED";
   return "UNKNOWN";
+}
+
+/* Canonical human-readable strategy labels keyed by both the snake_case
+ * `signal.type`/`strategyType` values used internally and the camelCase
+ * `strategyName` values used by the auto-trade passthrough layer. Used to
+ * make sure every strategy — MTF Top-Down included — is labeled consistently
+ * (instead of falling back to a raw internal key) whenever a signal is sent
+ * to Telegram or persisted to the adaptive_trade_history / activity log. */
+const STRATEGY_DISPLAY_LABELS = Object.freeze({
+  mtf_top_down: "MTF Top-Down",
+  mtfTopDown: "MTF Top-Down",
+  breakout_retest: "Breakout Retest",
+  liquidity_sweep: "Liquidity Sweep",
+  stop_loss_hunt: "Stop Loss Hunt",
+  failed_pin_bar: "Failed Pin Bar",
+  fib_scalp: "Fib Golden Zone",
+  ny_open_range: "NY Open Range",
+  session_range: "Session Range",
+  grid_scalper_ma: "Grid Scalper MA",
+  gridScalperMA: "Grid Scalper MA",
+  grid_scalper_v2: "Grid Scalper V2",
+  gridScalperV2: "Grid Scalper V2",
+  fvg_strat: "Fair Value Gap",
+  fvgStrat: "Fair Value Gap",
+  power_of_3: "Power of 3",
+  po3: "Power of 3",
+  po3_4h: "Power of 3 (4H)",
+  tiktok: "TikTok Fibonacci",
+  candle_interp: "Candle Interpretation",
+  candleInterp: "Candle Interpretation",
+  orb: "Opening Range Breakout",
+  orderblock: "Orderblock",
+  breaker_block: "Breaker Block",
+  ote_golden_pocket: "OTE Golden Pocket",
+  crt_tbs: "CRT TBS",
+  live_scalp: "Live Scalp"
+});
+
+function resolveStrategyDisplayLabel(typeOrKey, fallback = "Strategy") {
+  const key = String(typeOrKey || "").trim();
+  if (!key) return fallback;
+  return STRATEGY_DISPLAY_LABELS[key] || fallback;
 }
 
 function getAdaptiveBootstrapLatestSignal(symbol) {
@@ -910,6 +1055,7 @@ function mergeRemoteConfluenceStats(data) {
 async function bootstrapAdaptiveIntelligence(force = false, overrides = {}) {
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return null;
+  hydrateAdaptiveRuntimeFromDb();
   const scope = getAdaptiveBootstrapScope(overrides);
   if (!force) {
     const pending = adaptiveIntelligenceBootstrapPromises.get(scope.key);
@@ -1055,7 +1201,7 @@ function buildAdaptiveTradePayloadFromSignal(signal, overrides = {}) {
   return AdaptiveIntelligenceUtils.buildTradePayload(signal, signal._adaptiveDecision || null, {
     symbol,
     strategy: overrides.strategy || signal.strategyType || signal.type || "breakout_retest",
-    strategyLabel: overrides.strategyLabel || signal.strategyType || signal.type || "breakout_retest",
+    strategyLabel: overrides.strategyLabel || resolveStrategyDisplayLabel(signal.strategyType || signal.type, signal.strategyType || signal.type || "breakout_retest"),
     timeframeSec,
     marketCategory: overrides.marketCategory || getAdaptiveMarketCategory(symbol, timeframeSec),
     mtfStatus: overrides.mtfStatus || getAdaptiveMtfStatus(signal)
@@ -1124,7 +1270,17 @@ function getAdaptiveResolution(overrides = {}) {
 function getAdaptiveAppliedNumber(key, fallback, overrides = {}) {
   const r = getAdaptiveResolution(overrides);
   const n = r && r.applied ? parseFloat(r.applied[key]) : NaN;
-  return Number.isFinite(n) ? n : fallback;
+  const result = Number.isFinite(n) ? n : fallback;
+  if (r && r.mode !== "OFF") {
+    const cacheKey = `${r.profileKey}|${key}`;
+    if (_adaptiveAppliedLogCache.get(cacheKey) !== result) {
+      _adaptiveAppliedLogCache.set(cacheKey, result);
+      const base = Number(fallback) || 0;
+      const multiplier = base !== 0 ? result / base : 1;
+      console.log(`[Adaptive] Applied: strategy=${overrides.strategy || "breakout_retest"} symbol=${overrides.symbol || getActiveSymbol()} factor=${key} base=${base} multiplier=${multiplier.toFixed(3)} final=${result}`);
+    }
+  }
+  return result;
 }
 
 function processAdaptiveResolvedSignals() {
@@ -1191,6 +1347,9 @@ function processAdaptiveResolvedSignals() {
       adaptiveRuntime.markProcessed(id);
       s._adaptiveProcessed = true;
       touched = true;
+      /* Commit the updated weight/profile to the database immediately after
+         this trade outcome is processed, isolated by symbol+strategy+timeframe+regime. */
+      syncAdaptiveProfileToDb(ctx, adaptiveRuntime.ensureProfile(ctx));
     }
   }
 
@@ -1249,11 +1408,13 @@ function renderAdaptiveSettingsUI() {
 function recordAdaptiveCancellation(reason, overrides = {}) {
   if (!adaptiveRuntime || adaptiveMode === "OFF") return;
   const txt = String(reason || "");
-  adaptiveRuntime.recordCancellation(buildAdaptiveContext(overrides), {
+  const ctx = buildAdaptiveContext(overrides);
+  adaptiveRuntime.recordCancellation(ctx, {
     missedOpportunity: /confluence|quality|rejected|late/i.test(txt),
     wasWinningCandidate: /winning|profit/i.test(txt)
   });
   persistAdaptiveRuntime();
+  syncAdaptiveProfileToDb(ctx, adaptiveRuntime.ensureProfile(ctx));
 }
 
 function getSignalValidityMs() {
@@ -10570,7 +10731,7 @@ async function sendTelegramStrategyAlert(signal, force = false) {
     return;
   }
 
-  const qualification = await qualifySignalForTelegram(signal, signal.type || signal.strategyType || "strategy", force, {
+  const qualification = await qualifySignalForTelegram(signal, resolveStrategyDisplayLabel(signal.type || signal.strategyType, signal.type || signal.strategyType || "strategy"), force, {
     strategy: signal.strategyType || signal.type || "strategy"
   });
   if (!qualification.allowed) return;
@@ -14183,9 +14344,10 @@ function autoTradeSourceLabel(source, strategyName) {
       tiktok:         "📈 TikTok Fib",
       nyOpenRange:    "🕤 NY Open Range",
       sessionRange:   "🌍 Session Range",
-      gridScalperMA:  "🔲 Grid Scalper MA"
+      gridScalperMA:  "🔲 Grid Scalper MA",
+      mtfTopDown:     "⏱ MTF Top-Down"
     };
-    return STRAT_LABELS[strategyName] || "📊 Strategy";
+    return STRAT_LABELS[strategyName] || (strategyName ? `📊 ${resolveStrategyDisplayLabel(strategyName, strategyName)}` : "📊 Strategy");
   }
   return "📈 Breakout";
 }

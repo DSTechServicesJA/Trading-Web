@@ -229,6 +229,21 @@
         body: JSON.stringify(payload)
       });
     }
+
+    async getAdaptiveProfiles(symbol) {
+      if (!this.isAuthenticated()) return null;
+      const qs = symbol ? ('?symbol=' + encodeURIComponent(symbol)) : '';
+      const data = await this.fetchJson('/adaptive/profiles' + qs, { method: 'GET' });
+      return Array.isArray(data.profiles) ? data.profiles : [];
+    }
+
+    async saveAdaptiveProfile(payload) {
+      if (!this.isAuthenticated()) return null;
+      return this.fetchJson('/adaptive/profiles', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    }
   }
 
   const exported = {
