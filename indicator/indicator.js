@@ -10961,9 +10961,16 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   const pendingStatusText = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   let trackedTelegramStatus = null;
   const trackedTelegramStatusOwner = {};
+  const trackedTelegramStatusInvocationGeneration = (() => {
+    if (!UI.telegramStatus) return 0;
+    const nextGeneration = Number(UI.telegramStatus._sessionRangeInvocationGeneration || 0) + 1;
+    UI.telegramStatus._sessionRangeInvocationGeneration = nextGeneration;
+    return nextGeneration;
+  })();
   const trackedTelegramStatusGeneration = ((UI.telegramStatus && Number(UI.telegramStatus._sessionRangeStatusGeneration)) || 0) + 1;
   const setTrackedTelegramStatus = (text, className = "hint telegram-status") => {
     if (!UI.telegramStatus) return;
+    if (Number(UI.telegramStatus._sessionRangeInvocationGeneration || 0) !== trackedTelegramStatusInvocationGeneration) return;
     UI.telegramStatus.textContent = text;
     UI.telegramStatus.className = className;
     UI.telegramStatus._sessionRangeStatusOwner = trackedTelegramStatusOwner;

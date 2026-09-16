@@ -811,6 +811,87 @@ test('sendTelegramSessionRangeAlert does not let an older cancelled invocation c
   assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
 });
 
+test('sendTelegramSessionRangeAlert does not let an older successful invocation replace a newer pending session-range status', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  const sharedTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const qualificationResolvers = [];
+  const captureResolvers = [];
+  const timeoutCallbacks = [];
+  let sendCount = 0;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: new Map(),
+    sessionRangeTrade: sharedTrade,
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getCurrentGranularitySec: () => 60,
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => ['Global Factor'],
+    qualifySignalForTelegram: () => new Promise((resolve) => {
+      qualificationResolvers.push(resolve);
+    }),
+    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
+    captureTelegramScreenshot: () => new Promise((resolve) => {
+      captureResolvers.push(resolve);
+    }),
+    _snapshotChartGlobals: () => ({}),
+    activatePanel: () => {},
+    _restoreChartGlobals: () => {},
+    buildSessionRangeTelegramCaption: () => 'caption',
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => { sendCount++; },
+    sendTelegramMessage: async () => { sendCount++; },
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: (fn) => { timeoutCallbacks.push(fn); },
+    Date,
+    Promise
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  const firstPromise = sendTelegramSessionRangeAlert('LONDON_SWEEP');
+  await Promise.resolve();
+  qualificationResolvers[0]({ allowed: true, decision: { action: 'SEND' } });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const secondPromise = sendTelegramSessionRangeAlert('LONDON_SWEEP');
+  await Promise.resolve();
+  qualificationResolvers[1]({ allowed: true, decision: { action: 'SEND' } });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(context.UI.telegramStatus.textContent, 'Sending session range…');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
+
+  captureResolvers[0](null);
+  await firstPromise;
+  assert.equal(sendCount, 1);
+  assert.equal(timeoutCallbacks.length, 1);
+  assert.equal(context.UI.telegramStatus.textContent, 'Sending session range…');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
+
+  timeoutCallbacks[0]();
+  assert.equal(context.UI.telegramStatus.textContent, 'Sending session range…');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
+
+  captureResolvers[1](null);
+  await secondPromise;
+  assert.equal(sendCount, 2);
+  assert.equal(timeoutCallbacks.length, 2);
+
+  timeoutCallbacks[1]();
+  assert.equal(context.UI.telegramStatus.textContent, '');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
+});
+
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
   const fnSource = extractFunction('sendTelegramSessionRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
