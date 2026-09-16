@@ -561,6 +561,61 @@ test('sendTelegramSessionRangeAlert aborts delivery if panel trade is replaced d
   assert.equal(replacementTrade._telegramDelivered, undefined);
 });
 
+test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced during async screenshot capture', async () => {
+  const fnSource = extractFunction('sendTelegramSessionRangeAlert');
+  const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
+  const globalTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
+  const replacementTrade = { dir: 'BEAR', entry: 120, sl: 125, tp: 110 };
+  let sent = false;
+  let builtCaption = false;
+  const context = {
+    module: { exports: {} },
+    telegramSessionRangeAutoSend: true,
+    multiPanels: new Map(),
+    sessionRangeTrade: globalTrade,
+    getTelegramCredentials: () => ({ token: '123:abc', chatId: '1' }),
+    validateTelegramCredentials: () => {},
+    getCurrentGranularitySec: () => 60,
+    _multiPanelProcessing: null,
+    _multiPanelGran: null,
+    getActiveSymbol: () => 'R_100',
+    getSymbolLabel: (symbol) => symbol,
+    getActiveConfluenceFactors: () => ['Global Factor'],
+    qualifySignalForTelegram: async () => ({ allowed: true, decision: { action: 'SEND' } }),
+    UI: { telegramStatus: { textContent: '', className: '' }, symbolSelect: null, granSelect: null },
+    captureTelegramScreenshot: async () => {
+      context.sessionRangeTrade = replacementTrade;
+      return null;
+    },
+    _snapshotChartGlobals: () => ({}),
+    activatePanel: () => {},
+    _restoreChartGlobals: () => {},
+    buildSessionRangeTelegramCaption: () => {
+      builtCaption = true;
+      return 'caption';
+    },
+    decorateAdaptiveTelegramCaption: (caption) => caption,
+    sendTelegramPhoto: async () => { sent = true; },
+    sendTelegramMessage: async () => { sent = true; },
+    addLog: () => {},
+    TELEGRAM_STATUS_CLEAR_MS: 1,
+    setTimeout: () => {},
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { sendTelegramSessionRangeAlert } = context.module.exports;
+
+  await sendTelegramSessionRangeAlert('LONDON_SWEEP');
+
+  assert.equal(builtCaption, false);
+  assert.equal(sent, false);
+  assert.deepEqual(globalTrade._adaptiveDecision, { action: 'SEND' });
+  assert.equal(globalTrade._telegramDelivered, false);
+  assert.equal(replacementTrade._adaptiveDecision, undefined);
+  assert.equal(replacementTrade._telegramDelivered, undefined);
+});
+
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
   const fnSource = extractFunction('sendTelegramSessionRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
