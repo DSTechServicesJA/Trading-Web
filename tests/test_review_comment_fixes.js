@@ -175,6 +175,7 @@ test('bootstrapAdaptiveIntelligence keeps requests scoped and ignores stale resp
     renderAdaptiveConfluenceTable: () => renders.push(activeSymbol),
     syncPersistentAdaptiveTradeHistory: () => syncs.push(activeSymbol),
     initAdaptiveIntelligenceClient: () => {},
+    ensureAdaptiveRuntimeScope: () => true,
     hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => activeSymbol,
     getCurrentGranularitySec: () => 60,
@@ -248,6 +249,7 @@ test('bootstrapAdaptiveIntelligence does not let an older forced refresh overwri
     renderAdaptiveConfluenceTable: () => {},
     syncPersistentAdaptiveTradeHistory: () => {},
     initAdaptiveIntelligenceClient: () => {},
+    ensureAdaptiveRuntimeScope: () => true,
     hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => 'R_25',
     getCurrentGranularitySec: () => 60,
@@ -309,6 +311,7 @@ test('bootstrapAdaptiveIntelligence reuses the current cached scope without rere
     renderAdaptiveConfluenceTable: () => renders.push('rendered'),
     syncPersistentAdaptiveTradeHistory: () => {},
     initAdaptiveIntelligenceClient: () => {},
+    ensureAdaptiveRuntimeScope: () => true,
     hydrateAdaptiveRuntimeFromDb: () => {},
     getActiveSymbol: () => 'R_25',
     getCurrentGranularitySec: () => 60,
@@ -1523,4 +1526,129 @@ test('processMtfTopDown records signal validation before queueing successful sig
   ]);
   assert.equal(context.lastMtfTopDownIdx, 7);
   assert.equal(context.mtfTopDownHistory.length, 1);
+});
+
+test('initAdaptiveRuntime loads the authenticated user scoped state instead of the legacy shared key', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getAdaptiveRuntimeStorageKey'),
+    extractFunction('resetAdaptiveRuntimeSyncState'),
+    extractFunction('initAdaptiveRuntime'),
+    'module.exports = { initAdaptiveRuntime, getAdaptiveRuntimeStorageKey };'
+  ].join('\n');
+  const store = new Map();
+  function AdaptiveEngine(state) {
+    this.state = state;
+    this.setMode = (mode) => { this.mode = mode; };
+    this.exportState = () => this.state;
+  }
+  const context = {
+    module: { exports: {} },
+    ADAPTIVE_STATE_LS_KEY: 'tg_adaptiveState',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    adaptiveRuntime: null,
+    adaptiveRuntimeStorageScopeKey: '__guest__',
+    adaptiveMode: 'FULL_AUTO',
+    adaptiveRuntimeDbHydrated: true,
+    adaptiveIntelligenceBootstrap: { stale: true },
+    adaptiveIntelligenceBootstrapPromise: Promise.resolve(),
+    adaptiveIntelligenceBootstrapScopeKey: 'old-scope',
+    adaptiveIntelligenceBootstrapCache: new Map([['old-scope', { stale: true }]]),
+    adaptiveIntelligenceBootstrapPromises: new Map([['old-scope', Promise.resolve()]]),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map([['old-scope', 1]]),
+    AdaptiveEngine,
+    ITGuruAuth: { getUser: () => ({ username: 'Alice' }) },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    encodeURIComponent,
+    JSON,
+    String,
+    console
+  };
+  store.set('tg_adaptiveState', JSON.stringify({ owner: 'legacy-shared' }));
+  store.set('tg_adaptiveState::user%3Aalice', JSON.stringify({ owner: 'alice-only' }));
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { initAdaptiveRuntime, getAdaptiveRuntimeStorageKey } = context.module.exports;
+
+  initAdaptiveRuntime();
+
+  assert.equal(context.adaptiveRuntime.state.owner, 'alice-only');
+  assert.equal(context.adaptiveRuntimeStorageScopeKey, 'user:alice');
+  assert.equal(getAdaptiveRuntimeStorageKey(), 'tg_adaptiveState::user%3Aalice');
+  assert.equal(context.adaptiveRuntimeDbHydrated, false);
+  assert.equal(context.adaptiveIntelligenceBootstrapCache.size, 0);
+});
+
+test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authenticated user changes', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getAdaptiveRuntimeStorageKey'),
+    extractFunction('resetAdaptiveRuntimeSyncState'),
+    extractFunction('initAdaptiveRuntime'),
+    extractFunction('ensureAdaptiveRuntimeScope'),
+    'module.exports = { initAdaptiveRuntime, ensureAdaptiveRuntimeScope };'
+  ].join('\n');
+  const store = new Map();
+  let currentUser = { username: 'alice' };
+  function AdaptiveEngine(state) {
+    this.state = state;
+    this.setMode = (mode) => { this.mode = mode; };
+    this.exportState = () => this.state;
+  }
+  const context = {
+    module: { exports: {} },
+    ADAPTIVE_STATE_LS_KEY: 'tg_adaptiveState',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    adaptiveRuntime: null,
+    adaptiveRuntimeStorageScopeKey: '__guest__',
+    adaptiveMode: 'FULL_AUTO',
+    adaptiveRuntimeDbHydrated: false,
+    adaptiveIntelligenceBootstrap: null,
+    adaptiveIntelligenceBootstrapPromise: null,
+    adaptiveIntelligenceBootstrapScopeKey: '',
+    adaptiveIntelligenceBootstrapCache: new Map(),
+    adaptiveIntelligenceBootstrapPromises: new Map(),
+    adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    AdaptiveEngine,
+    ITGuruAuth: { getUser: () => currentUser },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    encodeURIComponent,
+    JSON,
+    String,
+    console
+  };
+  store.set('tg_adaptiveState::user%3Aalice', JSON.stringify({ owner: 'alice-state' }));
+  store.set('tg_adaptiveState::user%3Abob', JSON.stringify({ owner: 'bob-state' }));
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { initAdaptiveRuntime, ensureAdaptiveRuntimeScope } = context.module.exports;
+
+  initAdaptiveRuntime();
+  context.adaptiveRuntimeDbHydrated = true;
+  context.adaptiveIntelligenceBootstrap = { stale: true };
+  context.adaptiveIntelligenceBootstrapPromise = Promise.resolve();
+  context.adaptiveIntelligenceBootstrapScopeKey = 'alice-scope';
+  context.adaptiveIntelligenceBootstrapCache.set('alice-scope', { stale: true });
+  context.adaptiveIntelligenceBootstrapPromises.set('alice-scope', Promise.resolve());
+  context.adaptiveIntelligenceBootstrapLatestRequestIds.set('alice-scope', 7);
+  currentUser = { username: 'bob' };
+
+  const alreadyScoped = ensureAdaptiveRuntimeScope();
+
+  assert.equal(alreadyScoped, false);
+  assert.equal(context.adaptiveRuntime.state.owner, 'bob-state');
+  assert.equal(context.adaptiveRuntimeStorageScopeKey, 'user:bob');
+  assert.equal(context.adaptiveRuntimeDbHydrated, false);
+  assert.equal(context.adaptiveIntelligenceBootstrap, null);
+  assert.equal(context.adaptiveIntelligenceBootstrapPromise, null);
+  assert.equal(context.adaptiveIntelligenceBootstrapScopeKey, '');
+  assert.equal(context.adaptiveIntelligenceBootstrapCache.size, 0);
+  assert.equal(context.adaptiveIntelligenceBootstrapPromises.size, 0);
+  assert.equal(context.adaptiveIntelligenceBootstrapLatestRequestIds.size, 0);
 });

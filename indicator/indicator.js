@@ -460,6 +460,7 @@ const ENTRY_QUALITY_PROGRESS_ATR_DEFAULT    = 0.22; /* confirmed entries must di
 const RECENT_LOSS_PAUSE_COUNT_DEFAULT       = 2;    /* pause fresh entries after repeated same-side losses */
 const ADAPTIVE_MODE_DEFAULT                = "OFF";
 const ADAPTIVE_STATE_LS_KEY                = LS_PREFIX + "adaptiveState";
+const ADAPTIVE_RUNTIME_GUEST_SCOPE         = "__guest__";
 
 /* Telegram */
 const CHART_RENDER_DELAY_MS       = 100;   /* wait for canvas redraw before screenshot */
@@ -764,10 +765,44 @@ function getManualAdaptiveSettings() {
   };
 }
 
-function initAdaptiveRuntime() {
+function getAdaptiveRuntimeScopeKey() {
+  if (typeof ITGuruAuth !== "undefined" && ITGuruAuth && typeof ITGuruAuth.getUser === "function") {
+    const user = ITGuruAuth.getUser();
+    const rawIdentity = user && (
+      user.id ??
+      user.user_id ??
+      user.userId ??
+      user.username ??
+      user.email ??
+      user.displayName
+    );
+    const identity = String(rawIdentity || "").trim();
+    if (identity) return `user:${identity.toLowerCase()}`;
+  }
+  return ADAPTIVE_RUNTIME_GUEST_SCOPE;
+}
+
+function getAdaptiveRuntimeStorageKey(scopeKey = getAdaptiveRuntimeScopeKey()) {
+  return `${ADAPTIVE_STATE_LS_KEY}::${encodeURIComponent(String(scopeKey || ADAPTIVE_RUNTIME_GUEST_SCOPE))}`;
+}
+
+function resetAdaptiveRuntimeSyncState() {
+  adaptiveRuntimeDbHydrated = false;
+  adaptiveIntelligenceBootstrap = null;
+  adaptiveIntelligenceBootstrapPromise = null;
+  adaptiveIntelligenceBootstrapScopeKey = "";
+  adaptiveIntelligenceBootstrapCache.clear();
+  adaptiveIntelligenceBootstrapPromises.clear();
+  adaptiveIntelligenceBootstrapLatestRequestIds.clear();
+}
+
+function initAdaptiveRuntime(force = false) {
   if (typeof AdaptiveEngine !== "function") return;
+  const scopeKey = getAdaptiveRuntimeScopeKey();
+  if (!force && adaptiveRuntime && adaptiveRuntimeStorageScopeKey === scopeKey) return;
+  resetAdaptiveRuntimeSyncState();
   try {
-    const raw = localStorage.getItem(ADAPTIVE_STATE_LS_KEY);
+    const raw = localStorage.getItem(getAdaptiveRuntimeStorageKey(scopeKey));
     const parsed = raw ? JSON.parse(raw) : null;
     adaptiveRuntime = new AdaptiveEngine(parsed);
     adaptiveRuntime.setMode(adaptiveMode);
@@ -776,12 +811,23 @@ function initAdaptiveRuntime() {
     adaptiveRuntime = new AdaptiveEngine();
     adaptiveRuntime.setMode(adaptiveMode);
   }
+  adaptiveRuntimeStorageScopeKey = scopeKey;
+}
+
+function ensureAdaptiveRuntimeScope() {
+  const scopeKey = getAdaptiveRuntimeScopeKey();
+  if (!adaptiveRuntime || adaptiveRuntimeStorageScopeKey !== scopeKey) {
+    initAdaptiveRuntime(true);
+    return false;
+  }
+  return true;
 }
 
 function persistAdaptiveRuntime() {
   if (!adaptiveRuntime) return;
+  ensureAdaptiveRuntimeScope();
   try {
-    localStorage.setItem(ADAPTIVE_STATE_LS_KEY, JSON.stringify(adaptiveRuntime.exportState()));
+    localStorage.setItem(getAdaptiveRuntimeStorageKey(), JSON.stringify(adaptiveRuntime.exportState()));
   } catch (err) {
     console.warn("Adaptive runtime persist failed:", err.message);
   }
@@ -800,6 +846,9 @@ const _adaptiveAppliedLogCache = new Map();
 
 function syncAdaptiveProfileToDb(ctx, profile) {
   if (!ctx || !profile) return;
+  if (!ensureAdaptiveRuntimeScope()) {
+    profile = adaptiveRuntime ? adaptiveRuntime.ensureProfile(ctx) : profile;
+  }
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
   const prevWeights = profile._lastSyncedSettings || {};
@@ -833,6 +882,7 @@ function syncAdaptiveProfileToDb(ctx, profile) {
 }
 
 async function hydrateAdaptiveRuntimeFromDb() {
+  ensureAdaptiveRuntimeScope();
   if (adaptiveRuntimeDbHydrated) return;
   if (!adaptiveRuntime) return;
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
@@ -1053,6 +1103,7 @@ function mergeRemoteConfluenceStats(data) {
 }
 
 async function bootstrapAdaptiveIntelligence(force = false, overrides = {}) {
+  ensureAdaptiveRuntimeScope();
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return null;
   hydrateAdaptiveRuntimeFromDb();
@@ -2604,6 +2655,7 @@ let adaptiveConfluenceEnabled = false;
 let confluenceFactorStats = {};      /* { factorName: { wins, losses } } */
 let adaptiveMode = ADAPTIVE_MODE_DEFAULT;
 let adaptiveRuntime = null;
+let adaptiveRuntimeStorageScopeKey = ADAPTIVE_RUNTIME_GUEST_SCOPE;
 
 /* Confluence score for current setup */
 let confluenceScore = 0;
@@ -26754,7 +26806,11 @@ function initLoginGate() {
       onLogin: () => {
         localStorage.removeItem("itguru_deriv_token");
         /* Refresh user data (role + strategies) from server */
-        ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
+        ITGuruAuth.verify().then(() => {
+          initAdaptiveRuntime(true);
+          applyStrategyAccess();
+          bootstrapAdaptiveIntelligence(true);
+        });
         loadNotificationPreferences().then(renderNotificationPreferencesUI);
       }
     });
@@ -26764,6 +26820,7 @@ function initLoginGate() {
     if (authLogoutBtn) {
       authLogoutBtn.addEventListener("click", () => {
         ITGuruAuth.logout();
+        initAdaptiveRuntime(true);
         location.reload();
       });
     }
@@ -26772,7 +26829,11 @@ function initLoginGate() {
        Client-side JWT expiry is already checked in isLoggedIn(), so we don't
        force a logout here — a transient server error should not kick the user out. */
     if (ITGuruAuth.isLoggedIn()) {
-      ITGuruAuth.verify().then(() => { applyStrategyAccess(); bootstrapAdaptiveIntelligence(true); });
+      ITGuruAuth.verify().then(() => {
+        initAdaptiveRuntime(true);
+        applyStrategyAccess();
+        bootstrapAdaptiveIntelligence(true);
+      });
       loadNotificationPreferences().then(renderNotificationPreferencesUI);
     }
     return;
