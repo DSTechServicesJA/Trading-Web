@@ -1430,25 +1430,6 @@ function bindNotifications() {
 /* ═══════════════════════════════════════════════
    Adaptive Intelligence Administration
    ═══════════════════════════════════════════════ */
-let adaptiveDashboardState = null;
-
-function getAdaptiveFilters() {
-  return {
-    user_id: (el('adaptiveUserId')?.value || '').trim(),
-    market_category: (el('adaptiveCategoryFilter')?.value || '').trim(),
-    strategy_key: (el('adaptiveStrategyFilter')?.value || '').trim(),
-    symbol: (el('adaptiveSymbolFilter')?.value || '').trim(),
-  };
-}
-
-function buildAdaptiveDashboardQuery() {
-  const params = new URLSearchParams();
-  const filters = getAdaptiveFilters();
-  for (const [k, v] of Object.entries(filters)) {
-    if (v) params.set(k, v);
-  }
-  return params.toString();
-}
 
 function adaptiveActionLabel(action) {
   const value = String(action || '').toUpperCase();
@@ -2005,11 +1986,19 @@ function renderAdaptiveAudit(rows) {
 function renderAdaptiveCategoryAnalytics(rows) {
   const container = el('adaptiveCategoryAnalytics');
   if (!container) return;
-  if (!rows.length) {
-    container.innerHTML = '<div class="modal-card adaptive-card"><div class="table-empty">No category analytics available yet.</div></div>';
-    return;
-  }
-  container.innerHTML = rows.map((row) => {
+  const rowMap = new Map((rows || []).map((row) => [row.market_category, row]));
+  const categories = Object.keys(ADAPTIVE_CATEGORY_LABELS).map((key) => rowMap.get(key) || ({
+    market_category: key,
+    trade_count: 0,
+    wins: 0,
+    losses: 0,
+    win_rate: 0,
+    avg_r_multiple: null,
+    confidence: null,
+    best_strategy: null,
+    worst_strategy: null,
+  }));
+  container.innerHTML = categories.map((row) => {
     const total = Math.max(1, Number(row.trade_count || 0));
     const wins = Number(row.wins || 0);
     const losses = Number(row.losses || 0);

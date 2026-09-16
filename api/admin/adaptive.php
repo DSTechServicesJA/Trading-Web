@@ -139,7 +139,11 @@ try {
                 $nextValue['locked_at'] = !empty($body['locked_by_admin']) ? gmdate('Y-m-d H:i:s') : null;
                 $nextValue['locked_by_user_id'] = !empty($body['locked_by_admin']) ? $adminUserId : null;
             }
-            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_OVERRIDE', 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
+            $actionType = 'ADMIN_FACTOR_OVERRIDE';
+            if (array_key_exists('locked_by_admin', $body)) {
+                $actionType = !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_UNLOCK';
+            }
+            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], $actionType, 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
             jsonResponse(['message' => 'Factor statistics updated']);
         }
 
@@ -197,8 +201,13 @@ try {
                 jsonResponse(['error' => 'user_id is required'], 400);
             }
             $sourceUserId = (int) ($body['source_user_id'] ?? 0);
+            if ($sourceUserId <= 0 && !empty($body['source_username'])) {
+                $lookup = $pdo->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+                $lookup->execute([trim((string) $body['source_username'])]);
+                $sourceUserId = (int) ($lookup->fetchColumn() ?: 0);
+            }
             if ($sourceUserId <= 0) {
-                jsonResponse(['error' => 'source_user_id is required'], 400);
+                jsonResponse(['error' => 'source_user_id or source_username is required'], 400);
             }
             $pdo->beginTransaction();
             $count = adaptiveCloneRulesFromUser($pdo, $adminUserId, $targetUserId, $sourceUserId, (string) ($body['reason'] ?? 'Admin cloned adaptive rules from another user'));

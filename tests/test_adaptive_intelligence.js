@@ -7,6 +7,7 @@ const utils = require(path.resolve(__dirname, '../indicator/adaptive-intelligenc
 const indicatorSource = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
 const adminSource = fs.readFileSync(path.resolve(__dirname, '../admin/admin.js'), 'utf8');
 const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
+const adminControllerSource = fs.readFileSync(path.resolve(__dirname, '../api/admin/adaptive.php'), 'utf8');
 
 test('market categories remain isolated by symbol family', () => {
   assert.equal(utils.getMarketCategory('1HZ100V', 1), 'VOLATILITY_1S');
@@ -126,6 +127,12 @@ test('backend service defines persistent trade, factor, rule, and audit handling
   assert.match(serviceSource, /function adaptiveRecordTrade\(/);
   assert.match(serviceSource, /function adaptiveQualifySignal\(/);
   assert.match(serviceSource, /function adaptiveAudit\(/);
+  assert.match(serviceSource, /function adaptiveListUserIntelligenceProfiles\(/);
+  assert.match(serviceSource, /function adaptiveUserIntelligenceDetail\(/);
+  assert.match(serviceSource, /function adaptiveFactorHistory\(/);
+  assert.match(serviceSource, /function adaptiveCloneRulesFromUser\(/);
+  assert.match(serviceSource, /function adaptiveAssignDefaultProfile\(/);
+  assert.match(serviceSource, /function adaptiveResetFactorStat\(/);
   assert.match(serviceSource, /WEIGHT_AUTO_ADJUST/);
   assert.match(serviceSource, /TRADE_RECORDED/);
   assert.match(serviceSource, /adaptiveNormalizeDbTimestamp/);
@@ -135,6 +142,16 @@ test('backend service defines persistent trade, factor, rule, and audit handling
   assert.match(serviceSource, /\(market_category = \?\) DESC,\s*\(symbol_scope = \?\) DESC,\s*\(strategy_key = \?\) DESC/);
 });
 
+test('adaptive admin controller exposes profile, history, clone, defaults, and lock workflows', () => {
+  assert.match(adminControllerSource, /action === 'profiles'/);
+  assert.match(adminControllerSource, /action === 'history'/);
+  assert.match(adminControllerSource, /action === 'clone_rules'/);
+  assert.match(adminControllerSource, /action === 'defaults'/);
+  assert.match(adminControllerSource, /ADMIN_FACTOR_LOCK/);
+  assert.match(adminControllerSource, /ADMIN_FACTOR_UNLOCK/);
+  assert.match(adminControllerSource, /source_username/);
+});
+
 test('backend normalizes naive timestamps as UTC and skips untrusted trades during rebuilds', () => {
   assert.match(serviceSource, /\$utc = new DateTimeZone\('UTC'\);[\s\S]*new DateTimeImmutable\(\$raw,\s*\$utc\)/);
   assert.match(serviceSource, /json_decode\(\(string\) \$row\['notes_json'\], true\)[\s\S]*UNTRUSTED_CLIENT_REPORTED[\s\S]*continue;/);
@@ -142,7 +159,16 @@ test('backend normalizes naive timestamps as UTC and skips untrusted trades duri
 
 test('admin dashboard exposes adaptive management workflows', () => {
   assert.match(adminSource, /loadAdaptiveDashboard\(/);
+  assert.match(adminSource, /loadAdaptiveProfileIndex\(/);
+  assert.match(adminSource, /loadAdaptiveUserDetail\(/);
+  assert.match(adminSource, /renderAdaptiveGuide\(/);
   assert.match(adminSource, /saveAdaptiveRule\(/);
+  assert.match(adminSource, /cloneAdaptiveRules\(/);
+  assert.match(adminSource, /assignAdaptiveDefaults\(/);
+  assert.match(adminSource, /openAdaptiveFactorHistory\(/);
   assert.match(adminSource, /importAdaptiveData\(/);
   assert.match(adminSource, /resetAdaptiveScope\(/);
+  assert.match(adminSource, /adaptiveHistoryModal/);
+  assert.match(adminSource, /adaptiveProfilesIndexBody/);
+  assert.match(adminSource, /adaptiveCategoryAnalytics/);
 });

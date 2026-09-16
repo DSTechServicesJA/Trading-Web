@@ -323,12 +323,15 @@ function adaptiveLatestTimestamp(?string ...$values): ?string
     return $latest;
 }
 
-function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount): string
+function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount, int $factorCount = 0): string
 {
     if ($tradeCount <= 0) {
         return 'NOT_STARTED';
     }
     if ($lockedFactorCount > 0) {
+        if ($factorCount > $lockedFactorCount) {
+            return 'MIXED';
+        }
         return 'LOCKED';
     }
     return 'AUTO_LEARNING';
@@ -459,7 +462,7 @@ function adaptiveHydrateUserSummaries(PDO $pdo, array $users): array
     }
 
     foreach ($summaryById as &$summary) {
-        $statusCode = adaptiveLearningStatusCode((int) $summary['trade_count'], (int) $summary['locked_factor_count']);
+        $statusCode = adaptiveLearningStatusCode((int) $summary['trade_count'], (int) $summary['locked_factor_count'], (int) $summary['factor_count']);
         $summary['learning_status_code'] = $statusCode;
         $summary['learning_status'] = adaptiveLearningStatusLabel($statusCode);
     }
@@ -480,6 +483,7 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     $status = trim((string) ($filters['status'] ?? ''));
     $plan = trim((string) ($filters['plan'] ?? ''));
     $category = trim((string) ($filters['market_category'] ?? ''));
+    $learningStatus = trim((string) ($filters['learning_status'] ?? ''));
 
     $where = [];
     $params = [];
@@ -500,6 +504,20 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = u.id AND ar.enabled = 1 AND ar.market_category = ?)';
         $params[] = strtoupper($category);
     }
+    if ($learningStatus === 'NOT_STARTED') {
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+    } elseif ($learningStatus === 'AUTO_LEARNING') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+    } elseif ($learningStatus === 'LOCKED') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+    } elseif ($learningStatus === 'MIXED') {
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+    }
 
     $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $count = $pdo->prepare("SELECT COUNT(*) FROM users u $whereSql");
@@ -511,11 +529,6 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     $stmt->execute($queryParams);
     $users = $stmt->fetchAll();
     $rows = adaptiveHydrateUserSummaries($pdo, $users);
-
-    $learningStatus = trim((string) ($filters['learning_status'] ?? ''));
-    if ($learningStatus !== '') {
-        $rows = array_values(array_filter($rows, static fn(array $row): bool => ($row['learning_status_code'] ?? '') === $learningStatus));
-    }
 
     return [
         'rows' => $rows,
