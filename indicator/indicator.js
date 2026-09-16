@@ -10984,6 +10984,7 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         const prevPanelGran = _multiPanelGran;
         const prevUiSymbol = UI.symbolSelect ? UI.symbolSelect.value : null;
         const prevUiGran = UI.granSelect ? UI.granSelect.value : null;
+        let capturePromise;
         try {
           activatePanel(panel);
           _multiPanelProcessing = panel.symbol;
@@ -10991,17 +10992,18 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
           if (UI.symbolSelect) UI.symbolSelect.value = panel.symbol;
           if (UI.granSelect && Number.isFinite(panel.gran)) UI.granSelect.value = String(panel.gran);
           caption = buildSessionRangeTelegramCaption(signalType);
-          blob = await captureTelegramScreenshot(null);
-          if (!isScopedTradeStillCurrent()) {
-            clearTrackedTelegramStatus();
-            return;
-          }
+          capturePromise = captureTelegramScreenshot(null);
         } finally {
           _multiPanelProcessing = prevPanelSymbol;
           _multiPanelGran = prevPanelGran;
           _restoreChartGlobals(snap);
           if (UI.symbolSelect && prevUiSymbol !== null) UI.symbolSelect.value = prevUiSymbol;
           if (UI.granSelect && prevUiGran !== null) UI.granSelect.value = prevUiGran;
+        }
+        blob = await capturePromise;
+        if (!isScopedTradeStillCurrent()) {
+          clearTrackedTelegramStatus();
+          return;
         }
       } else {
         blob = await captureTelegramScreenshot(null);
