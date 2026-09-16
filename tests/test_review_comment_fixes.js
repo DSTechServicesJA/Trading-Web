@@ -1652,3 +1652,151 @@ test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authentic
   assert.equal(context.adaptiveIntelligenceBootstrapPromises.size, 0);
   assert.equal(context.adaptiveIntelligenceBootstrapLatestRequestIds.size, 0);
 });
+
+test('confluence stats persistence is scoped per authenticated user', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('recordConfluenceOutcome'),
+    extractFunction('loadConfluenceStats'),
+    'module.exports = { recordConfluenceOutcome, loadConfluenceStats, getConfluenceStatsStorageKey };'
+  ].join('\n');
+  const store = new Map();
+  let currentUser = { username: 'alice' };
+  const context = {
+    module: { exports: {} },
+    LS_PREFIX: 'tg_',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    adaptiveConfluenceEnabled: true,
+    confluenceFactorStats: {},
+    ITGuruAuth: { getUser: () => currentUser },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    encodeURIComponent,
+    JSON,
+    Number,
+    String
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { recordConfluenceOutcome, loadConfluenceStats, getConfluenceStatsStorageKey } = context.module.exports;
+
+  recordConfluenceOutcome(['EMA Aligned'], 'WIN');
+  assert.equal(store.has('tg_confStats'), false);
+  assert.ok(store.has('tg_confStats::user%3Aalice'));
+  assert.equal(getConfluenceStatsStorageKey(), 'tg_confStats::user%3Aalice');
+
+  currentUser = { username: 'bob' };
+  store.set('tg_confStats::user%3Abob', JSON.stringify({ 'EMA Aligned': { wins: 2, losses: 3 } }));
+  context.confluenceFactorStats = { stale: { wins: 99, losses: 1 } };
+  loadConfluenceStats();
+
+  assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 2, losses: 3 } });
+});
+
+test('hydrateAdaptiveRuntimeFromDb ignores stale async responses after auth scope changes', async () => {
+  const harness = [
+    extractFunction('hydrateAdaptiveRuntimeFromDb'),
+    'module.exports = { hydrateAdaptiveRuntimeFromDb };'
+  ].join('\n');
+  let resolveProfiles;
+  const pendingProfiles = new Promise((resolve) => { resolveProfiles = resolve; });
+  let currentScope = 'user:alice';
+  let persistCalls = 0;
+  const context = {
+    module: { exports: {} },
+    adaptiveRuntimeDbHydrated: false,
+    adaptiveRuntimeStorageScopeKey: 'user:alice',
+    adaptiveRuntime: { state: { symbolProfiles: {} } },
+    adaptiveIntelligenceClient: {
+      isAuthenticated: () => true,
+      getAdaptiveProfiles: async () => pendingProfiles
+    },
+    initAdaptiveIntelligenceClient: () => {},
+    ensureAdaptiveRuntimeScope: () => true,
+    getAdaptiveRuntimeScopeKey: () => currentScope,
+    persistAdaptiveRuntime: () => { persistCalls++; },
+    Date,
+    Number,
+    String,
+    Array,
+    Object,
+    Set,
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { hydrateAdaptiveRuntimeFromDb } = context.module.exports;
+
+  const hydration = hydrateAdaptiveRuntimeFromDb();
+  currentScope = 'user:bob';
+  context.adaptiveRuntimeStorageScopeKey = 'user:bob';
+  context.adaptiveRuntime = { state: { symbolProfiles: {} } };
+  resolveProfiles([{
+    symbol: 'R_100',
+    strategy_key: 'breakout_retest',
+    timeframe_sec: 60,
+    regime: 'TRANSITIONING',
+    profile: { settings: { minProgressAtr: 0.1 }, stats: {}, history: {}, lastRecommendation: {} },
+    confidence_score: 0.8,
+    sample_size: 4,
+    updated_at: new Date().toISOString()
+  }]);
+  await hydration;
+
+  assert.deepEqual(context.adaptiveRuntime.state.symbolProfiles, {});
+  assert.equal(persistCalls, 0);
+});
+
+test('initLoginGate initializes adaptive runtime immediately on login and re-checks scope after verify', async () => {
+  const harness = `${extractFunction('initLoginGate')}\nmodule.exports = { initLoginGate };`;
+  const callOrder = [];
+  let loginHandler = null;
+  let resolveVerify;
+  const verifyPromise = new Promise((resolve) => { resolveVerify = resolve; });
+  const context = {
+    module: { exports: {} },
+    ITGuruAuth: {
+      initLoginGate: ({ onLogin }) => { loginHandler = onLogin; },
+      verify: () => verifyPromise,
+      isLoggedIn: () => false
+    },
+    localStorage: { removeItem: () => callOrder.push('remove_token') },
+    initAdaptiveRuntime: () => callOrder.push('init_runtime'),
+    ensureAdaptiveRuntimeScope: () => callOrder.push('ensure_scope'),
+    applyStrategyAccess: () => callOrder.push('apply_access'),
+    bootstrapAdaptiveIntelligence: () => callOrder.push('bootstrap'),
+    loadNotificationPreferences: () => Promise.resolve().then(() => callOrder.push('load_notifications')),
+    renderNotificationPreferencesUI: () => callOrder.push('render_notifications'),
+    UI: { loginOverlay: { style: {} } },
+    document: { getElementById: () => null },
+    location: { reload: () => {} },
+    Promise
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { initLoginGate } = context.module.exports;
+
+  initLoginGate();
+  loginHandler();
+  assert.deepEqual(callOrder, ['remove_token', 'init_runtime']);
+
+  resolveVerify();
+  await verifyPromise;
+  await Promise.resolve();
+  const initIndex = callOrder.indexOf('init_runtime');
+  const ensureIndex = callOrder.indexOf('ensure_scope');
+  const applyIndex = callOrder.indexOf('apply_access');
+  const bootstrapIndex = callOrder.indexOf('bootstrap');
+  const loadIndex = callOrder.indexOf('load_notifications');
+  const renderIndex = callOrder.indexOf('render_notifications');
+
+  assert.ok(initIndex !== -1);
+  assert.ok(ensureIndex > initIndex);
+  assert.ok(applyIndex > ensureIndex);
+  assert.ok(bootstrapIndex > applyIndex);
+  assert.ok(loadIndex !== -1);
+  assert.ok(renderIndex > loadIndex);
+});
