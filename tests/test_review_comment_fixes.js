@@ -567,7 +567,7 @@ test('sendTelegramSessionRangeAlert aborts delivery if panel trade is replaced d
   assert.equal(replacementTrade._telegramDelivered, undefined);
 });
 
-test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced during async screenshot capture', async () => {
+test('sendTelegramSessionRangeAlert clears its cancelled status without clobbering newer alerts when global trade is replaced during async screenshot capture', async () => {
   const fnSource = extractFunction('sendTelegramSessionRangeAlert');
   const harness = `${fnSource}\nmodule.exports = { sendTelegramSessionRangeAlert };`;
   const globalTrade = { dir: 'BULL', entry: 100, sl: 95, tp: 110 };
@@ -575,6 +575,7 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
   let sent = false;
   let builtCaption = false;
   let timeoutCalls = 0;
+  let scheduledClear = null;
   const context = {
     module: { exports: {} },
     telegramSessionRangeAutoSend: true,
@@ -608,7 +609,7 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
     TELEGRAM_STATUS_CLEAR_MS: 1,
     setTimeout: (fn) => {
       timeoutCalls++;
-      fn();
+      scheduledClear = fn;
     },
     Date
   };
@@ -625,8 +626,15 @@ test('sendTelegramSessionRangeAlert aborts delivery if global trade is replaced 
   assert.equal(replacementTrade._adaptiveDecision, undefined);
   assert.equal(replacementTrade._telegramDelivered, undefined);
   assert.equal(timeoutCalls, 1);
+  assert.equal(typeof scheduledClear, 'function');
   assert.equal(context.UI.telegramStatus.textContent, '');
   assert.equal(context.UI.telegramStatus.className, 'hint telegram-status');
+
+  context.UI.telegramStatus.textContent = 'Sending strategy alert…';
+  context.UI.telegramStatus.className = 'hint telegram-status telegram-ok';
+  scheduledClear();
+  assert.equal(context.UI.telegramStatus.textContent, 'Sending strategy alert…');
+  assert.equal(context.UI.telegramStatus.className, 'hint telegram-status telegram-ok');
 });
 
 test('sendTelegramSessionRangeAlert skips removed panels instead of falling back to the active global trade', async () => {
