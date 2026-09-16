@@ -1704,7 +1704,7 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
 function stampSignalLifecycle(signal, options = {}) {
   if (!signal || typeof signal !== "object") return signal;
   if (!signal.signalId) signal.signalId = generateSignalId(signal.strategyType || signal.type || "sig");
-  if (!signal.adaptiveScopeKey) signal.adaptiveScopeKey = getAdaptiveRuntimeScopeKey();
+  if (options.assignScope !== false && !signal.adaptiveScopeKey) signal.adaptiveScopeKey = getAdaptiveRuntimeScopeKey();
   const createdAt = Number.isFinite(signal.createdAtMs) ? signal.createdAtMs : Date.now();
   const validityMs = Number.isFinite(signal.validityMs) ? signal.validityMs : (options.validityMs || getSignalValidityMs());
   signal.createdAtMs = createdAt;
@@ -1734,7 +1734,7 @@ function ensureAllKnownSignalIds() {
     if (!Array.isArray(history)) continue;
     for (const s of history) {
       if (s && typeof s === "object" && !s.signalId) {
-        stampSignalLifecycle(s);
+        stampSignalLifecycle(s, { assignScope: false });
         touched = true;
       }
     }
@@ -4013,6 +4013,7 @@ function processGridScalperV2() {
     lastGridScalperV2Idx = idx;
     gridScalperV2State = signal;
     signal._sentViaTelegram = false;
+    stampSignalLifecycle(signal);
     gridScalperV2History.unshift(signal);
     if (gridScalperV2History.length > GRID_SCALPER_V2_MAX_HISTORY) gridScalperV2History.pop();
     playStrategyAlert(signal.dir);
@@ -4603,6 +4604,7 @@ function processPowerOf3() {
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false; /* true when entry alert was Telegram-sent */
+  stampSignalLifecycle(signal);
   po3History.unshift(signal);
   if (po3History.length > PO3_MAX_HISTORY) po3History.pop();
 
@@ -4748,8 +4750,9 @@ function monitorPo3Outcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of po3History) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -5379,8 +5382,9 @@ function monitorPo3_4hOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of po3_4hHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -5781,8 +5785,9 @@ function monitorBreakerBlockOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of breakerBlockHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -6109,8 +6114,9 @@ function monitorOteGoldenPocketOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of oteGoldenPocketHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -6494,8 +6500,9 @@ function monitorOrbOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of orbHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -6853,6 +6860,7 @@ function processCrtTbs() {
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false;
+  stampSignalLifecycle(signal);
   crtTbsHistory.unshift(signal);
   if (crtTbsHistory.length > CRT_TBS_MAX_HISTORY) crtTbsHistory.pop();
 
@@ -6941,8 +6949,9 @@ function monitorCrtTbsOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of crtTbsHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -7191,6 +7200,7 @@ function processGridScalperMA() {
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false;
+  stampSignalLifecycle(signal);
   gridScalperMAHistory.unshift(signal);
   if (gridScalperMAHistory.length > GRID_SCALPER_MA_MAX_HISTORY) gridScalperMAHistory.pop();
 
@@ -7334,8 +7344,9 @@ function monitorGridScalperMAOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of gridScalperMAHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -7958,8 +7969,9 @@ function monitorFVGStratOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of fvgStratHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -9145,8 +9157,9 @@ function monitorMtfTopDownOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of mtfTopDownHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -9746,8 +9759,9 @@ function monitorCandleInterpOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of candleInterpHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -16139,8 +16153,9 @@ function monitorTradeOutcome(candle) {
     sendTradeOutcomeTelegram(pending);
     /* Feature 13: record confluence factor outcome for adaptive weighting */
     if (adaptiveConfluenceEnabled && pending._confFactors && !pending._confRecorded) {
-      recordConfluenceOutcome(pending._confFactors, pending.result, pending.adaptiveScopeKey);
-      pending._confRecorded = true;
+      if (recordConfluenceOutcome(pending._confFactors, pending.result, pending.adaptiveScopeKey)) {
+        pending._confRecorded = true;
+      }
     }
     if (!_historicalProcessing) rebuildWalkForwardProfilesFromHistory();
     logSignalEngineDebug("TRADE_CLOSE", {
@@ -16318,8 +16333,9 @@ function monitorOrderblockOutcomes(idx) {
         sendStrategyOutcomeTelegram(s);
       }
       if (adaptiveConfluenceEnabled && !s._confRecorded) {
-        recordConfluenceOutcome(s._confFactors || [], result, s.adaptiveScopeKey);
-        s._confRecorded = true;
+        if (recordConfluenceOutcome(s._confFactors || [], result, s.adaptiveScopeKey)) {
+          s._confRecorded = true;
+        }
       }
       updateStatsUI();
     }
@@ -23223,8 +23239,9 @@ function monitorLiquiditySweepOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of liquiditySweepHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -23450,8 +23467,9 @@ function monitorStopLossHuntOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of stopLossHuntHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -23672,8 +23690,9 @@ function monitorFailedPinBarOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of failedPinBarHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -23971,8 +23990,9 @@ function monitorFibScalpOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of fibScalpHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -24220,8 +24240,9 @@ function monitorTiktokOutcomes(candle) {
     if (adaptiveConfluenceEnabled) {
       for (const s of tiktokHistory) {
         if ((s.result === "WIN" || s.result === "LOSS") && !s._confRecorded) {
-          recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey);
-          s._confRecorded = true;
+          if (recordConfluenceOutcome(s._confFactors || [], s.result, s.adaptiveScopeKey)) {
+            s._confRecorded = true;
+          }
         }
       }
     }
@@ -24693,16 +24714,17 @@ function renderPLBreakdown() {
 
 /* ---- Feature 13: Adaptive Confluence Weighting ---- */
 function recordConfluenceOutcome(factors, result, scopeKey = null) {
-  if (!adaptiveConfluenceEnabled || !factors || !factors.length) return;
+  if (!adaptiveConfluenceEnabled || !factors || !factors.length) return false;
   const currentScopeKey = getAdaptiveRuntimeScopeKey();
   const targetScopeKey = String(scopeKey || "");
-  if (!targetScopeKey || targetScopeKey !== currentScopeKey) return;
+  if (!targetScopeKey || targetScopeKey !== currentScopeKey) return false;
   for (const factor of factors) {
     if (!confluenceFactorStats[factor]) confluenceFactorStats[factor] = { wins: 0, losses: 0 };
     if (result === "WIN")  confluenceFactorStats[factor].wins++;
     if (result === "LOSS") confluenceFactorStats[factor].losses++;
   }
   try { localStorage.setItem(getConfluenceStatsStorageKey(targetScopeKey), JSON.stringify(confluenceFactorStats)); } catch(e) {}
+  return true;
 }
 function loadConfluenceStats(scopeKey = null) {
   confluenceFactorStats = {};

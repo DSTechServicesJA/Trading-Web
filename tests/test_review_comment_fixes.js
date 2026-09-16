@@ -1996,6 +1996,250 @@ test('processAdaptiveResolvedSignals skips unscoped outcomes instead of restampi
   assert.equal(records.length, 0);
 });
 
+test('ensureAllKnownSignalIds preserves missing adaptive scopes while migrating legacy IDs', () => {
+  const harness = [
+    extractFunction('stampSignalLifecycle'),
+    extractFunction('ensureAllKnownSignalIds'),
+    'module.exports = { ensureAllKnownSignalIds };'
+  ].join('\n');
+  const legacyPo3 = { result: 'WIN', type: 'power_of_3' };
+  const scopedCrt = { result: 'LOSS', type: 'crt_tbs', adaptiveScopeKey: 'user:alice' };
+  const context = {
+    module: { exports: {} },
+    generateSignalId: (prefix) => `${prefix}-generated`,
+    getAdaptiveRuntimeScopeKey: () => 'user:bob',
+    getSignalValidityMs: () => 60000,
+    getSignalDistanceLimitAtr: () => 1.5,
+    getAtrReference: () => 2,
+    getCurrentRegimeTag: () => 'TRENDING',
+    signalHistory: [],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [legacyPo3],
+    gridScalperMAHistory: [],
+    fvgStratHistory: [],
+    mtfTopDownHistory: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    tiktokHistory: [],
+    orderblockHistory: [],
+    candleInterpHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    orbHistory: [],
+    crtTbsHistory: [scopedCrt],
+    Number,
+    Date
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { ensureAllKnownSignalIds } = context.module.exports;
+
+  assert.equal(ensureAllKnownSignalIds(), true);
+  assert.equal(legacyPo3.signalId, 'power_of_3-generated');
+  assert.equal(legacyPo3.adaptiveScopeKey, undefined);
+  assert.equal(scopedCrt.signalId, 'crt_tbs-generated');
+  assert.equal(scopedCrt.adaptiveScopeKey, 'user:alice');
+});
+
+test('strategy processors stamp new signals before adaptive sync and learning gates use scope', () => {
+  function runCase({ fnName, detectName, historyName, signal, extras = {} }) {
+    const harness = `${extractFunction(fnName)}\nmodule.exports = { ${fnName} };`;
+    let stampCalls = 0;
+    const context = {
+      module: { exports: {} },
+      minConfluenceEnabled: false,
+      computeConfluenceScore: () => 7,
+      getActiveConfluenceFactors: () => ['Scoped Factor'],
+      stampSignalLifecycle: (entry) => {
+        stampCalls++;
+        entry.signalId = `${fnName}-sig`;
+        entry.adaptiveScopeKey = 'user:bob';
+        return entry;
+      },
+      getActiveSymbol: () => 'R_100',
+      fmtPrice: (value) => String(value),
+      fmt: (value) => String(value),
+      addLog: () => {},
+      playStrategyAlert: () => {},
+      showToast: () => {},
+      renderStrategyAlerts: () => {},
+      notificationsEnabled: false,
+      telegramStrategyAutoSend: false,
+      autoTradeStrategyEnabled: false,
+      _historicalProcessing: false,
+      setTimeout: () => {},
+      executeAutoTrade: () => {},
+      po3History: [],
+      crtTbsHistory: [],
+      gridScalperMAHistory: [],
+      gridScalperV2History: [],
+      PO3_MAX_HISTORY: 5,
+      CRT_TBS_MAX_HISTORY: 5,
+      GRID_SCALPER_MA_MAX_HISTORY: 5,
+      GRID_SCALPER_V2_MAX_HISTORY: 5,
+      gridScalperAdaptiveEnabled: false,
+      gridScalperAdaptiveModeValue: 'Off',
+      normalizeGridScalperV2Settings: () => ({ emaSlowPeriod: 1, atrPeriod: 1 }),
+      applyGridScalperV2SettingsToUI: () => {},
+      gridV2_resetDailyState: () => {},
+      updateGridScalperV2DashboardUI: () => {},
+      candles: Array.from({ length: 40 }, (_, idx) => ({ epoch: idx + 1 })),
+      gridScalperV2Enabled: true,
+      gridScalperV2State: null,
+      lastGridScalperV2Idx: 0,
+      autoTradeGridScalperV2: false,
+      autoTradeGridScalperMA: false,
+      autoTradePo3: false,
+      Object,
+      Math
+    };
+    context[detectName] = () => Object.assign({}, signal);
+    Object.assign(context, extras);
+    vm.createContext(context);
+    vm.runInContext(harness, context);
+    context.module.exports[fnName]();
+
+    assert.equal(stampCalls, 1, `${fnName} should stamp the inserted signal once`);
+    assert.equal(context[historyName].length, 1, `${fnName} should insert one signal`);
+    assert.equal(context[historyName][0].adaptiveScopeKey, 'user:bob', `${fnName} should persist the stamped scope`);
+    assert.equal(context[historyName][0].signalId, `${fnName}-sig`, `${fnName} should persist the stamped signal ID`);
+  }
+
+  runCase({
+    fnName: 'processPowerOf3',
+    detectName: 'detectPowerOf3',
+    historyName: 'po3History',
+    signal: {
+      dir: 'BULL',
+      entry: 100,
+      sl: 95,
+      tp: 110,
+      rr: 2,
+      candleIdx: 3,
+      oneHourOpen: 99,
+      sweepPrice: 98,
+      fvgHigh: 101,
+      fvgLow: 97,
+      symbol: 'R_100',
+      result: 'PENDING',
+      type: 'power_of_3'
+    }
+  });
+
+  runCase({
+    fnName: 'processCrtTbs',
+    detectName: 'detectCrtTbsStrategy',
+    historyName: 'crtTbsHistory',
+    signal: {
+      dir: 'BULL',
+      entry: 100,
+      sl: 95,
+      tp: 110,
+      rr: 2,
+      candleIdx: 3,
+      crtLow: 97,
+      crtHigh: 103,
+      bias: 'buy',
+      symbol: 'R_100',
+      result: 'PENDING',
+      type: 'crt_tbs'
+    }
+  });
+
+  runCase({
+    fnName: 'processGridScalperMA',
+    detectName: 'detectGridScalperMA',
+    historyName: 'gridScalperMAHistory',
+    signal: {
+      dir: 'BULL',
+      entry: 100,
+      sl: 95,
+      tp: 110,
+      rr: 2,
+      candleIdx: 3,
+      symbol: 'R_100',
+      result: 'PENDING',
+      type: 'grid_scalper_ma',
+      mode: 'bos'
+    }
+  });
+
+  runCase({
+    fnName: 'processGridScalperV2',
+    detectName: 'detectGridScalperV2Strategy',
+    historyName: 'gridScalperV2History',
+    signal: {
+      dir: 'BUY',
+      entry: 100,
+      stopLoss: 95,
+      confidenceScore: 72,
+      entryScore: 64,
+      gridSpacing: 1,
+      maxTrades: 3,
+      regime: 'RANGING',
+      atr: 1,
+      adx: 20,
+      targets: [{ price: 110 }],
+      symbol: 'R_100',
+      result: 'PENDING',
+      status: 'ACTIVE'
+    }
+  });
+});
+
+test('monitorOrderblockOutcomes only marks confluence outcomes as recorded when the scope is accepted', () => {
+  const harness = `${extractFunction('monitorOrderblockOutcomes')}\nmodule.exports = { monitorOrderblockOutcomes };`;
+  const calls = [];
+  const aliceSignal = {
+    dir: 'BULL',
+    tp: 110,
+    sl: 95,
+    candleIdx: 0,
+    result: 'PENDING',
+    adaptiveScopeKey: 'user:alice',
+    _confFactors: ['A']
+  };
+  const bobSignal = {
+    dir: 'BULL',
+    tp: 110,
+    sl: 95,
+    candleIdx: 0,
+    result: 'PENDING',
+    adaptiveScopeKey: 'user:bob',
+    _confFactors: ['B']
+  };
+  const context = {
+    module: { exports: {} },
+    orderblockEnabled: true,
+    orderblockHistory: [aliceSignal, bobSignal],
+    candles: [{ high: 100, low: 100 }, { high: 111, low: 99 }],
+    addLog: () => {},
+    _historicalProcessing: true,
+    telegramStrategyOutcomeSend: false,
+    adaptiveConfluenceEnabled: true,
+    recordConfluenceOutcome: (_factors, _result, scopeKey) => {
+      calls.push(scopeKey);
+      return scopeKey === 'user:bob';
+    },
+    updateStatsUI: () => {}
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { monitorOrderblockOutcomes } = context.module.exports;
+
+  monitorOrderblockOutcomes(1);
+
+  assert.deepEqual(calls, ['user:alice', 'user:bob']);
+  assert.equal(aliceSignal.result, 'WIN');
+  assert.equal(aliceSignal._confRecorded, undefined);
+  assert.equal(bobSignal.result, 'WIN');
+  assert.equal(bobSignal._confRecorded, true);
+});
+
 test('hydrateAdaptiveRuntimeFromDb ignores stale async responses after auth scope changes', async () => {
   const harness = [
     extractFunction('hydrateAdaptiveRuntimeFromDb'),
