@@ -27,6 +27,7 @@ test('Reset session integration clears timers and storage-backed caches', () => 
   assert.match(source, /if \(pingTimer\) \{ clearInterval\(pingTimer\); pingTimer = null; \}/);
   assert.match(source, /if \(watchdogTimer\) \{ clearInterval\(watchdogTimer\); watchdogTimer = null; \}/);
   assert.match(source, /localStorage\.removeItem\(LS_PREFIX \+ "signalHistory"\)/);
+  assert.match(source, /confluenceFactorStats = \{\}/);
   assert.match(source, /localStorage\.removeItem\(getConfluenceStatsStorageKey\(\)\)/);
   assert.match(source, /localStorage\.removeItem\(SIGNAL_NOTES_LS_KEY\)/);
 });

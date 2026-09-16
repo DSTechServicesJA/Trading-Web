@@ -44,6 +44,7 @@ test('stampSignalLifecycle captures adaptive regime only for pending signals', (
   const context = {
     module: { exports: {} },
     generateSignalId: (prefix) => `${prefix}-generated`,
+    getAdaptiveRuntimeScopeKey: () => 'user:alice',
     getSignalValidityMs: () => 60000,
     getSignalDistanceLimitAtr: () => 1.5,
     getAtrReference: () => 2.25,
@@ -1113,6 +1114,7 @@ test('restoreSignalHistory persists migrated legacy signal IDs', () => {
     orbHistory: [],
     crtTbsHistory: [],
     generateSignalId: () => 'sig-migrated',
+    getAdaptiveRuntimeScopeKey: () => 'user:alice',
     getSignalValidityMs: () => 60000,
     getSignalDistanceLimitAtr: () => 1.5,
     getAtrReference: () => 2,
@@ -1278,9 +1280,13 @@ test('activatePanel restores MTF setup only when the exact breakout epoch exists
 });
 
 test('resetSession keeps only contract-backed active trades and their pending settlement records', () => {
-  const fnSource = extractFunction('resetSession');
-  const harness = `${fnSource}\nmodule.exports = { resetSession };`;
+  const harness = [
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('resetSession'),
+    'module.exports = { resetSession };'
+  ].join('\n');
   const clearedTimeouts = [];
+  const removedLocalStorageKeys = [];
   const sentKeys = { cleared: false, clear() { this.cleared = true; } };
   const inFlightKeys = { cleared: false, clear() { this.cleared = true; } };
   const context = {
@@ -1337,10 +1343,15 @@ test('resetSession keeps only contract-backed active trades and their pending se
     renderStrategyAlerts: () => {},
     updateSignalBanners: () => {},
     document: { getElementById: () => null },
-    localStorage: { removeItem: () => {} },
+    localStorage: { removeItem: (key) => removedLocalStorageKeys.push(key) },
     sessionStorage: { removeItem: () => {} },
     LS_PREFIX: 'tg_',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
     SIGNAL_NOTES_LS_KEY: 'tg_notes',
+    confluenceFactorStats: { stale: { wins: 5, losses: 1 } },
+    adaptiveConfluenceEnabled: true,
+    renderAdaptiveConfluenceTable: () => {},
+    getAdaptiveRuntimeScopeKey: () => 'user:alice',
     autoTradeHistory: [
       { symbol: 'R_100', tradeId: 'keep', result: 'PENDING' },
       { symbol: 'R_100', tradeId: 'drop', result: 'PENDING' }
@@ -1397,7 +1408,8 @@ test('resetSession keeps only contract-backed active trades and their pending se
     Map,
     Set,
     Object,
-    Array
+    Array,
+    encodeURIComponent
   };
   vm.createContext(context);
   vm.runInContext(harness, context);
@@ -1416,6 +1428,8 @@ test('resetSession keeps only contract-backed active trades and their pending se
   assert.equal(panel.lastMtfSetupAlertKey, '');
   assert.equal(sentKeys.cleared, true);
   assert.equal(inFlightKeys.cleared, true);
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), []);
+  assert.ok(removedLocalStorageKeys.includes('tg_confStats::user%3Aalice'));
 });
 
 test('processMtfTopDown keeps debug diagnostics but skips strategy processing when disabled', () => {
@@ -1532,6 +1546,8 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
   const harness = [
     extractFunction('getAdaptiveRuntimeScopeKey'),
     extractFunction('getAdaptiveRuntimeStorageKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('loadConfluenceStats'),
     extractFunction('resetAdaptiveRuntimeSyncState'),
     extractFunction('initAdaptiveRuntime'),
     'module.exports = { initAdaptiveRuntime, getAdaptiveRuntimeStorageKey };'
@@ -1546,6 +1562,7 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
     module: { exports: {} },
     ADAPTIVE_STATE_LS_KEY: 'tg_adaptiveState',
     ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    LS_PREFIX: 'tg_',
     adaptiveRuntime: null,
     adaptiveRuntimeStorageScopeKey: '__guest__',
     adaptiveMode: 'FULL_AUTO',
@@ -1556,6 +1573,7 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
     adaptiveIntelligenceBootstrapCache: new Map([['old-scope', { stale: true }]]),
     adaptiveIntelligenceBootstrapPromises: new Map([['old-scope', Promise.resolve()]]),
     adaptiveIntelligenceBootstrapLatestRequestIds: new Map([['old-scope', 1]]),
+    confluenceFactorStats: { stale: { wins: 1, losses: 9 } },
     AdaptiveEngine,
     ITGuruAuth: { getUser: () => ({ username: 'Alice' }) },
     localStorage: {
@@ -1569,6 +1587,7 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
   };
   store.set('tg_adaptiveState', JSON.stringify({ owner: 'legacy-shared' }));
   store.set('tg_adaptiveState::user%3Aalice', JSON.stringify({ owner: 'alice-only' }));
+  store.set('tg_confStats::user%3Aalice', JSON.stringify({ 'EMA Aligned': { wins: 3, losses: 1 } }));
   vm.createContext(context);
   vm.runInContext(harness, context);
   const { initAdaptiveRuntime, getAdaptiveRuntimeStorageKey } = context.module.exports;
@@ -1580,12 +1599,15 @@ test('initAdaptiveRuntime loads the authenticated user scoped state instead of t
   assert.equal(getAdaptiveRuntimeStorageKey(), 'tg_adaptiveState::user%3Aalice');
   assert.equal(context.adaptiveRuntimeDbHydrated, false);
   assert.equal(context.adaptiveIntelligenceBootstrapCache.size, 0);
+  assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 3, losses: 1 } });
 });
 
 test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authenticated user changes', () => {
   const harness = [
     extractFunction('getAdaptiveRuntimeScopeKey'),
     extractFunction('getAdaptiveRuntimeStorageKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('loadConfluenceStats'),
     extractFunction('resetAdaptiveRuntimeSyncState'),
     extractFunction('initAdaptiveRuntime'),
     extractFunction('ensureAdaptiveRuntimeScope'),
@@ -1602,6 +1624,7 @@ test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authentic
     module: { exports: {} },
     ADAPTIVE_STATE_LS_KEY: 'tg_adaptiveState',
     ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    LS_PREFIX: 'tg_',
     adaptiveRuntime: null,
     adaptiveRuntimeStorageScopeKey: '__guest__',
     adaptiveMode: 'FULL_AUTO',
@@ -1612,6 +1635,7 @@ test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authentic
     adaptiveIntelligenceBootstrapCache: new Map(),
     adaptiveIntelligenceBootstrapPromises: new Map(),
     adaptiveIntelligenceBootstrapLatestRequestIds: new Map(),
+    confluenceFactorStats: { stale: { wins: 8, losses: 2 } },
     AdaptiveEngine,
     ITGuruAuth: { getUser: () => currentUser },
     localStorage: {
@@ -1625,6 +1649,7 @@ test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authentic
   };
   store.set('tg_adaptiveState::user%3Aalice', JSON.stringify({ owner: 'alice-state' }));
   store.set('tg_adaptiveState::user%3Abob', JSON.stringify({ owner: 'bob-state' }));
+  store.set('tg_confStats::user%3Abob', JSON.stringify({ 'EMA Aligned': { wins: 2, losses: 3 } }));
   vm.createContext(context);
   vm.runInContext(harness, context);
   const { initAdaptiveRuntime, ensureAdaptiveRuntimeScope } = context.module.exports;
@@ -1651,6 +1676,7 @@ test('ensureAdaptiveRuntimeScope reinitializes adaptive state when the authentic
   assert.equal(context.adaptiveIntelligenceBootstrapCache.size, 0);
   assert.equal(context.adaptiveIntelligenceBootstrapPromises.size, 0);
   assert.equal(context.adaptiveIntelligenceBootstrapLatestRequestIds.size, 0);
+  assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 2, losses: 3 } });
 });
 
 test('confluence stats persistence is scoped per authenticated user', () => {
@@ -1694,6 +1720,83 @@ test('confluence stats persistence is scoped per authenticated user', () => {
   loadConfluenceStats();
 
   assert.deepEqual(context.confluenceFactorStats, { 'EMA Aligned': { wins: 2, losses: 3 } });
+
+  currentUser = { username: 'charlie' };
+  context.confluenceFactorStats = { stale: { wins: 7, losses: 4 } };
+  loadConfluenceStats();
+
+  assert.deepEqual(Object.keys(context.confluenceFactorStats), []);
+});
+
+test('recordConfluenceOutcome ignores stale outcomes after an auth scope change', () => {
+  const harness = [
+    extractFunction('getAdaptiveRuntimeScopeKey'),
+    extractFunction('getConfluenceStatsStorageKey'),
+    extractFunction('recordConfluenceOutcome'),
+    'module.exports = { recordConfluenceOutcome };'
+  ].join('\n');
+  const store = new Map();
+  let currentUser = { username: 'bob' };
+  const context = {
+    module: { exports: {} },
+    LS_PREFIX: 'tg_',
+    ADAPTIVE_RUNTIME_GUEST_SCOPE: '__guest__',
+    adaptiveConfluenceEnabled: true,
+    confluenceFactorStats: {},
+    ITGuruAuth: { getUser: () => currentUser },
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, value)
+    },
+    encodeURIComponent,
+    JSON,
+    Number,
+    String
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { recordConfluenceOutcome } = context.module.exports;
+
+  recordConfluenceOutcome(['EMA Aligned'], 'WIN', 'user:alice');
+
+  assert.deepEqual(context.confluenceFactorStats, {});
+  assert.equal(store.size, 0);
+});
+
+test('processAdaptiveResolvedSignals stops when the auth scope changes mid-run', () => {
+  const harness = `${extractFunction('processAdaptiveResolvedSignals')}\nmodule.exports = { processAdaptiveResolvedSignals };`;
+  const context = {
+    module: { exports: {} },
+    adaptiveRuntime: { state: {} },
+    ensureAdaptiveRuntimeScope: () => false,
+    signalHistory: [{ result: 'WIN', signalId: 'sig-1' }],
+    mtfTopDownHistory: [],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    crtTbsHistory: [],
+    stampSignalLifecycle: () => { throw new Error('should not stamp stale signals'); },
+    restoreSignalLifecycle: () => { throw new Error('should not restore stale signals'); },
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processAdaptiveResolvedSignals } = context.module.exports;
+
+  assert.doesNotThrow(() => processAdaptiveResolvedSignals());
 });
 
 test('hydrateAdaptiveRuntimeFromDb ignores stale async responses after auth scope changes', async () => {
