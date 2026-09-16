@@ -786,6 +786,10 @@ function getAdaptiveRuntimeStorageKey(scopeKey = getAdaptiveRuntimeScopeKey()) {
   return `${ADAPTIVE_STATE_LS_KEY}::${encodeURIComponent(String(scopeKey || ADAPTIVE_RUNTIME_GUEST_SCOPE))}`;
 }
 
+function getConfluenceStatsStorageKey(scopeKey = getAdaptiveRuntimeScopeKey()) {
+  return `${LS_PREFIX}confStats::${encodeURIComponent(String(scopeKey || ADAPTIVE_RUNTIME_GUEST_SCOPE))}`;
+}
+
 function resetAdaptiveRuntimeSyncState() {
   adaptiveRuntimeDbHydrated = false;
   adaptiveIntelligenceBootstrap = null;
@@ -846,9 +850,7 @@ const _adaptiveAppliedLogCache = new Map();
 
 function syncAdaptiveProfileToDb(ctx, profile) {
   if (!ctx || !profile) return;
-  if (!ensureAdaptiveRuntimeScope()) {
-    profile = adaptiveRuntime ? adaptiveRuntime.ensureProfile(ctx) : profile;
-  }
+  if (!ensureAdaptiveRuntimeScope()) return;
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
   const prevWeights = profile._lastSyncedSettings || {};
@@ -885,11 +887,16 @@ async function hydrateAdaptiveRuntimeFromDb() {
   ensureAdaptiveRuntimeScope();
   if (adaptiveRuntimeDbHydrated) return;
   if (!adaptiveRuntime) return;
+  const scopeKey = adaptiveRuntimeStorageScopeKey;
+  const runtime = adaptiveRuntime;
   if (!adaptiveIntelligenceClient) initAdaptiveIntelligenceClient();
   if (!adaptiveIntelligenceClient || !adaptiveIntelligenceClient.isAuthenticated()) return;
   adaptiveRuntimeDbHydrated = true;
   try {
     const rows = await adaptiveIntelligenceClient.getAdaptiveProfiles();
+    if (adaptiveRuntime !== runtime || adaptiveRuntimeStorageScopeKey !== scopeKey || getAdaptiveRuntimeScopeKey() !== scopeKey) {
+      return;
+    }
     if (!Array.isArray(rows) || !rows.length) {
       console.log("[Adaptive] Loaded weight: none found in database (starting fresh)");
       return;
@@ -1315,6 +1322,8 @@ function buildAdaptiveContext(overrides = {}) {
 
 function getAdaptiveResolution(overrides = {}) {
   if (!adaptiveRuntime) return null;
+  ensureAdaptiveRuntimeScope();
+  if (!adaptiveRuntime) return null;
   return adaptiveRuntime.resolve(buildAdaptiveContext(overrides), getManualAdaptiveSettings());
 }
 
@@ -1335,6 +1344,8 @@ function getAdaptiveAppliedNumber(key, fallback, overrides = {}) {
 }
 
 function processAdaptiveResolvedSignals() {
+  if (!adaptiveRuntime) return;
+  ensureAdaptiveRuntimeScope();
   if (!adaptiveRuntime) return;
   const buckets = [
     signalHistory, mtfTopDownHistory, liquiditySweepHistory, stopLossHuntHistory,
@@ -20806,7 +20817,7 @@ function resetSession() {
     localStorage.removeItem(LS_PREFIX + "signalHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradeHistory");
     localStorage.removeItem(LS_PREFIX + "autoTradePL");
-    localStorage.removeItem(LS_PREFIX + "confStats");
+    localStorage.removeItem(getConfluenceStatsStorageKey());
     localStorage.removeItem(SIGNAL_NOTES_LS_KEY);
     localStorage.removeItem(LS_PREFIX + "gsFlipStats");
     localStorage.removeItem(LS_PREFIX + "gsOppSettings");
@@ -24675,11 +24686,11 @@ function recordConfluenceOutcome(factors, result) {
     if (result === "WIN")  confluenceFactorStats[factor].wins++;
     if (result === "LOSS") confluenceFactorStats[factor].losses++;
   }
-  try { localStorage.setItem(LS_PREFIX + "confStats", JSON.stringify(confluenceFactorStats)); } catch(e) {}
+  try { localStorage.setItem(getConfluenceStatsStorageKey(), JSON.stringify(confluenceFactorStats)); } catch(e) {}
 }
 function loadConfluenceStats() {
   try {
-    const raw = localStorage.getItem(LS_PREFIX + "confStats");
+    const raw = localStorage.getItem(getConfluenceStatsStorageKey());
     if (raw) confluenceFactorStats = JSON.parse(raw);
   } catch(e) { confluenceFactorStats = {}; }
 }
@@ -26805,9 +26816,10 @@ function initLoginGate() {
     ITGuruAuth.initLoginGate({
       onLogin: () => {
         localStorage.removeItem("itguru_deriv_token");
+        initAdaptiveRuntime(true);
         /* Refresh user data (role + strategies) from server */
         ITGuruAuth.verify().then(() => {
-          initAdaptiveRuntime(true);
+          ensureAdaptiveRuntimeScope();
           applyStrategyAccess();
           bootstrapAdaptiveIntelligence(true);
         });
