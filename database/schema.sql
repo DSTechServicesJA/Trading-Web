@@ -442,13 +442,89 @@ CREATE TABLE IF NOT EXISTS adaptive_factor_stats (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Migration: add adaptive factor lock metadata to existing databases
--- ALTER TABLE adaptive_factor_stats
---     ADD COLUMN locked_by_admin TINYINT(1) NOT NULL DEFAULT 0 AFTER current_weight,
---     ADD COLUMN locked_reason VARCHAR(255) DEFAULT NULL AFTER locked_by_admin,
---     ADD COLUMN locked_at TIMESTAMP NULL DEFAULT NULL AFTER locked_reason,
---     ADD COLUMN locked_by_user_id INT UNSIGNED DEFAULT NULL AFTER locked_at,
---     ADD INDEX idx_adaptive_factor_locked (locked_by_admin, updated_at),
---     ADD CONSTRAINT fk_adaptive_factor_locked_by FOREIGN KEY (locked_by_user_id) REFERENCES users (id) ON DELETE SET NULL;
+SET @adaptive_has_locked_by_admin := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'adaptive_factor_stats'
+      AND COLUMN_NAME = 'locked_by_admin'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_by_admin = 0,
+    'ALTER TABLE adaptive_factor_stats ADD COLUMN locked_by_admin TINYINT(1) NOT NULL DEFAULT 0 AFTER current_weight',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
+
+SET @adaptive_has_locked_reason := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'adaptive_factor_stats'
+      AND COLUMN_NAME = 'locked_reason'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_reason = 0,
+    'ALTER TABLE adaptive_factor_stats ADD COLUMN locked_reason VARCHAR(255) DEFAULT NULL AFTER locked_by_admin',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
+
+SET @adaptive_has_locked_at := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'adaptive_factor_stats'
+      AND COLUMN_NAME = 'locked_at'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_at = 0,
+    'ALTER TABLE adaptive_factor_stats ADD COLUMN locked_at TIMESTAMP NULL DEFAULT NULL AFTER locked_reason',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
+
+SET @adaptive_has_locked_by_user_id := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'adaptive_factor_stats'
+      AND COLUMN_NAME = 'locked_by_user_id'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_by_user_id = 0,
+    'ALTER TABLE adaptive_factor_stats ADD COLUMN locked_by_user_id INT UNSIGNED DEFAULT NULL AFTER locked_at',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
+
+SET @adaptive_has_locked_index := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'adaptive_factor_stats'
+      AND INDEX_NAME = 'idx_adaptive_factor_locked'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_index = 0,
+    'ALTER TABLE adaptive_factor_stats ADD INDEX idx_adaptive_factor_locked (locked_by_admin, updated_at)',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
+
+SET @adaptive_has_locked_fk := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE()
+      AND CONSTRAINT_NAME = 'fk_adaptive_factor_locked_by'
+      AND TABLE_NAME = 'adaptive_factor_stats'
+);
+SET @adaptive_sql := IF(@adaptive_has_locked_fk = 0,
+    'ALTER TABLE adaptive_factor_stats ADD CONSTRAINT fk_adaptive_factor_locked_by FOREIGN KEY (locked_by_user_id) REFERENCES users (id) ON DELETE SET NULL',
+    'SELECT 1');
+PREPARE adaptive_stmt FROM @adaptive_sql;
+EXECUTE adaptive_stmt;
+DEALLOCATE PREPARE adaptive_stmt;
 
 -- ──────────────────────────────────────────────
 -- Cached learning profiles by category / strategy / symbol
@@ -580,4 +656,3 @@ CREATE TABLE IF NOT EXISTS adaptive_learning_audit_log (
     CONSTRAINT fk_adaptive_audit_target
         FOREIGN KEY (target_user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

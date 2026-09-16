@@ -1214,9 +1214,8 @@ html[data-theme="light"] .form-row select {
   margin-bottom: 14px;
 }
 
-.adaptive-profile-table-wrap,
-.adaptive-surface {
-  overflow: hidden;
+.adaptive-profile-table-wrap {
+  overflow-x: auto;
 }
 
 .adaptive-table th,

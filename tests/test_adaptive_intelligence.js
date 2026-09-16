@@ -8,6 +8,8 @@ const indicatorSource = fs.readFileSync(path.resolve(__dirname, '../indicator/in
 const adminSource = fs.readFileSync(path.resolve(__dirname, '../admin/admin.js'), 'utf8');
 const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
 const adminControllerSource = fs.readFileSync(path.resolve(__dirname, '../api/admin/adaptive.php'), 'utf8');
+const adminStyleSource = fs.readFileSync(path.resolve(__dirname, '../admin/style.css'), 'utf8');
+const schemaSource = fs.readFileSync(path.resolve(__dirname, '../database/schema.sql'), 'utf8');
 
 test('market categories remain isolated by symbol family', () => {
   assert.equal(utils.getMarketCategory('1HZ100V', 1), 'VOLATILITY_1S');
@@ -171,4 +173,21 @@ test('admin dashboard exposes adaptive management workflows', () => {
   assert.match(adminSource, /adaptiveHistoryModal/);
   assert.match(adminSource, /adaptiveProfilesIndexBody/);
   assert.match(adminSource, /adaptiveCategoryAnalytics/);
+});
+
+test('adaptive admin review fixes are wired for sorting, exports, locks, and accessibility', () => {
+  assert.match(adminSource, /function adaptiveFiniteNumber\(/);
+  assert.match(adminSource, /source username, or use id:<user_id>/);
+  assert.match(adminSource, /sourceInput\.match\(/);
+  assert.match(adminSource, /payload\.source_user_id = Number\(sourceIdMatch\[1\]\)/);
+  assert.match(adminSource, /data-adaptive-user-id="\$\{row\.user_id\}" tabindex="0" role="button"/);
+  assert.match(serviceSource, /sort_key/);
+  assert.match(serviceSource, /sort_direction/);
+  assert.match(serviceSource, /market_category IN \(\?, '\*'\)/);
+  assert.match(serviceSource, /adaptiveExportUserTrades/);
+  assert.match(serviceSource, /UNTRUSTED_CLIENT_REPORTED/);
+  assert.match(adminControllerSource, /adaptiveExportUserTrades\(/);
+  assert.match(adminControllerSource, /adaptiveAcquireUserTradeLock\(/);
+  assert.match(schemaSource, /INFORMATION_SCHEMA\.COLUMNS/);
+  assert.match(adminStyleSource, /\.adaptive-profile-table-wrap \{\s*overflow-x: auto;/);
 });
