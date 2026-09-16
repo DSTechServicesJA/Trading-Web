@@ -1921,7 +1921,7 @@ function renderAdaptiveProfileIndex(rows, payload) {
     const categories = (row.market_categories_enabled || []).slice(0, 2).map(adaptiveCategoryLabel).join(', ') || 'All defaults';
     const rowLabel = `View adaptive profile for ${row.name || row.username}`;
     return `
-      <tr class="adaptive-profile-row${selected ? ' selected' : ''}" data-adaptive-user-id="${row.user_id}" tabindex="0" role="button" aria-label="${escHtml(rowLabel)}" aria-selected="${selected ? 'true' : 'false'}">
+      <tr class="adaptive-profile-row${selected ? ' selected' : ''}" data-adaptive-user-id="${row.user_id}" tabindex="0" role="button" aria-label="${escHtml(rowLabel)}" aria-pressed="${selected ? 'true' : 'false'}">
         <td>
           <strong>${escHtml(row.name || row.username)}</strong>
           <div class="ts">@${escHtml(row.username)}</div>
