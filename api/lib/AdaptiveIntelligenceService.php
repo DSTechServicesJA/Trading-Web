@@ -415,7 +415,7 @@ function adaptiveHydrateUserSummaries(PDO $pdo, array $users): array
         $summaryById[$id]['last_updated'] = adaptiveLatestTimestamp($summaryById[$id]['last_updated'], $row['updated_at'] ?? null);
     }
 
-    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS trade_count, SUM(result = 'WIN') AS wins, SUM(result = 'LOSS') AS losses, AVG(CASE WHEN result IN ('WIN','LOSS') THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence, MAX(updated_at) AS updated_at FROM adaptive_trade_history WHERE user_id IN ($placeholders) GROUP BY user_id");
+    $st = $pdo->prepare("SELECT user_id, COUNT(*) AS trade_count, SUM(result = 'WIN') AS wins, SUM(result = 'LOSS') AS losses, AVG(CASE WHEN result IN ('WIN','LOSS') THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence, MAX(updated_at) AS updated_at FROM adaptive_trade_history WHERE user_id IN ($placeholders) AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED' GROUP BY user_id");
     $st->execute($ids);
     foreach ($st->fetchAll() as $row) {
         $id = (int) $row['user_id'];
@@ -484,6 +484,8 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     $plan = trim((string) ($filters['plan'] ?? ''));
     $category = trim((string) ($filters['market_category'] ?? ''));
     $learningStatus = trim((string) ($filters['learning_status'] ?? ''));
+    $sortKey = trim((string) ($filters['sort_key'] ?? 'name'));
+    $sortDirection = strtolower(trim((string) ($filters['sort_direction'] ?? 'asc'))) === 'desc' ? 'DESC' : 'ASC';
 
     $where = [];
     $params = [];
@@ -501,20 +503,21 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $params[] = $plan;
     }
     if ($category !== '') {
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = u.id AND ar.enabled = 1 AND ar.market_category = ?)';
+        $where[] = "EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = u.id AND ar.enabled = 1 AND ar.market_category IN (?, '*'))";
         $params[] = strtoupper($category);
     }
+    $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ath.notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
     if ($learningStatus === 'NOT_STARTED') {
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = "NOT EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
     } elseif ($learningStatus === 'AUTO_LEARNING') {
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
         $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
     } elseif ($learningStatus === 'LOCKED') {
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
         $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
     } elseif ($learningStatus === 'MIXED') {
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id)';
+        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
     }
@@ -524,8 +527,14 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     $count->execute($params);
     $total = (int) $count->fetchColumn();
 
+    $sortMap = [
+        'name' => 'COALESCE(u.display_name, u.username)',
+        'subscription_plan' => "COALESCE(u.subscription_plan, '')",
+        'status' => "COALESCE(u.status, '')",
+    ];
+    $sortColumn = $sortMap[$sortKey] ?? $sortMap['name'];
     $queryParams = array_merge($params, [$perPage, $offset]);
-    $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u $whereSql ORDER BY COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
+    $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u $whereSql ORDER BY $sortColumn $sortDirection, COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
     $stmt->execute($queryParams);
     $users = $stmt->fetchAll();
     $rows = adaptiveHydrateUserSummaries($pdo, $users);
@@ -537,6 +546,44 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         'total' => $total,
         'last_page' => (int) max(1, ceil($total / $perPage)),
     ];
+}
+
+/**
+ * @return array<int,array<string,mixed>>
+ */
+function adaptiveExportUserTrades(PDO $pdo, int $userId, array $filters = []): array
+{
+    $where = ['user_id = ?'];
+    $params = [$userId];
+
+    $category = trim((string) ($filters['market_category'] ?? ''));
+    if ($category !== '') {
+        $where[] = "market_category IN (?, '*')";
+        $params[] = strtoupper($category);
+    }
+    $strategy = trim((string) ($filters['strategy_key'] ?? ''));
+    if ($strategy !== '') {
+        $where[] = 'strategy_key = ?';
+        $params[] = $strategy;
+    }
+    $symbol = trim((string) ($filters['symbol'] ?? ''));
+    if ($symbol !== '') {
+        $where[] = 'symbol = ?';
+        $params[] = $symbol;
+    }
+
+    $where[] = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
+    $stmt = $pdo->prepare('SELECT * FROM adaptive_trade_history WHERE ' . implode(' AND ', $where) . ' ORDER BY created_at DESC, id DESC');
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    return array_map(static function (array $row): array {
+        $row['confluence_factors_present'] = json_decode((string) ($row['confluence_factors_json'] ?? ''), true) ?: [];
+        $row['confluence_factors_raw'] = json_decode((string) ($row['confluence_factors_raw_json'] ?? ''), true) ?: [];
+        $row['notes'] = json_decode((string) ($row['notes_json'] ?? ''), true) ?: [];
+        unset($row['id'], $row['user_id'], $row['confluence_factors_json'], $row['confluence_factors_raw_json'], $row['notes_json'], $row['created_at'], $row['updated_at']);
+        return $row;
+    }, $rows);
 }
 
 /**

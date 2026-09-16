@@ -40,6 +40,7 @@ try {
                 jsonResponse(['error' => 'user_id is required'], 400);
             }
             $payload = adaptiveUserIntelligenceDetail($pdo, $targetUserId, $_GET);
+            $payload['trades'] = adaptiveExportUserTrades($pdo, $targetUserId, $_GET);
             jsonResponse(['exported_at' => gmdate('c'), 'data' => $payload]);
         }
         jsonResponse(['error' => 'Unsupported action'], 400);
@@ -115,36 +116,56 @@ try {
             if (!$current) {
                 jsonResponse(['error' => 'Factor stat not found'], 404);
             }
-            $allowed = ['wins','losses','cancelled','sample_size','avg_r_multiple','confidence_score','base_weight','current_weight','trend_direction','last_adjustment_reason','locked_by_admin','locked_reason'];
-            $set = [];
-            $params = [];
-            foreach ($allowed as $field) {
-                if (array_key_exists($field, $body)) {
-                    $set[] = $field . ' = ?';
-                    $params[] = $body[$field];
+            $targetFactorUserId = (int) $current['user_id'];
+            adaptiveAcquireUserTradeLock($pdo, $targetFactorUserId);
+            try {
+                $currentStmt->execute([$factorId]);
+                $current = $currentStmt->fetch();
+                if (!$current) {
+                    jsonResponse(['error' => 'Factor stat not found'], 404);
                 }
+
+                $allowed = ['wins','losses','cancelled','sample_size','avg_r_multiple','confidence_score','base_weight','current_weight','trend_direction','last_adjustment_reason','locked_by_admin','locked_reason'];
+                $set = [];
+                $params = [];
+                foreach ($allowed as $field) {
+                    if (array_key_exists($field, $body)) {
+                        $set[] = $field . ' = ?';
+                        $params[] = $body[$field];
+                    }
+                }
+                if (!$set) {
+                    jsonResponse(['error' => 'No updatable factor fields provided'], 400);
+                }
+                $params[] = $factorId;
+                if (array_key_exists('locked_by_admin', $body)) {
+                    $set[] = 'locked_at = ' . (!empty($body['locked_by_admin']) ? 'CURRENT_TIMESTAMP' : 'NULL');
+                    $set[] = 'locked_by_user_id = ' . (!empty($body['locked_by_admin']) ? (int) $adminUserId : 'NULL');
+                }
+
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare('UPDATE adaptive_factor_stats SET ' . implode(', ', $set) . ', updated_at = CURRENT_TIMESTAMP, last_updated = CURRENT_TIMESTAMP WHERE id = ?');
+                $stmt->execute($params);
+                $nextValue = array_merge($current, array_intersect_key($body, array_flip($allowed)));
+                if (array_key_exists('locked_by_admin', $body)) {
+                    $nextValue['locked_at'] = !empty($body['locked_by_admin']) ? gmdate('Y-m-d H:i:s') : null;
+                    $nextValue['locked_by_user_id'] = !empty($body['locked_by_admin']) ? $adminUserId : null;
+                }
+                $actionType = 'ADMIN_FACTOR_OVERRIDE';
+                if (array_key_exists('locked_by_admin', $body)) {
+                    $actionType = !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_UNLOCK';
+                }
+                adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], $actionType, 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
+                $pdo->commit();
+                jsonResponse(['message' => 'Factor statistics updated']);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            } finally {
+                adaptiveReleaseUserTradeLock($pdo, $targetFactorUserId);
             }
-            if (!$set) {
-                jsonResponse(['error' => 'No updatable factor fields provided'], 400);
-            }
-            $params[] = $factorId;
-            if (array_key_exists('locked_by_admin', $body)) {
-                $set[] = 'locked_at = ' . (!empty($body['locked_by_admin']) ? 'CURRENT_TIMESTAMP' : 'NULL');
-                $set[] = 'locked_by_user_id = ' . (!empty($body['locked_by_admin']) ? (int) $adminUserId : 'NULL');
-            }
-            $stmt = $pdo->prepare('UPDATE adaptive_factor_stats SET ' . implode(', ', $set) . ', updated_at = CURRENT_TIMESTAMP, last_updated = CURRENT_TIMESTAMP WHERE id = ?');
-            $stmt->execute($params);
-            $nextValue = array_merge($current, array_intersect_key($body, array_flip($allowed)));
-            if (array_key_exists('locked_by_admin', $body)) {
-                $nextValue['locked_at'] = !empty($body['locked_by_admin']) ? gmdate('Y-m-d H:i:s') : null;
-                $nextValue['locked_by_user_id'] = !empty($body['locked_by_admin']) ? $adminUserId : null;
-            }
-            $actionType = 'ADMIN_FACTOR_OVERRIDE';
-            if (array_key_exists('locked_by_admin', $body)) {
-                $actionType = !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_UNLOCK';
-            }
-            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], $actionType, 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
-            jsonResponse(['message' => 'Factor statistics updated']);
         }
 
         jsonResponse(['error' => 'Unsupported action'], 400);
@@ -233,10 +254,20 @@ try {
             if ($factorId <= 0) {
                 jsonResponse(['error' => 'id is required'], 400);
             }
-            $pdo->beginTransaction();
-            $row = adaptiveResetFactorStat($pdo, $adminUserId, $targetUserId, $factorId, (string) ($body['reason'] ?? 'Admin reset adaptive factor to base weight'));
-            $pdo->commit();
-            jsonResponse(['message' => 'Adaptive factor reset', 'factor' => $row]);
+            adaptiveAcquireUserTradeLock($pdo, $targetUserId);
+            try {
+                $pdo->beginTransaction();
+                $row = adaptiveResetFactorStat($pdo, $adminUserId, $targetUserId, $factorId, (string) ($body['reason'] ?? 'Admin reset adaptive factor to base weight'));
+                $pdo->commit();
+                jsonResponse(['message' => 'Adaptive factor reset', 'factor' => $row]);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            } finally {
+                adaptiveReleaseUserTradeLock($pdo, $targetUserId);
+            }
         }
 
         if ($action === 'import') {

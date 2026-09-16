@@ -1544,12 +1544,21 @@ function adaptiveCategoryLabel(value) {
   return ADAPTIVE_CATEGORY_LABELS[value] || value || '—';
 }
 
+function adaptiveFiniteNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function adaptiveNumber(value, digits = 1, fallback = '—') {
-  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : fallback;
+  const parsed = adaptiveFiniteNumber(value);
+  return parsed === null ? fallback : parsed.toFixed(digits);
 }
 
 function adaptivePct(value, digits = 1, fallback = '—') {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}%` : fallback;
+  const parsed = adaptiveFiniteNumber(value);
+  return parsed === null ? fallback : `${parsed.toFixed(digits)}%`;
 }
 
 function adaptiveStatusClass(status) {
@@ -1616,6 +1625,8 @@ function buildAdaptiveProfilesQuery(page = 1) {
     if (key === 'strategy_key' || key === 'symbol') continue;
     if (value) params.set(key, value);
   }
+  params.set('sort_key', adaptiveProfileSortKey);
+  params.set('sort_direction', adaptiveProfileSortDirection);
   return params.toString();
 }
 
@@ -1634,14 +1645,16 @@ async function loadAdaptiveDashboard(preferredUserId = adaptiveSelectedUserId) {
 }
 
 async function loadAdaptiveProfileIndex(preferredUserId = adaptiveSelectedUserId, pageOverride = null) {
-  const page = pageOverride || adaptiveDashboardState.profileIndex?.page || 1;
+  const page = Number.isFinite(Number(pageOverride)) && Number(pageOverride) > 0
+    ? Number(pageOverride)
+    : (adaptiveDashboardState.profileIndex?.page || 1);
   const tbody = el('adaptiveProfilesIndexBody');
   if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="table-empty">Loading intelligence profiles…</td></tr>';
   try {
     const resp = await apiRequest('/admin/adaptive?' + buildAdaptiveProfilesQuery(page));
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Failed to load intelligence profiles');
-    const rows = adaptiveSortRows(data.rows || [], adaptiveProfileSortKey, adaptiveProfileSortDirection);
+    const rows = data.rows || [];
     adaptiveDashboardState.profileIndex = { ...data, rows };
     renderAdaptiveProfileIndex(rows, data);
     const selected = rows.some((row) => Number(row.user_id) === Number(preferredUserId))
@@ -1675,8 +1688,9 @@ function renderAdaptiveProfileIndex(rows, payload) {
     const selected = Number(row.user_id) === Number(adaptiveSelectedUserId);
     const strategies = (row.assigned_strategies || []).slice(0, 3).map((key) => escHtml(allStrategies.find((s) => s.key === key)?.label || key)).join(', ') || 'No strategies';
     const categories = (row.market_categories_enabled || []).slice(0, 2).map(adaptiveCategoryLabel).join(', ') || 'All defaults';
+    const rowLabel = `View adaptive profile for ${row.name || row.username}`;
     return `
-      <tr class="adaptive-profile-row${selected ? ' selected' : ''}" data-adaptive-user-id="${row.user_id}">
+      <tr class="adaptive-profile-row${selected ? ' selected' : ''}" data-adaptive-user-id="${row.user_id}" tabindex="0" role="button" aria-label="${escHtml(rowLabel)}" aria-selected="${selected ? 'true' : 'false'}">
         <td>
           <strong>${escHtml(row.name || row.username)}</strong>
           <div class="ts">@${escHtml(row.username)}</div>
@@ -1694,11 +1708,18 @@ function renderAdaptiveProfileIndex(rows, payload) {
         </td>
       </tr>`;
   }).join('');
+  const selectUser = async (node) => {
+    adaptiveSelectedUserId = Number(node.dataset.adaptiveUserId);
+    renderAdaptiveProfileIndex(rows, payload);
+    await loadAdaptiveUserDetail(adaptiveSelectedUserId);
+  };
   tbody.querySelectorAll('[data-adaptive-user-id]').forEach((node) => {
-    node.addEventListener('click', async () => {
-      adaptiveSelectedUserId = Number(node.dataset.adaptiveUserId);
-      renderAdaptiveProfileIndex(rows, payload);
-      await loadAdaptiveUserDetail(adaptiveSelectedUserId);
+    node.addEventListener('click', () => selectUser(node));
+    node.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectUser(node);
+      }
     });
   });
   renderAdaptiveProfilesPagination(payload.page || 1, payload.last_page || 1);
@@ -2241,13 +2262,15 @@ async function resetAdaptiveScope(deleteHistory = false) {
 
 async function cloneAdaptiveRules() {
   if (!adaptiveSelectedUserId) return alert('Select a user first.');
-  const source = prompt('Enter the source username or user ID to clone from');
+  const source = prompt('Enter the source username, or use id:<user_id> (example: id:42)');
   if (!source) return;
   const reason = prompt('Reason for cloning rules', 'Clone high-performing rule set');
   if (reason == null) return;
   const payload = { user_id: adaptiveSelectedUserId, reason };
-  if (/^\d+$/.test(source.trim())) payload.source_user_id = Number(source.trim());
-  else payload.source_username = source.trim();
+  const sourceInput = source.trim();
+  const sourceIdMatch = sourceInput.match(/^id:\s*(\d+)$/i);
+  if (sourceIdMatch) payload.source_user_id = Number(sourceIdMatch[1]);
+  else payload.source_username = sourceInput;
   const resp = await apiRequest('/admin/adaptive?action=clone_rules', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -2278,7 +2301,7 @@ function bindAdaptiveSortHeaders() {
       const key = th.dataset.adaptiveProfileSort;
       adaptiveProfileSortDirection = adaptiveProfileSortKey === key && adaptiveProfileSortDirection === 'asc' ? 'desc' : 'asc';
       adaptiveProfileSortKey = key;
-      await loadAdaptiveProfileIndex(adaptiveSelectedUserId, adaptiveDashboardState.profileIndex?.page || 1);
+      await loadAdaptiveProfileIndex(adaptiveSelectedUserId, 1);
     });
   });
   document.querySelectorAll('[data-adaptive-factor-sort]').forEach((th) => {
@@ -2314,7 +2337,7 @@ function bindAdaptiveAdmin() {
   el('adaptiveHistoryCloseBtn')?.addEventListener('click', () => { el('adaptiveHistoryModal').style.display = 'none'; });
   ['adaptiveProfileStatusFilter', 'adaptiveProfilePlanFilter', 'adaptiveLearningStatusFilter', 'adaptiveCategoryFilter'].forEach((id) => {
     const node = el(id);
-    if (node) node.addEventListener('change', () => loadAdaptiveDashboard(adaptiveSelectedUserId));
+    if (node) node.addEventListener('change', () => loadAdaptiveProfileIndex(adaptiveSelectedUserId, 1));
   });
   ['adaptiveStrategyFilter', 'adaptiveSymbolFilter'].forEach((id) => {
     const node = el(id);
@@ -2323,6 +2346,6 @@ function bindAdaptiveAdmin() {
   const search = el('adaptiveProfileSearch');
   if (search) search.addEventListener('input', () => {
     clearTimeout(adaptiveProfileSearchTimer);
-    adaptiveProfileSearchTimer = setTimeout(() => loadAdaptiveDashboard(adaptiveSelectedUserId), 250);
+    adaptiveProfileSearchTimer = setTimeout(() => loadAdaptiveProfileIndex(adaptiveSelectedUserId, 1), 250);
   });
 }

@@ -8,6 +8,26 @@ const indicatorSource = fs.readFileSync(path.resolve(__dirname, '../indicator/in
 const adminSource = fs.readFileSync(path.resolve(__dirname, '../admin/admin.js'), 'utf8');
 const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
 const adminControllerSource = fs.readFileSync(path.resolve(__dirname, '../api/admin/adaptive.php'), 'utf8');
+const adminStyleSource = fs.readFileSync(path.resolve(__dirname, '../admin/style.css'), 'utf8');
+const schemaSource = fs.readFileSync(path.resolve(__dirname, '../database/schema.sql'), 'utf8');
+
+function extractNamedFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `Expected function ${name} to exist`);
+  const bodyStart = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    const char = source[i];
+    if (char === '{') depth++;
+    if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(start, i + 1);
+      }
+    }
+  }
+  throw new Error(`Failed to extract function ${name}`);
+}
 
 test('market categories remain isolated by symbol family', () => {
   assert.equal(utils.getMarketCategory('1HZ100V', 1), 'VOLATILITY_1S');
@@ -171,4 +191,36 @@ test('admin dashboard exposes adaptive management workflows', () => {
   assert.match(adminSource, /adaptiveHistoryModal/);
   assert.match(adminSource, /adaptiveProfilesIndexBody/);
   assert.match(adminSource, /adaptiveCategoryAnalytics/);
+});
+
+test('adaptive admin review fixes are wired for sorting, exports, locks, and accessibility', () => {
+  assert.match(adminSource, /function adaptiveFiniteNumber\(/);
+  assert.match(adminSource, /source username, or use id:<user_id>/);
+  assert.match(adminSource, /sourceInput\.match\(/);
+  assert.match(adminSource, /payload\.source_user_id = Number\(sourceIdMatch\[1\]\)/);
+  assert.match(adminSource, /data-adaptive-user-id="\$\{row\.user_id\}" tabindex="0" role="button"/);
+  assert.match(serviceSource, /sort_key/);
+  assert.match(serviceSource, /sort_direction/);
+  assert.match(serviceSource, /market_category IN \(\?, '\*'\)/);
+  assert.match(serviceSource, /adaptiveExportUserTrades/);
+  assert.match(serviceSource, /adaptiveExportUserTrades[\s\S]*UNTRUSTED_CLIENT_REPORTED/);
+  assert.match(serviceSource, /UNTRUSTED_CLIENT_REPORTED/);
+  assert.match(adminControllerSource, /adaptiveExportUserTrades\(/);
+  assert.match(adminControllerSource, /adaptiveAcquireUserTradeLock\(/);
+  assert.match(schemaSource, /INFORMATION_SCHEMA\.COLUMNS/);
+  assert.match(adminStyleSource, /\.adaptive-profile-table-wrap \{\s*overflow-x: auto;/);
+});
+
+test('adaptive admin number formatters keep fallback for null and empty values', () => {
+  const finiteFn = extractNamedFunction(adminSource, 'adaptiveFiniteNumber');
+  const numberFn = extractNamedFunction(adminSource, 'adaptiveNumber');
+  const pctFn = extractNamedFunction(adminSource, 'adaptivePct');
+  const factory = new Function(`${finiteFn}\n${numberFn}\n${pctFn}\nreturn { adaptiveNumber, adaptivePct };`);
+  const { adaptiveNumber, adaptivePct } = factory();
+
+  assert.equal(adaptiveNumber(null, 2, '—'), '—');
+  assert.equal(adaptiveNumber('', 2, '—'), '—');
+  assert.equal(adaptiveNumber('0', 2, '—'), '0.00');
+  assert.equal(adaptivePct(undefined, 1, 'N/A'), 'N/A');
+  assert.equal(adaptivePct('0', 1, 'N/A'), '0.0%');
 });
