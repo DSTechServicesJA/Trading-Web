@@ -415,6 +415,10 @@ CREATE TABLE IF NOT EXISTS adaptive_factor_stats (
     confidence_score       DECIMAL(5,2) NOT NULL DEFAULT 0,
     base_weight            DECIMAL(6,2) NOT NULL DEFAULT 5,
     current_weight         DECIMAL(6,2) NOT NULL DEFAULT 5,
+    locked_by_admin        TINYINT(1)   NOT NULL DEFAULT 0,
+    locked_reason          VARCHAR(255) DEFAULT NULL,
+    locked_at              TIMESTAMP NULL DEFAULT NULL,
+    locked_by_user_id      INT UNSIGNED DEFAULT NULL,
     trend_direction        ENUM('UP','DOWN','FLAT') NOT NULL DEFAULT 'FLAT',
     last_adjusted_at       TIMESTAMP NULL DEFAULT NULL,
     last_adjustment_reason VARCHAR(255) DEFAULT NULL,
@@ -429,10 +433,22 @@ CREATE TABLE IF NOT EXISTS adaptive_factor_stats (
     INDEX idx_adaptive_factor_lookup    (user_id, market_category, strategy_key, symbol_scope),
     INDEX idx_adaptive_factor_weight    (current_weight),
     INDEX idx_adaptive_factor_updated   (last_updated),
+    INDEX idx_adaptive_factor_locked    (locked_by_admin, updated_at),
 
     CONSTRAINT fk_adaptive_factor_user
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_adaptive_factor_locked_by
+        FOREIGN KEY (locked_by_user_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migration: add adaptive factor lock metadata to existing databases
+-- ALTER TABLE adaptive_factor_stats
+--     ADD COLUMN locked_by_admin TINYINT(1) NOT NULL DEFAULT 0 AFTER current_weight,
+--     ADD COLUMN locked_reason VARCHAR(255) DEFAULT NULL AFTER locked_by_admin,
+--     ADD COLUMN locked_at TIMESTAMP NULL DEFAULT NULL AFTER locked_reason,
+--     ADD COLUMN locked_by_user_id INT UNSIGNED DEFAULT NULL AFTER locked_at,
+--     ADD INDEX idx_adaptive_factor_locked (locked_by_admin, updated_at),
+--     ADD CONSTRAINT fk_adaptive_factor_locked_by FOREIGN KEY (locked_by_user_id) REFERENCES users (id) ON DELETE SET NULL;
 
 -- ──────────────────────────────────────────────
 -- Cached learning profiles by category / strategy / symbol

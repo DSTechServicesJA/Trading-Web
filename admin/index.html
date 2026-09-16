@@ -237,104 +237,241 @@
       </div>
     </section>
 
-    <section class="profiles-section" id="adaptiveSection">
-      <h1>🧠 Adaptive Intelligence Administration</h1>
-      <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
-        Review persistent trade learning, category-isolated factor statistics, adaptive weights,
-        qualification rules, signal decisions, and audit history. Admin overrides are logged.
-      </p>
+    <section class="profiles-section adaptive-admin-shell" id="adaptiveSection">
+      <div class="adaptive-hero">
+        <div>
+          <h1>🧠 Adaptive Intelligence Administration</h1>
+          <p class="adaptive-hero-copy">A modern intelligence center for user learning profiles, adaptive weights, qualification rules, analytics, audit history, and operator guidance.</p>
+        </div>
+        <div class="adaptive-hero-badges">
+          <span class="adaptive-pill">Enterprise controls</span>
+          <span class="adaptive-pill">Server-filtered</span>
+          <span class="adaptive-pill">Audit-backed</span>
+        </div>
+      </div>
 
-      <div class="toolbar adaptive-toolbar">
-        <input type="number" id="adaptiveUserId" class="search-input" placeholder="User ID" min="1" />
+      <div class="adaptive-sticky-toolbar">
+        <input type="text" id="adaptiveProfileSearch" class="search-input" placeholder="Search name, username, or email" />
+        <select id="adaptiveProfileStatusFilter" class="filter-select">
+          <option value="">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="locked">Locked</option>
+        </select>
+        <select id="adaptiveProfilePlanFilter" class="filter-select">
+          <option value="">All Plans</option>
+          <option value="trial">Trial</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <select id="adaptiveLearningStatusFilter" class="filter-select">
+          <option value="">All Learning States</option>
+          <option value="AUTO_LEARNING">Auto Learning</option>
+          <option value="MIXED">Mixed</option>
+          <option value="LOCKED">Locked</option>
+          <option value="NOT_STARTED">Not Started</option>
+        </select>
         <select id="adaptiveCategoryFilter" class="filter-select">
           <option value="">All Categories</option>
-          <option value="VOLATILITY_1S">VOLATILITY_1S</option>
-          <option value="VOLATILITY_STANDARD">VOLATILITY_STANDARD</option>
-          <option value="BOOM_INDICES">BOOM_INDICES</option>
-          <option value="CRASH_INDICES">CRASH_INDICES</option>
-          <option value="JUMP_INDICES">JUMP_INDICES</option>
-          <option value="STEP_INDICES">STEP_INDICES</option>
-          <option value="FOREX_MAJORS">FOREX_MAJORS</option>
-          <option value="FOREX_CROSSES">FOREX_CROSSES</option>
-          <option value="COMMODITIES">COMMODITIES</option>
+          <option value="VOLATILITY_1S">Volatility (1s)</option>
+          <option value="VOLATILITY_STANDARD">Volatility (Standard)</option>
+          <option value="BOOM_INDICES">Boom Indices</option>
+          <option value="CRASH_INDICES">Crash Indices</option>
+          <option value="JUMP_INDICES">Jump Indices</option>
+          <option value="STEP_INDICES">Step Indices</option>
+          <option value="FOREX_MAJORS">Forex Majors</option>
+          <option value="FOREX_CROSSES">Forex Crosses</option>
+          <option value="COMMODITIES">Commodities</option>
         </select>
-        <input type="text" id="adaptiveStrategyFilter" class="search-input" placeholder="Strategy key" />
-        <input type="text" id="adaptiveSymbolFilter" class="search-input" placeholder="Symbol" />
-        <button id="adaptiveRefreshBtn" type="button" class="btn-primary">🔄 Refresh Learning</button>
-        <button id="adaptiveExportBtn" type="button" class="btn-ghost">📤 Export</button>
-        <button id="adaptiveResetBtn" type="button" class="btn-danger">♻ Reset Scope</button>
+        <input type="text" id="adaptiveStrategyFilter" class="search-input" placeholder="Filter strategy key" />
+        <input type="text" id="adaptiveSymbolFilter" class="search-input" placeholder="Filter symbol scope" />
+        <button id="adaptiveRefreshBtn" type="button" class="btn-primary">🔄 Refresh</button>
       </div>
 
-      <div class="stats-bar" id="adaptiveSummaryCards"></div>
+      <div class="adaptive-workspace">
+        <aside class="adaptive-sidebar">
+          <div class="modal-card adaptive-card">
+            <div class="adaptive-card-header">
+              <div>
+                <h3>🧠 User Intelligence Profiles</h3>
+                <p>Inspect every user's adaptive learning posture, thresholds, profiles, and readiness.</p>
+              </div>
+            </div>
+            <div id="adaptiveProfileListSummary" class="adaptive-profile-list-summary">Loading intelligence profiles…</div>
+            <div class="profiles-table-wrapper adaptive-profile-table-wrap">
+              <table class="profiles-table adaptive-table">
+                <thead>
+                  <tr>
+                    <th data-adaptive-profile-sort="name">Name</th>
+                    <th data-adaptive-profile-sort="subscription_plan">Plan</th>
+                    <th data-adaptive-profile-sort="status">Status</th>
+                    <th title="How the user's adaptive model is operating right now.">Learning</th>
+                    <th title="Current rule thresholds applied to Telegram qualification.">Thresholds</th>
+                  </tr>
+                </thead>
+                <tbody id="adaptiveProfilesIndexBody"><tr><td colspan="5" class="table-empty">Loading…</td></tr></tbody>
+              </table>
+            </div>
+            <div id="adaptiveProfilesPagination" class="pagination adaptive-pagination"></div>
+          </div>
+        </aside>
 
-      <div class="modal-card" style="max-width:none;">
-        <h3 style="margin-bottom:10px;">Qualification Rule Editor</h3>
-        <div class="adaptive-grid-form">
-          <label>Reject Below %<input type="number" id="adaptiveRuleReject" min="0" max="100" step="0.1" /></label>
-          <label>Watchlist Below %<input type="number" id="adaptiveRuleWatchlist" min="0" max="100" step="0.1" /></label>
-          <label>High Confidence %<input type="number" id="adaptiveRuleHigh" min="0" max="100" step="0.1" /></label>
-          <label>Min Samples<input type="number" id="adaptiveRuleSamples" min="1" step="1" /></label>
-          <label>Weight Sample Gate<input type="number" id="adaptiveRuleWeightSamples" min="1" step="1" /></label>
-          <label>Max Weight Step<input type="number" id="adaptiveRuleWeightStep" min="0.1" max="5" step="0.1" /></label>
-          <label>Signal Blend<input type="number" id="adaptiveRuleSignalBlend" min="0" max="1" step="0.01" /></label>
-          <label>History Blend<input type="number" id="adaptiveRuleHistoryBlend" min="0" max="1" step="0.01" /></label>
-          <label>Market Blend<input type="number" id="adaptiveRuleMarketBlend" min="0" max="1" step="0.01" /></label>
-          <label>Strategy Blend<input type="number" id="adaptiveRuleStrategyBlend" min="0" max="1" step="0.01" /></label>
+        <div class="adaptive-main">
+          <div id="adaptiveDetailEmpty" class="modal-card adaptive-empty-state">
+            Select a user intelligence profile to view adaptive rules, weights, analytics, and audit history.
+          </div>
+
+          <div id="adaptiveDetailContent" style="display:none;">
+            <div id="adaptiveUserHero"></div>
+            <div id="adaptiveUserSummaryCards" class="stats-bar adaptive-summary-grid"></div>
+
+            <div class="adaptive-grid-two">
+              <div class="modal-card adaptive-card">
+                <div class="adaptive-card-header">
+                  <div>
+                    <h3>⚙️ Qualification Policy Editor</h3>
+                    <p id="adaptiveRuleScopeLabel">Select a rule to edit.</p>
+                  </div>
+                </div>
+                <div class="adaptive-grid-form">
+                  <label>Reject Below %<input type="number" id="adaptiveRuleReject" min="0" max="100" step="0.1" /></label>
+                  <label>Watchlist Below %<input type="number" id="adaptiveRuleWatchlist" min="0" max="100" step="0.1" /></label>
+                  <label>High Confidence %<input type="number" id="adaptiveRuleHigh" min="0" max="100" step="0.1" /></label>
+                  <label>Min Samples<input type="number" id="adaptiveRuleSamples" min="1" step="1" /></label>
+                  <label>Weight Sample Gate<input type="number" id="adaptiveRuleWeightSamples" min="1" step="1" /></label>
+                  <label>Max Weight Step<input type="number" id="adaptiveRuleWeightStep" min="0.1" max="5" step="0.1" /></label>
+                  <label>Signal Blend<input type="number" id="adaptiveRuleSignalBlend" min="0" max="1" step="0.01" /></label>
+                  <label>History Blend<input type="number" id="adaptiveRuleHistoryBlend" min="0" max="1" step="0.01" /></label>
+                  <label>Market Blend<input type="number" id="adaptiveRuleMarketBlend" min="0" max="1" step="0.01" /></label>
+                  <label>Strategy Blend<input type="number" id="adaptiveRuleStrategyBlend" min="0" max="1" step="0.01" /></label>
+                </div>
+                <div class="modal-actions adaptive-inline-actions" style="justify-content:flex-start;">
+                  <button id="adaptiveSaveRuleBtn" type="button" class="btn-primary">💾 Save Rule</button>
+                  <label class="remember-me-row"><input type="checkbox" id="adaptiveRuleWatchlistTelegram" /> Send watchlist items to Telegram</label>
+                </div>
+                <div id="adaptiveRuleStatus" class="form-error"></div>
+              </div>
+
+              <div class="modal-card adaptive-card">
+                <div class="adaptive-card-header">
+                  <div>
+                    <h3>🚀 Quick Actions</h3>
+                    <p>Non-technical admin workflows for cloning, defaults, imports, exports, resets, and history cleanup.</p>
+                  </div>
+                </div>
+                <div class="adaptive-quick-actions">
+                  <button id="adaptiveCloneRulesBtn" type="button" class="btn-ghost">🧬 Clone Rules</button>
+                  <button id="adaptiveAssignDefaultsBtn" type="button" class="btn-ghost">📌 Assign Default Profile</button>
+                  <button id="adaptiveExportBtn" type="button" class="btn-ghost">📤 Export Learning</button>
+                  <button id="adaptiveImportBtn" type="button" class="btn-primary">📥 Import Learning</button>
+                  <button id="adaptiveResetBtn" type="button" class="btn-ghost">♻ Reset Learning</button>
+                  <button id="adaptiveDeleteHistoryBtn" type="button" class="btn-danger">🗑 Delete Adaptive History</button>
+                </div>
+                <textarea id="adaptiveImportExport" rows="9" class="adaptive-textarea" placeholder="Exported learning JSON appears here. Paste JSON here to import."></textarea>
+                <div id="adaptiveImportStatus" class="form-error"></div>
+              </div>
+            </div>
+
+            <div class="profiles-table-wrapper adaptive-surface">
+              <div class="adaptive-card-header">
+                <div>
+                  <h3>Adaptive Rules</h3>
+                  <p>Learned factor weights with edit, history, lock, and reset actions.</p>
+                </div>
+              </div>
+              <table class="profiles-table adaptive-table">
+                <thead>
+                  <tr>
+                    <th data-adaptive-factor-sort="factor_key">Rule</th>
+                    <th data-adaptive-factor-sort="market_category">Category</th>
+                    <th data-adaptive-factor-sort="strategy_key">Scope</th>
+                    <th title="Current learned adaptive weight.">Weight</th>
+                    <th title="Historical success rate for this factor.">Win Rate</th>
+                    <th title="Number of resolved trades used for this factor.">Sample Size</th>
+                    <th title="Statistical confidence for this factor.">Confidence</th>
+                    <th title="Whether the weight is auto-adjusting or admin-locked.">Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adaptiveFactorsBody"><tr><td colspan="9" class="table-empty">Loading…</td></tr></tbody>
+              </table>
+            </div>
+
+            <div class="profiles-table-wrapper adaptive-surface">
+              <div class="adaptive-card-header">
+                <div>
+                  <h3>All Qualification Rules</h3>
+                  <p>Inspect every threshold policy assigned to the selected user.</p>
+                </div>
+              </div>
+              <table class="profiles-table adaptive-table">
+                <thead>
+                  <tr>
+                    <th data-adaptive-rule-sort="market_category">Category</th>
+                    <th data-adaptive-rule-sort="strategy_key">Strategy</th>
+                    <th data-adaptive-rule-sort="symbol_scope">Symbol Scope</th>
+                    <th title="Signals below this confidence are rejected.">Reject</th>
+                    <th title="Signals above this confidence reach watchlist/Telegram flow.">Watchlist</th>
+                    <th title="Signals above this confidence are treated as high-confidence.">High Confidence</th>
+                    <th title="Rule activation state.">Enabled</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="adaptiveRulesBody"><tr><td colspan="8" class="table-empty">Loading…</td></tr></tbody>
+              </table>
+            </div>
+
+            <div class="adaptive-surface adaptive-category-section">
+              <div class="adaptive-card-header">
+                <div>
+                  <h3>📊 Market Category Analytics</h3>
+                  <p>Performance snapshots for volatility, indices, forex, and commodities.</p>
+                </div>
+              </div>
+              <div id="adaptiveCategoryAnalytics" class="adaptive-category-grid"></div>
+            </div>
+
+            <div class="adaptive-grid-two adaptive-bottom-grid">
+              <div class="profiles-table-wrapper adaptive-surface">
+                <div class="adaptive-card-header"><div><h3>Recent Trades</h3><p>Latest adaptive trade outcomes for the selected user.</p></div></div>
+                <table class="profiles-table adaptive-table">
+                  <thead><tr><th>Created</th><th>Trade</th><th>Category</th><th>Strategy</th><th>Result</th><th>R</th><th>Confidence</th></tr></thead>
+                  <tbody id="adaptiveTradesBody"><tr><td colspan="7" class="table-empty">Loading…</td></tr></tbody>
+                </table>
+              </div>
+
+              <div class="profiles-table-wrapper adaptive-surface">
+                <div class="adaptive-card-header"><div><h3>Recent Decisions</h3><p>Latest Telegram qualification decisions.</p></div></div>
+                <table class="profiles-table adaptive-table">
+                  <thead><tr><th>Created</th><th>Signal</th><th>Category</th><th>Action</th><th>Band</th><th>Final</th></tr></thead>
+                  <tbody id="adaptiveDecisionsBody"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="profiles-table-wrapper adaptive-surface">
+              <div class="adaptive-card-header">
+                <div>
+                  <h3>📝 Adaptive Intelligence Audit Log</h3>
+                  <p>Every manual override, clone, reset, and auto-adjustment is recorded here.</p>
+                </div>
+              </div>
+              <table class="profiles-table adaptive-table">
+                <thead><tr><th>Created</th><th>Admin / Actor</th><th>Rule</th><th>Previous</th><th>New</th><th>Reason</th></tr></thead>
+                <tbody id="adaptiveAuditBody"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div class="modal-actions" style="justify-content:flex-start;">
-          <button id="adaptiveSaveRuleBtn" type="button" class="btn-primary">💾 Save Rule</button>
-          <label class="remember-me-row"><input type="checkbox" id="adaptiveRuleWatchlistTelegram" /> Send watchlist items to Telegram</label>
+      </div>
+
+      <div class="adaptive-surface adaptive-guide-section">
+        <div class="adaptive-card-header">
+          <div>
+            <h3>📚 Adaptive Intelligence Guide</h3>
+            <p>Plain-English explanations of every threshold, metric, weight, and adaptive learning concept.</p>
+          </div>
         </div>
-        <div id="adaptiveRuleStatus" class="form-error"></div>
-      </div>
-
-      <div class="profiles-table-wrapper">
-        <h3 class="adaptive-subtitle">Trade History</h3>
-        <table class="profiles-table">
-          <thead><tr><th>Created</th><th>User</th><th>Trade ID</th><th>Symbol</th><th>Category</th><th>Strategy</th><th>Result</th><th>R</th><th>Telegram</th><th>Confidence</th><th>Action</th></tr></thead>
-          <tbody id="adaptiveTradesBody"><tr><td colspan="11" class="table-empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="profiles-table-wrapper">
-        <h3 class="adaptive-subtitle">Factor Statistics & Adaptive Weights</h3>
-        <table class="profiles-table">
-          <thead><tr><th>Factor</th><th>User</th><th>Category</th><th>Scope</th><th>W</th><th>L</th><th>Win %</th><th>Samples</th><th>Avg R</th><th>Confidence</th><th>Weight</th><th>Trend</th><th>Action</th></tr></thead>
-          <tbody id="adaptiveFactorsBody"><tr><td colspan="13" class="table-empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="profiles-table-wrapper">
-        <h3 class="adaptive-subtitle">Learning Profiles</h3>
-        <table class="profiles-table">
-          <thead><tr><th>Scope</th><th>User</th><th>Category</th><th>Strategy</th><th>Symbol</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Confidence</th><th>Last Updated</th></tr></thead>
-          <tbody id="adaptiveProfilesBody"><tr><td colspan="10" class="table-empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="profiles-table-wrapper">
-        <h3 class="adaptive-subtitle">Signal Decisions</h3>
-        <table class="profiles-table">
-          <thead><tr><th>Created</th><th>User</th><th>Signal</th><th>Category</th><th>Strategy</th><th>Action</th><th>Band</th><th>Signal</th><th>History</th><th>Market</th><th>Strategy</th><th>Final</th></tr></thead>
-          <tbody id="adaptiveDecisionsBody"><tr><td colspan="12" class="table-empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="profiles-table-wrapper">
-        <h3 class="adaptive-subtitle">Audit Log</h3>
-        <table class="profiles-table">
-          <thead><tr><th>Created</th><th>Actor</th><th>Target User</th><th>Action</th><th>Entity</th><th>Scope</th><th>Reason</th></tr></thead>
-          <tbody id="adaptiveAuditBody"><tr><td colspan="7" class="table-empty">Loading…</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="modal-card" style="max-width:none;">
-        <h3 style="margin-bottom:10px;">Import / Export</h3>
-        <textarea id="adaptiveImportExport" rows="10" style="width:100%;resize:vertical;background:var(--bg-surface);color:var(--text);border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:8px;font-family:var(--font-mono);font-size:12px;"></textarea>
-        <div class="modal-actions" style="justify-content:flex-start;">
-          <button id="adaptiveImportBtn" type="button" class="btn-primary">📥 Import Trade History</button>
-        </div>
-        <div id="adaptiveImportStatus" class="form-error"></div>
+        <div id="adaptiveGuideGrid" class="adaptive-guide-grid"></div>
       </div>
     </section>
 
@@ -558,6 +695,24 @@
     <div id="assignProfileError" class="form-error"></div>
     <div class="modal-actions">
       <button id="assignProfileCloseBtn" type="button" class="btn-ghost">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="adaptiveHistoryModal" class="modal-overlay" style="display:none;">
+  <div class="modal-card adaptive-history-modal">
+    <div class="adaptive-card-header">
+      <div>
+        <h3 id="adaptiveHistoryTitle">Adaptive Rule History</h3>
+        <p id="adaptiveHistorySubtitle">Recent audit entries and automatic adjustments.</p>
+      </div>
+      <button id="adaptiveHistoryCloseBtn" type="button" class="btn-ghost btn-sm">Close</button>
+    </div>
+    <div class="profiles-table-wrapper">
+      <table class="profiles-table adaptive-table">
+        <thead><tr><th>Created</th><th>Actor</th><th>Action</th><th>Previous</th><th>New</th><th>Reason</th></tr></thead>
+        <tbody id="adaptiveHistoryBody"><tr><td colspan="6" class="table-empty">No history loaded.</td></tr></tbody>
+      </table>
     </div>
   </div>
 </div>
