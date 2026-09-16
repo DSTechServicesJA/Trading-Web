@@ -10958,7 +10958,22 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   if (!qualification.allowed) return;
 
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
-  if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
+  const pendingStatusText = `Sending session range${symLabel ? " " + symLabel : ""}…`;
+  let trackedTelegramStatus = null;
+  const setTrackedTelegramStatus = (text, className = "hint telegram-status") => {
+    if (!UI.telegramStatus) return;
+    UI.telegramStatus.textContent = text;
+    UI.telegramStatus.className = className;
+    trackedTelegramStatus = { text, className };
+  };
+  const clearTrackedTelegramStatus = () => {
+    if (!UI.telegramStatus || !trackedTelegramStatus) return;
+    if (UI.telegramStatus.textContent !== trackedTelegramStatus.text) return;
+    if (UI.telegramStatus.className !== trackedTelegramStatus.className) return;
+    UI.telegramStatus.textContent = "";
+    UI.telegramStatus.className = "hint telegram-status";
+  };
+  setTrackedTelegramStatus(pendingStatusText);
   try {
     try {
       let caption;
@@ -10977,7 +10992,10 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
           if (UI.granSelect && Number.isFinite(panel.gran)) UI.granSelect.value = String(panel.gran);
           caption = buildSessionRangeTelegramCaption(signalType);
           blob = await captureTelegramScreenshot(null);
-          if (!isScopedTradeStillCurrent()) return;
+          if (!isScopedTradeStillCurrent()) {
+            clearTrackedTelegramStatus();
+            return;
+          }
         } finally {
           _multiPanelProcessing = prevPanelSymbol;
           _multiPanelGran = prevPanelGran;
@@ -10987,11 +11005,17 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         }
       } else {
         blob = await captureTelegramScreenshot(null);
-        if (!isScopedTradeStillCurrent()) return;
+        if (!isScopedTradeStillCurrent()) {
+          clearTrackedTelegramStatus();
+          return;
+        }
         caption = buildSessionRangeTelegramCaption(signalType);
       }
       caption = decorateAdaptiveTelegramCaption(caption, qualification.decision);
-      if (!isScopedTradeStillCurrent()) return;
+      if (!isScopedTradeStillCurrent()) {
+        clearTrackedTelegramStatus();
+        return;
+      }
       if (blob) {
         await sendTelegramPhoto(blob, caption);
       } else {
@@ -11004,23 +11028,14 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
         scopedTrade._telegramDelivered = true;
       }
       addLog(`📤 Session Range Telegram alert sent — ${signalType}${symLabel ? " [" + symLabel + "]" : ""}`);
-      if (UI.telegramStatus) {
-        UI.telegramStatus.textContent = `✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`;
-        UI.telegramStatus.className = "hint telegram-status telegram-ok";
-      }
+      setTrackedTelegramStatus(`✅ Session range sent!${symLabel ? " (" + symLabel + ")" : ""}`, "hint telegram-status telegram-ok");
     } catch (err) {
       addLog(`📤 Session Range Telegram error: ${err.message}`);
-      if (UI.telegramStatus) {
-        UI.telegramStatus.textContent = `❌ Session: ${err.message}`;
-        UI.telegramStatus.className = "hint telegram-status telegram-err";
-      }
+      setTrackedTelegramStatus(`❌ Session: ${err.message}`, "hint telegram-status telegram-err");
     }
   } finally {
     setTimeout(() => {
-      if (UI.telegramStatus) {
-        UI.telegramStatus.textContent = "";
-        UI.telegramStatus.className = "hint telegram-status";
-      }
+      clearTrackedTelegramStatus();
     }, TELEGRAM_STATUS_CLEAR_MS);
   }
 }
