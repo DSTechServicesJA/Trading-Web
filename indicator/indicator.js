@@ -10955,7 +10955,9 @@ async function sendTelegramSessionRangeAlert(signalType, panelSymbol) {
   const symLabel = panelSymbol ? getSymbolLabel(panelSymbol) : "";
   if (UI.telegramStatus) UI.telegramStatus.textContent = `Sending session range${symLabel ? " " + symLabel : ""}…`;
   try {
+    if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return;
     const blob = await captureTelegramScreenshot(panel || null);
+    if (panelSymbol && multiPanels.get(panelSymbol) !== panel) return;
     let caption;
     if (panel) {
       const snap = _snapshotChartGlobals();
