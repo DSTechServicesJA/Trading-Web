@@ -1631,10 +1631,9 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $diagStmt = $pdo->prepare(
         'SELECT COUNT(*) AS total_trades,
                 SUM(CASE WHEN COALESCE(NULLIF(TRIM(market_category), \'\'), \'UNCATEGORIZED\') = \'UNCATEGORIZED\' THEN 1 ELSE 0 END) AS uncategorized_trades
-         FROM adaptive_trade_history
-         WHERE user_id = ? AND ' . $trustedTradeFilterSql
+         FROM adaptive_trade_history ' . $tradeSql
     );
-    $diagStmt->execute([$userId]);
+    $diagStmt->execute($tradeParams);
     $diag = $diagStmt->fetch() ?: ['total_trades' => 0, 'uncategorized_trades' => 0];
     $totalTrades = (int) ($diag['total_trades'] ?? 0);
     $uncategorizedTrades = (int) ($diag['uncategorized_trades'] ?? 0);

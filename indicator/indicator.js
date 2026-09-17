@@ -1281,7 +1281,7 @@ function cleanupPendingSignalsForSymbol(symbol, strategyType = null, options = {
     if (tracksCurrentTrade) continue;
     const createdAt = getSignalCreatedAtMs(entry);
     const staleByAge = createdAt > 0 && now - createdAt >= staleAfterMs;
-    const staleByOrphan = !monitoringTrade && !trade;
+    const staleByOrphan = !monitoringTrade && !trade && createdAt > 0 && now - createdAt >= staleAfterMs;
     if (!staleByAge && !staleByOrphan) continue;
     entry.result = "EXPIRED";
     entry.outcomeCandleIdx = Array.isArray(candles) ? candles.length - 1 : null;
