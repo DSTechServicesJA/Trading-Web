@@ -1233,6 +1233,52 @@ html[data-theme="light"] .form-row select {
   margin-bottom: 14px;
 }
 
+.adaptive-table-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.adaptive-table-search {
+  min-width: 160px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.adaptive-table-page-size {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.adaptive-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.adaptive-page-summary {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.adaptive-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .adaptive-profile-table-wrap {
   overflow-x: auto;
 }
