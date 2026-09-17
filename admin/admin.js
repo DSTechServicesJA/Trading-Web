@@ -1588,10 +1588,15 @@ function bindNotificationPreferences() {
 /* ═══════════════════════════════════════════════
    Telegram Delivery Log
    ═══════════════════════════════════════════════ */
-async function loadTelegramDeliveryLog() {
+const TG_DELIVERY_LOG_PAGE_SIZE = 50;
+let tgDeliveryLogPage = 1;
+
+async function loadTelegramDeliveryLog(page = 1) {
   const tbody = el("tgDeliveryLogTableBody");
   if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="8" class="table-empty">Loading…</td></tr>`;
+
+  tgDeliveryLogPage = Math.max(1, page);
 
   const params = new URLSearchParams();
   const userId = el("tgDeliveryUserFilter")?.value.trim();
@@ -1600,20 +1605,50 @@ async function loadTelegramDeliveryLog() {
   if (userId) params.set("user_id", userId);
   if (type) params.set("notification_type", type);
   if (status) params.set("status", status);
+  params.set("limit", String(TG_DELIVERY_LOG_PAGE_SIZE));
+  params.set("offset", String((tgDeliveryLogPage - 1) * TG_DELIVERY_LOG_PAGE_SIZE));
 
   try {
-    const resp = await apiRequest(`/admin/telegram_delivery_log${params.toString() ? "?" + params.toString() : ""}`);
+    const resp = await apiRequest(`/admin/telegram_delivery_log?${params.toString()}`);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       tbody.innerHTML = `<tr><td colspan="8" class="table-empty" style="color:var(--danger-soft)">Error: ${escHtml(err.error || "Failed to load delivery log")}</td></tr>`;
+      renderTgDeliveryLogPagination(0, 0);
       return;
     }
     const data = await resp.json();
+    const total = data.total || 0;
+    const lastPage = Math.max(1, Math.ceil(total / TG_DELIVERY_LOG_PAGE_SIZE));
+    if (tgDeliveryLogPage > lastPage) {
+      return loadTelegramDeliveryLog(lastPage);
+    }
     renderTgDeliveryStats(data.stats || {});
     renderTgDeliveryLogTable(data.entries || []);
+    renderTgDeliveryLogPagination(total, tgDeliveryLogPage);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="8" class="table-empty" style="color:var(--danger-soft)">Network error — ${escHtml(e.message)}</td></tr>`;
+    renderTgDeliveryLogPagination(0, 0);
   }
+}
+
+function renderTgDeliveryLogPagination(total, page) {
+  const container = el("tgDeliveryLogPagination");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const lastPage = Math.max(1, Math.ceil(total / TG_DELIVERY_LOG_PAGE_SIZE));
+  if (lastPage <= 1) return;
+
+  const prev = mkBtn("← Prev", page <= 1, () => loadTelegramDeliveryLog(page - 1));
+  container.appendChild(prev);
+
+  const info = document.createElement("span");
+  info.className = "page-info";
+  info.textContent = `Page ${page} / ${lastPage}`;
+  container.appendChild(info);
+
+  const next = mkBtn("Next →", page >= lastPage, () => loadTelegramDeliveryLog(page + 1));
+  container.appendChild(next);
 }
 
 function renderTgDeliveryStats(stats) {
@@ -1651,10 +1686,10 @@ function renderTgDeliveryLogTable(entries) {
 }
 
 function bindTelegramDeliveryLog() {
-  el("refreshTgDeliveryLogBtn")?.addEventListener("click", () => loadTelegramDeliveryLog());
-  el("tgDeliveryUserFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
-  el("tgDeliveryTypeFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
-  el("tgDeliveryStatusFilter")?.addEventListener("change", () => loadTelegramDeliveryLog());
+  el("refreshTgDeliveryLogBtn")?.addEventListener("click", () => loadTelegramDeliveryLog(1));
+  el("tgDeliveryUserFilter")?.addEventListener("change", () => loadTelegramDeliveryLog(1));
+  el("tgDeliveryTypeFilter")?.addEventListener("change", () => loadTelegramDeliveryLog(1));
+  el("tgDeliveryStatusFilter")?.addEventListener("change", () => loadTelegramDeliveryLog(1));
 }
 
 
