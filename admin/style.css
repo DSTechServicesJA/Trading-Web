@@ -1206,6 +1206,19 @@ html[data-theme="light"] .form-row select {
   padding: 20px;
 }
 
+/* .adaptive-card reuses .modal-card styling for its visual treatment, but it is
+   rendered inline inside the workspace layout (sidebar list, grid panels) rather
+   than inside a fixed .modal-overlay. Reset the modal-specific sizing so it
+   doesn't force a fixed 580px width / 90vh height, which caused it to overflow
+   its grid cell and overlap neighboring panels (e.g. the Qualification Policy
+   Editor overlapping the Quick Actions card, hiding the Save Rule button). */
+.adaptive-card.modal-card {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+}
+
 .adaptive-card-header {
   display: flex;
   justify-content: space-between;
