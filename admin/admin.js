@@ -2052,12 +2052,18 @@ function renderAdaptiveUserDetail(data) {
   if (content) content.style.display = '';
   renderAdaptiveUserHero(data.profile || {}, data.adaptive_profiles || []);
   renderAdaptiveSummary(data.profile || {}, data.ingestion_diagnostics || null);
+  renderAdaptiveFactorDiagnostics(data.factor_diagnostics || null);
   renderAdaptiveFactors(data.factor_stats || []);
   renderAdaptiveQualificationRules(data.rules || []);
   renderAdaptiveTrades(data.trades || []);
   renderAdaptiveDecisions(data.decisions || []);
   renderAdaptiveAudit(data.audits || []);
   renderAdaptiveCategoryAnalytics(data.category_analytics || [], data.category_diagnostics || null);
+  renderAdaptiveFactorStatsBreakdown(
+    data.factor_statistics_by_strategy || [],
+    data.factor_statistics_by_symbol || [],
+    data.factor_statistics_by_category || []
+  );
 }
 
 function renderAdaptiveUserHero(profile, adaptiveProfiles) {
@@ -2106,6 +2112,24 @@ function renderAdaptiveSummary(profile, ingestionDiagnostics = null) {
     );
   }
   container.innerHTML = cards.map(([label, value, title]) => `<div class="stat-card" title="${escHtml(title)}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join('');
+}
+
+function renderAdaptiveFactorDiagnostics(diagnostics = null) {
+  const container = el('adaptiveFactorDiagnostics');
+  if (!container) return;
+  if (!diagnostics) {
+    container.innerHTML = '';
+    return;
+  }
+  const cards = [
+    ['Total Resolved Trades', diagnostics.total_resolved_trades || 0],
+    ['Total Adaptive Trades', diagnostics.total_adaptive_trades || 0],
+    ['Total Factors Recorded', diagnostics.total_factors_recorded || 0],
+    ['Rated Factors', diagnostics.rated_factors || 0],
+    ['Unrated Factors', diagnostics.unrated_factors || 0],
+    ['Min Samples To Rate', diagnostics.min_sample_size || 0],
+  ];
+  container.innerHTML = cards.map(([label, value]) => `<div class="stat-card"><div class="stat-label">${escHtml(label)}</div><div class="stat-value">${escHtml(String(value))}</div></div>`).join('');
 }
 
 function adaptiveFactorStatus(row) {
@@ -2328,6 +2352,29 @@ function renderAdaptiveCategoryAnalytics(rows, diagnostics = null) {
         </div>
       </article>`;
   }).join('');
+}
+
+function renderAdaptiveFactorStatsBreakdown(byStrategy, bySymbol, byCategory) {
+  const container = el('adaptiveFactorStatsBreakdown');
+  if (!container) return;
+  const makeTable = (title, rows, keyLabel) => `
+    <div class="profiles-table-wrapper adaptive-surface">
+      <div class="adaptive-card-header"><div><h3>${escHtml(title)}</h3></div></div>
+      <table class="profiles-table adaptive-table">
+        <thead><tr><th>${escHtml(keyLabel)}</th><th>Factors</th><th>Rated</th><th>Samples</th><th>Avg Weight</th></tr></thead>
+        <tbody>${(rows || []).length ? rows.map((row) => `
+          <tr>
+            <td>${escHtml(String(row[keyLabel === 'Category' ? 'market_category' : keyLabel === 'Strategy' ? 'strategy_key' : 'symbol_scope'] || '—'))}</td>
+            <td>${escHtml(String(row.factor_count || 0))}</td>
+            <td>${escHtml(String(row.rated_factor_count || 0))}</td>
+            <td>${escHtml(String(row.total_samples || 0))}</td>
+            <td>${adaptiveNumber(row.avg_weight, 2)}</td>
+          </tr>`).join('') : `<tr><td colspan="5" class="table-empty">No factor statistics found.</td></tr>`}</tbody>
+      </table>
+    </div>`;
+  container.innerHTML = makeTable('Factor Statistics By Strategy', byStrategy, 'Strategy')
+    + makeTable('Factor Statistics By Symbol', bySymbol, 'Symbol')
+    + makeTable('Factor Statistics By Category', byCategory, 'Category');
 }
 
 function renderAdaptiveGuide() {

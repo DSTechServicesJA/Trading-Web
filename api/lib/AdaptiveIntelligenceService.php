@@ -16,7 +16,14 @@ const ADAPTIVE_MARKET_CATEGORIES = [
 
 const ADAPTIVE_FACTOR_ALIASES = [
     'EMA Aligned' => 'Trend Alignment',
+    'EMA Alignment' => 'Trend Alignment',
     'HTF Trend' => 'MTF Confirmation',
+    'HTF Trend Alignment' => 'MTF Confirmation',
+    'HTF Breakout Confirmed' => 'Breakout Quality',
+    'LTF Retest Completed' => 'Retest Quality',
+    'MTF Bias Aligned' => 'MTF Confirmation',
+    'Entry Pattern Trigger' => 'Structure Strength',
+    'Market Structure Alignment' => 'Structure Strength',
     'MTF Structure' => 'MTF Confirmation',
     'Confirm Quality' => 'Structure Strength',
     'Confirm Pattern' => 'Structure Strength',
@@ -26,11 +33,14 @@ const ADAPTIVE_FACTOR_ALIASES = [
     'RSI Favors' => 'RSI Confirmation',
     'MACD Aligned' => 'MACD Confirmation',
     'Volume Spike' => 'Volume Confirmation',
+    'ATR Volatility Acceptable' => 'ATR Confirmation',
+    'Distance From Entry Within Threshold' => 'ATR Confirmation',
     'Active Session' => 'Session Timing',
     'ADX Strong' => 'Trend Strength',
     'Market Signal' => 'Market Regime',
     'Preferred Dir' => 'Trend Strength',
     'Momentum' => 'Momentum Score',
+    'Momentum Confirmation' => 'Momentum Score',
     'Stoch Cross' => 'Momentum Score',
     'BB Squeeze' => 'Market Regime',
     'ATR Tolerance' => 'ATR Confirmation',
@@ -200,26 +210,84 @@ function adaptiveReleaseUserTradeLock(PDO $pdo, int $userId): void
 
 /**
  * @param mixed $factors
- * @return array<int,string>
+ * @return array<int,array<string,mixed>>
  */
-function adaptiveNormalizeFactors(mixed $factors, ?string $mtfStatus = null): array
+function adaptiveNormalizeFactorDetails(mixed $factors, ?string $mtfStatus = null): array
 {
     $items = is_array($factors) ? $factors : [];
     $normalized = [];
     foreach ($items as $factor) {
+        if (is_array($factor)) {
+            $label = trim((string) ($factor['factor'] ?? $factor['name'] ?? $factor['label'] ?? $factor['group'] ?? ''));
+            $group = trim((string) ($factor['group'] ?? $factor['groupKey'] ?? $factor['factorGroup'] ?? $label));
+            $passed = array_key_exists('passed', $factor) ? (bool) $factor['passed'] : true;
+            $persist = array_key_exists('persist', $factor) ? (bool) $factor['persist'] : true;
+            $normalized[] = [
+                'factor' => $label,
+                'group' => ADAPTIVE_FACTOR_ALIASES[$group] ?? ADAPTIVE_FACTOR_ALIASES[$label] ?? ($group !== '' ? $group : $label),
+                'passed' => $passed,
+                'weight' => isset($factor['weight']) ? (float) $factor['weight'] : (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS[ADAPTIVE_FACTOR_ALIASES[$group] ?? ADAPTIVE_FACTOR_ALIASES[$label] ?? ($group !== '' ? $group : $label)] ?? 5.0),
+                'score' => isset($factor['score']) ? (float) $factor['score'] : ($passed ? (float) ($factor['weight'] ?? (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS[ADAPTIVE_FACTOR_ALIASES[$group] ?? ADAPTIVE_FACTOR_ALIASES[$label] ?? ($group !== '' ? $group : $label)] ?? 5.0)) : 0.0),
+                'detail' => array_key_exists('detail', $factor) ? (string) $factor['detail'] : null,
+                'persist' => $persist,
+            ];
+            continue;
+        }
         $label = trim((string) $factor);
         if ($label === '') {
             continue;
         }
-        $canonical = ADAPTIVE_FACTOR_ALIASES[$label] ?? $label;
-        $normalized[$canonical] = $canonical;
+        $group = ADAPTIVE_FACTOR_ALIASES[$label] ?? $label;
+        $normalized[] = [
+            'factor' => $label,
+            'group' => $group,
+            'passed' => true,
+            'weight' => (float) (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS[$group] ?? 5.0),
+            'score' => (float) (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS[$group] ?? 5.0),
+            'detail' => null,
+            'persist' => true,
+        ];
     }
 
     $mtf = strtoupper(trim((string) $mtfStatus));
-    if ($mtf === 'CONFIRMED' || $mtf === 'PASS' || $mtf === 'TRUE') {
-        $normalized['MTF Confirmation'] = 'MTF Confirmation';
+    if (($mtf === 'CONFIRMED' || $mtf === 'PASS' || $mtf === 'TRUE')) {
+        $hasMtf = false;
+        foreach ($normalized as $row) {
+            if (($row['group'] ?? '') === 'MTF Confirmation' && ($row['persist'] ?? true) && ($row['passed'] ?? true)) {
+                $hasMtf = true;
+                break;
+            }
+        }
+        if (!$hasMtf) {
+            $normalized[] = [
+                'factor' => 'MTF Bias Aligned',
+                'group' => 'MTF Confirmation',
+                'passed' => true,
+                'weight' => (float) (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS['MTF Confirmation'] ?? 6.0),
+                'score' => (float) (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS['MTF Confirmation'] ?? 6.0),
+                'detail' => null,
+                'persist' => true,
+            ];
+        }
     }
 
+    return $normalized;
+}
+
+/**
+ * @param mixed $factors
+ * @return array<int,string>
+ */
+function adaptiveNormalizeFactors(mixed $factors, ?string $mtfStatus = null): array
+{
+    $normalized = [];
+    foreach (adaptiveNormalizeFactorDetails($factors, $mtfStatus) as $factor) {
+        $group = trim((string) ($factor['group'] ?? ''));
+        if ($group === '' || !($factor['persist'] ?? true) || !($factor['passed'] ?? true)) {
+            continue;
+        }
+        $normalized[$group] = $group;
+    }
     return array_values($normalized);
 }
 
@@ -720,10 +788,19 @@ function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride 
     $result = adaptiveNormalizeResult($body['result'] ?? null);
     $direction = adaptiveNormalizeDirection($body['direction'] ?? $body['dir'] ?? null);
     $mtfStatus = strtoupper(trim((string) ($body['mtf_status'] ?? $body['mtfStatus'] ?? 'UNKNOWN')));
-    $factorsRaw = is_array($body['confluence_factors_present'] ?? null)
-        ? $body['confluence_factors_present']
-        : (is_array($body['confluenceFactorsPresent'] ?? null) ? $body['confluenceFactorsPresent'] : []);
-    $factors = adaptiveNormalizeFactors($factorsRaw, $mtfStatus);
+    $factorsRaw = is_array($body['confluence_factors_raw'] ?? null)
+        ? $body['confluence_factors_raw']
+        : (is_array($body['confluenceFactorsRaw'] ?? null)
+            ? $body['confluenceFactorsRaw']
+            : (is_array($body['factor_details'] ?? null)
+                ? $body['factor_details']
+                : (is_array($body['factorDetails'] ?? null)
+                    ? $body['factorDetails']
+                    : (is_array($body['confluence_factors_present'] ?? null)
+                        ? $body['confluence_factors_present']
+                        : (is_array($body['confluenceFactorsPresent'] ?? null) ? $body['confluenceFactorsPresent'] : [])))));
+    $factorDetails = adaptiveNormalizeFactorDetails($factorsRaw, $mtfStatus);
+    $factors = adaptiveNormalizeFactors($factorDetails, $mtfStatus);
 
     return [
         'trade_id' => mb_substr($tradeId, 0, 100),
@@ -751,7 +828,7 @@ function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride 
         'strategy_reliability_score' => isset($body['strategy_reliability_score']) ? (float) $body['strategy_reliability_score'] : (isset($body['strategyReliabilityScore']) ? (float) $body['strategyReliabilityScore'] : null),
         'qualification_band' => adaptiveNormalizeScopeValue($body['qualification_band'] ?? $body['qualificationBand'] ?? 'UNQUALIFIED', 'UNQUALIFIED'),
         'confluence_factors_present' => $factors,
-        'confluence_factors_raw' => $factorsRaw,
+        'confluence_factors_raw' => $factorDetails,
         'mtf_status' => mb_substr($mtfStatus === '' ? 'UNKNOWN' : $mtfStatus, 0, 32),
         'timeframe_sec' => $timeframeSec,
         'strategy_label' => adaptiveNormalizeScopeValue($body['strategy_label'] ?? $body['strategyLabel'] ?? $strategy, $strategy),
@@ -935,6 +1012,36 @@ function adaptiveFetchFactorStat(PDO $pdo, int $userId, string $category, string
     $stmt->execute([$userId, $category, $strategy, $symbolScope, $factor]);
     $row = $stmt->fetch();
     return is_array($row) ? $row : null;
+}
+
+function adaptiveEnsureFactorStatRows(PDO $pdo, int $userId, array $scope, array $factors, array $rule): void
+{
+    if (!$factors) {
+        return;
+    }
+    $stmt = $pdo->prepare(
+        'INSERT INTO adaptive_factor_stats
+        (user_id, market_category, strategy_key, symbol_scope, factor_key, wins, losses, cancelled, win_rate, sample_size,
+         r_multiple_sum, avg_r_multiple, confidence_score, base_weight, current_weight, trend_direction, last_adjustment_reason, last_updated)
+         VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, "FLAT", "Awaiting resolved trades", CURRENT_TIMESTAMP)
+         ON DUPLICATE KEY UPDATE updated_at = updated_at'
+    );
+    foreach ($factors as $factor) {
+        $label = trim((string) $factor);
+        if ($label === '') {
+            continue;
+        }
+        $weight = (float) (ADAPTIVE_DEFAULT_FACTOR_WEIGHTS[$label] ?? $rule['base_weight_default'] ?? 5.0);
+        $stmt->execute([
+            $userId,
+            $scope['market_category'],
+            $scope['strategy_key'],
+            $scope['symbol_scope'],
+            $label,
+            round($weight, 2),
+            round($weight, 2),
+        ]);
+    }
 }
 
 /**
@@ -1139,7 +1246,27 @@ function adaptivePersistSignalDecision(PDO $pdo, int $userId, array $decision): 
         adaptiveJsonEncode($decision['trace']),
     ]);
     $decision['id'] = (int) $pdo->lastInsertId();
+    $decision['weight_version'] = 'v' . (int) max(1, $decision['id']);
     return $decision;
+}
+
+function adaptiveFetchSignalDecision(PDO $pdo, int $userId, string $signalId): ?array
+{
+    if ($signalId === '') {
+        return null;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, signal_score,
+                historical_reliability_score, market_category_score, strategy_reliability_score, final_confidence_score,
+                mtf_status, factors_json
+           FROM adaptive_signal_decisions
+          WHERE user_id = ? AND signal_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1'
+    );
+    $stmt->execute([$userId, $signalId]);
+    $row = $stmt->fetch();
+    return is_array($row) ? $row : null;
 }
 
 /**
@@ -1205,7 +1332,9 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
 
     $direction = adaptiveNormalizeDirection($payload['direction'] ?? $payload['dir'] ?? null);
     $mtfStatus = strtoupper(trim((string) ($payload['mtf_status'] ?? $payload['mtfStatus'] ?? 'UNKNOWN')));
-    $factors = adaptiveNormalizeFactors($payload['confluence_factors_present'] ?? $payload['factors'] ?? [], $mtfStatus);
+    $factorInput = $payload['factor_details'] ?? $payload['factorDetails'] ?? $payload['confluence_factors_raw'] ?? $payload['confluenceFactorsRaw'] ?? $payload['confluence_factors_present'] ?? $payload['factors'] ?? [];
+    $factorDetails = adaptiveNormalizeFactorDetails($factorInput, $mtfStatus);
+    $factors = adaptiveNormalizeFactors($factorDetails, $mtfStatus);
     $confluenceScore = isset($payload['confluence_score']) ? (float) $payload['confluence_score'] : (isset($payload['confluenceScore']) ? (float) $payload['confluenceScore'] : 0.0);
     $confluenceMax = max(1.0, isset($payload['confluence_max']) ? (float) $payload['confluence_max'] : 16.0);
 
@@ -1213,6 +1342,11 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
     $strategyProfile = adaptiveFetchLearningProfile($pdo, $userId, $category, $strategy, '*');
     $symbolProfile = adaptiveFetchLearningProfile($pdo, $userId, $category, $strategy, $symbolScope);
     $historyProfile = $symbolProfile ?: ($strategyProfile ?: $categoryProfile);
+    $scopes = adaptiveBuildScopes($category, $strategy, $symbol);
+    foreach ($scopes as $scope) {
+        $scopeRule = adaptiveResolveRule($pdo, $userId, $scope['market_category'], $scope['strategy_key'], $scope['symbol_scope']);
+        adaptiveEnsureFactorStatRows($pdo, $userId, $scope, $factors, $scopeRule);
+    }
 
     $factorRows = adaptiveFetchFactorRows($pdo, $userId, $category, $strategy, $symbolScope, $factors);
     $factorMap = [];
@@ -1287,10 +1421,11 @@ function adaptiveQualifySignal(PDO $pdo, int $userId, array $payload): array
         'market_category_score' => round($marketCategoryScore, 2),
         'strategy_reliability_score' => round($strategyReliabilityScore, 2),
         'final_confidence_score' => $finalConfidence,
-        'factors' => $factors,
+        'factors' => $factorDetails,
         'mtf_status' => $mtfStatus === '' ? 'UNKNOWN' : $mtfStatus,
         'rule_snapshot' => $rule,
         'trace' => $trace,
+        'weight_version' => 'v' . max(1, count($factorRows)),
     ]);
 }
 
@@ -1301,6 +1436,38 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
 {
     $trustedSource = $actorRole !== 'user';
     $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
+    $signalDecision = $trade['signal_id'] ? adaptiveFetchSignalDecision($pdo, $userId, (string) $trade['signal_id']) : null;
+    if ($signalDecision) {
+        if (!$trade['confluence_factors_present']) {
+            $decisionFactors = json_decode((string) ($signalDecision['factors_json'] ?? ''), true) ?: [];
+            $trade['confluence_factors_raw'] = adaptiveNormalizeFactorDetails($decisionFactors, $signalDecision['mtf_status'] ?? $trade['mtf_status']);
+            $trade['confluence_factors_present'] = adaptiveNormalizeFactors($trade['confluence_factors_raw'], $signalDecision['mtf_status'] ?? $trade['mtf_status']);
+        }
+        if (($trade['mtf_status'] ?? 'UNKNOWN') === 'UNKNOWN' && !empty($signalDecision['mtf_status'])) {
+            $trade['mtf_status'] = (string) $signalDecision['mtf_status'];
+        }
+        if (($trade['telegram_decision'] ?? 'UNKNOWN') === 'UNKNOWN' && !empty($signalDecision['telegram_action'])) {
+            $trade['telegram_decision'] = (string) $signalDecision['telegram_action'];
+        }
+        if (($trade['qualification_band'] ?? 'UNQUALIFIED') === 'UNQUALIFIED' && !empty($signalDecision['qualification_band'])) {
+            $trade['qualification_band'] = (string) $signalDecision['qualification_band'];
+        }
+        if ($trade['confidence_score'] === null && isset($signalDecision['final_confidence_score'])) {
+            $trade['confidence_score'] = (float) $signalDecision['final_confidence_score'];
+        }
+        if ($trade['signal_score'] === null && isset($signalDecision['signal_score'])) {
+            $trade['signal_score'] = (float) $signalDecision['signal_score'];
+        }
+        if ($trade['historical_reliability_score'] === null && isset($signalDecision['historical_reliability_score'])) {
+            $trade['historical_reliability_score'] = (float) $signalDecision['historical_reliability_score'];
+        }
+        if ($trade['market_category_score'] === null && isset($signalDecision['market_category_score'])) {
+            $trade['market_category_score'] = (float) $signalDecision['market_category_score'];
+        }
+        if ($trade['strategy_reliability_score'] === null && isset($signalDecision['strategy_reliability_score'])) {
+            $trade['strategy_reliability_score'] = (float) $signalDecision['strategy_reliability_score'];
+        }
+    }
     if (!$trustedSource && adaptiveCanTrustClientTrade($pdo, $userId, $trade)) {
         $trustedSource = true;
         $trade['notes_json']['trust_source'] = 'QUALIFIED_CLIENT_SIGNAL';
@@ -1572,6 +1739,16 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $factorStmt = $pdo->prepare('SELECT * FROM adaptive_factor_stats ' . $factorSql . ' ORDER BY sample_size DESC, current_weight DESC, factor_key ASC LIMIT 250');
     $factorStmt->execute($factorParams);
     $factorStats = $factorStmt->fetchAll();
+    $factorMinSample = 10;
+    foreach ($rules as $ruleRow) {
+        $factorMinSample = min($factorMinSample, max(1, (int) ($ruleRow['min_sample_size'] ?? 10)));
+    }
+    $ratedFactorCount = 0;
+    foreach ($factorStats as $factorRow) {
+        if ((int) ($factorRow['sample_size'] ?? 0) >= $factorMinSample) {
+            $ratedFactorCount++;
+        }
+    }
 
     $adaptiveProfileStmt = $pdo->prepare('SELECT symbol, timeframe_sec, strategy_key, regime, adaptive_mode, confidence_score, sample_size, updated_at FROM adaptive_profiles WHERE user_id = ? ORDER BY updated_at DESC LIMIT 12');
     $adaptiveProfileStmt->execute([$userId]);
@@ -1584,6 +1761,18 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $decisionStmt = $pdo->prepare('SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at FROM adaptive_signal_decisions ' . $decisionSql . ' ORDER BY created_at DESC LIMIT 30');
     $decisionStmt->execute($decisionParams);
     $decisions = $decisionStmt->fetchAll();
+
+    $factorStrategyStmt = $pdo->prepare('SELECT strategy_key, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY strategy_key ORDER BY rated_factor_count DESC, factor_count DESC, strategy_key ASC LIMIT 100');
+    $factorStrategyStmt->execute(array_merge([$factorMinSample], $factorParams));
+    $factorStatsByStrategy = $factorStrategyStmt->fetchAll();
+
+    $factorSymbolStmt = $pdo->prepare('SELECT symbol_scope, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY symbol_scope ORDER BY rated_factor_count DESC, factor_count DESC, symbol_scope ASC LIMIT 100');
+    $factorSymbolStmt->execute(array_merge([$factorMinSample], $factorParams));
+    $factorStatsBySymbol = $factorSymbolStmt->fetchAll();
+
+    $factorCategoryStmt = $pdo->prepare('SELECT market_category, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY market_category ORDER BY rated_factor_count DESC, factor_count DESC, market_category ASC LIMIT 100');
+    $factorCategoryStmt->execute(array_merge([$factorMinSample], $factorParams));
+    $factorStatsByCategory = $factorCategoryStmt->fetchAll();
 
     $auditWhere = ['target_user_id = ?'];
     $auditParams = [$userId];
@@ -1701,6 +1890,17 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
             'untrusted_24h_rate_pct' => $ingest24hTotal > 0 ? round(($untrusted24h / $ingest24hTotal) * 100, 1) : 0.0,
             'trust_promotion_window_seconds' => ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS,
         ],
+        'factor_diagnostics' => [
+            'total_resolved_trades' => $trustedTotal,
+            'total_adaptive_trades' => $totalTrades,
+            'total_factors_recorded' => count($factorStats),
+            'rated_factors' => $ratedFactorCount,
+            'unrated_factors' => max(0, count($factorStats) - $ratedFactorCount),
+            'min_sample_size' => $factorMinSample,
+        ],
+        'factor_statistics_by_strategy' => $factorStatsByStrategy,
+        'factor_statistics_by_symbol' => $factorStatsBySymbol,
+        'factor_statistics_by_category' => $factorStatsByCategory,
     ];
 }
 
