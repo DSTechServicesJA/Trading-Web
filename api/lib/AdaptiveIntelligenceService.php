@@ -391,6 +391,95 @@ function adaptiveLatestTimestamp(?string ...$values): ?string
     return $latest;
 }
 
+const ADAPTIVE_PAGINATION_ALLOWED_SIZES = [10, 25, 50, 100];
+
+/**
+ * Extract normalized server-side pagination/sort/search parameters for a
+ * given list prefix (e.g. "rules", "trades", "decisions", "audit") from the
+ * incoming filter/query array. Keeps page size bounded to the supported
+ * presets and sort column restricted to an allow-list to avoid SQL injection.
+ *
+ * @return array{0:int,1:int,2:string,3:string,4:string} [page, perPage, sortColumn, sortDir, search]
+ */
+function adaptivePaginationInput(array $filters, string $prefix, string $defaultSort, array $allowedSort): array
+{
+    $page = max(1, (int) ($filters[$prefix . '_page'] ?? 1));
+    $perPage = (int) ($filters[$prefix . '_per_page'] ?? 25);
+    if (!in_array($perPage, ADAPTIVE_PAGINATION_ALLOWED_SIZES, true)) {
+        $perPage = 25;
+    }
+    $sortCol = (string) ($filters[$prefix . '_sort'] ?? $defaultSort);
+    if (!in_array($sortCol, $allowedSort, true)) {
+        $sortCol = $defaultSort;
+    }
+    $sortDir = strtolower((string) ($filters[$prefix . '_dir'] ?? 'desc')) === 'asc' ? 'ASC' : 'DESC';
+    $search = trim((string) ($filters[$prefix . '_search'] ?? ''));
+    return [$page, $perPage, $sortCol, $sortDir, $search];
+}
+
+/**
+ * Build the pagination metadata block returned alongside a page of rows.
+ */
+function adaptiveBuildPageMeta(int $total, int $page, int $perPage): array
+{
+    $lastPage = max(1, (int) ceil($total / max(1, $perPage)));
+    $page = min($page, $lastPage);
+    return [
+        'total' => $total,
+        'page' => $page,
+        'per_page' => $perPage,
+        'last_page' => $lastPage,
+    ];
+}
+
+/**
+ * Run a paginated, sorted, optionally-searched SELECT against a table given
+ * an existing WHERE clause/params, returning rows + pagination metadata.
+ * $searchColumns lists columns eligible for the free-text LIKE search.
+ */
+function adaptiveFetchPaginated(
+    PDO $pdo,
+    string $table,
+    array $whereClauses,
+    array $whereParams,
+    array $filters,
+    string $prefix,
+    string $defaultSort,
+    array $allowedSort,
+    array $searchColumns,
+    string $columns = '*'
+): array {
+    [$page, $perPage, $sortCol, $sortDir, $search] = adaptivePaginationInput($filters, $prefix, $defaultSort, $allowedSort);
+
+    $clauses = $whereClauses;
+    $params = $whereParams;
+    if ($search !== '' && $searchColumns) {
+        $likeParts = [];
+        $like = '%' . $search . '%';
+        foreach ($searchColumns as $col) {
+            $likeParts[] = "$col LIKE ?";
+            $params[] = $like;
+        }
+        $clauses[] = '(' . implode(' OR ', $likeParts) . ')';
+    }
+    $whereSql = $clauses ? ('WHERE ' . implode(' AND ', $clauses)) : '';
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} {$whereSql}");
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
+    $meta = adaptiveBuildPageMeta($total, $page, $perPage);
+    $offset = ($meta['page'] - 1) * $perPage;
+
+    $rowsStmt = $pdo->prepare(
+        "SELECT {$columns} FROM {$table} {$whereSql} ORDER BY {$sortCol} {$sortDir} LIMIT {$perPage} OFFSET {$offset}"
+    );
+    $rowsStmt->execute($params);
+    $rows = $rowsStmt->fetchAll();
+
+    return ['rows' => $rows] + $meta;
+}
+
 const ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES = 10;
 const ADAPTIVE_LEARNING_MATURE_MIN_TRADES = 20;
 const ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS = 21600;
@@ -1759,6 +1848,19 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $rulesStmt->execute($ruleParams);
     $rules = $rulesStmt->fetchAll();
 
+    /* Server-side paginated/sortable/searchable view of the same rule scope for the UI table. */
+    $rulesPaginated = adaptiveFetchPaginated(
+        $pdo,
+        'adaptive_qualification_rules',
+        $ruleWhere,
+        $ruleParams,
+        $filters,
+        'rules',
+        'updated_at',
+        ['market_category', 'strategy_key', 'symbol_scope', 'min_sample_size', 'enabled', 'updated_at', 'created_at'],
+        ['market_category', 'strategy_key', 'symbol_scope']
+    );
+
     $factorStmt = $pdo->prepare('SELECT * FROM adaptive_factor_stats ' . $factorSql . ' ORDER BY sample_size DESC, current_weight DESC, factor_key ASC LIMIT 250');
     $factorStmt->execute($factorParams);
     $factorStats = $factorStmt->fetchAll();
@@ -1827,9 +1929,37 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $tradesStmt->execute($tradeParams);
     $trades = $tradesStmt->fetchAll();
 
+    /* Server-side paginated/sortable/searchable "Recent Trades" view. */
+    $tradesPaginated = adaptiveFetchPaginated(
+        $pdo,
+        'adaptive_trade_history',
+        $tradeWhere,
+        $tradeParams,
+        $filters,
+        'trades',
+        'created_at',
+        ['created_at', 'symbol', 'market_category', 'strategy_key', 'result', 'r_multiple', 'confidence_score'],
+        ['trade_id', 'symbol', 'market_category', 'strategy_key', 'result'],
+        'id, trade_id, symbol, market_category, strategy_key, result, r_multiple, confidence_score, created_at'
+    );
+
     $decisionStmt = $pdo->prepare('SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at FROM adaptive_signal_decisions ' . $decisionSql . ' ORDER BY created_at DESC LIMIT 30');
     $decisionStmt->execute($decisionParams);
     $decisions = $decisionStmt->fetchAll();
+
+    /* Server-side paginated/sortable/searchable "Recent Decisions" view. */
+    $decisionsPaginated = adaptiveFetchPaginated(
+        $pdo,
+        'adaptive_signal_decisions',
+        $decisionWhere,
+        $decisionParams,
+        $filters,
+        'decisions',
+        'created_at',
+        ['created_at', 'symbol', 'market_category', 'strategy_key', 'telegram_action', 'qualification_band', 'final_confidence_score'],
+        ['signal_id', 'symbol', 'market_category', 'strategy_key', 'telegram_action', 'qualification_band'],
+        'signal_id, market_category, strategy_key, telegram_action, qualification_band, final_confidence_score, created_at'
+    );
 
     $factorStatsByStrategyMap = [];
     $factorStatsBySymbolMap = [];
@@ -1915,6 +2045,19 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $auditStmt->execute($auditParams);
     $audits = $auditStmt->fetchAll();
 
+    /* Server-side paginated/sortable/searchable audit log view. */
+    $auditPaginated = adaptiveFetchPaginated(
+        $pdo,
+        'adaptive_learning_audit_log',
+        $auditWhere,
+        $auditParams,
+        $filters,
+        'audit',
+        'created_at',
+        ['created_at', 'action_type', 'entity_type', 'market_category', 'strategy_key', 'symbol_scope'],
+        ['action_type', 'entity_type', 'entity_key', 'market_category', 'strategy_key', 'symbol_scope', 'reason_text']
+    );
+
     $categoryStmt = $pdo->prepare('SELECT market_category, COUNT(*) AS trade_count, SUM(result = "WIN") AS wins, SUM(result = "LOSS") AS losses, AVG(CASE WHEN result IN ("WIN","LOSS") THEN r_multiple END) AS avg_r_multiple, AVG(confidence_score) AS avg_confidence FROM adaptive_trade_history ' . $tradeSql . ' GROUP BY market_category ORDER BY market_category');
     $categoryStmt->execute($tradeParams);
     $categoryRows = $categoryStmt->fetchAll();
@@ -1988,15 +2131,98 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $ingestTotal = $trustedTotal + $untrustedTotal;
     $ingest24hTotal = $trusted24h + $untrusted24h;
 
+    /* ── Issue 5: full pipeline diagnostics report ──────────────────────
+       Signal Generated → Signal Stored → Trade Opened → Trade Closed →
+       Outcome Recorded → Strategy Statistics Updated → Adaptive Learning
+       Updated → Factor Performance Updated → Market Category Updated →
+       Dashboard Updated. Every count below is scoped by the same
+       category/strategy/symbol filters as the rest of this payload so the
+       report reflects exactly what the admin is looking at. */
+    $pipelineWhere = ['user_id = ?'];
+    $pipelineParams = [$userId];
+    if ($categoryValue !== null) {
+        $pipelineWhere[] = 'market_category = ?';
+        $pipelineParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $pipelineWhere[] = 'strategy_key = ?';
+        $pipelineParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $pipelineWhere[] = 'symbol = ?';
+        $pipelineParams[] = $symbolValue;
+    }
+    $pipelineSql = 'WHERE ' . implode(' AND ', $pipelineWhere);
+
+    $pipelineTradeStmt = $pdo->prepare(
+        "SELECT COUNT(*) AS opened_trades,
+                SUM(result = 'WIN') AS wins,
+                SUM(result = 'LOSS') AS losses,
+                SUM(result = 'CANCELLED') AS cancelled,
+                SUM(result IN ('WIN','LOSS','CANCELLED')) AS closed_trades,
+                SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '\$.trust_source')), '') = 'UNTRUSTED_CLIENT_REPORTED') AS untrusted_trades
+         FROM adaptive_trade_history " . $pipelineSql
+    );
+    $pipelineTradeStmt->execute($pipelineParams);
+    $pipelineTradeRow = $pipelineTradeStmt->fetch() ?: [];
+
+    $pipelineDecisionStmt = $pdo->prepare('SELECT COUNT(*) FROM adaptive_signal_decisions ' . $decisionSql);
+    $pipelineDecisionStmt->execute($decisionParams);
+    $generatedSignals = (int) $pipelineDecisionStmt->fetchColumn();
+
+    $adaptiveUpdatesWhere = ['target_user_id = ?', "action_type = 'WEIGHT_AUTO_ADJUST'", "actor_role = 'system'"];
+    $adaptiveUpdatesParams = [$userId];
+    if ($categoryValue !== null) {
+        $adaptiveUpdatesWhere[] = 'market_category = ?';
+        $adaptiveUpdatesParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $adaptiveUpdatesWhere[] = 'strategy_key = ?';
+        $adaptiveUpdatesParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $adaptiveUpdatesWhere[] = 'symbol_scope = ?';
+        $adaptiveUpdatesParams[] = $symbolValue;
+    }
+    $adaptiveUpdatesStmt = $pdo->prepare('SELECT COUNT(*) FROM adaptive_learning_audit_log WHERE ' . implode(' AND ', $adaptiveUpdatesWhere));
+    $adaptiveUpdatesStmt->execute($adaptiveUpdatesParams);
+    $adaptiveUpdates = (int) $adaptiveUpdatesStmt->fetchColumn();
+
+    $categoryUpdatesStmt = $pdo->prepare('SELECT COUNT(DISTINCT market_category) FROM adaptive_trade_history ' . $pipelineSql);
+    $categoryUpdatesStmt->execute($pipelineParams);
+    $categoryUpdates = (int) $categoryUpdatesStmt->fetchColumn();
+
+    $pipelineOpenedTrades = (int) ($pipelineTradeRow['opened_trades'] ?? 0);
+    $pipelineClosedTrades = (int) ($pipelineTradeRow['closed_trades'] ?? 0);
+    $pipelineFailedUpdates = (int) ($pipelineTradeRow['untrusted_trades'] ?? 0);
+
+    $pipelineDiagnostics = [
+        'generated_signals' => $generatedSignals,
+        'opened_trades' => $pipelineOpenedTrades,
+        'closed_trades' => $pipelineClosedTrades,
+        'recorded_wins' => (int) ($pipelineTradeRow['wins'] ?? 0),
+        'recorded_losses' => (int) ($pipelineTradeRow['losses'] ?? 0),
+        'recorded_cancelled' => (int) ($pipelineTradeRow['cancelled'] ?? 0),
+        'adaptive_updates' => $adaptiveUpdates,
+        'category_updates' => $categoryUpdates,
+        'failed_updates' => $pipelineFailedUpdates,
+        'failed_updates_reason' => 'Untrusted client-reported trade outcomes are recorded in trade history but intentionally excluded from adaptive learning weight updates (see adaptiveRecordTrade).',
+    ];
+
     return [
         'profile' => $profile,
         'adaptive_profiles' => $adaptiveProfiles,
         'rules' => $rules,
+        'rules_page' => $rulesPaginated,
         'factor_stats' => $factorStats,
         'trades' => $trades,
+        'trades_page' => $tradesPaginated,
         'decisions' => $decisions,
+        'decisions_page' => $decisionsPaginated,
         'audits' => $audits,
+        'audits_page' => $auditPaginated,
         'category_analytics' => $categoryAnalytics,
+        'pipeline_diagnostics' => $pipelineDiagnostics,
         'category_diagnostics' => [
             'total_trades' => $totalTrades,
             'categorized_trades' => max(0, $totalTrades - $uncategorizedTrades),

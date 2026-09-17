@@ -352,6 +352,11 @@ html[data-theme="light"] body::before {
   background: linear-gradient(135deg, var(--bg-card), rgba(245,158,11,0.04));
 }
 
+.stat-card-warning {
+  border-color: rgba(239,68,68,0.35);
+  background: linear-gradient(135deg, var(--bg-card), rgba(239,68,68,0.08));
+}
+
 .stat-label {
   font-size: 10px;
   font-weight: 700;
@@ -1231,6 +1236,52 @@ html[data-theme="light"] .form-row select {
   gap: 12px;
   align-items: flex-start;
   margin-bottom: 14px;
+}
+
+.adaptive-table-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.adaptive-table-search {
+  min-width: 160px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.adaptive-table-page-size {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.adaptive-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.adaptive-page-summary {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.adaptive-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .adaptive-profile-table-wrap {

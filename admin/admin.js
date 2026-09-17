@@ -1806,6 +1806,104 @@ let adaptiveProfileSearchTimer = null;
 const adaptiveFactorRowMap = new Map();
 const adaptiveRuleRowMap = new Map();
 
+/* Server-side pagination/sort/search state for the Rules, Trades, Decisions,
+   and Audit Log tables on the adaptive intelligence detail view. Prefixes
+   match the backend's adaptiveFetchPaginated() query-param prefixes. */
+const ADAPTIVE_PAGE_TABLES = {
+  rules: { prefix: 'rules', defaultSort: 'updated_at', defaultDir: 'desc' },
+  trades: { prefix: 'trades', defaultSort: 'created_at', defaultDir: 'desc' },
+  decisions: { prefix: 'decisions', defaultSort: 'created_at', defaultDir: 'desc' },
+  audit: { prefix: 'audit', defaultSort: 'created_at', defaultDir: 'desc' },
+};
+const adaptiveTablePagination = {
+  rules: { page: 1, per_page: 25, sort: 'updated_at', dir: 'desc', search: '' },
+  trades: { page: 1, per_page: 25, sort: 'created_at', dir: 'desc', search: '' },
+  decisions: { page: 1, per_page: 25, sort: 'created_at', dir: 'desc', search: '' },
+  audit: { page: 1, per_page: 25, sort: 'created_at', dir: 'desc', search: '' },
+};
+let adaptiveTableSearchTimer = null;
+
+function renderAdaptiveTablePagination(tableKey, pageData) {
+  const container = el(`adaptive${tableKey.charAt(0).toUpperCase()}${tableKey.slice(1)}Pagination`);
+  const summary = el(`adaptive${tableKey.charAt(0).toUpperCase()}${tableKey.slice(1)}Summary`);
+  const state = adaptiveTablePagination[tableKey];
+  const total = pageData?.total || 0;
+  const page = pageData?.page || 1;
+  const lastPage = pageData?.last_page || 1;
+  if (summary) {
+    const start = total === 0 ? 0 : (page - 1) * (pageData?.per_page || state.per_page) + 1;
+    const end = total === 0 ? 0 : Math.min(total, start + (pageData?.rows?.length || 0) - 1);
+    summary.textContent = total === 0 ? 'No records found.' : `Showing ${start}-${end} of ${total}`;
+  }
+  if (!container) return;
+  container.innerHTML = '';
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'btn-ghost btn-sm';
+  prev.textContent = '← Prev';
+  prev.disabled = page <= 1;
+  prev.addEventListener('click', () => {
+    state.page = Math.max(1, page - 1);
+    loadAdaptiveUserDetail(adaptiveSelectedUserId);
+  });
+  const info = document.createElement('span');
+  info.className = 'adaptive-page-label';
+  info.textContent = `Page ${page} / ${Math.max(1, lastPage)}`;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'btn-ghost btn-sm';
+  next.textContent = 'Next →';
+  next.disabled = page >= lastPage;
+  next.addEventListener('click', () => {
+    state.page = Math.min(lastPage, page + 1);
+    loadAdaptiveUserDetail(adaptiveSelectedUserId);
+  });
+  container.appendChild(prev);
+  container.appendChild(info);
+  container.appendChild(next);
+}
+
+function bindAdaptiveTableControl(tableKey, searchId, pageSizeId) {
+  const state = adaptiveTablePagination[tableKey];
+  const searchInput = el(searchId);
+  if (searchInput) {
+    searchInput.value = state.search;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(adaptiveTableSearchTimer);
+      adaptiveTableSearchTimer = setTimeout(() => {
+        state.search = searchInput.value.trim();
+        state.page = 1;
+        loadAdaptiveUserDetail(adaptiveSelectedUserId);
+      }, 350);
+    });
+  }
+  const pageSizeSelect = el(pageSizeId);
+  if (pageSizeSelect) {
+    pageSizeSelect.value = String(state.per_page);
+    pageSizeSelect.addEventListener('change', () => {
+      state.per_page = Number(pageSizeSelect.value) || 25;
+      state.page = 1;
+      loadAdaptiveUserDetail(adaptiveSelectedUserId);
+    });
+  }
+}
+
+function bindAdaptiveTableControls() {
+  bindAdaptiveTableControl('rules', 'adaptiveRulesSearch', 'adaptiveRulesPageSize');
+  bindAdaptiveTableControl('trades', 'adaptiveTradesSearch', 'adaptiveTradesPageSize');
+  bindAdaptiveTableControl('decisions', 'adaptiveDecisionsSearch', 'adaptiveDecisionsPageSize');
+  bindAdaptiveTableControl('audit', 'adaptiveAuditSearch', 'adaptiveAuditPageSize');
+}
+
+function resetAdaptiveTablePagination() {
+  for (const [tableKey, config] of Object.entries(ADAPTIVE_PAGE_TABLES)) {
+    const state = adaptiveTablePagination[tableKey];
+    state.page = 1;
+    state.sort = config.defaultSort;
+    state.dir = config.defaultDir;
+  }
+}
+
 function adaptiveCategoryLabel(value) {
   return ADAPTIVE_CATEGORY_LABELS[value] || value || '—';
 }
@@ -1904,6 +2002,14 @@ function buildAdaptiveDetailQuery(userId = adaptiveSelectedUserId) {
   if (filters.market_category) params.set('market_category', filters.market_category);
   if (filters.strategy_key) params.set('strategy_key', filters.strategy_key);
   if (filters.symbol) params.set('symbol', filters.symbol);
+  for (const [tableKey, config] of Object.entries(ADAPTIVE_PAGE_TABLES)) {
+    const state = adaptiveTablePagination[tableKey];
+    params.set(`${config.prefix}_page`, String(state.page));
+    params.set(`${config.prefix}_per_page`, String(state.per_page));
+    params.set(`${config.prefix}_sort`, state.sort);
+    params.set(`${config.prefix}_dir`, state.dir);
+    if (state.search) params.set(`${config.prefix}_search`, state.search);
+  }
   return params.toString();
 }
 
@@ -1928,6 +2034,7 @@ async function loadAdaptiveProfileIndex(preferredUserId = adaptiveSelectedUserId
     const selected = rows.some((row) => Number(row.user_id) === Number(preferredUserId))
       ? Number(preferredUserId)
       : (rows[0] ? Number(rows[0].user_id) : 0);
+    if (selected !== adaptiveSelectedUserId) resetAdaptiveTablePagination();
     adaptiveSelectedUserId = selected;
     if (selected > 0) {
       await loadAdaptiveUserDetail(selected);
@@ -1977,6 +2084,7 @@ function renderAdaptiveProfileIndex(rows, payload) {
       </tr>`;
   }).join('');
   const selectUser = async (node) => {
+    resetAdaptiveTablePagination();
     adaptiveSelectedUserId = Number(node.dataset.adaptiveUserId);
     renderAdaptiveProfileIndex(rows, payload);
     await loadAdaptiveUserDetail(adaptiveSelectedUserId);
@@ -2053,11 +2161,12 @@ function renderAdaptiveUserDetail(data) {
   renderAdaptiveUserHero(data.profile || {}, data.adaptive_profiles || []);
   renderAdaptiveSummary(data.profile || {}, data.ingestion_diagnostics || null);
   renderAdaptiveFactorDiagnostics(data.factor_diagnostics || null);
+  renderAdaptivePipelineDiagnostics(data.pipeline_diagnostics || null);
   renderAdaptiveFactors(data.factor_stats || []);
-  renderAdaptiveQualificationRules(data.rules || []);
-  renderAdaptiveTrades(data.trades || []);
-  renderAdaptiveDecisions(data.decisions || []);
-  renderAdaptiveAudit(data.audits || []);
+  renderAdaptiveQualificationRules(data.rules_page || { rows: data.rules || [], total: (data.rules || []).length, page: 1, last_page: 1, per_page: 25 });
+  renderAdaptiveTrades(data.trades_page || { rows: data.trades || [], total: (data.trades || []).length, page: 1, last_page: 1, per_page: 25 });
+  renderAdaptiveDecisions(data.decisions_page || { rows: data.decisions || [], total: (data.decisions || []).length, page: 1, last_page: 1, per_page: 25 });
+  renderAdaptiveAudit(data.audits_page || { rows: data.audits || [], total: (data.audits || []).length, page: 1, last_page: 1, per_page: 25 });
   renderAdaptiveCategoryAnalytics(data.category_analytics || [], data.category_diagnostics || null);
   renderAdaptiveFactorStatsBreakdown(
     data.factor_statistics_by_strategy || [],
@@ -2130,6 +2239,31 @@ function renderAdaptiveFactorDiagnostics(diagnostics = null) {
     ['Min Samples To Rate', diagnostics.min_sample_size || 0],
   ];
   container.innerHTML = cards.map(([label, value]) => `<div class="stat-card"><div class="stat-label">${escHtml(label)}</div><div class="stat-value">${escHtml(String(value))}</div></div>`).join('');
+}
+
+function renderAdaptivePipelineDiagnostics(diagnostics = null) {
+  const container = el('adaptivePipelineDiagnostics');
+  if (!container) return;
+  if (!diagnostics) {
+    container.innerHTML = '';
+    return;
+  }
+  const cards = [
+    ['Generated Signals', diagnostics.generated_signals || 0],
+    ['Opened Trades', diagnostics.opened_trades || 0],
+    ['Closed Trades', diagnostics.closed_trades || 0],
+    ['Recorded Wins', diagnostics.recorded_wins || 0],
+    ['Recorded Losses', diagnostics.recorded_losses || 0],
+    ['Recorded Cancelled', diagnostics.recorded_cancelled || 0],
+    ['Adaptive Updates', diagnostics.adaptive_updates || 0],
+    ['Category Updates', diagnostics.category_updates || 0],
+    ['Failed Updates', diagnostics.failed_updates || 0],
+  ];
+  container.innerHTML = cards.map(([label, value]) => {
+    const isFailed = label === 'Failed Updates' && Number(value) > 0;
+    const title = label === 'Failed Updates' ? ` title="${escHtml(diagnostics.failed_updates_reason || '')}"` : '';
+    return `<div class="stat-card${isFailed ? ' stat-card-warning' : ''}"${title}><div class="stat-label">${escHtml(label)}</div><div class="stat-value">${escHtml(String(value))}</div></div>`;
+  }).join('');
 }
 
 function adaptiveFactorStatus(row) {
@@ -2207,16 +2341,17 @@ function setRuleField(id, value, fallback) {
   if (target) target.value = value != null ? value : fallback;
 }
 
-function renderAdaptiveQualificationRules(rows) {
+function renderAdaptiveQualificationRules(pageData) {
   adaptiveRuleRowMap.clear();
   const tbody = el('adaptiveRulesBody');
   if (!tbody) return;
-  const sorted = adaptiveSortRows(rows, adaptiveRuleSortKey, adaptiveRuleSortDirection);
-  if (!sorted.length) {
+  const rows = pageData.rows || [];
+  if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No qualification rules found.</td></tr>';
+    renderAdaptiveTablePagination('rules', pageData);
     return;
   }
-  tbody.innerHTML = sorted.map((row) => {
+  tbody.innerHTML = rows.map((row) => {
     const key = `${row.market_category}|${row.strategy_key}|${row.symbol_scope}`;
     adaptiveRuleRowMap.set(key, row);
     const selected = adaptiveEditingRuleScope
@@ -2238,21 +2373,24 @@ function renderAdaptiveQualificationRules(rows) {
   const current = adaptiveEditingRuleScope
     ? adaptiveRuleRowMap.get(`${adaptiveEditingRuleScope.market_category}|${adaptiveEditingRuleScope.strategy_key}|${adaptiveEditingRuleScope.symbol_scope}`)
     : null;
-  setAdaptiveRuleEditor(current || sorted[0]);
+  setAdaptiveRuleEditor(current || rows[0]);
   tbody.querySelectorAll('[data-adaptive-edit-rule]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const row = adaptiveRuleRowMap.get(btn.dataset.adaptiveEditRule);
       setAdaptiveRuleEditor(row);
-      renderAdaptiveQualificationRules(rows);
+      renderAdaptiveQualificationRules(pageData);
     });
   });
+  renderAdaptiveTablePagination('rules', pageData);
 }
 
-function renderAdaptiveTrades(rows) {
+function renderAdaptiveTrades(pageData) {
   const tbody = el('adaptiveTradesBody');
   if (!tbody) return;
+  const rows = pageData.rows || [];
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No adaptive trade history found.</td></tr>';
+    renderAdaptiveTablePagination('trades', pageData);
     return;
   }
   tbody.innerHTML = rows.map((row) => `
@@ -2265,13 +2403,16 @@ function renderAdaptiveTrades(rows) {
       <td>${adaptiveNumber(row.r_multiple, 2)}</td>
       <td>${adaptivePct(row.confidence_score, 1)}</td>
     </tr>`).join('');
+  renderAdaptiveTablePagination('trades', pageData);
 }
 
-function renderAdaptiveDecisions(rows) {
+function renderAdaptiveDecisions(pageData) {
   const tbody = el('adaptiveDecisionsBody');
   if (!tbody) return;
+  const rows = pageData.rows || [];
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No signal decisions logged yet.</td></tr>';
+    renderAdaptiveTablePagination('decisions', pageData);
     return;
   }
   tbody.innerHTML = rows.map((row) => `
@@ -2283,13 +2424,16 @@ function renderAdaptiveDecisions(rows) {
       <td>${escHtml(row.qualification_band)}</td>
       <td><strong>${adaptivePct(row.final_confidence_score, 1)}</strong></td>
     </tr>`).join('');
+  renderAdaptiveTablePagination('decisions', pageData);
 }
 
-function renderAdaptiveAudit(rows) {
+function renderAdaptiveAudit(pageData) {
   const tbody = el('adaptiveAuditBody');
   if (!tbody) return;
+  const rows = pageData.rows || [];
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No adaptive audit entries found.</td></tr>';
+    renderAdaptiveTablePagination('audit', pageData);
     return;
   }
   tbody.innerHTML = rows.map((row) => `
@@ -2301,6 +2445,7 @@ function renderAdaptiveAudit(rows) {
       <td class="ts">${adaptiveJsonSummary(row.new_value_json)}</td>
       <td>${escHtml(row.reason_text || '—')}</td>
     </tr>`).join('');
+  renderAdaptiveTablePagination('audit', pageData);
 }
 
 function renderAdaptiveCategoryAnalytics(rows, diagnostics = null) {
@@ -2644,15 +2789,18 @@ function bindAdaptiveSortHeaders() {
     th.style.cursor = 'pointer';
     th.addEventListener('click', () => {
       const key = th.dataset.adaptiveRuleSort;
-      adaptiveRuleSortDirection = adaptiveRuleSortKey === key && adaptiveRuleSortDirection === 'asc' ? 'desc' : 'asc';
-      adaptiveRuleSortKey = key;
-      renderAdaptiveQualificationRules(adaptiveDashboardState.detail?.rules || []);
+      const state = adaptiveTablePagination.rules;
+      state.dir = state.sort === key && state.dir === 'asc' ? 'desc' : 'asc';
+      state.sort = key;
+      state.page = 1;
+      loadAdaptiveUserDetail(adaptiveSelectedUserId);
     });
   });
 }
 
 function bindAdaptiveAdmin() {
   bindAdaptiveSortHeaders();
+  bindAdaptiveTableControls();
   el('adaptiveRefreshBtn')?.addEventListener('click', () => loadAdaptiveDashboard(adaptiveSelectedUserId));
   el('adaptiveExportBtn')?.addEventListener('click', exportAdaptiveData);
   el('adaptiveImportBtn')?.addEventListener('click', importAdaptiveData);

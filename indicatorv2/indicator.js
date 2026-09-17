@@ -1486,6 +1486,7 @@ let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx
 let sessionRangeTrade     = null;     /* null | { entry, sl, tp, dir, rr, entryIdx, symbol } — computed on London sweep */
 let sessionRangeTradeWins   = 0;     /* running win count for session range trades */
 let sessionRangeTradeLosses = 0;     /* running loss count for session range trades */
+let lastSessionRangeBuildDate = null; /* YYYY-MM-DD of last buildSessionRanges() call — detects day rollover */
 let sessionRangeHistory   = [];      /* alert history for strategy alerts panel */
 const SESSION_RANGE_MAX_HISTORY = 20;
 const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
@@ -2814,6 +2815,20 @@ function buildSessionRanges() {
   const latestDate = new Date(candles[candles.length - 1].epoch * 1000);
   const todayUTC = latestDate.toISOString().slice(0, 10); /* YYYY-MM-DD */
 
+  /* Trading-day rollover guard: this function only ever scans candles from
+     "today" (see loop below), so once UTC date changes, stale ranges from
+     the prior day (asian/london/ny highs+lows) as well as londonSweepSignal
+     from the prior day must be cleared — otherwise detectLondonAsianSweep()'s
+     `if (londonSweepSignal) return;` gate stays latched forever and no new
+     sweep is ever detected again for this symbol/panel. Only clear when no
+     trade is actively PENDING so an open position is never dropped mid-flight. */
+  if (lastSessionRangeBuildDate !== null && lastSessionRangeBuildDate !== todayUTC) {
+    if (!sessionRangeTrade || sessionRangeTrade.result !== "PENDING") {
+      resetSessionRanges();
+    }
+  }
+  lastSessionRangeBuildDate = todayUTC;
+
   let asianHigh = -Infinity, asianLow = Infinity, asianStart = -1, asianEnd = -1;
   let londonHigh = -Infinity, londonLow = Infinity, londonStart = -1, londonEnd = -1;
   let nyHigh = -Infinity, nyLow = Infinity, nyStart = -1, nyEnd = -1;
@@ -3045,6 +3060,7 @@ function resetSessionRanges() {
  */
 function monitorSessionRangeTradeOutcome(candle) {
   if (!sessionRangesEnabled || !sessionRangeTrade) return;
+  if (sessionRangeTrade.result && sessionRangeTrade.result !== "PENDING") return;
 
   const srt = sessionRangeTrade;
 
@@ -3125,6 +3141,7 @@ function monitorSessionRangeTradeOutcome(candle) {
  */
 async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
   if (!telegramSessionRangeOutcomeSend) return;
+  if (resolvedTrade.result && !canSendTradeResolutionNotification(resolvedTrade, resolvedTrade.result)) return;
 
   /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
@@ -8632,6 +8649,10 @@ function detectFailedPinBar() {
  * Run the failed pin bar scanner and handle alerting.
  */
 function processFailedPinBar() {
+  /* Keep one active failed-pin-bar setup at a time to avoid overlapping
+     trades while the current setup is still pending outcome (SL/TP). */
+  if (failedPinBarHistory.some(s => s.result === "PENDING")) return;
+
   const signal = detectFailedPinBar();
   if (!signal) return;
 
@@ -11256,12 +11277,36 @@ async function sendTelegramStrategyAlert(signal, force = false) {
 }
 
 /**
+ * Centralized WIN/LOSS/EXPIRED resolution-notification deduplication.
+ * Every trade-resolution notification sender must consult this guard before
+ * dispatching so the same trade_id + resolution_type combination can never
+ * fire more than once. (Duplicate trade notification fix)
+ */
+const _tradeResolutionNotificationKeys = new Set();
+function tradeResolutionNotificationKey(signal, resolutionType) {
+  const tradeId = (signal && (signal.tradeId || signal.signalId)) ||
+    `${(signal && signal.type) || "trade"}_${(signal && signal.symbol) || ""}_${signal && signal.candleIdx != null ? signal.candleIdx : (signal && signal.entryIdx)}_${(signal && signal.epoch) || ""}`;
+  return `${tradeId}::${resolutionType}`;
+}
+function canSendTradeResolutionNotification(signal, resolutionType) {
+  const key = tradeResolutionNotificationKey(signal, resolutionType);
+  if (_tradeResolutionNotificationKeys.has(key)) {
+    addLog(`[TRADE] Duplicate notification prevented (${key})`);
+    return false;
+  }
+  _tradeResolutionNotificationKeys.add(key);
+  addLog(`[TRADE] Resolution notification queued (${key})`);
+  return true;
+}
+
+/**
  * Send strategy outcome (WIN / LOSS) via Telegram when enabled.
  * Called from monitorLiquiditySweepOutcomes, monitorStopLossHuntOutcomes,
  * monitorFailedPinBarOutcomes after a signal resolves.
  */
 async function sendStrategyOutcomeTelegram(signal) {
   if (!telegramStrategyOutcomeSend) return;
+  if (signal.result && !canSendTradeResolutionNotification(signal, signal.result)) return;
 
   /* Sync credentials from DOM and validate BEFORE marking the signal as sent,
      so that a bad-credential failure leaves _stratOutcomeSent = false and allows
@@ -17377,6 +17422,7 @@ function activatePanel(p) {
   sessionRangeTradeWins   = p.sessionRangeTradeWins   || 0;
   sessionRangeTradeLosses = p.sessionRangeTradeLosses || 0;
   sessionRangeHistory = p.sessionRangeHistory || [];
+  lastSessionRangeBuildDate = p.lastSessionRangeBuildDate || null;
 
   /* NY Open Range */
   nyOpenRange         = p.nyOpenRange        || null;
@@ -17513,6 +17559,7 @@ function savePanel(p) {
   p.sessionRangeTradeWins   = sessionRangeTradeWins;
   p.sessionRangeTradeLosses = sessionRangeTradeLosses;
   p.sessionRangeHistory = sessionRangeHistory;
+  p.lastSessionRangeBuildDate = lastSessionRangeBuildDate;
 
   /* NY Open Range */
   p.nyOpenRange         = nyOpenRange;
