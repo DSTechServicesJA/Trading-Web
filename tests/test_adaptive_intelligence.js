@@ -250,7 +250,8 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
 
 test('adaptive profile learning-status filters pre-aggregate trusted trades and factor lock counts', () => {
   assert.match(serviceSource, /COUNT\(\*\) AS trusted_trade_count FROM adaptive_trade_history ath INNER JOIN users u_filter ON u_filter\.id = ath\.user_id WHERE \$trustedTradeFilterSql\$tradeScopedBaseWhere GROUP BY ath\.user_id\) ath_counts ON ath_counts\.user_id = u\.id/);
-  assert.match(serviceSource, /SUM\(afs\.locked_by_admin = 1\) AS locked_factor_count, SUM\(afs\.locked_by_admin = 0\) AS unlocked_factor_count FROM adaptive_factor_stats afs INNER JOIN users u_factor_filter ON u_factor_filter\.id = afs\.user_id\$factorScopedBaseWhere GROUP BY afs\.user_id\) afs_counts ON afs_counts\.user_id = u\.id/);
+  assert.match(serviceSource, /COUNT\(\*\) AS factor_row_count, SUM\(afs\.locked_by_admin = 1\) AS locked_factor_count, SUM\(afs\.locked_by_admin = 0\) AS unlocked_factor_count FROM adaptive_factor_stats afs INNER JOIN users u_factor_filter ON u_factor_filter\.id = afs\.user_id\$factorScopedBaseWhere GROUP BY afs\.user_id\) afs_counts ON afs_counts\.user_id = u\.id/);
+  assert.match(serviceSource, /\$factorRowCountColumn = 'COALESCE\(afs_counts\.factor_row_count, 0\)'/);
   assert.match(serviceSource, /\$trustedTradeCountColumn = 'COALESCE\(ath_counts\.trusted_trade_count, 0\)'/);
   assert.match(serviceSource, /\$queryParams = array_merge\(\$params, \$params, \$params\);/);
   assert.match(serviceSource, /SELECT COUNT\(\*\) FROM users u\$learningStatusJoinSql \$whereSql/);

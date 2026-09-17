@@ -524,6 +524,7 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     };
     $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ath.notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
     $trustedTradeCountColumn = 'COALESCE(ath_counts.trusted_trade_count, 0)';
+    $factorRowCountColumn = 'COALESCE(afs_counts.factor_row_count, 0)';
     $lockedFactorCountColumn = 'COALESCE(afs_counts.locked_factor_count, 0)';
     $unlockedFactorCountColumn = 'COALESCE(afs_counts.unlocked_factor_count, 0)';
     $learningWhere = [];
@@ -534,7 +535,7 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $factorScopedBaseWhere = $baseWhere ? ' WHERE ' . implode(' AND ', $applyUserAlias($baseWhere, 'u_factor_filter')) : '';
         $learningStatusJoinSql =
             " LEFT JOIN (SELECT ath.user_id, COUNT(*) AS trusted_trade_count FROM adaptive_trade_history ath INNER JOIN users u_filter ON u_filter.id = ath.user_id WHERE $trustedTradeFilterSql$tradeScopedBaseWhere GROUP BY ath.user_id) ath_counts ON ath_counts.user_id = u.id" .
-            " LEFT JOIN (SELECT afs.user_id, SUM(afs.locked_by_admin = 1) AS locked_factor_count, SUM(afs.locked_by_admin = 0) AS unlocked_factor_count FROM adaptive_factor_stats afs INNER JOIN users u_factor_filter ON u_factor_filter.id = afs.user_id$factorScopedBaseWhere GROUP BY afs.user_id) afs_counts ON afs_counts.user_id = u.id";
+            " LEFT JOIN (SELECT afs.user_id, COUNT(*) AS factor_row_count, SUM(afs.locked_by_admin = 1) AS locked_factor_count, SUM(afs.locked_by_admin = 0) AS unlocked_factor_count FROM adaptive_factor_stats afs INNER JOIN users u_factor_filter ON u_factor_filter.id = afs.user_id$factorScopedBaseWhere GROUP BY afs.user_id) afs_counts ON afs_counts.user_id = u.id";
         $queryParams = array_merge($params, $params, $params);
     }
     if ($learningStatus === 'NOT_STARTED') {
@@ -554,10 +555,12 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $learningWhere[] = "$trustedTradeCountColumn >= 1";
         $learningWhere[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'LOCKED') {
+        $learningWhere[] = "$factorRowCountColumn >= 1";
         $learningWhere[] = "$trustedTradeCountColumn >= 1";
         $learningWhere[] = "$lockedFactorCountColumn >= 1";
         $learningWhere[] = "$unlockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'MIXED') {
+        $learningWhere[] = "$factorRowCountColumn >= 1";
         $learningWhere[] = "$trustedTradeCountColumn >= 1";
         $learningWhere[] = "$lockedFactorCountColumn >= 1";
         $learningWhere[] = "$unlockedFactorCountColumn >= 1";
