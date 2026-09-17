@@ -236,7 +236,7 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
   assert.match(serviceSource, /sort_key/);
   assert.match(serviceSource, /sort_direction/);
   assert.match(serviceSource, /market_category IN \(\?, '\*'\)/);
-  assert.match(serviceSource, /\$trustedTradeFilterSql = "COALESCE\(JSON_UNQUOTE\(JSON_EXTRACT\(notes_json, '\$\.trust_source'\)\), ''\) <> 'UNTRUSTED_CLIENT_REPORTED'"/);
+  assert.match(serviceSource, /\$trustedTradeFilterSql = "COALESCE\(JSON_UNQUOTE\(JSON_EXTRACT\(ath\.notes_json, '\$\.trust_source'\)\), ''\) <> 'UNTRUSTED_CLIENT_REPORTED'"/);
   assert.match(serviceSource, /\$tradeWhere = \['user_id = \?', \$trustedTradeFilterSql\]/);
   assert.match(serviceSource, /adaptive_signal_decisions ' \. \$decisionSql/);
   assert.match(serviceSource, /adaptiveExportUserTrades/);
@@ -246,6 +246,14 @@ test('adaptive admin review fixes are wired for sorting, exports, locks, and acc
   assert.match(adminControllerSource, /adaptiveAcquireUserTradeLock\(/);
   assert.match(schemaSource, /INFORMATION_SCHEMA\.COLUMNS/);
   assert.match(adminStyleSource, /\.adaptive-profile-table-wrap \{\s*overflow-x: auto;/);
+});
+
+test('adaptive profile learning-status filters pre-aggregate trusted trades and factor lock counts', () => {
+  assert.match(serviceSource, /COUNT\(\*\) AS trusted_trade_count FROM adaptive_trade_history ath WHERE \$trustedTradeFilterSql GROUP BY ath\.user_id\) ath_counts ON ath_counts\.user_id = u\.id/);
+  assert.match(serviceSource, /SUM\(locked_by_admin = 1\) AS locked_factor_count, SUM\(locked_by_admin = 0\) AS unlocked_factor_count FROM adaptive_factor_stats GROUP BY user_id\) afs_counts ON afs_counts\.user_id = u\.id/);
+  assert.match(serviceSource, /\$trustedTradeCountColumn = 'COALESCE\(ath_counts\.trusted_trade_count, 0\)'/);
+  assert.match(serviceSource, /SELECT COUNT\(\*\) FROM users u\$learningStatusJoinSql \$whereSql/);
+  assert.doesNotMatch(serviceSource, /\$trustedTradeCountSql =/);
 });
 
 test('adaptive admin number formatters keep fallback for null and empty values', () => {

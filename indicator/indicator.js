@@ -1375,15 +1375,17 @@ function collectLifecycleHealthReport(options = {}) {
   const staleAfterMs = Number.isFinite(options.staleAfterMs)
     ? options.staleAfterMs
     : Math.max(30 * 60 * 1000, getSignalValidityMs() * 3);
-  const histories = [signalHistory];
+  const histories = [{ entries: signalHistory, symbol: getActiveSymbol() || null }];
   for (const panel of multiPanels.values()) {
-    if (panel && Array.isArray(panel.signalHistory)) histories.push(panel.signalHistory);
+    if (panel && Array.isArray(panel.signalHistory)) {
+      histories.push({ entries: panel.signalHistory, symbol: panel.symbol || null });
+    }
   }
   const bySymbol = new Map();
   for (const history of histories) {
-    for (const entry of (history || [])) {
+    for (const entry of (history && history.entries ? history.entries : [])) {
       if (!entry || entry.result !== "PENDING") continue;
-      const symbol = entry.symbol || getActiveSymbol() || "UNKNOWN";
+      const symbol = entry.symbol || history.symbol || getActiveSymbol() || "UNKNOWN";
       const row = bySymbol.get(symbol) || { symbol, pending: 0, stalePending: 0 };
       row.pending += 1;
       const createdAtMs = getSignalCreatedAtMs(entry);
@@ -16096,23 +16098,24 @@ function restoreAutoTradeHistory() {
 
 function monitorTradeOutcome(candle) {
   if (!monitoringTrade || !trade) return;
-  const tradeSymbol = trade.symbol || getActiveSymbol();
-  const pending = (trade.signalId
-    ? signalHistory.findLast((s) => s && s.result === "PENDING" && s.signalId === trade.signalId)
+  const releasedTrade = trade;
+  const tradeSymbol = releasedTrade.symbol || getActiveSymbol();
+  const pending = (releasedTrade.signalId
+    ? signalHistory.findLast((s) => s && s.result === "PENDING" && s.signalId === releasedTrade.signalId)
     : null) || findPendingTradeSignal(tradeSymbol);
   if (!pending) {
     logSignalEngineDebug("TRADE_RELEASE", {
-      signalId: trade.signalId || null,
+      signalId: releasedTrade.signalId || null,
       reason: "missing_pending_signal_record",
       symbol: tradeSymbol
     });
-    cleanupPendingSignalsForSymbol(tradeSymbol, "breakout_retest", { keepSignalId: trade.signalId || null });
+    cleanupPendingSignalsForSymbol(tradeSymbol, "breakout_retest", { keepSignalId: releasedTrade.signalId || null });
     monitoringTrade = false;
     trade = null;
     trailingSL = null;
     partialTpHit = false;
     logSignalLifecycleEvent(tradeSymbol, "State Reset Complete", {
-      signalId: trade && trade.signalId ? trade.signalId : null,
+      signalId: releasedTrade.signalId || null,
       reason: "missing_pending_signal_record"
     });
     if (phase === "TRADE") setPhase("BREAKOUT");

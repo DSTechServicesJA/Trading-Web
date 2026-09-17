@@ -520,36 +520,43 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $params[] = strtoupper($category);
     }
     $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ath.notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
-    $trustedTradeExistsSql = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
-    $trustedTradeCountSql = "(SELECT COUNT(*) FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+    $trustedTradeCountColumn = 'COALESCE(ath_counts.trusted_trade_count, 0)';
+    $lockedFactorCountColumn = 'COALESCE(afs_counts.locked_factor_count, 0)';
+    $unlockedFactorCountColumn = 'COALESCE(afs_counts.unlocked_factor_count, 0)';
+    $learningStatusJoinSql = '';
+    if ($learningStatus !== '') {
+        $learningStatusJoinSql =
+            " LEFT JOIN (SELECT ath.user_id, COUNT(*) AS trusted_trade_count FROM adaptive_trade_history ath WHERE $trustedTradeFilterSql GROUP BY ath.user_id) ath_counts ON ath_counts.user_id = u.id" .
+            " LEFT JOIN (SELECT user_id, SUM(locked_by_admin = 1) AS locked_factor_count, SUM(locked_by_admin = 0) AS unlocked_factor_count FROM adaptive_factor_stats GROUP BY user_id) afs_counts ON afs_counts.user_id = u.id";
+    }
     if ($learningStatus === 'NOT_STARTED') {
-        $where[] = "NOT $trustedTradeExistsSql";
+        $where[] = "$trustedTradeCountColumn = 0";
     } elseif ($learningStatus === 'LEARNING') {
-        $where[] = "$trustedTradeCountSql >= 1";
-        $where[] = "$trustedTradeCountSql < " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = "$trustedTradeCountColumn >= 1";
+        $where[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $where[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'ACTIVE') {
-        $where[] = "$trustedTradeCountSql >= " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
-        $where[] = "$trustedTradeCountSql < " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $where[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $where[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'MATURE') {
-        $where[] = "$trustedTradeCountSql >= " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $where[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'AUTO_LEARNING') {
-        $where[] = $trustedTradeExistsSql;
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+        $where[] = "$trustedTradeCountColumn >= 1";
+        $where[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'LOCKED') {
-        $where[] = $trustedTradeExistsSql;
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
-        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+        $where[] = "$trustedTradeCountColumn >= 1";
+        $where[] = "$lockedFactorCountColumn >= 1";
+        $where[] = "$unlockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'MIXED') {
-        $where[] = $trustedTradeExistsSql;
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
-        $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
+        $where[] = "$trustedTradeCountColumn >= 1";
+        $where[] = "$lockedFactorCountColumn >= 1";
+        $where[] = "$unlockedFactorCountColumn >= 1";
     }
 
     $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $count = $pdo->prepare("SELECT COUNT(*) FROM users u $whereSql");
+    $count = $pdo->prepare("SELECT COUNT(*) FROM users u$learningStatusJoinSql $whereSql");
     $count->execute($params);
     $total = (int) $count->fetchColumn();
 
@@ -560,7 +567,7 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     ];
     $sortColumn = $sortMap[$sortKey] ?? $sortMap['name'];
     $queryParams = array_merge($params, [$perPage, $offset]);
-    $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u $whereSql ORDER BY $sortColumn $sortDirection, COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
+    $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u$learningStatusJoinSql $whereSql ORDER BY $sortColumn $sortDirection, COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
     $stmt->execute($queryParams);
     $users = $stmt->fetchAll();
     $rows = adaptiveHydrateUserSummaries($pdo, $users);

@@ -298,7 +298,7 @@ test('MTF rejection breakdown tracks percentages by reason', () => {
 
 test('signal lifecycle cleanup and logging paths stay wired after resolution', () => {
   assert.match(source, /function cleanupPendingSignalsForSymbol\(symbol, strategyType = null, options = \{\}\)/);
-  assert.match(source, /const pending = \(trade\.signalId[\s\S]*\|\| findPendingTradeSignal\(tradeSymbol\);/);
+  assert.match(source, /const pending = \(releasedTrade\.signalId[\s\S]*\|\| findPendingTradeSignal\(tradeSymbol\);/);
   assert.match(source, /cleanupPendingSignalsForSymbol\(pending\.symbol \|\| tradeSymbol, "breakout_retest", \{ keepSignalId: pending\.signalId \|\| null \}\);/);
   assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| tradeSymbol, "Trade Closed"/);
   assert.match(source, /logSignalLifecycleEvent\([^)]+, "State Reset Complete"/);
@@ -324,4 +324,75 @@ test('signal lifecycle FSM, active-trade registry, and health monitor remain wir
   assert.match(source, /function collectLifecycleHealthReport\(options = \{\}\)/);
   assert.match(source, /startLifecycleHealthMonitor\(\);/);
   assert.match(source, /stopLifecycleHealthMonitor\(\);/);
+});
+
+test('collectLifecycleHealthReport preserves panel symbol context for entries without an explicit symbol', () => {
+  const fnSource = extractFunction('collectLifecycleHealthReport');
+  const harness = `${fnSource}\nmodule.exports = { collectLifecycleHealthReport };`;
+  const now = 10_000;
+  const context = {
+    module: { exports: {} },
+    signalHistory: [],
+    multiPanels: new Map([
+      ['R_50', { symbol: 'R_50', signalHistory: [{ result: 'PENDING', createdAtMs: 1_000 }] }]
+    ]),
+    activeTradeRegistry: new Map([['R_50|sig-1', { symbol: 'R_50', signalId: 'sig-1' }]]),
+    getActiveSymbol: () => 'R_100',
+    getSignalValidityMs: () => 1_000,
+    getSignalCreatedAtMs: (entry) => entry.createdAtMs,
+    Number,
+    Math,
+    Date,
+    Map
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { collectLifecycleHealthReport } = context.module.exports;
+
+  const report = collectLifecycleHealthReport({ now, staleAfterMs: 5_000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(report.symbols)), [
+    { symbol: 'R_50', pending: 1, stalePending: 1 }
+  ]);
+  assert.equal(report.totalPending, 1);
+  assert.equal(report.totalStalePending, 1);
+  assert.equal(report.activeTradeRegistryCount, 1);
+});
+
+test('monitorTradeOutcome keeps the released signal id when the pending record is missing', () => {
+  const fnSource = extractFunction('monitorTradeOutcome');
+  const harness = `${fnSource}\nmodule.exports = { monitorTradeOutcome };`;
+  const cleanupCalls = [];
+  const lifecycleCalls = [];
+  const phaseChanges = [];
+  const context = {
+    module: { exports: {} },
+    monitoringTrade: true,
+    trade: { symbol: 'R_50', signalId: 'sig-7', entry: 100, sl: 95, dir: 'BULL' },
+    signalHistory: [],
+    trailingSL: 10,
+    partialTpHit: true,
+    phase: 'TRADE',
+    candles: [{ close: 100 }],
+    getActiveSymbol: () => 'R_100',
+    findPendingTradeSignal: () => null,
+    cleanupPendingSignalsForSymbol: (...args) => cleanupCalls.push(args),
+    logSignalLifecycleEvent: (...args) => lifecycleCalls.push(args),
+    logSignalEngineDebug: () => {},
+    setPhase: (value) => {
+      phaseChanges.push(value);
+      context.phase = value;
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { monitorTradeOutcome } = context.module.exports;
+
+  monitorTradeOutcome({ close: 100 });
+  assert.deepEqual(JSON.parse(JSON.stringify(cleanupCalls)), [['R_50', 'breakout_retest', { keepSignalId: 'sig-7' }]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(lifecycleCalls)), [['R_50', 'State Reset Complete', { signalId: 'sig-7', reason: 'missing_pending_signal_record' }]]);
+  assert.equal(context.monitoringTrade, false);
+  assert.equal(context.trade, null);
+  assert.equal(context.trailingSL, null);
+  assert.equal(context.partialTpHit, false);
+  assert.deepEqual(phaseChanges, ['BREAKOUT']);
 });
