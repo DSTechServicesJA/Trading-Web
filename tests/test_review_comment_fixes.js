@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
+const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
 
 function extractFunction(name) {
   const startToken = `function ${name}(`;
@@ -2435,4 +2436,76 @@ test('initLoginGate initializes adaptive runtime immediately on login and re-che
   assert.ok(bootstrapIndex > applyIndex);
   assert.ok(loadIndex !== -1);
   assert.ok(renderIndex > loadIndex);
+});
+
+test('syncPersistentAdaptiveTradeHistory does not record rejected cached adaptive decisions', async () => {
+  const harness = `${extractFunction('syncPersistentAdaptiveTradeHistory')}\nmodule.exports = { syncPersistentAdaptiveTradeHistory };`;
+  let recorded = false;
+  const signal = {
+    signalId: 'sig-reject',
+    symbol: 'stpRNG5',
+    strategyType: 'mtf_top_down',
+    timeframeSec: 300,
+    result: 'WIN',
+    adaptiveScopeKey: 'user:test',
+    _adaptiveDecision: { telegram_action: 'REJECT' }
+  };
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: { isAuthenticated: () => true, recordTrade: async () => { recorded = true; return { ok: true }; } },
+    signalHistory: [],
+    mtfTopDownHistory: [signal],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    gridScalperV2History: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    orbHistory: [],
+    crtTbsHistory: [],
+    backtestMode: false,
+    getAdaptiveRuntimeScopeKey: () => 'user:test',
+    shouldSyncAdaptiveTradeSignal: () => true,
+    ensureAdaptiveTradeResolutionTimestamp: () => {},
+    qualifySignalForTelegram: async () => ({ allowed: true, decision: null }),
+    resolveStrategyDisplayLabel: () => 'MTF Top-Down',
+    buildAdaptiveTradePayloadFromSignal: () => ({ signal_id: 'sig-reject' }),
+    getActiveSymbol: () => 'stpRNG5',
+    getCurrentGranularitySec: () => 300,
+    getAdaptiveMtfStatus: () => 'CONFIRMED',
+    generateSignalId: () => 'sig-reject',
+    console,
+    Date,
+    String,
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  context.module.exports.syncPersistentAdaptiveTradeHistory();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(recorded, false);
+});
+
+test('MTF active lifecycle send is gated by adaptive qualification allow flag', () => {
+  assert.match(source, /if \(!qualification \|\| qualification\.allowed !== true\) return;\s*sendSignalLifecycleTelegram\("active"/s);
+});
+
+test('adaptive trade ingestion backfills scope and decision-id fallback logic for linked signal decisions', () => {
+  assert.match(serviceSource, /if \(\$decisionId <= 0\) \{/);
+  assert.match(serviceSource, /WHERE user_id = \? AND signal_id = \?/);
+  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['market_category'\]\)\)/);
+  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['strategy_key'\]\)\)/);
+  assert.match(serviceSource, /if \(empty\(\$trade\['has_raw_factor_details'\]\)\)/);
+  assert.match(serviceSource, /\$resolveFactorMinSample = static function \(array \$factorRow\) use \(\$rules\): int \{/);
 });

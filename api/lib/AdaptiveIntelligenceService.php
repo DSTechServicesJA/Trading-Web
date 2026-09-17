@@ -828,6 +828,7 @@ function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride 
         'strategy_reliability_score' => isset($body['strategy_reliability_score']) ? (float) $body['strategy_reliability_score'] : (isset($body['strategyReliabilityScore']) ? (float) $body['strategyReliabilityScore'] : null),
         'qualification_band' => adaptiveNormalizeScopeValue($body['qualification_band'] ?? $body['qualificationBand'] ?? 'UNQUALIFIED', 'UNQUALIFIED'),
         'confluence_factors_present' => $factors,
+        'has_raw_factor_details' => count($factorsRaw) > 0,
         'confluence_factors_raw' => $factorDetails,
         'mtf_status' => mb_substr($mtfStatus === '' ? 'UNKNOWN' : $mtfStatus, 0, 32),
         'timeframe_sec' => $timeframeSec,
@@ -1245,8 +1246,20 @@ function adaptivePersistSignalDecision(PDO $pdo, int $userId, array $decision): 
         adaptiveJsonEncode($decision['rule_snapshot']),
         adaptiveJsonEncode($decision['trace']),
     ]);
-    $decision['id'] = (int) $pdo->lastInsertId();
-    $decision['weight_version'] = 'v' . (int) max(1, $decision['id']);
+    $decisionId = (int) $pdo->lastInsertId();
+    if ($decisionId <= 0) {
+        $idStmt = $pdo->prepare(
+            'SELECT id
+               FROM adaptive_signal_decisions
+              WHERE user_id = ? AND signal_id = ?
+              ORDER BY updated_at DESC, id DESC
+              LIMIT 1'
+        );
+        $idStmt->execute([$userId, (string) $decision['signal_id']]);
+        $decisionId = (int) ($idStmt->fetchColumn() ?: 0);
+    }
+    $decision['id'] = $decisionId;
+    $decision['weight_version'] = 'v' . (int) max(1, $decisionId);
     return $decision;
 }
 
@@ -1256,7 +1269,7 @@ function adaptiveFetchSignalDecision(PDO $pdo, int $userId, string $signalId): ?
         return null;
     }
     $stmt = $pdo->prepare(
-        'SELECT signal_id, market_category, strategy_key, telegram_action, qualification_band, signal_score,
+        'SELECT id, signal_id, symbol, market_category, strategy_key, telegram_action, qualification_band, signal_score,
                 historical_reliability_score, market_category_score, strategy_reliability_score, final_confidence_score,
                 mtf_status, factors_json
            FROM adaptive_signal_decisions
@@ -1438,10 +1451,20 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
     $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
     $signalDecision = $trade['signal_id'] ? adaptiveFetchSignalDecision($pdo, $userId, (string) $trade['signal_id']) : null;
     if ($signalDecision) {
-        if (!$trade['confluence_factors_present']) {
+        if (!empty($signalDecision['market_category'])) {
+            $trade['market_category'] = adaptiveNormalizeCategory((string) $signalDecision['market_category'], $trade['symbol'], (int) ($trade['timeframe_sec'] ?? 60));
+        }
+        if (!empty($signalDecision['strategy_key'])) {
+            $trade['strategy_key'] = adaptiveNormalizeScopeValue((string) $signalDecision['strategy_key'], $trade['strategy_key']);
+        }
+        if (!empty($signalDecision['symbol'])) {
+            $trade['symbol'] = adaptiveNormalizeScopeValue((string) $signalDecision['symbol'], $trade['symbol']);
+        }
+        if (empty($trade['has_raw_factor_details'])) {
             $decisionFactors = json_decode((string) ($signalDecision['factors_json'] ?? ''), true) ?: [];
             $trade['confluence_factors_raw'] = adaptiveNormalizeFactorDetails($decisionFactors, $signalDecision['mtf_status'] ?? $trade['mtf_status']);
             $trade['confluence_factors_present'] = adaptiveNormalizeFactors($trade['confluence_factors_raw'], $signalDecision['mtf_status'] ?? $trade['mtf_status']);
+            $trade['has_raw_factor_details'] = count($trade['confluence_factors_raw']) > 0;
         }
         if (($trade['mtf_status'] ?? 'UNKNOWN') === 'UNKNOWN' && !empty($signalDecision['mtf_status'])) {
             $trade['mtf_status'] = (string) $signalDecision['mtf_status'];
@@ -1739,13 +1762,51 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $factorStmt = $pdo->prepare('SELECT * FROM adaptive_factor_stats ' . $factorSql . ' ORDER BY sample_size DESC, current_weight DESC, factor_key ASC LIMIT 250');
     $factorStmt->execute($factorParams);
     $factorStats = $factorStmt->fetchAll();
+    $resolveFactorMinSample = static function (array $factorRow) use ($rules): int {
+        $rowCategory = strtoupper(trim((string) ($factorRow['market_category'] ?? '')));
+        $rowStrategy = trim((string) ($factorRow['strategy_key'] ?? ''));
+        $rowSymbol = trim((string) ($factorRow['symbol_scope'] ?? ''));
+        $bestRule = null;
+        $bestScore = -1;
+        $bestUpdatedAt = '';
+        foreach ($rules as $ruleRow) {
+            $ruleCategory = strtoupper(trim((string) ($ruleRow['market_category'] ?? '*')));
+            $ruleStrategy = trim((string) ($ruleRow['strategy_key'] ?? '*'));
+            $ruleSymbol = trim((string) ($ruleRow['symbol_scope'] ?? '*'));
+            if ($ruleCategory !== '*' && $ruleCategory !== $rowCategory) {
+                continue;
+            }
+            if ($ruleStrategy !== '*' && $ruleStrategy !== $rowStrategy) {
+                continue;
+            }
+            if ($ruleSymbol !== '*' && $ruleSymbol !== $rowSymbol) {
+                continue;
+            }
+            $score = 0;
+            if ($ruleCategory === $rowCategory) {
+                $score += 4;
+            }
+            if ($ruleSymbol === $rowSymbol) {
+                $score += 2;
+            }
+            if ($ruleStrategy === $rowStrategy) {
+                $score += 1;
+            }
+            $updatedAt = trim((string) ($ruleRow['updated_at'] ?? ''));
+            if ($score > $bestScore || ($score === $bestScore && $updatedAt > $bestUpdatedAt)) {
+                $bestRule = $ruleRow;
+                $bestScore = $score;
+                $bestUpdatedAt = $updatedAt;
+            }
+        }
+        return max(1, (int) (($bestRule['min_sample_size'] ?? 10)));
+    };
     $factorMinSample = 10;
-    foreach ($rules as $ruleRow) {
-        $factorMinSample = min($factorMinSample, max(1, (int) ($ruleRow['min_sample_size'] ?? 10)));
-    }
     $ratedFactorCount = 0;
     foreach ($factorStats as $factorRow) {
-        if ((int) ($factorRow['sample_size'] ?? 0) >= $factorMinSample) {
+        $rowMinSample = $resolveFactorMinSample($factorRow);
+        $factorMinSample = min($factorMinSample, $rowMinSample);
+        if ((int) ($factorRow['sample_size'] ?? 0) >= $rowMinSample) {
             $ratedFactorCount++;
         }
     }
@@ -1762,17 +1823,72 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $decisionStmt->execute($decisionParams);
     $decisions = $decisionStmt->fetchAll();
 
-    $factorStrategyStmt = $pdo->prepare('SELECT strategy_key, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY strategy_key ORDER BY rated_factor_count DESC, factor_count DESC, strategy_key ASC LIMIT 100');
-    $factorStrategyStmt->execute(array_merge([$factorMinSample], $factorParams));
-    $factorStatsByStrategy = $factorStrategyStmt->fetchAll();
+    $factorStatsByStrategyMap = [];
+    $factorStatsBySymbolMap = [];
+    $factorStatsByCategoryMap = [];
+    foreach ($factorStats as $factorRow) {
+        $sampleSize = (int) ($factorRow['sample_size'] ?? 0);
+        $currentWeight = (float) ($factorRow['current_weight'] ?? 0);
+        $rowMinSample = $resolveFactorMinSample($factorRow);
+        $isRated = $sampleSize >= $rowMinSample ? 1 : 0;
 
-    $factorSymbolStmt = $pdo->prepare('SELECT symbol_scope, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY symbol_scope ORDER BY rated_factor_count DESC, factor_count DESC, symbol_scope ASC LIMIT 100');
-    $factorSymbolStmt->execute(array_merge([$factorMinSample], $factorParams));
-    $factorStatsBySymbol = $factorSymbolStmt->fetchAll();
+        $strategyKey = trim((string) ($factorRow['strategy_key'] ?? ''));
+        $strategyKey = $strategyKey !== '' ? $strategyKey : '*';
+        if (!isset($factorStatsByStrategyMap[$strategyKey])) {
+            $factorStatsByStrategyMap[$strategyKey] = ['strategy_key' => $strategyKey, 'factor_count' => 0, 'rated_factor_count' => 0, 'total_samples' => 0, 'weight_sum' => 0.0];
+        }
+        $factorStatsByStrategyMap[$strategyKey]['factor_count']++;
+        $factorStatsByStrategyMap[$strategyKey]['rated_factor_count'] += $isRated;
+        $factorStatsByStrategyMap[$strategyKey]['total_samples'] += $sampleSize;
+        $factorStatsByStrategyMap[$strategyKey]['weight_sum'] += $currentWeight;
 
-    $factorCategoryStmt = $pdo->prepare('SELECT market_category, COUNT(*) AS factor_count, SUM(sample_size >= ?) AS rated_factor_count, SUM(sample_size) AS total_samples, AVG(current_weight) AS avg_weight FROM adaptive_factor_stats ' . $factorSql . ' GROUP BY market_category ORDER BY rated_factor_count DESC, factor_count DESC, market_category ASC LIMIT 100');
-    $factorCategoryStmt->execute(array_merge([$factorMinSample], $factorParams));
-    $factorStatsByCategory = $factorCategoryStmt->fetchAll();
+        $symbolScope = trim((string) ($factorRow['symbol_scope'] ?? ''));
+        $symbolScope = $symbolScope !== '' ? $symbolScope : '*';
+        if (!isset($factorStatsBySymbolMap[$symbolScope])) {
+            $factorStatsBySymbolMap[$symbolScope] = ['symbol_scope' => $symbolScope, 'factor_count' => 0, 'rated_factor_count' => 0, 'total_samples' => 0, 'weight_sum' => 0.0];
+        }
+        $factorStatsBySymbolMap[$symbolScope]['factor_count']++;
+        $factorStatsBySymbolMap[$symbolScope]['rated_factor_count'] += $isRated;
+        $factorStatsBySymbolMap[$symbolScope]['total_samples'] += $sampleSize;
+        $factorStatsBySymbolMap[$symbolScope]['weight_sum'] += $currentWeight;
+
+        $marketCategory = strtoupper(trim((string) ($factorRow['market_category'] ?? '')));
+        $marketCategory = $marketCategory !== '' ? $marketCategory : 'UNCATEGORIZED';
+        if (!isset($factorStatsByCategoryMap[$marketCategory])) {
+            $factorStatsByCategoryMap[$marketCategory] = ['market_category' => $marketCategory, 'factor_count' => 0, 'rated_factor_count' => 0, 'total_samples' => 0, 'weight_sum' => 0.0];
+        }
+        $factorStatsByCategoryMap[$marketCategory]['factor_count']++;
+        $factorStatsByCategoryMap[$marketCategory]['rated_factor_count'] += $isRated;
+        $factorStatsByCategoryMap[$marketCategory]['total_samples'] += $sampleSize;
+        $factorStatsByCategoryMap[$marketCategory]['weight_sum'] += $currentWeight;
+    }
+
+    $finalizeFactorBreakdown = static function (array $rows): array {
+        foreach ($rows as &$row) {
+            $count = max(1, (int) ($row['factor_count'] ?? 0));
+            $row['avg_weight'] = round(((float) ($row['weight_sum'] ?? 0.0)) / $count, 4);
+            unset($row['weight_sum']);
+        }
+        unset($row);
+        usort($rows, static function (array $a, array $b): int {
+            $ratedCmp = ((int) ($b['rated_factor_count'] ?? 0)) <=> ((int) ($a['rated_factor_count'] ?? 0));
+            if ($ratedCmp !== 0) {
+                return $ratedCmp;
+            }
+            $factorCmp = ((int) ($b['factor_count'] ?? 0)) <=> ((int) ($a['factor_count'] ?? 0));
+            if ($factorCmp !== 0) {
+                return $factorCmp;
+            }
+            $leftKey = (string) ($a['strategy_key'] ?? $a['symbol_scope'] ?? $a['market_category'] ?? '');
+            $rightKey = (string) ($b['strategy_key'] ?? $b['symbol_scope'] ?? $b['market_category'] ?? '');
+            return strcmp($leftKey, $rightKey);
+        });
+        return array_slice($rows, 0, 100);
+    };
+
+    $factorStatsByStrategy = $finalizeFactorBreakdown(array_values($factorStatsByStrategyMap));
+    $factorStatsBySymbol = $finalizeFactorBreakdown(array_values($factorStatsBySymbolMap));
+    $factorStatsByCategory = $finalizeFactorBreakdown(array_values($factorStatsByCategoryMap));
 
     $auditWhere = ['target_user_id = ?'];
     $auditParams = [$userId];
