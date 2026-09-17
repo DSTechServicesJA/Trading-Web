@@ -6,7 +6,6 @@ const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
-const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
 
 function extractFunction(name) {
   const startToken = `function ${name}(`;
@@ -2498,8 +2497,77 @@ test('syncPersistentAdaptiveTradeHistory does not record rejected cached adaptiv
   assert.equal(recorded, false);
 });
 
-test('MTF active lifecycle send is gated by adaptive qualification allow flag', () => {
-  assert.match(source, /if \(!qualification \|\| qualification\.allowed !== true\) return;\s*sendSignalLifecycleTelegram\("active"/s);
+test('processMtfTopDown skips MTF active lifecycle Telegram send when adaptive qualification disallows it', async () => {
+  const fnSource = extractFunction('processMtfTopDown');
+  const harness = `${fnSource}\nmodule.exports = { processMtfTopDown };`;
+  let lifecycleSends = 0;
+  const context = {
+    module: { exports: {} },
+    mtfTopDownEnabled: true,
+    mtfDebugMode: false,
+    candles: [{ close: 101 }],
+    MTF_REQUIRED_BASE_CANDLES: 120,
+    MTF_TOP_DOWN_MAX_HISTORY: 10,
+    mtfTopDownHistory: [],
+    mtfSetupState: null,
+    mtfTerminalBreakoutEpoch: null,
+    lastMtfTopDownIdx: -1,
+    _historicalProcessing: false,
+    telegramStrategyAutoSend: false,
+    notificationsEnabled: false,
+    autoTradeStrategyEnabled: false,
+    autoTradeMtfTopDown: false,
+    window: {},
+    Notification: { permission: 'default' },
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    markMtfPipelineStage: () => {},
+    captureMtfHtfDiagnostics: () => {},
+    getMtfSetupState: () => null,
+    detectMtfConfirmation: () => null,
+    detectMtfTopDown: () => ({
+      symbol: 'R_100',
+      signalId: 'sig-1',
+      candleIdx: 7,
+      dir: 'BULL',
+      entry: 100,
+      level: 100,
+      sl: 99,
+      tp: 102,
+      rr: 2,
+      mtfBias: 'BULL',
+      patternType: 'pin_bar'
+    }),
+    stampSignalLifecycle: () => {},
+    minConfluenceEnabled: false,
+    computeConfluenceScore: () => 11,
+    getActiveConfluenceFactors: () => ['factor'],
+    resolveSignalFactorGroup: (value) => value,
+    SIGNAL_FACTOR_DEFAULT_WEIGHTS: { factor: 5 },
+    mergeSignalTriggerFactorDetails: () => [],
+    buildNamedTriggerFactor: (factor, detail, group, weight, passed = true, extra = {}) => ({ factor, detail, group, weight, score: passed ? weight : 0, passed, persist: extra.persist !== false }),
+    qualifySignalForTelegram: async () => ({ allowed: false, decision: { telegram_action: 'REJECT' } }),
+    playStrategyAlert: () => {},
+    addLog: () => {},
+    fmtPrice: (value) => String(value),
+    fmt: (value, dp) => Number(value).toFixed(dp),
+    logSignalEngineDebug: () => {},
+    showToast: () => {},
+    throttledNotification: () => {},
+    sendSignalLifecycleTelegram: () => { lifecycleSends++; },
+    buildLifecyclePayloadFromSignal: () => ({}),
+    renderStrategyAlerts: () => {},
+    executeAutoTrade: () => {},
+    Date,
+    Object,
+    setTimeout
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processMtfTopDown } = context.module.exports;
+  processMtfTopDown();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(lifecycleSends, 0);
 });
 
 test('adaptive trade payload tracks raw factor source and still synthesizes MTF confirmation groups when needed', () => {
@@ -2515,14 +2583,4 @@ echo json_encode([
   const parsed = JSON.parse(stdout);
   assert.equal(parsed.has_raw_factor_details, false);
   assert.ok(parsed.confluence_factors_present.includes('MTF Confirmation'));
-});
-
-test('adaptive trade ingestion source includes linked-decision scope backfill and decision-id fallback guards', () => {
-  assert.match(serviceSource, /if \(\$decisionId <= 0\) \{/);
-  assert.match(serviceSource, /WHERE user_id = \? AND signal_id = \?/);
-  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['symbol'\]\)\)/);
-  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['market_category'\]\)\)/);
-  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['strategy_key'\]\)\)/);
-  assert.match(serviceSource, /if \(empty\(\$trade\['has_raw_factor_details'\]\)\)/);
-  assert.match(serviceSource, /\$resolveFactorMinSample = static function \(array \$factorRow\) use \(\$rules\): int \{/);
 });

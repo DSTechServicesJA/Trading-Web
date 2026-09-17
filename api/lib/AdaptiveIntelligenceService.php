@@ -1801,14 +1801,14 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
         }
         return max(1, (int) (($bestRule['min_sample_size'] ?? 10)));
     };
-    $factorMinSample = 10;
+    $minObservedFactorSample = 10;
     $ratedFactorCount = 0;
     $factorStatsWithThresholds = [];
     foreach ($factorStats as $factorRow) {
         $rowMinSample = $resolveFactorMinSample($factorRow);
         $sampleSize = (int) ($factorRow['sample_size'] ?? 0);
         $isRated = $sampleSize >= $rowMinSample ? 1 : 0;
-        $factorMinSample = min($factorMinSample, $rowMinSample);
+        $minObservedFactorSample = min($minObservedFactorSample, $rowMinSample);
         if ($isRated === 1) {
             $ratedFactorCount++;
         }
@@ -2019,7 +2019,7 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
             'total_factors_recorded' => count($factorStats),
             'rated_factors' => $ratedFactorCount,
             'unrated_factors' => max(0, count($factorStats) - $ratedFactorCount),
-            'min_sample_size' => $factorMinSample,
+            'min_sample_size' => $minObservedFactorSample,
         ],
         'factor_statistics_by_strategy' => $factorStatsByStrategy,
         'factor_statistics_by_symbol' => $factorStatsBySymbol,
