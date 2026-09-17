@@ -174,3 +174,99 @@ test('monitorSessionRangeTradeOutcome does not re-resolve an already-resolved tr
   monitorSessionRangeTradeOutcome({ high: 111, low: 109 });
   assert.equal(winsIncremented, 0, 'an already-resolved Session Range trade must not be re-processed as a new WIN');
 });
+
+test('buildSessionRanges clears stale London Sweep lock when the trading day rolls over', () => {
+  const fnSource = [
+    extractFunction('getCandleSessionFlags'),
+    extractFunction('resetSessionRanges'),
+    extractFunction('buildSessionRanges'),
+  ].join('\n');
+  const harness = `${fnSource}\nmodule.exports = { buildSessionRanges, resetSessionRanges };`;
+
+  // Day 1: 09:00 UTC candle (London session) — simulate a stale, unresolved
+  // London Sweep signal left over from a prior session.
+  const day1Epoch = Date.UTC(2026, 0, 1, 9, 0, 0) / 1000;
+  const context = {
+    module: { exports: {} },
+    SESSION_ASIAN: { start: 0, end: 9 },
+    SESSION_LONDON: { start: 7, end: 16 },
+    SESSION_NEW_YORK: { start: 12, end: 21 },
+    ASIAN_TIGHT_ATR_MULT: 1.0,
+    sessionRangesEnabled: true,
+    candles: [{ epoch: day1Epoch, high: 105, low: 95 }],
+    atrValue: 2,
+    asianRangeTight: false,
+    sessionRangeAsian: null,
+    sessionRangeLondon: null,
+    sessionRangeNY: null,
+    londonSweepSignal: { dir: 'HIGH', candleIdx: 0, price: 105 },
+    sessionRangeTrade: null,
+    lastSessionRangeBuildDate: null,
+    telegramSessionRangeAutoSend: false,
+    _historicalProcessing: true,
+    _multiPanelProcessing: null,
+    CHART_RENDER_DELAY_MS: 0,
+    setTimeout,
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { buildSessionRanges } = context.module.exports;
+
+  // First call on day 1 just establishes lastSessionRangeBuildDate; the stale
+  // signal from "yesterday" must not be touched yet since no rollover has
+  // been observed within this run.
+  buildSessionRanges.call(context);
+  assert.equal(context.lastSessionRangeBuildDate, '2026-01-01');
+  assert.ok(context.londonSweepSignal, 'signal should remain armed on the same day');
+
+  // Day 2: a new candle 24h later must trigger the rollover guard, clearing
+  // the stale londonSweepSignal/sessionRangeTrade so a fresh sweep can be
+  // detected again today.
+  context.candles.push({ epoch: day1Epoch + 24 * 3600, high: 106, low: 96 });
+  buildSessionRanges.call(context);
+  assert.equal(context.lastSessionRangeBuildDate, '2026-01-02');
+  assert.equal(context.londonSweepSignal, null, 'stale londonSweepSignal from the prior day must be cleared on rollover');
+});
+
+test('buildSessionRanges does not clear an actively PENDING trade across a day rollover', () => {
+  const fnSource = [
+    extractFunction('getCandleSessionFlags'),
+    extractFunction('resetSessionRanges'),
+    extractFunction('buildSessionRanges'),
+  ].join('\n');
+  const harness = `${fnSource}\nmodule.exports = { buildSessionRanges, resetSessionRanges };`;
+
+  const day1Epoch = Date.UTC(2026, 0, 1, 9, 0, 0) / 1000;
+  const pendingTrade = { entry: 100, sl: 95, tp: 110, dir: 'BULL', result: 'PENDING' };
+  const context = {
+    module: { exports: {} },
+    SESSION_ASIAN: { start: 0, end: 9 },
+    SESSION_LONDON: { start: 7, end: 16 },
+    SESSION_NEW_YORK: { start: 12, end: 21 },
+    ASIAN_TIGHT_ATR_MULT: 1.0,
+    sessionRangesEnabled: true,
+    candles: [{ epoch: day1Epoch, high: 105, low: 95 }],
+    atrValue: 2,
+    asianRangeTight: false,
+    sessionRangeAsian: null,
+    sessionRangeLondon: null,
+    sessionRangeNY: null,
+    londonSweepSignal: { dir: 'HIGH', candleIdx: 0, price: 105 },
+    sessionRangeTrade: pendingTrade,
+    lastSessionRangeBuildDate: '2026-01-01',
+    telegramSessionRangeAutoSend: false,
+    _historicalProcessing: true,
+    _multiPanelProcessing: null,
+    CHART_RENDER_DELAY_MS: 0,
+    setTimeout,
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { buildSessionRanges } = context.module.exports;
+
+  context.candles.push({ epoch: day1Epoch + 24 * 3600, high: 106, low: 96 });
+  buildSessionRanges.call(context);
+
+  assert.equal(context.sessionRangeTrade, pendingTrade, 'an actively PENDING trade must survive the day rollover reset');
+  assert.ok(context.londonSweepSignal, 'lock must remain armed while the trade is still open');
+});

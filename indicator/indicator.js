@@ -3333,6 +3333,7 @@ let londonSweepSignal     = null;     /* null | { dir: "HIGH" | "LOW", candleIdx
 let sessionRangeTrade     = null;     /* null | { entry, sl, tp, dir, rr, entryIdx, symbol } — computed on London sweep */
 let sessionRangeTradeWins   = 0;     /* running win count for session range trades */
 let sessionRangeTradeLosses = 0;     /* running loss count for session range trades */
+let lastSessionRangeBuildDate = null; /* YYYY-MM-DD of last buildSessionRanges() call — detects day rollover */
 let sessionRangeHistory   = [];      /* alert history for strategy alerts panel */
 const SESSION_RANGE_MAX_HISTORY = 20;
 const ASIAN_TIGHT_ATR_MULT = 1.0;    /* threshold: range < 1× ATR = "tight" */
@@ -17596,6 +17597,20 @@ function buildSessionRanges() {
   const latestDate = new Date(candles[candles.length - 1].epoch * 1000);
   const todayUTC = latestDate.toISOString().slice(0, 10); /* YYYY-MM-DD */
 
+  /* Trading-day rollover guard: this function only ever scans candles from
+     "today" (see loop below), so once UTC date changes, stale ranges from
+     the prior day (asian/london/ny highs+lows) as well as londonSweepSignal
+     from the prior day must be cleared — otherwise detectLondonAsianSweep()'s
+     `if (londonSweepSignal) return;` gate stays latched forever and no new
+     sweep is ever detected again for this symbol/panel. Only clear when no
+     trade is actively PENDING so an open position is never dropped mid-flight. */
+  if (lastSessionRangeBuildDate !== null && lastSessionRangeBuildDate !== todayUTC) {
+    if (!sessionRangeTrade || sessionRangeTrade.result !== "PENDING") {
+      resetSessionRanges();
+    }
+  }
+  lastSessionRangeBuildDate = todayUTC;
+
   let asianHigh = -Infinity, asianLow = Infinity, asianStart = -1, asianEnd = -1;
   let londonHigh = -Infinity, londonLow = Infinity, londonStart = -1, londonEnd = -1;
   let nyHigh = -Infinity, nyLow = Infinity, nyStart = -1, nyEnd = -1;
@@ -28017,6 +28032,7 @@ function activatePanel(p) {
   sessionRangeTradeWins   = p.sessionRangeTradeWins   || 0;
   sessionRangeTradeLosses = p.sessionRangeTradeLosses || 0;
   sessionRangeHistory = p.sessionRangeHistory || [];
+  lastSessionRangeBuildDate = p.lastSessionRangeBuildDate || null;
 
   /* NY Open Range */
   nyOpenRange         = p.nyOpenRange        || null;
@@ -28177,6 +28193,7 @@ function savePanel(p) {
   p.sessionRangeTradeWins   = sessionRangeTradeWins;
   p.sessionRangeTradeLosses = sessionRangeTradeLosses;
   p.sessionRangeHistory = sessionRangeHistory;
+  p.lastSessionRangeBuildDate = lastSessionRangeBuildDate;
 
   /* NY Open Range */
   p.nyOpenRange         = nyOpenRange;
