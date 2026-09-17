@@ -1806,7 +1806,7 @@ function adaptiveJsonSummary(value) {
   if (typeof parsed === 'string') {
     try { parsed = JSON.parse(parsed); } catch { return escHtml(parsed).slice(0, 120); }
   }
-  if (typeof parsed !== 'object') return escHtml(String(parsed));
+  if (parsed === null || typeof parsed !== 'object') return escHtml(String(parsed));
   const entries = Object.entries(parsed).slice(0, 4).map(([k, v]) => `${k}: ${typeof v === 'object' ? '[...]' : v}`);
   return escHtml(entries.join(' · ') || '—');
 }
