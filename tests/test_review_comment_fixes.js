@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
 const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
@@ -2501,9 +2502,25 @@ test('MTF active lifecycle send is gated by adaptive qualification allow flag', 
   assert.match(source, /if \(!qualification \|\| qualification\.allowed !== true\) return;\s*sendSignalLifecycleTelegram\("active"/s);
 });
 
-test('adaptive trade ingestion backfills scope and decision-id fallback logic for linked signal decisions', () => {
+test('adaptive trade payload tracks raw factor source and still synthesizes MTF confirmation groups when needed', () => {
+  const phpCode = `
+require ${JSON.stringify(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'))};
+$payload = adaptiveNormalizeTradePayload(['symbol' => 'R_100', 'mtf_status' => 'CONFIRMED'], false);
+echo json_encode([
+  'has_raw_factor_details' => $payload['has_raw_factor_details'],
+  'confluence_factors_present' => $payload['confluence_factors_present']
+]);
+`;
+  const stdout = execFileSync('php', ['-r', phpCode], { encoding: 'utf8' });
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.has_raw_factor_details, false);
+  assert.ok(parsed.confluence_factors_present.includes('MTF Confirmation'));
+});
+
+test('adaptive trade ingestion source includes linked-decision scope backfill and decision-id fallback guards', () => {
   assert.match(serviceSource, /if \(\$decisionId <= 0\) \{/);
   assert.match(serviceSource, /WHERE user_id = \? AND signal_id = \?/);
+  assert.match(serviceSource, /if \(!empty\(\$signalDecision\['symbol'\]\)\)/);
   assert.match(serviceSource, /if \(!empty\(\$signalDecision\['market_category'\]\)\)/);
   assert.match(serviceSource, /if \(!empty\(\$signalDecision\['strategy_key'\]\)\)/);
   assert.match(serviceSource, /if \(empty\(\$trade\['has_raw_factor_details'\]\)\)/);

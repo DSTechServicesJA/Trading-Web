@@ -1451,14 +1451,14 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
     $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
     $signalDecision = $trade['signal_id'] ? adaptiveFetchSignalDecision($pdo, $userId, (string) $trade['signal_id']) : null;
     if ($signalDecision) {
+        if (!empty($signalDecision['symbol'])) {
+            $trade['symbol'] = adaptiveNormalizeScopeValue((string) $signalDecision['symbol'], $trade['symbol']);
+        }
         if (!empty($signalDecision['market_category'])) {
             $trade['market_category'] = adaptiveNormalizeCategory((string) $signalDecision['market_category'], $trade['symbol'], (int) ($trade['timeframe_sec'] ?? 60));
         }
         if (!empty($signalDecision['strategy_key'])) {
             $trade['strategy_key'] = adaptiveNormalizeScopeValue((string) $signalDecision['strategy_key'], $trade['strategy_key']);
-        }
-        if (!empty($signalDecision['symbol'])) {
-            $trade['symbol'] = adaptiveNormalizeScopeValue((string) $signalDecision['symbol'], $trade['symbol']);
         }
         if (empty($trade['has_raw_factor_details'])) {
             $decisionFactors = json_decode((string) ($signalDecision['factors_json'] ?? ''), true) ?: [];
@@ -1803,12 +1803,20 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     };
     $factorMinSample = 10;
     $ratedFactorCount = 0;
+    $factorStatsWithThresholds = [];
     foreach ($factorStats as $factorRow) {
         $rowMinSample = $resolveFactorMinSample($factorRow);
+        $sampleSize = (int) ($factorRow['sample_size'] ?? 0);
+        $isRated = $sampleSize >= $rowMinSample ? 1 : 0;
         $factorMinSample = min($factorMinSample, $rowMinSample);
-        if ((int) ($factorRow['sample_size'] ?? 0) >= $rowMinSample) {
+        if ($isRated === 1) {
             $ratedFactorCount++;
         }
+        $factorStatsWithThresholds[] = $factorRow + [
+            '_row_min_sample' => $rowMinSample,
+            '_row_is_rated' => $isRated,
+            '_row_sample_size' => $sampleSize,
+        ];
     }
 
     $adaptiveProfileStmt = $pdo->prepare('SELECT symbol, timeframe_sec, strategy_key, regime, adaptive_mode, confidence_score, sample_size, updated_at FROM adaptive_profiles WHERE user_id = ? ORDER BY updated_at DESC LIMIT 12');
@@ -1826,11 +1834,10 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $factorStatsByStrategyMap = [];
     $factorStatsBySymbolMap = [];
     $factorStatsByCategoryMap = [];
-    foreach ($factorStats as $factorRow) {
-        $sampleSize = (int) ($factorRow['sample_size'] ?? 0);
+    foreach ($factorStatsWithThresholds as $factorRow) {
+        $sampleSize = (int) ($factorRow['_row_sample_size'] ?? $factorRow['sample_size'] ?? 0);
         $currentWeight = (float) ($factorRow['current_weight'] ?? 0);
-        $rowMinSample = $resolveFactorMinSample($factorRow);
-        $isRated = $sampleSize >= $rowMinSample ? 1 : 0;
+        $isRated = (int) ($factorRow['_row_is_rated'] ?? 0);
 
         $strategyKey = trim((string) ($factorRow['strategy_key'] ?? ''));
         $strategyKey = $strategyKey !== '' ? $strategyKey : '*';
