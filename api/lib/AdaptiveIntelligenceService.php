@@ -740,6 +740,26 @@ function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride 
     ];
 }
 
+function adaptiveCanTrustClientTrade(PDO $pdo, int $userId, array $trade): bool
+{
+    $signalId = trim((string) ($trade['signal_id'] ?? ''));
+    if ($signalId === '') {
+        return false;
+    }
+    $symbol = adaptiveNormalizeScopeValue($trade['symbol'] ?? '', '');
+    $strategy = adaptiveNormalizeScopeValue($trade['strategy_key'] ?? '', '');
+    if ($symbol === '' || $strategy === '') {
+        return false;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM adaptive_signal_decisions
+         WHERE user_id = ? AND signal_id = ? AND symbol = ? AND strategy_key = ?
+         LIMIT 1'
+    );
+    $stmt->execute([$userId, $signalId, $symbol, $strategy]);
+    return (bool) $stmt->fetchColumn();
+}
+
 function adaptiveAudit(
     PDO $pdo,
     ?int $actorUserId,
@@ -1260,6 +1280,10 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
 {
     $trustedSource = $actorRole !== 'user';
     $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
+    if (!$trustedSource && adaptiveCanTrustClientTrade($pdo, $userId, $trade)) {
+        $trustedSource = true;
+        $trade['notes_json']['trust_source'] = 'QUALIFIED_CLIENT_SIGNAL';
+    }
     if (!$trustedSource) {
         $trade['notes_json']['trust_source'] = 'UNTRUSTED_CLIENT_REPORTED';
     }

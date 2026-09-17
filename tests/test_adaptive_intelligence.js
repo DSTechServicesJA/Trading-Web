@@ -174,8 +174,12 @@ test('adaptive learning progression supports Learning/Active/Mature lifecycle', 
   assert.match(serviceSource, /'MATURE' => 'Mature'/);
 });
 
-test('resolved adaptive trades from indicator sync are recorded as trusted learning input', () => {
-  assert.match(adaptiveTradesApiSource, /adaptiveRecordTrade\(\$pdo, \$userId, \$body, \$userId, 'system'\)/);
+test('resolved adaptive trades from indicator sync are trust-promoted only when linked to adaptive decisions', () => {
+  assert.match(adaptiveTradesApiSource, /adaptiveRecordTrade\(\$pdo, \$userId, \$body, \$userId, 'user'\)/);
+  assert.match(serviceSource, /function adaptiveCanTrustClientTrade\(PDO \$pdo, int \$userId, array \$trade\): bool/);
+  assert.match(serviceSource, /SELECT 1 FROM adaptive_signal_decisions[\s\S]*signal_id = \?[\s\S]*symbol = \?[\s\S]*strategy_key = \?/);
+  assert.match(serviceSource, /if \(!\$trustedSource && adaptiveCanTrustClientTrade\(\$pdo, \$userId, \$trade\)\) \{/);
+  assert.match(serviceSource, /QUALIFIED_CLIENT_SIGNAL/);
   assert.match(serviceSource, /if \(\$trustedSource\) \{\s*\$scopes = adaptiveBuildScopes/);
 });
 
