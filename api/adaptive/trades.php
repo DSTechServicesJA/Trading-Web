@@ -21,7 +21,7 @@ try {
 
     if ($method === 'POST') {
         $body = getJsonBody();
-        $result = adaptiveRecordTrade($pdo, $userId, $body, $userId, 'user');
+        $result = adaptiveRecordTrade($pdo, $userId, $body, $userId, 'system');
         jsonResponse($result, $result['duplicate'] ? 200 : 201);
     }
 

@@ -1254,6 +1254,47 @@ function findPendingTradeSignal(symbol) {
   return signalHistory.findLast((s) => s && s.result === "PENDING" && (!target || (s.symbol || getActiveSymbol()) === target));
 }
 
+function logSignalLifecycleEvent(symbol, stage, details = null) {
+  const sym = symbol || getActiveSymbol() || "UNKNOWN";
+  addLog(`[${sym}] ${stage}`);
+  logSignalEngineDebug(`LIFECYCLE_${String(stage || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`, Object.assign({ symbol: sym }, details || {}));
+}
+
+function cleanupPendingSignalsForSymbol(symbol, strategyType = null, options = {}) {
+  const sym = symbol || getActiveSymbol();
+  if (!sym || !Array.isArray(signalHistory) || signalHistory.length === 0) return 0;
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const staleAfterMs = Number.isFinite(options.staleAfterMs)
+    ? options.staleAfterMs
+    : Math.max(30 * 60 * 1000, getSignalValidityMs() * 3);
+  const keepSignalId = options.keepSignalId || null;
+  let cleaned = 0;
+  for (const entry of signalHistory) {
+    if (!entry || entry.result !== "PENDING") continue;
+    if ((entry.symbol || sym) !== sym) continue;
+    if (strategyType && (entry.strategyType || entry.type || "breakout_retest") !== strategyType) continue;
+    if (keepSignalId && entry.signalId && entry.signalId === keepSignalId) continue;
+    const tracksCurrentTrade = monitoringTrade && trade && (
+      (trade.signalId && entry.signalId && trade.signalId === entry.signalId)
+      || ((!trade.signalId || !entry.signalId) && (trade.symbol || sym) === sym)
+    );
+    if (tracksCurrentTrade) continue;
+    const createdAt = getSignalCreatedAtMs(entry);
+    const staleByAge = createdAt > 0 && now - createdAt >= staleAfterMs;
+    const staleByOrphan = !monitoringTrade && !trade;
+    if (!staleByAge && !staleByOrphan) continue;
+    entry.result = "EXPIRED";
+    entry.outcomeCandleIdx = Array.isArray(candles) ? candles.length - 1 : null;
+    ensureAdaptiveTradeResolutionTimestamp(entry);
+    cleaned++;
+  }
+  if (cleaned > 0) {
+    addLog(`🧹 [${sym}] Cleared ${cleaned} stale pending signal${cleaned === 1 ? "" : "s"}`);
+    persistSignalHistory();
+  }
+  return cleaned;
+}
+
 function buildAdaptiveTradePayloadFromSignal(signal, overrides = {}) {
   if (!signal || typeof AdaptiveIntelligenceUtils === "undefined" || !AdaptiveIntelligenceUtils.buildTradePayload) return null;
   const symbol = overrides.symbol || signal.symbol || getActiveSymbol();
@@ -1635,6 +1676,9 @@ function isSymbolEligibleForNewSignal(symbol, strategyType = null) {
   const sym = symbol || getActiveSymbol();
   if (!sym) return true;
   const normalizedType = strategyType || null;
+  if (typeof cleanupPendingSignalsForSymbol === "function") {
+    cleanupPendingSignalsForSymbol(sym, normalizedType, { keepSignalId: trade && trade.signalId ? trade.signalId : null });
+  }
   if (normalizedType === "breakout_retest" && monitoringTrade && trade && (trade.symbol || sym) === sym) return false;
   const hasPending = signalHistory.some((s) => {
     if (!s || s.result !== "PENDING") return false;
@@ -12902,7 +12946,10 @@ function processAllCandles() {
   /* Reset Session Ranges for full reprocessing */
   resetSessionRanges();
 
-  if (candles.length === 0) return;
+  if (candles.length === 0) {
+    _historicalProcessing = false;
+    return;
+  }
   rangeStartEpoch = candles[0].epoch;
   computeATR();
   computeRSI();
@@ -12967,6 +13014,7 @@ function processAllCandles() {
     detectLondonAsianSweep();
   }
 
+  cleanupPendingSignalsForSymbol(getActiveSymbol(), "breakout_retest");
   updateStateUI();
   _historicalProcessing = false;
 }
@@ -13068,6 +13116,7 @@ function runIntrabarTimingOptimizations(currentCandle) {
  * Starts a new opening range from the latest candle epoch.
  */
 function resetForNextSetup() {
+  const resetSymbol = (trade && trade.symbol) || getActiveSymbol();
   openingRange   = null;
   breakout       = null;
   retestInfo     = null;
@@ -13085,6 +13134,7 @@ function resetForNextSetup() {
   rangeStartEpoch = candles.length > 0 ? candles[candles.length - 1].epoch : null;
   setPhase("RANGE");
   updateStateUI();
+  logSignalLifecycleEvent(resetSymbol, "State Reset Complete");
 }
 
 function buildOpeningRange() {
@@ -14203,6 +14253,15 @@ function recordSignal(confirmPattern) {
     if (UI.canvas) signal.chartImage = UI.canvas.toDataURL("image/png");
   } catch (e) { /* canvas tainted or unavailable */ }
   monitoringTrade = true;
+  cleanupPendingSignalsForSymbol(signal.symbol, "breakout_retest", { keepSignalId: signal.signalId });
+  logSignalLifecycleEvent(signal.symbol, "Signal Generated", {
+    signalId: signal.signalId || null,
+    strategy: signal.strategyType || signal.type || "breakout_retest"
+  });
+  logSignalLifecycleEvent(signal.symbol, "Trade Opened", {
+    signalId: signal.signalId || null,
+    entry: signal.entry
+  });
   logSignalEngineDebug("TRADE_ACTIVATED", {
     signalId: signal.signalId || null,
     symbol: signal.symbol,
@@ -15844,20 +15903,25 @@ function restoreAutoTradeHistory() {
 
 function monitorTradeOutcome(candle) {
   if (!monitoringTrade || !trade) return;
-  /* Use the most recent PENDING signal so that stale signals from previous
-     sessions (loaded via restoreSignalHistory) are not incorrectly resolved
-     instead of the current live trade's signal. */
-  const pending = signalHistory.findLast(s => s.result === "PENDING");
+  const tradeSymbol = trade.symbol || getActiveSymbol();
+  const pending = (trade.signalId
+    ? signalHistory.findLast((s) => s && s.result === "PENDING" && s.signalId === trade.signalId)
+    : null) || findPendingTradeSignal(tradeSymbol);
   if (!pending) {
     logSignalEngineDebug("TRADE_RELEASE", {
       signalId: trade.signalId || null,
       reason: "missing_pending_signal_record",
-      symbol: trade.symbol || getActiveSymbol()
+      symbol: tradeSymbol
     });
+    cleanupPendingSignalsForSymbol(tradeSymbol, "breakout_retest", { keepSignalId: trade.signalId || null });
     monitoringTrade = false;
     trade = null;
     trailingSL = null;
     partialTpHit = false;
+    logSignalLifecycleEvent(tradeSymbol, "State Reset Complete", {
+      signalId: trade && trade.signalId ? trade.signalId : null,
+      reason: "missing_pending_signal_record"
+    });
     if (phase === "TRADE") setPhase("BREAKOUT");
     return;
   }
@@ -16178,6 +16242,11 @@ function monitorTradeOutcome(candle) {
     updateStatsUI();
     playPhaseAlert(pending.result === "WIN" ? "TRADE" : "RANGE");
     sendTradeOutcomeTelegram(pending);
+    logSignalLifecycleEvent(pending.symbol || tradeSymbol, "Trade Closed", {
+      signalId: pending.signalId || trade.signalId || null,
+      result: pending.result,
+      exitPrice: pending.exitPrice != null ? pending.exitPrice : null
+    });
     /* Feature 13: record confluence factor outcome for adaptive weighting */
     if (adaptiveConfluenceEnabled && pending._confFactors && !pending._confRecorded) {
       if (recordConfluenceOutcome(pending._confFactors, pending.result, pending.adaptiveScopeKey)) {
@@ -16202,7 +16271,12 @@ function monitorTradeOutcome(candle) {
       trade = null;
       trailingSL = null;
       partialTpHit = false;
+      logSignalLifecycleEvent(pending.symbol || tradeSymbol, "State Reset Complete", {
+        signalId: pending.signalId || null,
+        reason: "trade_resolved"
+      });
     }
+    cleanupPendingSignalsForSymbol(pending.symbol || tradeSymbol, "breakout_retest", { keepSignalId: pending.signalId || null });
     const eligibleAfterClose = isSymbolEligibleForNewSignal(pending.symbol || getActiveSymbol(), "breakout_retest");
     logSignalEngineDebug("NEW_SIGNAL_ELIGIBILITY", {
       signalId: pending.signalId || null,
@@ -18009,6 +18083,10 @@ async function sendTelegramAlert() {
     if (pending) {
       pending._sentViaTelegram = true;
       pending._telegramDelivered = true;
+      logSignalLifecycleEvent(pending.symbol || getActiveSymbol(), "Signal Sent", {
+        signalId: pending.signalId || null,
+        channel: "telegram"
+      });
     }
     addLog("📤 Telegram alert sent successfully");
     if (UI.telegramStatus) {
@@ -18072,6 +18150,10 @@ async function sendPanelTelegramAlert(symbol) {
     if (pending) {
       pending._sentViaTelegram = true;
       pending._telegramDelivered = true;
+      logSignalLifecycleEvent(pending.symbol || symbol, "Signal Sent", {
+        signalId: pending.signalId || null,
+        channel: "telegram"
+      });
     }
     addLog(`📤 [${symbol}] Telegram alert sent — TRADE setup`);
     if (UI.telegramStatus) {

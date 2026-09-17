@@ -1830,7 +1830,9 @@ function adaptivePct(value, digits = 1, fallback = '—') {
 function adaptiveStatusClass(status) {
   const value = String(status || '').toUpperCase();
   if (value.includes('LOCK')) return 'adaptive-badge-danger';
-  if (value.includes('AUTO')) return 'adaptive-badge-success';
+  if (value.includes('MATURE') || value.includes('AUTO')) return 'adaptive-badge-success';
+  if (value.includes('ACTIVE')) return 'adaptive-badge-primary';
+  if (value.includes('LEARNING')) return 'adaptive-badge-warning';
   if (value.includes('MIX')) return 'adaptive-badge-warning';
   return 'adaptive-badge-muted';
 }
@@ -2055,7 +2057,7 @@ function renderAdaptiveUserDetail(data) {
   renderAdaptiveTrades(data.trades || []);
   renderAdaptiveDecisions(data.decisions || []);
   renderAdaptiveAudit(data.audits || []);
-  renderAdaptiveCategoryAnalytics(data.category_analytics || []);
+  renderAdaptiveCategoryAnalytics(data.category_analytics || [], data.category_diagnostics || null);
 }
 
 function renderAdaptiveUserHero(profile, adaptiveProfiles) {
@@ -2270,11 +2272,11 @@ function renderAdaptiveAudit(rows) {
     </tr>`).join('');
 }
 
-function renderAdaptiveCategoryAnalytics(rows) {
+function renderAdaptiveCategoryAnalytics(rows, diagnostics = null) {
   const container = el('adaptiveCategoryAnalytics');
   if (!container) return;
   const rowMap = new Map((rows || []).map((row) => [row.market_category, row]));
-  const categories = Object.keys(ADAPTIVE_CATEGORY_LABELS).map((key) => rowMap.get(key) || ({
+  const baseCategories = Object.keys(ADAPTIVE_CATEGORY_LABELS).map((key) => rowMap.get(key) || ({
     market_category: key,
     trade_count: 0,
     wins: 0,
@@ -2285,7 +2287,12 @@ function renderAdaptiveCategoryAnalytics(rows) {
     best_strategy: null,
     worst_strategy: null,
   }));
-  container.innerHTML = categories.map((row) => {
+  const extraCategories = (rows || []).filter((row) => !ADAPTIVE_CATEGORY_LABELS[row.market_category]);
+  const categories = baseCategories.concat(extraCategories);
+  const diagnosticsBlock = diagnostics
+    ? `<div class="adaptive-category-diag" title="Category aggregation diagnostics">Total: <strong>${escHtml(String(diagnostics.total_trades || 0))}</strong> · Categorized: <strong>${escHtml(String(diagnostics.categorized_trades || 0))}</strong> · Uncategorized: <strong>${escHtml(String(diagnostics.uncategorized_trades || 0))}</strong></div>`
+    : '';
+  container.innerHTML = diagnosticsBlock + categories.map((row) => {
     const total = Math.max(1, Number(row.trade_count || 0));
     const wins = Number(row.wins || 0);
     const losses = Number(row.losses || 0);

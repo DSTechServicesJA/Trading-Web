@@ -8,6 +8,7 @@ const indicatorSource = fs.readFileSync(path.resolve(__dirname, '../indicator/in
 const adminSource = fs.readFileSync(path.resolve(__dirname, '../admin/admin.js'), 'utf8');
 const serviceSource = fs.readFileSync(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'), 'utf8');
 const adminControllerSource = fs.readFileSync(path.resolve(__dirname, '../api/admin/adaptive.php'), 'utf8');
+const adaptiveTradesApiSource = fs.readFileSync(path.resolve(__dirname, '../api/adaptive/trades.php'), 'utf8');
 const adminStyleSource = fs.readFileSync(path.resolve(__dirname, '../admin/style.css'), 'utf8');
 const schemaSource = fs.readFileSync(path.resolve(__dirname, '../database/schema.sql'), 'utf8');
 
@@ -162,6 +163,22 @@ test('backend service defines persistent trade, factor, rule, and audit handling
   assert.match(serviceSource, /\(market_category = \?\) DESC,\s*\(symbol_scope = \?\) DESC,\s*\(strategy_key = \?\) DESC/);
 });
 
+test('adaptive learning progression supports Learning/Active/Mature lifecycle', () => {
+  assert.match(serviceSource, /ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES = 10/);
+  assert.match(serviceSource, /ADAPTIVE_LEARNING_MATURE_MIN_TRADES = 20/);
+  assert.match(serviceSource, /if \(\$tradeCount < ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES\) \{\s*return 'LEARNING';\s*\}/);
+  assert.match(serviceSource, /if \(\$tradeCount < ADAPTIVE_LEARNING_MATURE_MIN_TRADES\) \{\s*return 'ACTIVE';\s*\}/);
+  assert.match(serviceSource, /return 'MATURE';/);
+  assert.match(serviceSource, /'LEARNING' => 'Learning'/);
+  assert.match(serviceSource, /'ACTIVE' => 'Active'/);
+  assert.match(serviceSource, /'MATURE' => 'Mature'/);
+});
+
+test('resolved adaptive trades from indicator sync are recorded as trusted learning input', () => {
+  assert.match(adaptiveTradesApiSource, /adaptiveRecordTrade\(\$pdo, \$userId, \$body, \$userId, 'system'\)/);
+  assert.match(serviceSource, /if \(\$trustedSource\) \{\s*\$scopes = adaptiveBuildScopes/);
+});
+
 test('adaptive admin controller exposes profile, history, clone, defaults, and lock workflows', () => {
   assert.match(adminControllerSource, /action === 'profiles'/);
   assert.match(adminControllerSource, /action === 'history'/);
@@ -175,6 +192,14 @@ test('adaptive admin controller exposes profile, history, clone, defaults, and l
 test('backend normalizes naive timestamps as UTC and skips untrusted trades during rebuilds', () => {
   assert.match(serviceSource, /\$utc = new DateTimeZone\('UTC'\);[\s\S]*new DateTimeImmutable\(\$raw,\s*\$utc\)/);
   assert.match(serviceSource, /json_decode\(\(string\) \$row\['notes_json'\], true\)[\s\S]*UNTRUSTED_CLIENT_REPORTED[\s\S]*continue;/);
+});
+
+test('category analytics pipeline publishes diagnostics and supports non-default categories', () => {
+  assert.match(serviceSource, /'category_diagnostics' => \[/);
+  assert.match(serviceSource, /uncategorized_trades/);
+  assert.match(adminSource, /function renderAdaptiveCategoryAnalytics\(rows, diagnostics = null\)/);
+  assert.match(adminSource, /const extraCategories = \(rows \|\| \[\]\)\.filter/);
+  assert.match(adminSource, /Total: <strong>\$\{escHtml\(String\(diagnostics\.total_trades \|\| 0\)\)\}<\/strong>/);
 });
 
 test('admin dashboard exposes adaptive management workflows', () => {

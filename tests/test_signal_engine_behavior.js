@@ -295,3 +295,22 @@ test('MTF rejection breakdown tracks percentages by reason', () => {
   assert.equal(breakdown[1].count, 1);
   assert.equal(breakdown[1].percent, 33);
 });
+
+test('signal lifecycle cleanup and logging paths stay wired after resolution', () => {
+  assert.match(source, /function cleanupPendingSignalsForSymbol\(symbol, strategyType = null, options = \{\}\)/);
+  assert.match(source, /const pending = \(trade\.signalId[\s\S]*\|\| findPendingTradeSignal\(tradeSymbol\);/);
+  assert.match(source, /cleanupPendingSignalsForSymbol\(pending\.symbol \|\| tradeSymbol, "breakout_retest", \{ keepSignalId: pending\.signalId \|\| null \}\);/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| tradeSymbol, "Trade Closed"/);
+  assert.match(source, /logSignalLifecycleEvent\([^)]+, "State Reset Complete"/);
+});
+
+test('historical replay exits cleanly and clears stale pending locks', () => {
+  assert.match(source, /if \(candles\.length === 0\) \{\s*_historicalProcessing = false;\s*return;\s*\}/);
+  assert.match(source, /cleanupPendingSignalsForSymbol\(getActiveSymbol\(\), "breakout_retest"\);/);
+});
+
+test('multi-symbol signal notifications include explicit lifecycle markers', () => {
+  assert.match(source, /logSignalLifecycleEvent\(signal\.symbol, "Signal Generated"/);
+  assert.match(source, /logSignalLifecycleEvent\(signal\.symbol, "Trade Opened"/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| symbol, "Signal Sent"/);
+});
