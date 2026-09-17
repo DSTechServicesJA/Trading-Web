@@ -1034,6 +1034,103 @@ function resolveStrategyDisplayLabel(typeOrKey, fallback = "Strategy") {
   return STRATEGY_DISPLAY_LABELS[key] || fallback;
 }
 
+const SIGNAL_FACTOR_DEFAULT_WEIGHTS = Object.freeze({
+  "Trend Alignment": 5,
+  "MTF Confirmation": 6,
+  "RSI Confirmation": 5,
+  "MACD Confirmation": 5,
+  "Structure Strength": 5,
+  "ATR Confirmation": 4,
+  "Breakout Quality": 5,
+  "Retest Quality": 5,
+  "Volume Confirmation": 4,
+  "Session Timing": 4,
+  "Trend Strength": 5,
+  "Market Regime": 5,
+  "Momentum Score": 5
+});
+
+function resolveSignalFactorGroup(label) {
+  const raw = String(label || "").trim();
+  if (!raw) return "";
+  if (typeof AdaptiveIntelligenceUtils !== "undefined" && AdaptiveIntelligenceUtils.FACTOR_ALIASES && AdaptiveIntelligenceUtils.FACTOR_ALIASES[raw]) {
+    return AdaptiveIntelligenceUtils.FACTOR_ALIASES[raw];
+  }
+  return raw;
+}
+
+function normalizeSignalTriggerFactors(factors, mtfStatus = null) {
+  const normalized = [];
+  for (const factor of (Array.isArray(factors) ? factors : [])) {
+    const row = factor && typeof factor === "object" ? factor : null;
+    const name = String(row ? (row.factor ?? row.name ?? row.label ?? row.group ?? "") : (factor || "")).trim();
+    if (!name) continue;
+    const group = resolveSignalFactorGroup(row ? (row.group ?? row.groupKey ?? row.factorGroup ?? name) : name) || name;
+    const weight = Number.isFinite(row && row.weight) ? Number(row.weight) : (SIGNAL_FACTOR_DEFAULT_WEIGHTS[group] ?? 5);
+    const passed = row ? row.passed !== false : true;
+    normalized.push({
+      factor: name,
+      group,
+      passed,
+      weight,
+      score: Number.isFinite(row && row.score) ? Number(row.score) : (passed ? weight : 0),
+      detail: row && row.detail != null ? String(row.detail) : null,
+      persist: row && row.persist === false ? false : true
+    });
+  }
+  const mtf = String(mtfStatus || "").trim().toUpperCase();
+  if ((mtf === "CONFIRMED" || mtf === "PASS" || mtf === "TRUE")
+      && !normalized.some((factor) => factor.group === "MTF Confirmation" && factor.persist !== false && factor.passed !== false)) {
+    normalized.push({
+      factor: "MTF Bias Aligned",
+      group: "MTF Confirmation",
+      passed: true,
+      weight: SIGNAL_FACTOR_DEFAULT_WEIGHTS["MTF Confirmation"] ?? 6,
+      score: SIGNAL_FACTOR_DEFAULT_WEIGHTS["MTF Confirmation"] ?? 6,
+      detail: null,
+      persist: true
+    });
+  }
+  return normalized;
+}
+
+function ensureSignalTriggerFactors(signal, fallbackFactors = null) {
+  if (!signal || typeof signal !== "object") return [];
+  const source = Array.isArray(signal.triggerFactors) && signal.triggerFactors.length
+    ? signal.triggerFactors
+    : (Array.isArray(signal.factorBreakdown) && signal.factorBreakdown.length
+      ? signal.factorBreakdown
+      : (fallbackFactors || signal._confFactors || []));
+  const normalized = normalizeSignalTriggerFactors(source, getAdaptiveMtfStatus(signal));
+  signal.triggerFactors = normalized;
+  signal.factorBreakdown = normalized;
+  return normalized;
+}
+
+function formatSignalFactorLabel(factor) {
+  if (!factor || !factor.factor) return "";
+  return factor.detail ? `${factor.factor} (${factor.detail})` : factor.factor;
+}
+
+function getAdaptiveConfidenceLabel(signal) {
+  const decision = signal && signal._adaptiveDecision;
+  if (decision && decision.qualification_band) {
+    const band = String(decision.qualification_band).toUpperCase();
+    if (band === "HIGH_CONFIDENCE") return "High";
+    if (band === "NORMAL") return "Normal";
+    if (band === "WATCHLIST") return "Watchlist";
+    if (band === "REJECT") return "Rejected";
+  }
+  const score = decision && Number.isFinite(decision.final_confidence_score)
+    ? Number(decision.final_confidence_score)
+    : (signal && Number.isFinite(signal.confluenceScore) ? Number(signal.confluenceScore) : null);
+  if (!Number.isFinite(score)) return null;
+  if (score >= 90) return "High";
+  if (score >= 75) return "Normal";
+  if (score >= 60) return "Watchlist";
+  return "Low";
+}
+
 function getAdaptiveBootstrapLatestSignal(symbol) {
   const targetSymbol = symbol || getActiveSymbol();
   const candidates = [];
@@ -1171,9 +1268,10 @@ function buildAdaptiveQualificationPayload(signal, strategyLabel, overrides = {}
   const symbol = overrides.symbol || s.symbol || getActiveSymbol();
   const timeframeSec = overrides.timeframeSec || s.timeframeSec || getCurrentGranularitySec();
   const mtfStatus = overrides.mtfStatus || getAdaptiveMtfStatus(s);
+  const factorDetails = ensureSignalTriggerFactors(s);
   const factors = (typeof AdaptiveIntelligenceUtils !== "undefined" && AdaptiveIntelligenceUtils.normalizeFactors)
-    ? AdaptiveIntelligenceUtils.normalizeFactors(s._confFactors || [], mtfStatus)
-    : (s._confFactors || []);
+    ? AdaptiveIntelligenceUtils.normalizeFactors(factorDetails, mtfStatus)
+    : factorDetails.filter((factor) => factor && factor.persist !== false && factor.passed !== false).map((factor) => factor.group || factor.factor);
   const rawScore = Number.isFinite(s.confluenceScore) ? s.confluenceScore : (Number.isFinite(s.conf) ? s.conf : (Array.isArray(s._confFactors) ? s._confFactors.length : 0));
   return {
     signal_id: s.signalId,
@@ -1187,6 +1285,7 @@ function buildAdaptiveQualificationPayload(signal, strategyLabel, overrides = {}
     confluence_score: rawScore,
     confluence_max: Number.isFinite(s.conf) ? 7 : 16,
     confluence_factors_present: factors,
+    factor_details: factorDetails,
     mtf_status: mtfStatus
   };
 }
@@ -1533,12 +1632,32 @@ function syncPersistentAdaptiveTradeHistory() {
       const result = String(signal.result || "").toUpperCase();
       if (!signal.signalId) signal.signalId = generateSignalId(signal.strategyType || signal.type || "sig");
       ensureAdaptiveTradeResolutionTimestamp(signal);
-      const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
-      const payload = buildAdaptiveTradePayloadFromSignal(cloned);
-      if (!payload) continue;
       signal._adaptiveTradeSyncing = true;
-      adaptiveIntelligenceClient.recordTrade(payload)
-        .then(() => {
+      const strategyKey = signal.strategyType || signal.type || "breakout_retest";
+      const strategyLabel = resolveStrategyDisplayLabel(strategyKey, strategyKey);
+      Promise.resolve(
+        signal._adaptiveDecision
+          ? signal._adaptiveDecision
+          : qualifySignalForTelegram(signal, strategyLabel, false, {
+              strategy: strategyKey,
+              symbol: signal.symbol || getActiveSymbol(),
+              timeframeSec: signal.timeframeSec || getCurrentGranularitySec(),
+              mtfStatus: getAdaptiveMtfStatus(signal)
+            }).then((qualification) => qualification && qualification.decision ? qualification.decision : null)
+      )
+        .catch((err) => {
+          console.warn("Adaptive signal qualification before trade sync failed:", err.message);
+          return false;
+        })
+        .then((qualificationState) => {
+          if (qualificationState === false) return false;
+          const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
+          const payload = buildAdaptiveTradePayloadFromSignal(cloned);
+          if (!payload) return false;
+          return adaptiveIntelligenceClient.recordTrade(payload);
+        })
+        .then((recordResult) => {
+          if (!recordResult) return;
           signal._adaptiveTradeSynced = true;
           signal._adaptiveTradeFailures = 0;
           signal._adaptiveTradeNextRetryAt = 0;
@@ -1922,6 +2041,8 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
   if (!signal) return null;
   const atrAtSignal = Number.isFinite(signal.atrAtSignal) ? signal.atrAtSignal : (Number.isFinite(signal.atrAtEntry) ? signal.atrAtEntry : getAtrReference());
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+  const triggerFactors = ensureSignalTriggerFactors(signal);
+  const rr = Number.isFinite(signal.riskReward) ? signal.riskReward : (Number.isFinite(signal.rr) ? signal.rr : null);
   return {
     signalId: signal.signalId || null,
     channel,
@@ -1933,7 +2054,14 @@ function buildLifecyclePayloadFromSignal(signal, strategyLabel, channel = "trade
     entry: signal.entry,
     sl: signal.sl || signal.stopLoss || null,
     tp: signal.tp || signal.takeProfit || null,
+    rr,
+    atr: Number.isFinite(signal.atr) ? signal.atr : atrAtSignal,
     confidenceScore: signal.confluenceScore != null ? signal.confluenceScore : null,
+    adaptiveConfidenceLabel: getAdaptiveConfidenceLabel(signal),
+    marketCategory: getAdaptiveMarketCategory(signal.symbol || getActiveSymbol(), signal.timeframeSec != null ? signal.timeframeSec : getCurrentGranularitySec()),
+    weightVersion: signal._adaptiveDecision && signal._adaptiveDecision.weight_version ? signal._adaptiveDecision.weight_version : null,
+    triggerFactors,
+    tradeManagement: signal.tradeManagement || null,
     validUntilMs: signal.validUntilMs,
     maxDistanceAtr: Number.isFinite(signal.maxEntryDistanceAtr) ? signal.maxEntryDistanceAtr : getSignalDistanceLimitAtr(),
     distanceAtr: getSignalDistanceFromEntry({ entry: signal.entry, atrAtSignal }, currentPrice),
@@ -8332,6 +8460,8 @@ const MTF_BIAS_LOOKBACK        = 6;   /* synthesised 4H bars for bias */
 const MTF_SETUP_LOOKBACK       = 12;  /* synthesised 1H bars for setup range */
 const MTF_SL_ATR_BUFFER        = 0.3; /* ATR buffer beyond wick for SL */
 const MTF_RETEST_LOOKBACK      = 8;   /* current-TF candles to scan for retest */
+const MTF_SL_FALLBACK_MODE     = "structure_then_swing";
+const MTF_TP_FALLBACK_MODE     = "htf_then_rr";
 const MTF_DEBUG_STORAGE_KEY    = `${LS_PREFIX}mtfDebugMode`;
 const MTF_REQUIRED_BASE_CANDLES = Math.max(
   (MTF_BIAS_LOOKBACK + 2) * MTF_BIAS_TF_MULT,
@@ -8342,6 +8472,131 @@ let mtfDebugMode = false;
 let mtfDebugRows = [];
 let mtfDebugClock = 0;
 const mtfPipelineStats = new Map();
+
+function buildNamedTriggerFactor(factor, detail, group, weight, passed = true, extra = {}) {
+  return Object.assign({
+    factor,
+    detail: detail || null,
+    group: group || resolveSignalFactorGroup(factor) || factor,
+    weight: Number.isFinite(weight) ? Number(weight) : (SIGNAL_FACTOR_DEFAULT_WEIGHTS[group] ?? 5),
+    score: passed ? (Number.isFinite(weight) ? Number(weight) : (SIGNAL_FACTOR_DEFAULT_WEIGHTS[group] ?? 5)) : 0,
+    passed,
+    persist: extra.persist !== false
+  }, extra);
+}
+
+function mergeSignalTriggerFactorDetails(signal, factors) {
+  if (!signal) return [];
+  const merged = ensureSignalTriggerFactors(signal);
+  const seen = new Set(merged.map((factor) => `${factor.factor}|${factor.detail || ""}`));
+  for (const factor of normalizeSignalTriggerFactors(factors, getAdaptiveMtfStatus(signal))) {
+    const key = `${factor.factor}|${factor.detail || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(factor);
+  }
+  signal.triggerFactors = merged;
+  signal.factorBreakdown = merged;
+  return merged;
+}
+
+function computeMtfExecutionLevels({ dir, entry, level, idx, retestCandleIdx, currentCandle, atrRef, rrTarget, stopBuffer, biasSlice }) {
+  const structureStart = Math.max(0, Math.min(Number.isFinite(retestCandleIdx) ? retestCandleIdx : idx, idx) - 1);
+  const structureCandles = candles.slice(structureStart, idx + 1).filter(Boolean);
+  const lows = structureCandles.map((c) => c.low).filter(Number.isFinite);
+  const highs = structureCandles.map((c) => c.high).filter(Number.isFinite);
+  const structureLow = lows.length ? Math.min(...lows, Number.isFinite(level) ? level : Infinity, Number.isFinite(currentCandle && currentCandle.low) ? currentCandle.low : Infinity) : null;
+  const structureHigh = highs.length ? Math.max(...highs, Number.isFinite(level) ? level : -Infinity, Number.isFinite(currentCandle && currentCandle.high) ? currentCandle.high : -Infinity) : null;
+  const swingStart = Math.max(0, idx - Math.max(12, MTF_RETEST_LOOKBACK * 2));
+  const swingCandles = candles.slice(swingStart, idx + 1).filter(Boolean);
+  const swingLow = swingCandles.length ? Math.min(...swingCandles.map((c) => c.low).filter(Number.isFinite)) : null;
+  const swingHigh = swingCandles.length ? Math.max(...swingCandles.map((c) => c.high).filter(Number.isFinite)) : null;
+  const fallbackRisk = Math.max(
+    Number.isFinite(currentCandle && currentCandle.high) && Number.isFinite(currentCandle && currentCandle.low)
+      ? Math.abs(currentCandle.high - currentCandle.low)
+      : 0,
+    Number.isFinite(entry) && Number.isFinite(level) ? Math.abs(entry - level) : 0,
+    Number.isFinite(atrRef) && atrRef > 0 ? atrRef * 0.75 : 0
+  );
+  let stopLossMethod = "atr_structure";
+  let takeProfitMethod = "htf_projection";
+  let fallbackUsed = false;
+  let sl = null;
+  let tp = null;
+
+  if (dir === "BULL") {
+    if (Number.isFinite(structureLow)) sl = structureLow - stopBuffer;
+    if (!Number.isFinite(sl) || sl >= entry) {
+      sl = Number.isFinite(swingLow) ? swingLow - (Number.isFinite(atrRef) && atrRef > 0 ? atrRef * 0.15 : 0) : null;
+      stopLossMethod = "swing_low_fallback";
+      fallbackUsed = true;
+    }
+    if (!Number.isFinite(sl) || sl >= entry) {
+      sl = entry - Math.max(fallbackRisk, 0.0001);
+      stopLossMethod = "distance_fallback";
+      fallbackUsed = true;
+    }
+    tp = Array.isArray(biasSlice) && biasSlice.length > 0
+      ? Math.max(...biasSlice.map((bar) => bar.high).filter(Number.isFinite))
+      : null;
+    if (!Number.isFinite(tp) || tp <= entry) {
+      tp = entry + Math.abs(entry - sl) * Math.max(1, rrTarget);
+      takeProfitMethod = "rr_extension_fallback";
+      fallbackUsed = true;
+    }
+  } else {
+    if (Number.isFinite(structureHigh)) sl = structureHigh + stopBuffer;
+    if (!Number.isFinite(sl) || sl <= entry) {
+      sl = Number.isFinite(swingHigh) ? swingHigh + (Number.isFinite(atrRef) && atrRef > 0 ? atrRef * 0.15 : 0) : null;
+      stopLossMethod = "swing_high_fallback";
+      fallbackUsed = true;
+    }
+    if (!Number.isFinite(sl) || sl <= entry) {
+      sl = entry + Math.max(fallbackRisk, 0.0001);
+      stopLossMethod = "distance_fallback";
+      fallbackUsed = true;
+    }
+    tp = Array.isArray(biasSlice) && biasSlice.length > 0
+      ? Math.min(...biasSlice.map((bar) => bar.low).filter(Number.isFinite))
+      : null;
+    if (!Number.isFinite(tp) || tp >= entry) {
+      tp = entry - Math.abs(sl - entry) * Math.max(1, rrTarget);
+      takeProfitMethod = "rr_extension_fallback";
+      fallbackUsed = true;
+    }
+  }
+
+  const risk = Number.isFinite(entry) && Number.isFinite(sl) ? Math.abs(entry - sl) : NaN;
+  if (!(risk > 0) || !Number.isFinite(tp)) {
+    return { valid: false, stopLoss: sl, takeProfit: tp, riskReward: null };
+  }
+  let riskReward = Math.abs(tp - entry) / risk;
+  if (!(riskReward > 0) || (Number.isFinite(rrTarget) && rrTarget > 0 && riskReward < rrTarget)) {
+    tp = dir === "BULL" ? entry + risk * rrTarget : entry - risk * rrTarget;
+    takeProfitMethod = "rr_extension_fallback";
+    fallbackUsed = true;
+    riskReward = Math.abs(tp - entry) / risk;
+  }
+
+  return {
+    valid: Number.isFinite(entry) && Number.isFinite(sl) && Number.isFinite(tp) && Number.isFinite(riskReward),
+    stopLoss: sl,
+    takeProfit: tp,
+    riskReward,
+    atr: Number.isFinite(atrRef) && atrRef > 0 ? atrRef : null,
+    tradeManagement: {
+      stopLossMethod,
+      takeProfitMethod,
+      fallbackMode: `${MTF_SL_FALLBACK_MODE}|${MTF_TP_FALLBACK_MODE}`,
+      fallbackUsed,
+      riskDistance: risk,
+      structureLow: Number.isFinite(structureLow) ? structureLow : null,
+      structureHigh: Number.isFinite(structureHigh) ? structureHigh : null,
+      swingLow: Number.isFinite(swingLow) ? swingLow : null,
+      swingHigh: Number.isFinite(swingHigh) ? swingHigh : null
+    }
+  };
+}
 
 function loadMtfDebugMode() {
   try {
@@ -9036,34 +9291,36 @@ function detectMtfTopDown(confirmationOverride = null) {
     : "micro_bos";
 
   const entry = c.close;
-  const slBuffer = atrValue * (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(symbol, getCurrentGranularitySec(), { volumeSpike: true }));
   const _profParams = getStrategyProfitParams();
   const _mtfRR = _profParams.rrMTFMin;
+  const atrRef = Number.isFinite(atrValue) && atrValue > 0 ? atrValue : null;
+  const slBufferAtr = MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(symbol, getCurrentGranularitySec(), { volumeSpike: true });
+  const slBuffer = (atrRef || 0) * slBufferAtr * ((_profParams && _profParams.slBufferMult) || 1);
   markMtfPipelineStage("indicator_calculation", {
     symbol,
-    atrValue,
+    atrValue: atrRef,
     entryDriftAtr,
     maxEntryDriftAtr,
     timingQuality,
     rrTarget: _mtfRR
   });
-  const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT).slice(-MTF_BIAS_LOOKBACK);
-  let sl, tp;
-
-  if (dir === "BULL") {
-    sl = c.low - slBuffer * _profParams.slBufferMult;
-    tp = biasSlice.length > 0
-      ? Math.max(...biasSlice.map(b => b.high))
-      : entry + Math.abs(entry - sl) * _mtfRR;
-  } else {
-    sl = c.high + slBuffer * _profParams.slBufferMult;
-    tp = biasSlice.length > 0
-      ? Math.min(...biasSlice.map(b => b.low))
-      : entry - Math.abs(sl - entry) * _mtfRR;
-  }
-
-  const risk = Math.abs(entry - sl);
-  if (risk <= 0) {
+  const biasSlice = synthesizeTfCandles(MTF_BIAS_TF_MULT, { closedOnly: true }).slice(-MTF_BIAS_LOOKBACK);
+  const execution = computeMtfExecutionLevels({
+    dir,
+    entry,
+    level,
+    idx,
+    retestCandleIdx,
+    currentCandle: c,
+    atrRef,
+    rrTarget: _mtfRR,
+    stopBuffer: slBuffer,
+    biasSlice
+  });
+  const sl = execution.stopLoss;
+  const tp = execution.takeProfit;
+  const risk = Number.isFinite(entry) && Number.isFinite(sl) ? Math.abs(entry - sl) : NaN;
+  if (!execution.valid || !(risk > 0)) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "invalid_risk", entry, sl });
     recordMtfRejection("invalid_risk", {
       symbol,
@@ -9074,18 +9331,19 @@ function detectMtfTopDown(confirmationOverride = null) {
     return null;
   }
   baseConditions.risk = "PASS";
-
-  if (Math.abs(tp - entry) / risk < _mtfRR) {
-    tp = dir === "BULL" ? entry + risk * _mtfRR : entry - risk * _mtfRR;
-  }
-  const rr = Math.abs(tp - entry) / risk;
+  const rr = execution.riskReward;
+  const mtfBias = computeMtfBias();
 
   const signal = {
     dir, entry, sl, tp, rr, level, retestCandleIdx,
-    mtfBias: computeMtfBias(),
+    stopLoss: sl,
+    takeProfit: tp,
+    riskReward: rr,
+    mtfBias,
     patternType,
     candleIdx: idx,
     epoch: c.epoch,
+    time: Number.isFinite(c.epoch) ? new Date(c.epoch * 1000).toISOString() : new Date().toISOString(),
     symbol,
     timeframeSec: getCurrentGranularitySec(),
     result: "PENDING",
@@ -9096,12 +9354,38 @@ function detectMtfTopDown(confirmationOverride = null) {
     validUntilMs: Date.now() + getSignalValidityMs(),
     maxEntryDistanceAtr: getSignalDistanceLimitAtr(),
     entryDriftAtr,
-    stopBufferAtr: (MTF_SL_ATR_BUFFER + getVolatilityAdjustedStopBufferAtr(symbol, getCurrentGranularitySec(), { volumeSpike: true })) * (_profParams.slBufferMult || 1),
+    stopBufferAtr: slBufferAtr * (_profParams.slBufferMult || 1),
     entryMode,
     entryProgressAtr: timingQuality.progressAtr,
     entryBodyAtr: timingQuality.bodyAtr,
-    entryCloseLocation: timingQuality.closeLocation
+    entryCloseLocation: timingQuality.closeLocation,
+    atr: execution.atr,
+    atrAtSignal: execution.atr,
+    tradeManagement: Object.assign({
+      strategy: "mtf_top_down",
+      validUntilMs: Date.now() + getSignalValidityMs()
+    }, execution.tradeManagement || {})
   };
+  signal.triggerFactors = [
+    buildNamedTriggerFactor("HTF Trend Alignment", mtfBias === "BULL" ? "Bullish" : "Bearish", "MTF Confirmation", 15),
+    buildNamedTriggerFactor("HTF Breakout Confirmed", null, "Breakout Quality", 15),
+    buildNamedTriggerFactor("LTF Retest Completed", null, "Retest Quality", 14),
+    buildNamedTriggerFactor("Entry Pattern Trigger", patternType === "pin_bar" ? "Pin Bar" : patternType === "engulfing" ? "Engulfing" : "Micro BOS", "Structure Strength", 14),
+    buildNamedTriggerFactor("ATR Volatility Acceptable", null, "ATR Confirmation", 8, Number.isFinite(entryDriftAtr) ? entryDriftAtr <= maxEntryDriftAtr : execution.atr != null),
+    buildNamedTriggerFactor("Distance From Entry Within Threshold", Number.isFinite(entryDriftAtr) ? `${Math.round(entryDriftAtr * 100) / 100} ATR` : null, "ATR Confirmation", 8, Number.isFinite(entryDriftAtr) ? entryDriftAtr <= maxEntryDriftAtr : true),
+    buildNamedTriggerFactor("Confluence Score", `${Math.round(computeConfluenceScore(dir, entry, idx) / 16 * 100)}%`, "Confluence Score", 0, true, { persist: false })
+  ];
+  if (!Number.isFinite(signal.entry) || !Number.isFinite(signal.stopLoss) || !Number.isFinite(signal.takeProfit)) {
+    logSignalEngineDebug("MTF_SIGNAL_FILTERED", { reason: "missing_execution_levels", entry: signal.entry, stopLoss: signal.stopLoss, takeProfit: signal.takeProfit });
+    recordMtfRejection("missing_execution_levels", {
+      symbol,
+      entry: signal.entry,
+      stopLoss: signal.stopLoss,
+      takeProfit: signal.takeProfit,
+      conditions: Object.assign({}, baseConditions, { executionLevels: "FAIL" })
+    });
+    return null;
+  }
   stampSignalLifecycle(signal);
   const state = getMtfPipelineState(symbol);
   state.conditions = Object.assign({}, state.conditions || {}, baseConditions, { signalGenerated: "PASS" });
@@ -9248,6 +9532,16 @@ function processMtfTopDown() {
   /* Always compute and store confluence score on the signal for UI display */
   signal.confluenceScore = computeConfluenceScore(signal.dir, signal.entry, signal.candleIdx);
   signal._confFactors   = getActiveConfluenceFactors(signal.dir, signal.entry, signal.candleIdx);
+  mergeSignalTriggerFactorDetails(signal, (signal._confFactors || []).map((factor) => {
+    if (factor === "EMA Aligned") return buildNamedTriggerFactor("EMA Alignment", signal.dir === "BULL" ? "Bullish" : "Bearish", "Trend Alignment", 10);
+    if (factor === "HTF Trend") return buildNamedTriggerFactor("HTF Trend Alignment", signal.dir === "BULL" ? "Bullish" : "Bearish", "MTF Confirmation", 15);
+    if (factor === "Strong Breakout") return buildNamedTriggerFactor("HTF Breakout Confirmed", null, "Breakout Quality", 15);
+    if (factor === "Confirm Pattern") return buildNamedTriggerFactor("Entry Pattern Trigger", signal.patternType === "pin_bar" ? "Pin Bar" : signal.patternType === "engulfing" ? "Engulfing" : "Micro BOS", "Structure Strength", 14);
+    if (factor === "S/R Level") return buildNamedTriggerFactor("Market Structure Alignment", null, "Structure Strength", 10);
+    if (factor === "Volume Spike") return buildNamedTriggerFactor("Volume Confirmation", null, "Volume Confirmation", 8);
+    if (factor === "Momentum") return buildNamedTriggerFactor("Momentum Confirmation", null, "Momentum Score", 8);
+    return buildNamedTriggerFactor(factor, null, resolveSignalFactorGroup(factor), SIGNAL_FACTOR_DEFAULT_WEIGHTS[resolveSignalFactorGroup(factor)] ?? 5);
+  }));
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false;
@@ -9285,10 +9579,17 @@ function processMtfTopDown() {
      downstream, the TP/SL/Cancelled/Expired alerts that used to be gated on
      the setup alert's success flag). */
   logSignalEngineDebug("MTF_SIGNAL_ACTIVATED", { signalId: signal.signalId, symbol: signal.symbol || sym, dir: signal.dir, entry: signal.entry });
-  sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
-    signal.entryMode === "aggressive_intrabar"
-      ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
-      : "Entry activated after the lower-timeframe trigger candle closed."));
+  void (async () => {
+    try {
+      await qualifySignalForTelegram(signal, "MTF Top-Down", false, { strategy: "mtf_top_down", symbol: signal.symbol || sym, timeframeSec: signal.timeframeSec || getCurrentGranularitySec() });
+    } catch (err) {
+      console.warn("MTF adaptive qualification failed:", err.message);
+    }
+    sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
+      signal.entryMode === "aggressive_intrabar"
+        ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."
+        : "Entry activated after the lower-timeframe trigger candle closed."));
+  })();
   markMtfPipelineStage("notification_layer", {
     symbol: signal.symbol || sym,
     signalId: signal.signalId,
@@ -10600,12 +10901,22 @@ function buildStrategyTelegramCaption(signal) {
     stratLabel = "Opening Range Breakout";
   }
 
+  const triggerFactors = ensureSignalTriggerFactors(signal);
+  const rrLabel = Number.isFinite(signal.riskReward) ? signal.riskReward : (Number.isFinite(signal.rr) ? signal.rr : null);
+  const adaptiveConfidenceLabel = getAdaptiveConfidenceLabel(signal);
+  const adaptiveConfidenceScore = signal._adaptiveDecision && Number.isFinite(signal._adaptiveDecision.final_confidence_score)
+    ? signal._adaptiveDecision.final_confidence_score
+    : null;
+  const marketCategory = getAdaptiveMarketCategory(symbol, signal.timeframeSec != null ? signal.timeframeSec : getCurrentGranularitySec());
   const lines = [];
-  lines.push(`<b>${stratEmoji} ${stratLabel} — Entry Active</b>`);
+  lines.push(`<b>🚨 NEW TRADE SIGNAL</b>`);
+  lines.push(``);
+  lines.push(`<b>Strategy:</b> ${stratLabel}`);
+  if (signal.signalId) lines.push(`<b>Signal ID:</b> <code>${signal.signalId}</code>`);
   lines.push(``);
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
-  lines.push(`<b>Direction:</b> ${dirEmoji} ${dirArrow} ${signal.dir} (${dirLabel})`);
+  lines.push(`<b>Direction:</b> ${dirEmoji} ${dirLabel}`);
 
   /* Indicate if opposite mode will reverse this signal for auto-trading.
      For Grid Scalper MA the strategy's own Opposite Mode toggle
@@ -10623,19 +10934,25 @@ function buildStrategyTelegramCaption(signal) {
     lines.push(`<b>🔄 Opposite Mode:</b> ❌ Disabled`);
   }
 
-  lines.push(``);
-  lines.push(`<b>━━━ Original Signal ━━━</b>`);
   lines.push(`<b>📍 Entry:</b> <code>${fmtPrice(signal.entry, symbol)}</code>`);
-  lines.push(`<b>🛑 SL:</b> <code>${fmtPrice(signal.sl, symbol)}</code>`);
-  lines.push(`<b>🎯 TP:</b> <code>${fmtPrice(signal.tp, symbol)}</code>`);
-  if (signal.rr != null) {
-    lines.push(`<b>R:R:</b> 1:${fmt(signal.rr, 1)}`);
+  lines.push(`<b>🛑 Stop Loss:</b> <code>${fmtPrice(signal.stopLoss ?? signal.sl, symbol)}</code>`);
+  lines.push(`<b>🎯 Take Profit:</b> <code>${fmtPrice(signal.takeProfit ?? signal.tp, symbol)}</code>`);
+  if (rrLabel != null) {
+    lines.push(`<b>Risk/Reward:</b> 1:${fmt(rrLabel, 1)}`);
   }
+  if (Number.isFinite(signal.confluenceScore)) lines.push(`<b>Signal Quality:</b> ${Math.round((signal.confluenceScore / 16) * 100)}%`);
+  if (adaptiveConfidenceLabel) {
+    const scoreSuffix = Number.isFinite(adaptiveConfidenceScore) ? ` (${Math.round(adaptiveConfidenceScore)}%)` : "";
+    lines.push(`<b>Adaptive Confidence:</b> ${adaptiveConfidenceLabel}${scoreSuffix}`);
+  }
+  if (marketCategory) lines.push(`<b>Market Category:</b> ${marketCategory}`);
+  if (signal._adaptiveDecision && signal._adaptiveDecision.weight_version) lines.push(`<b>Learning Weight Version:</b> ${signal._adaptiveDecision.weight_version}`);
   if (Number.isFinite(signal.validUntilMs)) lines.push(`<b>Valid Until:</b> ${formatUtcTs(signal.validUntilMs)}`);
   if (signal.entryMode) lines.push(`<b>Entry Mode:</b> ${signal.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(signal.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(signal.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(signal.maxEntryDistanceAtr)) lines.push(`<b>Max Entry Distance:</b> ${fmt(signal.maxEntryDistanceAtr, 2)} ATR`);
   if (Number.isFinite(signal.stopBufferAtr)) lines.push(`<b>Stop Buffer:</b> ${fmt(signal.stopBufferAtr, 2)} ATR`);
+  if (Number.isFinite(signal.atr ?? signal.atrAtSignal)) lines.push(`<b>ATR:</b> ${fmt(signal.atr ?? signal.atrAtSignal, 3)}`);
 
   /* Show opposite signal details when opposite mode is active */
   if ((autoTradeStrategyOpposite || gsOppositeOn) && signal.type === "grid_scalper_ma") {
@@ -10679,41 +10996,12 @@ function buildStrategyTelegramCaption(signal) {
   }
 
   lines.push(``);
-  lines.push(`<b>🧠 Trade Conditions:</b>`);
-  if (signal.type === "liquidity_sweep" && signal.range) {
-    lines.push(`• Sweep wick breached prior range and closed back inside.`);
-  } else if (signal.type === "stop_loss_hunt" && signal.level) {
-    const side = signal.level.type === "support" ? "support" : "resistance";
-    lines.push(`• Price hunted ${side} liquidity and reclaimed the key level.`);
-  } else if (signal.type === "failed_pin_bar") {
-    lines.push(`• Pin bar against ${signal.state === "fear" ? "fear" : "greed"} failed, so momentum continuation setup triggered.`);
-  } else if (signal.type === "fib_scalp") {
-    lines.push(`• BOS trend continuation plus retracement into the 0.5–0.618 golden zone.`);
-  } else if (signal.type === "power_of_3") {
-    lines.push(`• EMA bias aligned, liquidity sweep formed, MSS displacement created FVG, and price retraced for entry.`);
-  } else if (signal.type === "grid_scalper_ma") {
-    lines.push(`• ${signal.mode === "bos" ? "Break of structure beyond latest swing level." : signal.mode === "triple_ma" ? "Triple MA cascade: SMA 50 trend, SMA 20 direction, SMA 11 entry crossover." : `Price crossed SMA ${gridScalperMAPeriod} with confirmation.`}`);
-  } else if (signal.type === "fvg_strat") {
-    lines.push(`• Strong impulse + discount/premium retrace into origin zone with entry confirmation.`);
-  } else if (signal.type === "mtf_top_down") {
-    lines.push(`• HTF bias aligned with LTF retest and entry trigger at key level.`);
-  } else if (signal.type === "ny_open_range") {
-    lines.push(`• Candle body broke NY range, then retest wick held without closing back inside.`);
-  } else if (signal.type === "session_range") {
-    lines.push(`• London sweep of Asian range liquidity reversed from the swept side.`);
-  } else if (signal.type === "orderblock") {
-    lines.push(`• Dominant impulse identified orderblock and price retested OB zone for entry.`);
-  } else if (signal.type === "tiktok") {
-    lines.push(`• 4-step Fibonacci retracement (A→B→C→D): price completed all steps and touched the 0.88 level.`);
-  } else if (signal.type === "candle_interp") {
-    lines.push(`• Multi-candle sequence (${signal.sequence ? signal.sequence.type : "unknown"}) detected at key level with HTF alignment.`);
-  } else if (signal.type === "orb") {
-    const trigDesc = signal.triggerType === "breakout_retest" ? "Price broke and retested the opening range level with confirmation."
-      : signal.triggerType === "failed_breakout_high" ? "Failed breakout above ORB High — price re-entered range, targeting ORB Low."
-      : "Failed breakout below ORB Low — price re-entered range, targeting ORB High.";
-    lines.push(`• ${trigDesc}`);
+  lines.push(`<b>✅ Trigger Factors</b>`);
+  const passedTriggerFactors = triggerFactors.filter((factor) => factor && factor.passed !== false);
+  if (passedTriggerFactors.length > 0) {
+    passedTriggerFactors.forEach((factor) => lines.push(`• ${formatSignalFactorLabel(factor)}`));
   } else {
-    lines.push(`• Strategy-specific confirmation conditions were met for this setup.`);
+    lines.push(`• Strategy-specific confirmation conditions were met.`);
   }
 
   /* Strategy-specific details */
@@ -10889,34 +11177,51 @@ function buildLifecycleTelegramCaption(kind, payload) {
   const dir = payload.dir || "--";
   const dirLabel = dir === "BULL" ? "🟢 BUY" : dir === "BEAR" ? "🔴 SELL" : dir;
   const titles = {
-    setup: "New Trade Signal",
-    approaching: "Signal Approaching Entry",
-    active: "Trade Activated",
-    tp: "Take Profit Hit",
-    sl: "Stop Loss Hit",
-    cancelled: "Trade Cancelled",
-    expired: "Trade Expired"
+    setup: "🚨 NEW TRADE SIGNAL",
+    approaching: "🟡 SIGNAL APPROACHING ENTRY",
+    active: "🚨 NEW TRADE SIGNAL",
+    tp: "🎯 TAKE PROFIT HIT",
+    sl: "🛑 STOP LOSS HIT",
+    cancelled: "⚪ TRADE CANCELLED",
+    expired: "⌛ TRADE EXPIRED"
   };
   const title = titles[kind] || "Signal Update";
+  const rrValue = Number.isFinite(payload.riskReward) ? payload.riskReward : (Number.isFinite(payload.rr) ? payload.rr : null);
+  const triggerFactors = normalizeSignalTriggerFactors(
+    payload.triggerFactors || payload.factorBreakdown || payload._confFactors || [],
+    payload.mtf_status || payload.mtfStatus || null
+  )
+    .filter((factor) => factor && factor.passed !== false);
   const lines = [];
-  lines.push(`📣 <b>${title}</b>`);
+  lines.push(`<b>${title}</b>`);
   lines.push("");
   lines.push(`<b>Strategy:</b> ${payload.strategyLabel || "Breakout Retest"}`);
   if (payload.signalId) lines.push(`<b>Signal ID:</b> <code>${payload.signalId}</code>`);
+  lines.push("");
   lines.push(`<b>Symbol:</b> ${symLabel}`);
   lines.push(`<b>Timeframe:</b> ${tfLabel}`);
   lines.push(`<b>Direction:</b> ${dirLabel}`);
   if (payload.level != null) lines.push(`<b>Key Level:</b> <code>${fmtPrice(payload.level, symbol)}</code>`);
   if (payload.entry != null) lines.push(`<b>Entry:</b> <code>${fmtPrice(payload.entry, symbol)}</code>`);
-  if (payload.sl != null) lines.push(`<b>SL:</b> <code>${fmtPrice(payload.sl, symbol)}</code>`);
-  if (payload.tp != null) lines.push(`<b>TP:</b> <code>${fmtPrice(payload.tp, symbol)}</code>`);
-  if (payload.confidenceScore != null) lines.push(`<b>Confidence:</b> ${payload.confidenceScore}`);
+  if (payload.sl != null) lines.push(`<b>Stop Loss:</b> <code>${fmtPrice(payload.sl, symbol)}</code>`);
+  if (payload.tp != null) lines.push(`<b>Take Profit:</b> <code>${fmtPrice(payload.tp, symbol)}</code>`);
+  if (rrValue != null) lines.push(`<b>Risk/Reward:</b> 1:${fmt(rrValue, 1)}`);
+  if (payload.confidenceScore != null) lines.push(`<b>Signal Quality:</b> ${Math.round((Number(payload.confidenceScore) / 16) * 100)}%`);
+  if (payload.adaptiveConfidenceLabel) lines.push(`<b>Adaptive Confidence:</b> ${payload.adaptiveConfidenceLabel}`);
+  if (payload.marketCategory) lines.push(`<b>Market Category:</b> ${payload.marketCategory}`);
+  if (payload.weightVersion) lines.push(`<b>Learning Weight Version:</b> ${payload.weightVersion}`);
   if (payload.entryMode) lines.push(`<b>Entry Mode:</b> ${payload.entryMode === "aggressive_intrabar" ? "Aggressive Intrabar" : "Confirmed Close"}`);
   if (Number.isFinite(payload.entryDriftAtr)) lines.push(`<b>Entry Drift:</b> ${fmt(payload.entryDriftAtr, 2)} ATR`);
   if (Number.isFinite(payload.distanceAtr)) lines.push(`<b>Distance Now:</b> ${fmt(payload.distanceAtr, 2)} ATR`);
   if (Number.isFinite(payload.maxDistanceAtr)) lines.push(`<b>Max Valid Distance:</b> ${fmt(payload.maxDistanceAtr, 2)} ATR`);
   if (Number.isFinite(payload.stopBufferAtr)) lines.push(`<b>Stop Buffer:</b> ${fmt(payload.stopBufferAtr, 2)} ATR`);
+  if (Number.isFinite(payload.atr)) lines.push(`<b>ATR:</b> ${fmt(payload.atr, 3)}`);
   if (Number.isFinite(payload.validUntilMs)) lines.push(`<b>Valid Until:</b> ${formatUtcTs(payload.validUntilMs)}`);
+  if (triggerFactors.length > 0 && (kind === "active" || kind === "setup" || kind === "approaching")) {
+    lines.push("");
+    lines.push(`<b>✅ Trigger Factors</b>`);
+    triggerFactors.forEach((factor) => lines.push(`• ${formatSignalFactorLabel(factor)}`));
+  }
   if (payload.reason) lines.push(`<b>Reason:</b> ${payload.reason}`);
   lines.push("");
   lines.push(`<i>${formatUtcTs(Date.now())}</i>`);

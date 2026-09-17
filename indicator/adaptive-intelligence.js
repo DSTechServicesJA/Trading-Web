@@ -3,7 +3,14 @@
 
   const FACTOR_ALIASES = Object.freeze({
     'EMA Aligned': 'Trend Alignment',
+    'EMA Alignment': 'Trend Alignment',
     'HTF Trend': 'MTF Confirmation',
+    'HTF Trend Alignment': 'MTF Confirmation',
+    'HTF Breakout Confirmed': 'Breakout Quality',
+    'LTF Retest Completed': 'Retest Quality',
+    'MTF Bias Aligned': 'MTF Confirmation',
+    'Entry Pattern Trigger': 'Structure Strength',
+    'Market Structure Alignment': 'Structure Strength',
     'MTF Structure': 'MTF Confirmation',
     'Confirm Quality': 'Structure Strength',
     'Confirm Pattern': 'Structure Strength',
@@ -13,13 +20,32 @@
     'RSI Favors': 'RSI Confirmation',
     'MACD Aligned': 'MACD Confirmation',
     'Volume Spike': 'Volume Confirmation',
+    'ATR Volatility Acceptable': 'ATR Confirmation',
+    'Distance From Entry Within Threshold': 'ATR Confirmation',
     'Active Session': 'Session Timing',
     'ADX Strong': 'Trend Strength',
     'Market Signal': 'Market Regime',
     'Preferred Dir': 'Trend Strength',
     'Momentum': 'Momentum Score',
+    'Momentum Confirmation': 'Momentum Score',
     'Stoch Cross': 'Momentum Score',
     'BB Squeeze': 'Market Regime'
+  });
+
+  const FACTOR_DEFAULT_WEIGHTS = Object.freeze({
+    'Trend Alignment': 5,
+    'MTF Confirmation': 6,
+    'RSI Confirmation': 5,
+    'MACD Confirmation': 5,
+    'Structure Strength': 5,
+    'ATR Confirmation': 4,
+    'Breakout Quality': 5,
+    'Retest Quality': 5,
+    'Volume Confirmation': 4,
+    'Session Timing': 4,
+    'Trend Strength': 5,
+    'Market Regime': 5,
+    'Momentum Score': 5
   });
 
   function clamp(value, min, max) {
@@ -28,21 +54,50 @@
     return Math.max(min, Math.min(max, n));
   }
 
+  function normalizeFactorDetails(factors, mtfStatus) {
+    const out = [];
+    for (const factor of (Array.isArray(factors) ? factors : [])) {
+      const raw = factor && typeof factor === 'object' ? factor : null;
+      const label = String(raw ? (raw.factor ?? raw.name ?? raw.label ?? raw.group ?? '') : (factor || '')).trim();
+      if (!label) continue;
+      const groupLabel = String(raw ? (raw.group ?? raw.groupKey ?? raw.factorGroup ?? label) : label).trim() || label;
+      const normalized = FACTOR_ALIASES[groupLabel] || FACTOR_ALIASES[label] || groupLabel || label;
+      const weight = Number.isFinite(raw && raw.weight) ? Number(raw.weight) : (FACTOR_DEFAULT_WEIGHTS[normalized] ?? 5);
+      const passed = raw ? raw.passed !== false : true;
+      const score = Number.isFinite(raw && raw.score) ? Number(raw.score) : (passed ? weight : 0);
+      out.push({
+        factor: label,
+        group: normalized,
+        passed,
+        weight,
+        score,
+        detail: raw && raw.detail != null ? String(raw.detail) : null,
+        persist: raw && raw.persist === false ? false : true
+      });
+    }
+    const mtf = String(mtfStatus || '').trim().toUpperCase();
+    if (['CONFIRMED', 'PASS', 'TRUE'].includes(mtf) && !out.some((factor) => factor.group === 'MTF Confirmation' && factor.persist !== false && factor.passed !== false)) {
+      out.push({
+        factor: 'MTF Bias Aligned',
+        group: 'MTF Confirmation',
+        passed: true,
+        weight: FACTOR_DEFAULT_WEIGHTS['MTF Confirmation'] ?? 6,
+        score: FACTOR_DEFAULT_WEIGHTS['MTF Confirmation'] ?? 6,
+        detail: null,
+        persist: true
+      });
+    }
+    return out;
+  }
+
   function normalizeFactors(factors, mtfStatus) {
     const out = [];
     const seen = new Set();
-    for (const factor of (Array.isArray(factors) ? factors : [])) {
-      const label = String(factor || '').trim();
-      if (!label) continue;
-      const normalized = FACTOR_ALIASES[label] || label;
-      if (!seen.has(normalized)) {
-        seen.add(normalized);
-        out.push(normalized);
-      }
-    }
-    const mtf = String(mtfStatus || '').trim().toUpperCase();
-    if (['CONFIRMED', 'PASS', 'TRUE'].includes(mtf) && !seen.has('MTF Confirmation')) {
-      out.push('MTF Confirmation');
+    for (const factor of normalizeFactorDetails(factors, mtfStatus)) {
+      if (!factor || factor.persist === false || factor.passed === false) continue;
+      if (seen.has(factor.group)) continue;
+      seen.add(factor.group);
+      out.push(factor.group);
     }
     return out;
   }
@@ -125,6 +180,12 @@
     const strategy = String(options.strategy || signal && (signal.strategyType || signal.type) || 'breakout_retest');
     const mtfStatus = String(options.mtfStatus || signal && signal.mtfStatus || signal && signal.adaptiveMtfStatus || 'UNKNOWN');
     const result = normalizeResult(signal && signal.result);
+    const factorDetails = normalizeFactorDetails(
+      options.factorDetails
+      || signal && (signal.triggerFactors || signal.factorBreakdown || signal._triggerFactorsDetailed || signal._confFactors)
+      || [],
+      mtfStatus
+    );
     return {
       trade_id: options.tradeId || `trade_${String(signal && signal.signalId || `${strategy}_${signal && signal.time || Date.now()}`).replace(/[^A-Za-z0-9_-]/g, '_')}`,
       signal_id: signal && signal.signalId ? signal.signalId : null,
@@ -151,13 +212,20 @@
       market_category_score: decision && Number.isFinite(decision.market_category_score) ? decision.market_category_score : null,
       strategy_reliability_score: decision && Number.isFinite(decision.strategy_reliability_score) ? decision.strategy_reliability_score : null,
       qualification_band: decision && decision.qualification_band ? decision.qualification_band : 'UNQUALIFIED',
-      confluence_factors_present: normalizeFactors(signal && signal._confFactors || [], mtfStatus),
+      confluence_factors_present: normalizeFactors(factorDetails, mtfStatus),
+      confluence_factors_raw: factorDetails,
       mtf_status: mtfStatus,
       timeframe_sec: timeframeSec,
       notes: {
         entryMode: signal && signal.entryMode || null,
         confluenceScore: signal && signal.confluenceScore != null ? signal.confluenceScore : null,
-        watchlistOnly: decision && decision.telegram_action === 'WATCHLIST_ONLY'
+        watchlistOnly: decision && decision.telegram_action === 'WATCHLIST_ONLY',
+        patternType: signal && signal.patternType || null,
+        mtfBias: signal && signal.mtfBias || null,
+        riskReward: Number.isFinite(signal && (signal.riskReward ?? signal.rr)) ? Number(signal.riskReward ?? signal.rr) : null,
+        atr: Number.isFinite(signal && (signal.atr ?? signal.atrAtSignal ?? signal.atrAtEntry)) ? Number(signal.atr ?? signal.atrAtSignal ?? signal.atrAtEntry) : null,
+        tradeManagement: signal && signal.tradeManagement ? signal.tradeManagement : null,
+        weightVersion: decision && decision.weight_version ? decision.weight_version : null
       }
     };
   }
@@ -248,7 +316,9 @@
 
   const exported = {
     FACTOR_ALIASES,
+    FACTOR_DEFAULT_WEIGHTS,
     clamp,
+    normalizeFactorDetails,
     normalizeFactors,
     getMarketCategory,
     normalizeDirection,

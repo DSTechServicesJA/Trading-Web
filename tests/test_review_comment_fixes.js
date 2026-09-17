@@ -1510,6 +1510,11 @@ test('processMtfTopDown records signal validation before queueing successful sig
     minConfluenceEnabled: false,
     computeConfluenceScore: () => 11,
     getActiveConfluenceFactors: () => ['factor'],
+    resolveSignalFactorGroup: (value) => value,
+    SIGNAL_FACTOR_DEFAULT_WEIGHTS: { factor: 5 },
+    mergeSignalTriggerFactorDetails: () => [],
+    buildNamedTriggerFactor: (factor, detail, group, weight, passed = true, extra = {}) => ({ factor, detail, group, weight, score: passed ? weight : 0, passed, persist: extra.persist !== false }),
+    qualifySignalForTelegram: async () => ({ allowed: true, decision: null }),
     playStrategyAlert: () => {},
     addLog: () => {},
     fmtPrice: (value) => String(value),
@@ -1868,6 +1873,11 @@ test('syncPersistentAdaptiveTradeHistory only uploads outcomes from the active a
     },
     getAdaptiveRuntimeScopeKey: () => 'user:bob',
     generateSignalId: (prefix) => `${prefix}-generated`,
+    resolveStrategyDisplayLabel: (value) => value,
+    qualifySignalForTelegram: async () => ({ allowed: true, decision: null }),
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    getAdaptiveMtfStatus: () => 'CONFIRMED',
     buildAdaptiveTradePayloadFromSignal: (signal) => ({ signalId: signal.signalId, scope: signal.adaptiveScopeKey }),
     backtestMode: false,
     signalHistory: [
@@ -1908,7 +1918,7 @@ test('syncPersistentAdaptiveTradeHistory only uploads outcomes from the active a
   const { syncPersistentAdaptiveTradeHistory } = context.module.exports;
 
   syncPersistentAdaptiveTradeHistory();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(uploads.length, 1);
   assert.deepEqual(uploads[0], { signalId: 'mtf_top_down-generated', scope: 'user:bob' });
