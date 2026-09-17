@@ -352,6 +352,11 @@ html[data-theme="light"] body::before {
   background: linear-gradient(135deg, var(--bg-card), rgba(245,158,11,0.04));
 }
 
+.stat-card-warning {
+  border-color: rgba(239,68,68,0.35);
+  background: linear-gradient(135deg, var(--bg-card), rgba(239,68,68,0.08));
+}
+
 .stat-label {
   font-size: 10px;
   font-weight: 700;

@@ -2161,6 +2161,7 @@ function renderAdaptiveUserDetail(data) {
   renderAdaptiveUserHero(data.profile || {}, data.adaptive_profiles || []);
   renderAdaptiveSummary(data.profile || {}, data.ingestion_diagnostics || null);
   renderAdaptiveFactorDiagnostics(data.factor_diagnostics || null);
+  renderAdaptivePipelineDiagnostics(data.pipeline_diagnostics || null);
   renderAdaptiveFactors(data.factor_stats || []);
   renderAdaptiveQualificationRules(data.rules_page || { rows: data.rules || [], total: (data.rules || []).length, page: 1, last_page: 1, per_page: 25 });
   renderAdaptiveTrades(data.trades_page || { rows: data.trades || [], total: (data.trades || []).length, page: 1, last_page: 1, per_page: 25 });
@@ -2238,6 +2239,31 @@ function renderAdaptiveFactorDiagnostics(diagnostics = null) {
     ['Min Samples To Rate', diagnostics.min_sample_size || 0],
   ];
   container.innerHTML = cards.map(([label, value]) => `<div class="stat-card"><div class="stat-label">${escHtml(label)}</div><div class="stat-value">${escHtml(String(value))}</div></div>`).join('');
+}
+
+function renderAdaptivePipelineDiagnostics(diagnostics = null) {
+  const container = el('adaptivePipelineDiagnostics');
+  if (!container) return;
+  if (!diagnostics) {
+    container.innerHTML = '';
+    return;
+  }
+  const cards = [
+    ['Generated Signals', diagnostics.generated_signals || 0],
+    ['Opened Trades', diagnostics.opened_trades || 0],
+    ['Closed Trades', diagnostics.closed_trades || 0],
+    ['Recorded Wins', diagnostics.recorded_wins || 0],
+    ['Recorded Losses', diagnostics.recorded_losses || 0],
+    ['Recorded Cancelled', diagnostics.recorded_cancelled || 0],
+    ['Adaptive Updates', diagnostics.adaptive_updates || 0],
+    ['Category Updates', diagnostics.category_updates || 0],
+    ['Failed Updates', diagnostics.failed_updates || 0],
+  ];
+  container.innerHTML = cards.map(([label, value]) => {
+    const isFailed = label === 'Failed Updates' && Number(value) > 0;
+    const title = label === 'Failed Updates' ? ` title="${escHtml(diagnostics.failed_updates_reason || '')}"` : '';
+    return `<div class="stat-card${isFailed ? ' stat-card-warning' : ''}"${title}><div class="stat-label">${escHtml(label)}</div><div class="stat-value">${escHtml(String(value))}</div></div>`;
+  }).join('');
 }
 
 function adaptiveFactorStatus(row) {

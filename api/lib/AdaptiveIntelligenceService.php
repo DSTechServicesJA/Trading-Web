@@ -2131,6 +2131,84 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $ingestTotal = $trustedTotal + $untrustedTotal;
     $ingest24hTotal = $trusted24h + $untrusted24h;
 
+    /* ── Issue 5: full pipeline diagnostics report ──────────────────────
+       Signal Generated → Signal Stored → Trade Opened → Trade Closed →
+       Outcome Recorded → Strategy Statistics Updated → Adaptive Learning
+       Updated → Factor Performance Updated → Market Category Updated →
+       Dashboard Updated. Every count below is scoped by the same
+       category/strategy/symbol filters as the rest of this payload so the
+       report reflects exactly what the admin is looking at. */
+    $pipelineWhere = ['user_id = ?'];
+    $pipelineParams = [$userId];
+    if ($categoryValue !== null) {
+        $pipelineWhere[] = 'market_category = ?';
+        $pipelineParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $pipelineWhere[] = 'strategy_key = ?';
+        $pipelineParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $pipelineWhere[] = 'symbol = ?';
+        $pipelineParams[] = $symbolValue;
+    }
+    $pipelineSql = 'WHERE ' . implode(' AND ', $pipelineWhere);
+
+    $pipelineTradeStmt = $pdo->prepare(
+        "SELECT COUNT(*) AS opened_trades,
+                SUM(result = 'WIN') AS wins,
+                SUM(result = 'LOSS') AS losses,
+                SUM(result = 'CANCELLED') AS cancelled,
+                SUM(result IN ('WIN','LOSS','CANCELLED')) AS closed_trades,
+                SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, '\$.trust_source')), '') = 'UNTRUSTED_CLIENT_REPORTED') AS untrusted_trades
+         FROM adaptive_trade_history " . $pipelineSql
+    );
+    $pipelineTradeStmt->execute($pipelineParams);
+    $pipelineTradeRow = $pipelineTradeStmt->fetch() ?: [];
+
+    $pipelineDecisionStmt = $pdo->prepare('SELECT COUNT(*) FROM adaptive_signal_decisions ' . $decisionSql);
+    $pipelineDecisionStmt->execute($decisionParams);
+    $generatedSignals = (int) $pipelineDecisionStmt->fetchColumn();
+
+    $adaptiveUpdatesWhere = ['target_user_id = ?', "action_type = 'WEIGHT_AUTO_ADJUST'", "actor_role = 'system'"];
+    $adaptiveUpdatesParams = [$userId];
+    if ($categoryValue !== null) {
+        $adaptiveUpdatesWhere[] = 'market_category = ?';
+        $adaptiveUpdatesParams[] = $categoryValue;
+    }
+    if ($strategyValue !== null) {
+        $adaptiveUpdatesWhere[] = 'strategy_key = ?';
+        $adaptiveUpdatesParams[] = $strategyValue;
+    }
+    if ($symbolValue !== null) {
+        $adaptiveUpdatesWhere[] = 'symbol_scope = ?';
+        $adaptiveUpdatesParams[] = $symbolValue;
+    }
+    $adaptiveUpdatesStmt = $pdo->prepare('SELECT COUNT(*) FROM adaptive_learning_audit_log WHERE ' . implode(' AND ', $adaptiveUpdatesWhere));
+    $adaptiveUpdatesStmt->execute($adaptiveUpdatesParams);
+    $adaptiveUpdates = (int) $adaptiveUpdatesStmt->fetchColumn();
+
+    $categoryUpdatesStmt = $pdo->prepare('SELECT COUNT(DISTINCT market_category) FROM adaptive_trade_history ' . $pipelineSql);
+    $categoryUpdatesStmt->execute($pipelineParams);
+    $categoryUpdates = (int) $categoryUpdatesStmt->fetchColumn();
+
+    $pipelineOpenedTrades = (int) ($pipelineTradeRow['opened_trades'] ?? 0);
+    $pipelineClosedTrades = (int) ($pipelineTradeRow['closed_trades'] ?? 0);
+    $pipelineFailedUpdates = (int) ($pipelineTradeRow['untrusted_trades'] ?? 0);
+
+    $pipelineDiagnostics = [
+        'generated_signals' => $generatedSignals,
+        'opened_trades' => $pipelineOpenedTrades,
+        'closed_trades' => $pipelineClosedTrades,
+        'recorded_wins' => (int) ($pipelineTradeRow['wins'] ?? 0),
+        'recorded_losses' => (int) ($pipelineTradeRow['losses'] ?? 0),
+        'recorded_cancelled' => (int) ($pipelineTradeRow['cancelled'] ?? 0),
+        'adaptive_updates' => $adaptiveUpdates,
+        'category_updates' => $categoryUpdates,
+        'failed_updates' => $pipelineFailedUpdates,
+        'failed_updates_reason' => 'Untrusted client-reported trade outcomes are recorded in trade history but intentionally excluded from adaptive learning weight updates (see adaptiveRecordTrade).',
+    ];
+
     return [
         'profile' => $profile,
         'adaptive_profiles' => $adaptiveProfiles,
@@ -2144,6 +2222,7 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
         'audits' => $audits,
         'audits_page' => $auditPaginated,
         'category_analytics' => $categoryAnalytics,
+        'pipeline_diagnostics' => $pipelineDiagnostics,
         'category_diagnostics' => [
             'total_trades' => $totalTrades,
             'categorized_trades' => max(0, $totalTrades - $uncategorizedTrades),
