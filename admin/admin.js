@@ -2051,7 +2051,7 @@ function renderAdaptiveUserDetail(data) {
   if (empty) empty.style.display = 'none';
   if (content) content.style.display = '';
   renderAdaptiveUserHero(data.profile || {}, data.adaptive_profiles || []);
-  renderAdaptiveSummary(data.profile || {});
+  renderAdaptiveSummary(data.profile || {}, data.ingestion_diagnostics || null);
   renderAdaptiveFactors(data.factor_stats || []);
   renderAdaptiveQualificationRules(data.rules || []);
   renderAdaptiveTrades(data.trades || []);
@@ -2085,7 +2085,7 @@ function renderAdaptiveUserHero(profile, adaptiveProfiles) {
     </div>`;
 }
 
-function renderAdaptiveSummary(profile) {
+function renderAdaptiveSummary(profile, ingestionDiagnostics = null) {
   const container = el('adaptiveUserSummaryCards');
   if (!container) return;
   const cards = [
@@ -2098,6 +2098,13 @@ function renderAdaptiveSummary(profile) {
     ['High Threshold', adaptivePct(profile.active_confidence_threshold, 1), 'Active high-confidence threshold.'],
     ['Telegram Threshold', adaptivePct(profile.telegram_qualification_threshold, 1), 'Watchlist / Telegram qualification threshold.'],
   ];
+  if (ingestionDiagnostics) {
+    cards.push(
+      ['Trusted Ingestion', adaptivePct(ingestionDiagnostics.trusted_rate_pct, 1), 'Trusted adaptive trade ingestion rate (all-time).'],
+      ['Untrusted Ingestion', adaptivePct(ingestionDiagnostics.untrusted_rate_pct, 1), 'Untrusted adaptive trade ingestion rate (all-time).'],
+      ['Trusted Ingestion (24h)', adaptivePct(ingestionDiagnostics.trusted_24h_rate_pct, 1), 'Trusted adaptive trade ingestion rate in the last 24h.']
+    );
+  }
   container.innerHTML = cards.map(([label, value, title]) => `<div class="stat-card" title="${escHtml(title)}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join('');
 }
 

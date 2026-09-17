@@ -311,6 +311,17 @@ test('historical replay exits cleanly and clears stale pending locks', () => {
 
 test('multi-symbol signal notifications include explicit lifecycle markers', () => {
   assert.match(source, /logSignalLifecycleEvent\(signal\.symbol, "Signal Generated"/);
-  assert.match(source, /logSignalLifecycleEvent\(signal\.symbol, "Trade Opened"/);
+  assert.match(source, /if \(!pending\._openedLogged\) \{/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| tradeSymbol, "Trade Opened"/);
   assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| symbol, "Signal Sent"/);
+});
+
+test('signal lifecycle FSM, active-trade registry, and health monitor remain wired', () => {
+  assert.match(source, /const SIGNAL_LIFECYCLE_STATE_LS_KEY = `\$\{LS_PREFIX\}signalLifecycleBySymbol`/);
+  assert.match(source, /const ACTIVE_TRADE_REGISTRY_LS_KEY = `\$\{LS_PREFIX\}activeTradeRegistry`/);
+  assert.match(source, /function transitionSignalLifecycleState\(symbol, nextState, details = \{\}\)/);
+  assert.match(source, /function registerActiveTradeRecord\(symbol, signalId, details = \{\}\)/);
+  assert.match(source, /function collectLifecycleHealthReport\(options = \{\}\)/);
+  assert.match(source, /startLifecycleHealthMonitor\(\);/);
+  assert.match(source, /stopLifecycleHealthMonitor\(\);/);
 });

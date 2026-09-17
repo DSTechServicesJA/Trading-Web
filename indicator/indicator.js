@@ -1254,39 +1254,236 @@ function findPendingTradeSignal(symbol) {
   return signalHistory.findLast((s) => s && s.result === "PENDING" && (!target || (s.symbol || getActiveSymbol()) === target));
 }
 
+const SIGNAL_LIFECYCLE_STATE_LS_KEY = `${LS_PREFIX}signalLifecycleBySymbol`;
+const ACTIVE_TRADE_REGISTRY_LS_KEY = `${LS_PREFIX}activeTradeRegistry`;
+const SIGNAL_LIFECYCLE_HEALTH_INTERVAL_MS = 60000;
+let lifecycleHealthTimer = null;
+const signalLifecycleBySymbol = new Map();
+const activeTradeRegistry = new Map();
+
+function buildActiveTradeRegistryKey(symbol, signalId) {
+  const sym = String(symbol || "").trim();
+  const id = String(signalId || "").trim();
+  if (!sym || !id) return "";
+  return `${sym}|${id}`;
+}
+
+function persistSignalLifecycleState() {
+  try {
+    const lifecycleRows = Array.from(signalLifecycleBySymbol.entries()).map(([symbol, value]) => ({ symbol, value }));
+    localStorage.setItem(SIGNAL_LIFECYCLE_STATE_LS_KEY, JSON.stringify(lifecycleRows));
+    localStorage.setItem(ACTIVE_TRADE_REGISTRY_LS_KEY, JSON.stringify(Array.from(activeTradeRegistry.entries())));
+  } catch { /* storage unavailable */ }
+}
+
+function restoreSignalLifecycleState() {
+  signalLifecycleBySymbol.clear();
+  activeTradeRegistry.clear();
+  try {
+    const lifecycleRaw = localStorage.getItem(SIGNAL_LIFECYCLE_STATE_LS_KEY);
+    if (lifecycleRaw) {
+      const rows = JSON.parse(lifecycleRaw);
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (!row || !row.symbol || !row.value) continue;
+          signalLifecycleBySymbol.set(String(row.symbol), row.value);
+        }
+      }
+    }
+    const registryRaw = localStorage.getItem(ACTIVE_TRADE_REGISTRY_LS_KEY);
+    if (registryRaw) {
+      const entries = JSON.parse(registryRaw);
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (!Array.isArray(entry) || entry.length < 2) continue;
+          const key = String(entry[0] || "");
+          const value = entry[1];
+          if (!key || !value || !value.symbol || !value.signalId) continue;
+          activeTradeRegistry.set(key, value);
+        }
+      }
+    }
+  } catch { /* storage unavailable */ }
+}
+
+function transitionSignalLifecycleState(symbol, nextState, details = {}) {
+  const sym = symbol || getActiveSymbol() || "UNKNOWN";
+  const allowedTransitions = {
+    IDLE: new Set(["GENERATED", "SENT", "OPEN", "CLOSED", "IDLE"]),
+    GENERATED: new Set(["SENT", "OPEN", "CLOSED", "IDLE", "GENERATED"]),
+    SENT: new Set(["OPEN", "CLOSED", "IDLE", "SENT"]),
+    OPEN: new Set(["CLOSED", "IDLE", "OPEN"]),
+    CLOSED: new Set(["IDLE", "GENERATED", "SENT", "OPEN", "CLOSED"])
+  };
+  const prev = signalLifecycleBySymbol.get(sym) || { state: "IDLE", updatedAt: null };
+  const previousState = String(prev.state || "IDLE").toUpperCase();
+  const targetState = String(nextState || "IDLE").toUpperCase();
+  const allowed = (allowedTransitions[previousState] || allowedTransitions.IDLE).has(targetState);
+  signalLifecycleBySymbol.set(sym, {
+    state: targetState,
+    previousState,
+    updatedAt: new Date().toISOString(),
+    signalId: details.signalId || prev.signalId || null,
+    reason: details.reason || null
+  });
+  if (!allowed) {
+    logSignalEngineDebug("LIFECYCLE_STATE_TRANSITION_FORCED", {
+      symbol: sym,
+      previousState,
+      targetState,
+      details
+    });
+  } else {
+    logSignalEngineDebug("LIFECYCLE_STATE_TRANSITION", {
+      symbol: sym,
+      previousState,
+      targetState
+    });
+  }
+  persistSignalLifecycleState();
+}
+
+function registerActiveTradeRecord(symbol, signalId, details = {}) {
+  const key = buildActiveTradeRegistryKey(symbol, signalId);
+  if (!key) return;
+  activeTradeRegistry.set(key, {
+    symbol: String(symbol),
+    signalId: String(signalId),
+    strategyType: details.strategyType || null,
+    openedAtIso: details.openedAtIso || new Date().toISOString(),
+    entry: Number.isFinite(details.entry) ? details.entry : null
+  });
+  persistSignalLifecycleState();
+}
+
+function unregisterActiveTradeRecord(symbol, signalId = null) {
+  const sym = String(symbol || "").trim();
+  if (!sym) return;
+  if (signalId) {
+    const key = buildActiveTradeRegistryKey(sym, signalId);
+    if (key) activeTradeRegistry.delete(key);
+  } else {
+    for (const [key, value] of activeTradeRegistry.entries()) {
+      if (value && value.symbol === sym) activeTradeRegistry.delete(key);
+    }
+  }
+  persistSignalLifecycleState();
+}
+
+function collectLifecycleHealthReport(options = {}) {
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const staleAfterMs = Number.isFinite(options.staleAfterMs)
+    ? options.staleAfterMs
+    : Math.max(30 * 60 * 1000, getSignalValidityMs() * 3);
+  const histories = [signalHistory];
+  for (const panel of multiPanels.values()) {
+    if (panel && Array.isArray(panel.signalHistory)) histories.push(panel.signalHistory);
+  }
+  const bySymbol = new Map();
+  for (const history of histories) {
+    for (const entry of (history || [])) {
+      if (!entry || entry.result !== "PENDING") continue;
+      const symbol = entry.symbol || getActiveSymbol() || "UNKNOWN";
+      const row = bySymbol.get(symbol) || { symbol, pending: 0, stalePending: 0 };
+      row.pending += 1;
+      const createdAtMs = getSignalCreatedAtMs(entry);
+      if (createdAtMs > 0 && (now - createdAtMs) >= staleAfterMs) row.stalePending += 1;
+      bySymbol.set(symbol, row);
+    }
+  }
+  const symbols = Array.from(bySymbol.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+  return {
+    generatedAtIso: new Date(now).toISOString(),
+    symbols,
+    totalPending: symbols.reduce((sum, row) => sum + row.pending, 0),
+    totalStalePending: symbols.reduce((sum, row) => sum + row.stalePending, 0),
+    activeTradeRegistryCount: activeTradeRegistry.size
+  };
+}
+
+function runLifecycleHealthCheck() {
+  const report = collectLifecycleHealthReport();
+  logSignalEngineDebug("LIFECYCLE_HEALTH", report);
+  if (report.totalStalePending > 0) {
+    addLog(`⚠️ Lifecycle health: ${report.totalStalePending} stale pending signal(s) across ${report.symbols.length} symbol(s)`);
+  }
+}
+
+function startLifecycleHealthMonitor() {
+  if (lifecycleHealthTimer) clearInterval(lifecycleHealthTimer);
+  lifecycleHealthTimer = setInterval(runLifecycleHealthCheck, SIGNAL_LIFECYCLE_HEALTH_INTERVAL_MS);
+}
+
+function stopLifecycleHealthMonitor() {
+  if (!lifecycleHealthTimer) return;
+  clearInterval(lifecycleHealthTimer);
+  lifecycleHealthTimer = null;
+}
+
 function logSignalLifecycleEvent(symbol, stage, details = null) {
   const sym = symbol || getActiveSymbol() || "UNKNOWN";
+  const stageName = String(stage || "").trim();
+  if (stageName === "Signal Generated") transitionSignalLifecycleState(sym, "GENERATED", details || {});
+  else if (stageName === "Signal Sent") transitionSignalLifecycleState(sym, "SENT", details || {});
+  else if (stageName === "Trade Opened") {
+    transitionSignalLifecycleState(sym, "OPEN", details || {});
+    if (details && details.signalId) {
+      registerActiveTradeRecord(sym, details.signalId, {
+        strategyType: details.strategy || null,
+        openedAtIso: details.openedAtIso || null,
+        entry: details.entry
+      });
+    }
+  } else if (stageName === "Trade Closed") {
+    transitionSignalLifecycleState(sym, "CLOSED", details || {});
+    unregisterActiveTradeRecord(sym, details && details.signalId ? details.signalId : null);
+  } else if (stageName === "State Reset Complete") {
+    transitionSignalLifecycleState(sym, "IDLE", details || {});
+    unregisterActiveTradeRecord(sym, details && details.signalId ? details.signalId : null);
+  }
   addLog(`[${sym}] ${stage}`);
   logSignalEngineDebug(`LIFECYCLE_${String(stage || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`, Object.assign({ symbol: sym }, details || {}));
 }
 
 function cleanupPendingSignalsForSymbol(symbol, strategyType = null, options = {}) {
   const sym = symbol || getActiveSymbol();
-  if (!sym || !Array.isArray(signalHistory) || signalHistory.length === 0) return 0;
+  if (!sym) return 0;
   const now = Number.isFinite(options.now) ? options.now : Date.now();
   const staleAfterMs = Number.isFinite(options.staleAfterMs)
     ? options.staleAfterMs
     : Math.max(30 * 60 * 1000, getSignalValidityMs() * 3);
   const keepSignalId = options.keepSignalId || null;
+  const histories = [signalHistory];
+  for (const panel of multiPanels.values()) {
+    if (panel && panel.symbol === sym && Array.isArray(panel.signalHistory)) histories.push(panel.signalHistory);
+  }
   let cleaned = 0;
-  for (const entry of signalHistory) {
-    if (!entry || entry.result !== "PENDING") continue;
-    if ((entry.symbol || sym) !== sym) continue;
-    if (strategyType && (entry.strategyType || entry.type || "breakout_retest") !== strategyType) continue;
-    if (keepSignalId && entry.signalId && entry.signalId === keepSignalId) continue;
-    const tracksCurrentTrade = monitoringTrade && trade && (
-      (trade.signalId && entry.signalId && trade.signalId === entry.signalId)
-      || ((!trade.signalId || !entry.signalId) && (trade.symbol || sym) === sym)
-    );
-    if (tracksCurrentTrade) continue;
-    const createdAt = getSignalCreatedAtMs(entry);
-    const staleByAge = createdAt > 0 && now - createdAt >= staleAfterMs;
-    const staleByOrphan = !monitoringTrade && !trade && createdAt > 0 && now - createdAt >= staleAfterMs;
-    if (!staleByAge && !staleByOrphan) continue;
-    entry.result = "EXPIRED";
-    entry.outcomeCandleIdx = Array.isArray(candles) ? candles.length - 1 : null;
-    ensureAdaptiveTradeResolutionTimestamp(entry);
-    cleaned++;
+  for (const history of histories) {
+    if (!Array.isArray(history) || history.length === 0) continue;
+    for (const entry of history) {
+      if (!entry || entry.result !== "PENDING") continue;
+      if ((entry.symbol || sym) !== sym) continue;
+      if (strategyType && (entry.strategyType || entry.type || "breakout_retest") !== strategyType) continue;
+      if (keepSignalId && entry.signalId && entry.signalId === keepSignalId) continue;
+      const tracksCurrentTrade = monitoringTrade && trade && (
+        (trade.signalId && entry.signalId && trade.signalId === entry.signalId)
+        || ((!trade.signalId || !entry.signalId) && (trade.symbol || sym) === sym)
+      );
+      if (tracksCurrentTrade) continue;
+      const createdAt = getSignalCreatedAtMs(entry);
+      const staleByAge = createdAt > 0 && now - createdAt >= staleAfterMs;
+      const staleByOrphan = !monitoringTrade && !trade && createdAt > 0 && now - createdAt >= staleAfterMs;
+      if (!staleByAge && !staleByOrphan) continue;
+      entry.result = "EXPIRED";
+      entry.outcomeCandleIdx = Array.isArray(candles) ? candles.length - 1 : null;
+      ensureAdaptiveTradeResolutionTimestamp(entry);
+      if (entry.signalId) unregisterActiveTradeRecord(sym, entry.signalId);
+      transitionSignalLifecycleState(sym, "CLOSED", {
+        signalId: entry.signalId || null,
+        reason: "stale_pending_cleanup"
+      });
+      cleaned++;
+    }
   }
   if (cleaned > 0) {
     addLog(`🧹 [${sym}] Cleared ${cleaned} stale pending signal${cleaned === 1 ? "" : "s"}`);
@@ -14258,10 +14455,6 @@ function recordSignal(confirmPattern) {
     signalId: signal.signalId || null,
     strategy: signal.strategyType || signal.type || "breakout_retest"
   });
-  logSignalLifecycleEvent(signal.symbol, "Trade Opened", {
-    signalId: signal.signalId || null,
-    entry: signal.entry
-  });
   logSignalEngineDebug("TRADE_ACTIVATED", {
     signalId: signal.signalId || null,
     symbol: signal.symbol,
@@ -15929,6 +16122,14 @@ function monitorTradeOutcome(candle) {
   const effectiveSL = trailingSL != null ? trailingSL : trade.sl;
   const currentIdx = candles.length - 1;
   if (trade.outcomeStartIdx != null && currentIdx < trade.outcomeStartIdx) return;
+  if (!pending._openedLogged) {
+    pending._openedLogged = true;
+    logSignalLifecycleEvent(pending.symbol || tradeSymbol, "Trade Opened", {
+      signalId: pending.signalId || trade.signalId || null,
+      entry: pending.entry != null ? pending.entry : trade.entry,
+      strategy: pending.strategyType || pending.type || "breakout_retest"
+    });
+  }
 
   /* ---- Partial TP at 1:1 ---- */
   if (partialTpEnabled && !partialTpHit) {
@@ -19191,6 +19392,7 @@ function restoreSignalHistory() {
       signalBreakevens = signalHistory.filter(s => isBreakevenSignal(s)).length;
       signalLosses = signalHistory.filter(s => s && s.result === "LOSS" && !isBreakevenSignal(s)).length;
       updateStatsUI();
+      if (typeof runLifecycleHealthCheck === "function") runLifecycleHealthCheck();
     }
   } catch (e) {
     console.warn("Failed to restore signal history:", e.message);
@@ -20960,8 +21162,16 @@ function resetSession() {
     localStorage.removeItem(SIGNAL_NOTES_LS_KEY);
     localStorage.removeItem(LS_PREFIX + "gsFlipStats");
     localStorage.removeItem(LS_PREFIX + "gsOppSettings");
+    localStorage.removeItem(SIGNAL_LIFECYCLE_STATE_LS_KEY);
+    localStorage.removeItem(ACTIVE_TRADE_REGISTRY_LS_KEY);
     sessionStorage.removeItem(LS_PREFIX + "signalQueue");
   } catch (e) { /* storage not available */ }
+  if (typeof signalLifecycleBySymbol !== "undefined" && signalLifecycleBySymbol && typeof signalLifecycleBySymbol.clear === "function") {
+    signalLifecycleBySymbol.clear();
+  }
+  if (typeof activeTradeRegistry !== "undefined" && activeTradeRegistry && typeof activeTradeRegistry.clear === "function") {
+    activeTradeRegistry.clear();
+  }
 
   /* Reset auto-trade history */
   const pendingSettlementHistory = autoTradeHistory
@@ -21045,6 +21255,7 @@ function resetSession() {
   if (_nyOpenRangeTimerInterval) { clearInterval(_nyOpenRangeTimerInterval); _nyOpenRangeTimerInterval = null; }
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  if (typeof stopLifecycleHealthMonitor === "function") stopLifecycleHealthMonitor();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (reconnectDebounceTimer) { clearTimeout(reconnectDebounceTimer); reconnectDebounceTimer = null; }
   if (backtestInterval) { clearInterval(backtestInterval); backtestInterval = null; }
@@ -21787,6 +21998,7 @@ function connect() {
     startUptimeTimer();
     startPing();
     startWatchdog();
+    startLifecycleHealthMonitor();
 
     /* Start NY Open Range timer if enabled */
     if (nyOpenRangeEnabled) startNyOpenRangeTimer();
@@ -22076,6 +22288,7 @@ function disconnect() {
   stopCandleCountdown();
   stopUptimeTimer();
   stopNyOpenRangeTimer();
+  if (typeof stopLifecycleHealthMonitor === "function") stopLifecycleHealthMonitor();
   updateAccountBadge(null);
   /* Clear all per-symbol auto-trade slots */
   for (const [sym, slot] of autoTradeSlots.entries()) {
@@ -28780,6 +28993,7 @@ document.addEventListener("DOMContentLoaded", () => {
     applyRecommendedSettings();
     restoreSignalLog();
     restoreSignalHistory();
+    restoreSignalLifecycleState();
     initTheme();
   });
 

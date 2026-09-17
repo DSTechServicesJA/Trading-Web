@@ -325,6 +325,7 @@ function adaptiveLatestTimestamp(?string ...$values): ?string
 
 const ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES = 10;
 const ADAPTIVE_LEARNING_MATURE_MIN_TRADES = 20;
+const ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS = 21600;
 
 function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount, int $factorCount = 0): string
 {
@@ -754,9 +755,11 @@ function adaptiveCanTrustClientTrade(PDO $pdo, int $userId, array $trade): bool
     $stmt = $pdo->prepare(
         'SELECT 1 FROM adaptive_signal_decisions
          WHERE user_id = ? AND signal_id = ? AND symbol = ? AND strategy_key = ?
+           AND created_at IS NOT NULL
+           AND TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) BETWEEN 0 AND ?
          LIMIT 1'
     );
-    $stmt->execute([$userId, $signalId, $symbol, $strategy]);
+    $stmt->execute([$userId, $signalId, $symbol, $strategy, ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS]);
     return (bool) $stmt->fetchColumn();
 }
 
@@ -1637,6 +1640,23 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
     $diag = $diagStmt->fetch() ?: ['total_trades' => 0, 'uncategorized_trades' => 0];
     $totalTrades = (int) ($diag['total_trades'] ?? 0);
     $uncategorizedTrades = (int) ($diag['uncategorized_trades'] ?? 0);
+    $ingestStmt = $pdo->prepare(
+        'SELECT
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') = \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS untrusted_total,
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') <> \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS trusted_total,
+            SUM(CASE WHEN created_at >= (UTC_TIMESTAMP() - INTERVAL 24 HOUR) AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') = \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS untrusted_24h,
+            SUM(CASE WHEN created_at >= (UTC_TIMESTAMP() - INTERVAL 24 HOUR) AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') <> \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS trusted_24h
+         FROM adaptive_trade_history
+         WHERE user_id = ?'
+    );
+    $ingestStmt->execute([$userId]);
+    $ingest = $ingestStmt->fetch() ?: [];
+    $trustedTotal = (int) ($ingest['trusted_total'] ?? 0);
+    $untrustedTotal = (int) ($ingest['untrusted_total'] ?? 0);
+    $trusted24h = (int) ($ingest['trusted_24h'] ?? 0);
+    $untrusted24h = (int) ($ingest['untrusted_24h'] ?? 0);
+    $ingestTotal = $trustedTotal + $untrustedTotal;
+    $ingest24hTotal = $trusted24h + $untrusted24h;
 
     return [
         'profile' => $profile,
@@ -1651,6 +1671,17 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
             'total_trades' => $totalTrades,
             'categorized_trades' => max(0, $totalTrades - $uncategorizedTrades),
             'uncategorized_trades' => $uncategorizedTrades,
+        ],
+        'ingestion_diagnostics' => [
+            'trusted_total' => $trustedTotal,
+            'untrusted_total' => $untrustedTotal,
+            'trusted_rate_pct' => $ingestTotal > 0 ? round(($trustedTotal / $ingestTotal) * 100, 1) : 0.0,
+            'untrusted_rate_pct' => $ingestTotal > 0 ? round(($untrustedTotal / $ingestTotal) * 100, 1) : 0.0,
+            'trusted_24h' => $trusted24h,
+            'untrusted_24h' => $untrusted24h,
+            'trusted_24h_rate_pct' => $ingest24hTotal > 0 ? round(($trusted24h / $ingest24hTotal) * 100, 1) : 0.0,
+            'untrusted_24h_rate_pct' => $ingest24hTotal > 0 ? round(($untrusted24h / $ingest24hTotal) * 100, 1) : 0.0,
+            'trust_promotion_window_seconds' => ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS,
         ],
     ];
 }

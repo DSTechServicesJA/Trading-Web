@@ -177,7 +177,8 @@ test('adaptive learning progression supports Learning/Active/Mature lifecycle', 
 test('resolved adaptive trades from indicator sync are trust-promoted only when linked to adaptive decisions', () => {
   assert.match(adaptiveTradesApiSource, /adaptiveRecordTrade\(\$pdo, \$userId, \$body, \$userId, 'user'\)/);
   assert.match(serviceSource, /function adaptiveCanTrustClientTrade\(PDO \$pdo, int \$userId, array \$trade\): bool/);
-  assert.match(serviceSource, /SELECT 1 FROM adaptive_signal_decisions[\s\S]*signal_id = \?[\s\S]*symbol = \?[\s\S]*strategy_key = \?/);
+  assert.match(serviceSource, /SELECT 1 FROM adaptive_signal_decisions[\s\S]*signal_id = \?[\s\S]*symbol = \?[\s\S]*strategy_key = \?[\s\S]*TIMESTAMPDIFF\(SECOND, created_at, UTC_TIMESTAMP\(\)\) BETWEEN 0 AND \?/);
+  assert.match(serviceSource, /ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS = 21600/);
   assert.match(serviceSource, /if \(!\$trustedSource && adaptiveCanTrustClientTrade\(\$pdo, \$userId, \$trade\)\) \{/);
   assert.match(serviceSource, /QUALIFIED_CLIENT_SIGNAL/);
   assert.match(serviceSource, /if \(\$trustedSource\) \{\s*\$scopes = adaptiveBuildScopes/);
@@ -200,10 +201,13 @@ test('backend normalizes naive timestamps as UTC and skips untrusted trades duri
 
 test('category analytics pipeline publishes diagnostics and supports non-default categories', () => {
   assert.match(serviceSource, /'category_diagnostics' => \[/);
+  assert.match(serviceSource, /'ingestion_diagnostics' => \[/);
+  assert.match(serviceSource, /trusted_24h_rate_pct/);
   assert.match(serviceSource, /uncategorized_trades/);
   assert.match(adminSource, /function renderAdaptiveCategoryAnalytics\(rows, diagnostics = null\)/);
   assert.match(adminSource, /const extraCategories = \(rows \|\| \[\]\)\.filter/);
   assert.match(adminSource, /Total: <strong>\$\{escHtml\(String\(diagnostics\.total_trades \|\| 0\)\)\}<\/strong>/);
+  assert.match(adminSource, /function renderAdaptiveSummary\(profile, ingestionDiagnostics = null\)/);
 });
 
 test('admin dashboard exposes adaptive management workflows', () => {
