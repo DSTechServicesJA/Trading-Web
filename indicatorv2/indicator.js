@@ -3045,6 +3045,7 @@ function resetSessionRanges() {
  */
 function monitorSessionRangeTradeOutcome(candle) {
   if (!sessionRangesEnabled || !sessionRangeTrade) return;
+  if (sessionRangeTrade.result && sessionRangeTrade.result !== "PENDING") return;
 
   const srt = sessionRangeTrade;
 
@@ -3125,6 +3126,7 @@ function monitorSessionRangeTradeOutcome(candle) {
  */
 async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
   if (!telegramSessionRangeOutcomeSend) return;
+  if (resolvedTrade.result && !canSendTradeResolutionNotification(resolvedTrade, resolvedTrade.result)) return;
 
   /* Sync credentials from DOM */
   if (UI.telegramBotToken) telegramBotToken = UI.telegramBotToken.value;
@@ -8632,6 +8634,10 @@ function detectFailedPinBar() {
  * Run the failed pin bar scanner and handle alerting.
  */
 function processFailedPinBar() {
+  /* Keep one active failed-pin-bar setup at a time to avoid overlapping
+     trades while the current setup is still pending outcome (SL/TP). */
+  if (failedPinBarHistory.some(s => s.result === "PENDING")) return;
+
   const signal = detectFailedPinBar();
   if (!signal) return;
 
@@ -11256,12 +11262,36 @@ async function sendTelegramStrategyAlert(signal, force = false) {
 }
 
 /**
+ * Centralized WIN/LOSS/EXPIRED resolution-notification deduplication.
+ * Every trade-resolution notification sender must consult this guard before
+ * dispatching so the same trade_id + resolution_type combination can never
+ * fire more than once. (Duplicate trade notification fix)
+ */
+const _tradeResolutionNotificationKeys = new Set();
+function tradeResolutionNotificationKey(signal, resolutionType) {
+  const tradeId = (signal && (signal.tradeId || signal.signalId)) ||
+    `${(signal && signal.type) || "trade"}_${(signal && signal.symbol) || ""}_${signal && signal.candleIdx != null ? signal.candleIdx : (signal && signal.entryIdx)}_${(signal && signal.epoch) || ""}`;
+  return `${tradeId}::${resolutionType}`;
+}
+function canSendTradeResolutionNotification(signal, resolutionType) {
+  const key = tradeResolutionNotificationKey(signal, resolutionType);
+  if (_tradeResolutionNotificationKeys.has(key)) {
+    addLog(`[TRADE] Duplicate notification prevented (${key})`);
+    return false;
+  }
+  _tradeResolutionNotificationKeys.add(key);
+  addLog(`[TRADE] Resolution notification queued (${key})`);
+  return true;
+}
+
+/**
  * Send strategy outcome (WIN / LOSS) via Telegram when enabled.
  * Called from monitorLiquiditySweepOutcomes, monitorStopLossHuntOutcomes,
  * monitorFailedPinBarOutcomes after a signal resolves.
  */
 async function sendStrategyOutcomeTelegram(signal) {
   if (!telegramStrategyOutcomeSend) return;
+  if (signal.result && !canSendTradeResolutionNotification(signal, signal.result)) return;
 
   /* Sync credentials from DOM and validate BEFORE marking the signal as sent,
      so that a bad-credential failure leaves _stratOutcomeSent = false and allows
