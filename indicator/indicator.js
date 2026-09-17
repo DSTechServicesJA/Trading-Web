@@ -1647,9 +1647,10 @@ function syncPersistentAdaptiveTradeHistory() {
       )
         .catch((err) => {
           console.warn("Adaptive signal qualification before trade sync failed:", err.message);
-          return null;
+          return false;
         })
-        .then(() => {
+        .then((qualificationState) => {
+          if (qualificationState === false) return false;
           const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
           const payload = buildAdaptiveTradePayloadFromSignal(cloned);
           if (!payload) return false;
