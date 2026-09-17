@@ -214,7 +214,17 @@ test('detectMtfTopDown emits a signal when all MTF confirmations pass', () => {
     getVolatilityAdjustedStopBufferAtr: () => 0.1,
     getStrategyProfitParams: () => ({ rrMTFMin: 2, slBufferMult: 1 }),
     synthesizeTfCandles: () => [{ high: 103, low: 99 }, { high: 104, low: 98 }],
+    computeMtfExecutionLevels: () => ({
+      valid: true,
+      stopLoss: 100.2,
+      takeProfit: 103,
+      riskReward: 2,
+      atr: 0.5,
+      tradeManagement: { stopLossMethod: 'atr_structure' }
+    }),
     computeMtfBias: () => 'BULL',
+    buildNamedTriggerFactor: (factor, detail, group, weight, passed = true, extra = {}) => ({ factor, detail, group, weight, score: passed ? weight : 0, passed, persist: extra.persist !== false }),
+    computeConfluenceScore: () => 11,
     getCurrentRegimeTag: () => 'TRENDING',
     getSignalValidityMs: () => 120000,
     getSignalDistanceLimitAtr: () => 2,

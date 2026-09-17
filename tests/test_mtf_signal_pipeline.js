@@ -13,9 +13,21 @@ function extractFunction(name) {
   const startToken = `function ${name}(`;
   const start = indicatorSource.indexOf(startToken);
   assert.notEqual(start, -1, `Missing function ${name}`);
-  let bodyStart = indicatorSource.indexOf('{', start);
+  let i = indicatorSource.indexOf('(', start);
+  let parenDepth = 0;
+  for (; i < indicatorSource.length; i++) {
+    const ch = indicatorSource[i];
+    if (ch === '(') parenDepth++;
+    if (ch === ')') {
+      parenDepth--;
+      if (parenDepth === 0) {
+        i = indicatorSource.indexOf('{', i);
+        break;
+      }
+    }
+  }
   let depth = 0;
-  for (let i = bodyStart; i < indicatorSource.length; i++) {
+  for (; i < indicatorSource.length; i++) {
     const ch = indicatorSource[i];
     if (ch === '{') depth++;
     if (ch === '}') {
@@ -76,6 +88,7 @@ function makeMtfContext({ dir = 'BULL', atrValue = 0.5, biasBars = [{ high: 103,
     getStrategyProfitParams: () => ({ rrMTFMin: 2.5, slBufferMult: 1 }),
     synthesizeTfCandles: () => biasBars,
     computeMtfBias: () => dir,
+    computeConfluenceScore: () => 14,
     getCurrentRegimeTag: () => 'TRENDING',
     getSignalValidityMs: () => 120000,
     getSignalDistanceLimitAtr: () => 2,
@@ -179,7 +192,7 @@ test('lifecycle notification renders trigger factors and execution levels', () =
   assert.match(caption, /Stop Loss/);
   assert.match(caption, /Take Profit/);
   assert.match(caption, /Risk\/Reward/);
-  assert.match(caption, /Adaptive Confidence:\s*High/);
+  assert.match(caption, /Adaptive Confidence:<\/b>\s*High/);
 });
 
 test('adaptive trade payload preserves factor scores and trade-management metadata', () => {
