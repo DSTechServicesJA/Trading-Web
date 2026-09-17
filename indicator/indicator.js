@@ -1637,20 +1637,27 @@ function syncPersistentAdaptiveTradeHistory() {
       const strategyLabel = resolveStrategyDisplayLabel(strategyKey, strategyKey);
       Promise.resolve(
         signal._adaptiveDecision
-          ? signal._adaptiveDecision
+          ? (() => {
+              const action = String(signal._adaptiveDecision.telegram_action || "").toUpperCase();
+              return {
+                allowed: action !== "REJECT" && action !== "WATCHLIST_ONLY",
+                decision: signal._adaptiveDecision
+              };
+            })()
           : qualifySignalForTelegram(signal, strategyLabel, false, {
               strategy: strategyKey,
               symbol: signal.symbol || getActiveSymbol(),
               timeframeSec: signal.timeframeSec || getCurrentGranularitySec(),
               mtfStatus: getAdaptiveMtfStatus(signal)
-            }).then((qualification) => qualification && qualification.decision ? qualification.decision : null)
+            })
       )
         .catch((err) => {
           console.warn("Adaptive signal qualification before trade sync failed:", err.message);
-          return false;
+          return { allowed: false, decision: null };
         })
         .then((qualificationState) => {
-          if (qualificationState === false) return false;
+          if (!qualificationState || qualificationState.allowed !== true) return false;
+          if (qualificationState.decision) signal._adaptiveDecision = qualificationState.decision;
           const cloned = Object.assign({}, signal, { result: result === "EXPIRED" ? "CANCELLED" : result });
           const payload = buildAdaptiveTradePayloadFromSignal(cloned);
           if (!payload) return false;
@@ -9215,7 +9222,7 @@ function detectMtfTopDown(confirmationOverride = null) {
     return null;
   }
   baseConditions.candleContext = "PASS";
-  const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : 0;
+  const entryDriftAtr = atrValue > 0 ? Math.abs(c.close - level) / atrValue : Number.NaN;
   const maxEntryDriftAtr = getMaxEntryDriftAtr(symbol, getCurrentGranularitySec(), true);
   if (atrValue > 0 && entryDriftAtr > maxEntryDriftAtr) {
     logSignalEngineDebug("MTF_SIGNAL_FILTERED", {
@@ -9366,13 +9373,15 @@ function detectMtfTopDown(confirmationOverride = null) {
       validUntilMs: Date.now() + getSignalValidityMs()
     }, execution.tradeManagement || {})
   };
+  const hasExecutionAtr = Number.isFinite(execution.atr) && execution.atr > 0;
+  const atrDistanceWithinThreshold = hasExecutionAtr && Number.isFinite(entryDriftAtr) && entryDriftAtr <= maxEntryDriftAtr;
   signal.triggerFactors = [
     buildNamedTriggerFactor("HTF Trend Alignment", mtfBias === "BULL" ? "Bullish" : "Bearish", "MTF Confirmation", 15),
     buildNamedTriggerFactor("HTF Breakout Confirmed", null, "Breakout Quality", 15),
     buildNamedTriggerFactor("LTF Retest Completed", null, "Retest Quality", 14),
     buildNamedTriggerFactor("Entry Pattern Trigger", patternType === "pin_bar" ? "Pin Bar" : patternType === "engulfing" ? "Engulfing" : "Micro BOS", "Structure Strength", 14),
-    buildNamedTriggerFactor("ATR Volatility Acceptable", null, "ATR Confirmation", 8, Number.isFinite(entryDriftAtr) ? entryDriftAtr <= maxEntryDriftAtr : execution.atr != null),
-    buildNamedTriggerFactor("Distance From Entry Within Threshold", Number.isFinite(entryDriftAtr) ? `${Math.round(entryDriftAtr * 100) / 100} ATR` : null, "ATR Confirmation", 8, Number.isFinite(entryDriftAtr) ? entryDriftAtr <= maxEntryDriftAtr : true),
+    buildNamedTriggerFactor("ATR Volatility Acceptable", null, "ATR Confirmation", 8, atrDistanceWithinThreshold),
+    buildNamedTriggerFactor("Distance From Entry Within Threshold", Number.isFinite(entryDriftAtr) ? `${Math.round(entryDriftAtr * 100) / 100} ATR` : null, "ATR Confirmation", 8, atrDistanceWithinThreshold),
     buildNamedTriggerFactor("Confluence Score", `${Math.round(computeConfluenceScore(dir, entry, idx) / 16 * 100)}%`, "Confluence Score", 0, true, { persist: false })
   ];
   if (!Number.isFinite(signal.entry) || !Number.isFinite(signal.stopLoss) || !Number.isFinite(signal.takeProfit)) {
@@ -9580,11 +9589,14 @@ function processMtfTopDown() {
      the setup alert's success flag). */
   logSignalEngineDebug("MTF_SIGNAL_ACTIVATED", { signalId: signal.signalId, symbol: signal.symbol || sym, dir: signal.dir, entry: signal.entry });
   void (async () => {
+    let qualification = null;
     try {
-      await qualifySignalForTelegram(signal, "MTF Top-Down", false, { strategy: "mtf_top_down", symbol: signal.symbol || sym, timeframeSec: signal.timeframeSec || getCurrentGranularitySec() });
+      qualification = await qualifySignalForTelegram(signal, "MTF Top-Down", false, { strategy: "mtf_top_down", symbol: signal.symbol || sym, timeframeSec: signal.timeframeSec || getCurrentGranularitySec() });
     } catch (err) {
       console.warn("MTF adaptive qualification failed:", err.message);
+      return;
     }
+    if (!qualification || qualification.allowed !== true) return;
     sendSignalLifecycleTelegram("active", buildLifecyclePayloadFromSignal(signal, "MTF Top-Down", "strategy",
       signal.entryMode === "aggressive_intrabar"
         ? "Entry activated intrabar after the lower-timeframe trigger pushed away from the MTF level."

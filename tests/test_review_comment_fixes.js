@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../indicator/indicator.js'), 'utf8');
 
@@ -2435,4 +2436,151 @@ test('initLoginGate initializes adaptive runtime immediately on login and re-che
   assert.ok(bootstrapIndex > applyIndex);
   assert.ok(loadIndex !== -1);
   assert.ok(renderIndex > loadIndex);
+});
+
+test('syncPersistentAdaptiveTradeHistory does not record rejected cached adaptive decisions', async () => {
+  const harness = `${extractFunction('syncPersistentAdaptiveTradeHistory')}\nmodule.exports = { syncPersistentAdaptiveTradeHistory };`;
+  let recorded = false;
+  const signal = {
+    signalId: 'sig-reject',
+    symbol: 'stpRNG5',
+    strategyType: 'mtf_top_down',
+    timeframeSec: 300,
+    result: 'WIN',
+    adaptiveScopeKey: 'user:test',
+    _adaptiveDecision: { telegram_action: 'REJECT' }
+  };
+  const context = {
+    module: { exports: {} },
+    adaptiveIntelligenceClient: { isAuthenticated: () => true, recordTrade: async () => { recorded = true; return { ok: true }; } },
+    signalHistory: [],
+    mtfTopDownHistory: [signal],
+    liquiditySweepHistory: [],
+    stopLossHuntHistory: [],
+    failedPinBarHistory: [],
+    fibScalpHistory: [],
+    po3History: [],
+    nyOpenRangeHistory: [],
+    sessionRangeHistory: [],
+    gridScalperMAHistory: [],
+    gridScalperV2History: [],
+    fvgStratHistory: [],
+    liveScalpHistory: [],
+    candleInterpHistory: [],
+    orderblockHistory: [],
+    tiktokHistory: [],
+    po3_4hHistory: [],
+    breakerBlockHistory: [],
+    oteGoldenPocketHistory: [],
+    orbHistory: [],
+    crtTbsHistory: [],
+    backtestMode: false,
+    getAdaptiveRuntimeScopeKey: () => 'user:test',
+    shouldSyncAdaptiveTradeSignal: () => true,
+    ensureAdaptiveTradeResolutionTimestamp: () => {},
+    qualifySignalForTelegram: async () => ({ allowed: true, decision: null }),
+    resolveStrategyDisplayLabel: () => 'MTF Top-Down',
+    buildAdaptiveTradePayloadFromSignal: () => ({ signal_id: 'sig-reject' }),
+    getActiveSymbol: () => 'stpRNG5',
+    getCurrentGranularitySec: () => 300,
+    getAdaptiveMtfStatus: () => 'CONFIRMED',
+    generateSignalId: () => 'sig-reject',
+    console,
+    Date,
+    String,
+    Array
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  context.module.exports.syncPersistentAdaptiveTradeHistory();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(recorded, false);
+});
+
+test('processMtfTopDown skips MTF active lifecycle Telegram send when adaptive qualification disallows it', async () => {
+  const fnSource = extractFunction('processMtfTopDown');
+  const harness = `${fnSource}\nmodule.exports = { processMtfTopDown };`;
+  let lifecycleSends = 0;
+  const context = {
+    module: { exports: {} },
+    mtfTopDownEnabled: true,
+    mtfDebugMode: false,
+    candles: [{ close: 101 }],
+    MTF_REQUIRED_BASE_CANDLES: 120,
+    MTF_TOP_DOWN_MAX_HISTORY: 10,
+    mtfTopDownHistory: [],
+    mtfSetupState: null,
+    mtfTerminalBreakoutEpoch: null,
+    lastMtfTopDownIdx: -1,
+    _historicalProcessing: false,
+    telegramStrategyAutoSend: false,
+    notificationsEnabled: false,
+    autoTradeStrategyEnabled: false,
+    autoTradeMtfTopDown: false,
+    window: {},
+    Notification: { permission: 'default' },
+    getActiveSymbol: () => 'R_100',
+    getCurrentGranularitySec: () => 60,
+    markMtfPipelineStage: () => {},
+    captureMtfHtfDiagnostics: () => {},
+    getMtfSetupState: () => null,
+    detectMtfConfirmation: () => null,
+    detectMtfTopDown: () => ({
+      symbol: 'R_100',
+      signalId: 'sig-1',
+      candleIdx: 7,
+      dir: 'BULL',
+      entry: 100,
+      level: 100,
+      sl: 99,
+      tp: 102,
+      rr: 2,
+      mtfBias: 'BULL',
+      patternType: 'pin_bar'
+    }),
+    stampSignalLifecycle: () => {},
+    minConfluenceEnabled: false,
+    computeConfluenceScore: () => 11,
+    getActiveConfluenceFactors: () => ['factor'],
+    resolveSignalFactorGroup: (value) => value,
+    SIGNAL_FACTOR_DEFAULT_WEIGHTS: { factor: 5 },
+    mergeSignalTriggerFactorDetails: () => [],
+    buildNamedTriggerFactor: (factor, detail, group, weight, passed = true, extra = {}) => ({ factor, detail, group, weight, score: passed ? weight : 0, passed, persist: extra.persist !== false }),
+    qualifySignalForTelegram: async () => ({ allowed: false, decision: { telegram_action: 'REJECT' } }),
+    playStrategyAlert: () => {},
+    addLog: () => {},
+    fmtPrice: (value) => String(value),
+    fmt: (value, dp) => Number(value).toFixed(dp),
+    logSignalEngineDebug: () => {},
+    showToast: () => {},
+    throttledNotification: () => {},
+    sendSignalLifecycleTelegram: () => { lifecycleSends++; },
+    buildLifecyclePayloadFromSignal: () => ({}),
+    renderStrategyAlerts: () => {},
+    executeAutoTrade: () => {},
+    Date,
+    Object,
+    setTimeout
+  };
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const { processMtfTopDown } = context.module.exports;
+  processMtfTopDown();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(lifecycleSends, 0);
+});
+
+test('adaptive trade payload tracks raw factor source and still synthesizes MTF confirmation groups when needed', () => {
+  const phpCode = `
+require ${JSON.stringify(path.resolve(__dirname, '../api/lib/AdaptiveIntelligenceService.php'))};
+$payload = adaptiveNormalizeTradePayload(['symbol' => 'R_100', 'mtf_status' => 'CONFIRMED'], false);
+echo json_encode([
+  'has_raw_factor_details' => $payload['has_raw_factor_details'],
+  'confluence_factors_present' => $payload['confluence_factors_present']
+]);
+`;
+  const stdout = execFileSync('php', ['-r', phpCode], { encoding: 'utf8' });
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.has_raw_factor_details, false);
+  assert.ok(parsed.confluence_factors_present.includes('MTF Confirmation'));
 });

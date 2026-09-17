@@ -141,6 +141,23 @@ test('generate MTF SELL signal falls back to valid TP/SL when ATR or HTF target 
   assert.equal(signal.tradeManagement.fallbackUsed, true);
 });
 
+test('generate MTF signal marks ATR confirmation factors as not passed when ATR is unavailable', () => {
+  const harness = [
+    extractFunction('computeMtfExecutionLevels'),
+    extractFunction('detectMtfTopDown'),
+    'module.exports = { detectMtfTopDown };'
+  ].join('\n');
+  const context = makeMtfContext({ dir: 'BEAR', atrValue: Number.NaN, biasBars: [] });
+  vm.createContext(context);
+  vm.runInContext(harness, context);
+  const signal = context.module.exports.detectMtfTopDown();
+  assert.ok(signal);
+  const atrVolatilityFactor = signal.triggerFactors.find((factor) => factor.factor === 'ATR Volatility Acceptable');
+  const atrDistanceFactor = signal.triggerFactors.find((factor) => factor.factor === 'Distance From Entry Within Threshold');
+  assert.equal(atrVolatilityFactor && atrVolatilityFactor.passed, false);
+  assert.equal(atrDistanceFactor && atrDistanceFactor.passed, false);
+});
+
 test('lifecycle notification renders trigger factors and execution levels', () => {
   const harness = [
     extractFunction('normalizeSignalTriggerFactors'),
