@@ -500,64 +500,73 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
     $sortKey = trim((string) ($filters['sort_key'] ?? 'name'));
     $sortDirection = strtolower(trim((string) ($filters['sort_direction'] ?? 'asc'))) === 'desc' ? 'DESC' : 'ASC';
 
-    $where = [];
+    $baseWhere = [];
     $params = [];
     if ($search !== '') {
         $like = '%' . $search . '%';
-        $where[] = '(u.username LIKE ? OR u.display_name LIKE ? OR u.email LIKE ?)';
+        $baseWhere[] = '(__USER__.username LIKE ? OR __USER__.display_name LIKE ? OR __USER__.email LIKE ?)';
         array_push($params, $like, $like, $like);
     }
     if (in_array($status, ['active', 'locked'], true)) {
-        $where[] = 'u.status = ?';
+        $baseWhere[] = '__USER__.status = ?';
         $params[] = $status;
     }
     if (in_array($plan, ['trial', 'weekly', 'monthly'], true)) {
-        $where[] = 'u.subscription_plan = ?';
+        $baseWhere[] = '__USER__.subscription_plan = ?';
         $params[] = $plan;
     }
     if ($category !== '') {
-        $where[] = "EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = u.id AND ar.enabled = 1 AND ar.market_category IN (?, '*'))";
+        $baseWhere[] = "EXISTS (SELECT 1 FROM adaptive_qualification_rules ar WHERE ar.user_id = __USER__.id AND ar.enabled = 1 AND ar.market_category IN (?, '*'))";
         $params[] = strtoupper($category);
     }
+    $applyUserAlias = static function (array $clauses, string $alias): array {
+        return array_map(static fn(string $clause): string => str_replace('__USER__', $alias, $clause), $clauses);
+    };
     $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ath.notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
     $trustedTradeCountColumn = 'COALESCE(ath_counts.trusted_trade_count, 0)';
     $lockedFactorCountColumn = 'COALESCE(afs_counts.locked_factor_count, 0)';
     $unlockedFactorCountColumn = 'COALESCE(afs_counts.unlocked_factor_count, 0)';
+    $learningWhere = [];
     $learningStatusJoinSql = '';
+    $queryParams = $params;
     if ($learningStatus !== '') {
+        $tradeScopedBaseWhere = $baseWhere ? ' AND ' . implode(' AND ', $applyUserAlias($baseWhere, 'u_filter')) : '';
+        $factorScopedBaseWhere = $baseWhere ? ' WHERE ' . implode(' AND ', $applyUserAlias($baseWhere, 'u_factor_filter')) : '';
         $learningStatusJoinSql =
-            " LEFT JOIN (SELECT ath.user_id, COUNT(*) AS trusted_trade_count FROM adaptive_trade_history ath WHERE $trustedTradeFilterSql GROUP BY ath.user_id) ath_counts ON ath_counts.user_id = u.id" .
-            " LEFT JOIN (SELECT user_id, SUM(locked_by_admin = 1) AS locked_factor_count, SUM(locked_by_admin = 0) AS unlocked_factor_count FROM adaptive_factor_stats GROUP BY user_id) afs_counts ON afs_counts.user_id = u.id";
+            " LEFT JOIN (SELECT ath.user_id, COUNT(*) AS trusted_trade_count FROM adaptive_trade_history ath INNER JOIN users u_filter ON u_filter.id = ath.user_id WHERE $trustedTradeFilterSql$tradeScopedBaseWhere GROUP BY ath.user_id) ath_counts ON ath_counts.user_id = u.id" .
+            " LEFT JOIN (SELECT afs.user_id, SUM(afs.locked_by_admin = 1) AS locked_factor_count, SUM(afs.locked_by_admin = 0) AS unlocked_factor_count FROM adaptive_factor_stats afs INNER JOIN users u_factor_filter ON u_factor_filter.id = afs.user_id$factorScopedBaseWhere GROUP BY afs.user_id) afs_counts ON afs_counts.user_id = u.id";
+        $queryParams = array_merge($params, $params, $params);
     }
     if ($learningStatus === 'NOT_STARTED') {
-        $where[] = "$trustedTradeCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn = 0";
     } elseif ($learningStatus === 'LEARNING') {
-        $where[] = "$trustedTradeCountColumn >= 1";
-        $where[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
-        $where[] = "$lockedFactorCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn >= 1";
+        $learningWhere[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $learningWhere[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'ACTIVE') {
-        $where[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
-        $where[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
-        $where[] = "$lockedFactorCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $learningWhere[] = "$trustedTradeCountColumn < " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $learningWhere[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'MATURE') {
-        $where[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
-        $where[] = "$lockedFactorCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn >= " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $learningWhere[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'AUTO_LEARNING') {
-        $where[] = "$trustedTradeCountColumn >= 1";
-        $where[] = "$lockedFactorCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn >= 1";
+        $learningWhere[] = "$lockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'LOCKED') {
-        $where[] = "$trustedTradeCountColumn >= 1";
-        $where[] = "$lockedFactorCountColumn >= 1";
-        $where[] = "$unlockedFactorCountColumn = 0";
+        $learningWhere[] = "$trustedTradeCountColumn >= 1";
+        $learningWhere[] = "$lockedFactorCountColumn >= 1";
+        $learningWhere[] = "$unlockedFactorCountColumn = 0";
     } elseif ($learningStatus === 'MIXED') {
-        $where[] = "$trustedTradeCountColumn >= 1";
-        $where[] = "$lockedFactorCountColumn >= 1";
-        $where[] = "$unlockedFactorCountColumn >= 1";
+        $learningWhere[] = "$trustedTradeCountColumn >= 1";
+        $learningWhere[] = "$lockedFactorCountColumn >= 1";
+        $learningWhere[] = "$unlockedFactorCountColumn >= 1";
     }
 
+    $where = array_merge($applyUserAlias($baseWhere, 'u'), $learningWhere);
     $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $count = $pdo->prepare("SELECT COUNT(*) FROM users u$learningStatusJoinSql $whereSql");
-    $count->execute($params);
+    $count->execute($queryParams);
     $total = (int) $count->fetchColumn();
 
     $sortMap = [
@@ -566,9 +575,8 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         'status' => "COALESCE(u.status, '')",
     ];
     $sortColumn = $sortMap[$sortKey] ?? $sortMap['name'];
-    $queryParams = array_merge($params, [$perPage, $offset]);
     $stmt = $pdo->prepare("SELECT u.id, u.username, u.display_name, u.email, u.subscription_plan, u.subscription_status, u.status, u.updated_at, u.created_at FROM users u$learningStatusJoinSql $whereSql ORDER BY $sortColumn $sortDirection, COALESCE(u.display_name, u.username) ASC, u.id DESC LIMIT ? OFFSET ?");
-    $stmt->execute($queryParams);
+    $stmt->execute(array_merge($queryParams, [$perPage, $offset]));
     $users = $stmt->fetchAll();
     $rows = adaptiveHydrateUserSummaries($pdo, $users);
 
