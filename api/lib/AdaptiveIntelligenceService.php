@@ -323,6 +323,10 @@ function adaptiveLatestTimestamp(?string ...$values): ?string
     return $latest;
 }
 
+const ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES = 10;
+const ADAPTIVE_LEARNING_MATURE_MIN_TRADES = 20;
+const ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS = 21600;
+
 function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount, int $factorCount = 0): string
 {
     if ($tradeCount <= 0) {
@@ -334,7 +338,13 @@ function adaptiveLearningStatusCode(int $tradeCount, int $lockedFactorCount, int
         }
         return 'LOCKED';
     }
-    return 'AUTO_LEARNING';
+    if ($tradeCount < ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES) {
+        return 'LEARNING';
+    }
+    if ($tradeCount < ADAPTIVE_LEARNING_MATURE_MIN_TRADES) {
+        return 'ACTIVE';
+    }
+    return 'MATURE';
 }
 
 function adaptiveLearningStatusLabel(string $code): string
@@ -342,6 +352,9 @@ function adaptiveLearningStatusLabel(string $code): string
     return match ($code) {
         'LOCKED' => 'Locked',
         'MIXED' => 'Mixed',
+        'LEARNING' => 'Learning',
+        'ACTIVE' => 'Active',
+        'MATURE' => 'Mature',
         'AUTO_LEARNING' => 'Auto Learning',
         default => 'Not Started',
     };
@@ -507,17 +520,30 @@ function adaptiveListUserIntelligenceProfiles(PDO $pdo, array $filters = []): ar
         $params[] = strtoupper($category);
     }
     $trustedTradeFilterSql = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ath.notes_json, '$.trust_source')), '') <> 'UNTRUSTED_CLIENT_REPORTED'";
+    $trustedTradeExistsSql = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+    $trustedTradeCountSql = "(SELECT COUNT(*) FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
     if ($learningStatus === 'NOT_STARTED') {
-        $where[] = "NOT EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+        $where[] = "NOT $trustedTradeExistsSql";
+    } elseif ($learningStatus === 'LEARNING') {
+        $where[] = "$trustedTradeCountSql >= 1";
+        $where[] = "$trustedTradeCountSql < " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+    } elseif ($learningStatus === 'ACTIVE') {
+        $where[] = "$trustedTradeCountSql >= " . ADAPTIVE_LEARNING_ACTIVE_MIN_TRADES;
+        $where[] = "$trustedTradeCountSql < " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
+    } elseif ($learningStatus === 'MATURE') {
+        $where[] = "$trustedTradeCountSql >= " . ADAPTIVE_LEARNING_MATURE_MIN_TRADES;
+        $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
     } elseif ($learningStatus === 'AUTO_LEARNING') {
-        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+        $where[] = $trustedTradeExistsSql;
         $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
     } elseif ($learningStatus === 'LOCKED') {
-        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+        $where[] = $trustedTradeExistsSql;
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
         $where[] = 'NOT EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
     } elseif ($learningStatus === 'MIXED') {
-        $where[] = "EXISTS (SELECT 1 FROM adaptive_trade_history ath WHERE ath.user_id = u.id AND $trustedTradeFilterSql)";
+        $where[] = $trustedTradeExistsSql;
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs WHERE afs.user_id = u.id AND afs.locked_by_admin = 1)';
         $where[] = 'EXISTS (SELECT 1 FROM adaptive_factor_stats afs2 WHERE afs2.user_id = u.id AND afs2.locked_by_admin = 0)';
     }
@@ -713,6 +739,28 @@ function adaptiveNormalizeTradePayload(array $body, bool $allowCategoryOverride 
         'strategy_label' => adaptiveNormalizeScopeValue($body['strategy_label'] ?? $body['strategyLabel'] ?? $strategy, $strategy),
         'notes_json' => is_array($body['notes'] ?? null) ? $body['notes'] : [],
     ];
+}
+
+function adaptiveCanTrustClientTrade(PDO $pdo, int $userId, array $trade): bool
+{
+    $signalId = trim((string) ($trade['signal_id'] ?? ''));
+    if ($signalId === '') {
+        return false;
+    }
+    $symbol = adaptiveNormalizeScopeValue($trade['symbol'] ?? '', '');
+    $strategy = adaptiveNormalizeScopeValue($trade['strategy_key'] ?? '', '');
+    if ($symbol === '' || $strategy === '') {
+        return false;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM adaptive_signal_decisions
+         WHERE user_id = ? AND signal_id = ? AND symbol = ? AND strategy_key = ?
+           AND created_at IS NOT NULL
+           AND TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) BETWEEN 0 AND ?
+         LIMIT 1'
+    );
+    $stmt->execute([$userId, $signalId, $symbol, $strategy, ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS]);
+    return (bool) $stmt->fetchColumn();
 }
 
 function adaptiveAudit(
@@ -1235,6 +1283,10 @@ function adaptiveRecordTrade(PDO $pdo, int $userId, array $payload, ?int $actorU
 {
     $trustedSource = $actorRole !== 'user';
     $trade = adaptiveNormalizeTradePayload($payload, $trustedSource);
+    if (!$trustedSource && adaptiveCanTrustClientTrade($pdo, $userId, $trade)) {
+        $trustedSource = true;
+        $trade['notes_json']['trust_source'] = 'QUALIFIED_CLIENT_SIGNAL';
+    }
     if (!$trustedSource) {
         $trade['notes_json']['trust_source'] = 'UNTRUSTED_CLIENT_REPORTED';
     }
@@ -1579,6 +1631,33 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
         ];
     }
 
+    $diagStmt = $pdo->prepare(
+        'SELECT COUNT(*) AS total_trades,
+                SUM(CASE WHEN COALESCE(NULLIF(TRIM(market_category), \'\'), \'UNCATEGORIZED\') = \'UNCATEGORIZED\' THEN 1 ELSE 0 END) AS uncategorized_trades
+         FROM adaptive_trade_history ' . $tradeSql
+    );
+    $diagStmt->execute($tradeParams);
+    $diag = $diagStmt->fetch() ?: ['total_trades' => 0, 'uncategorized_trades' => 0];
+    $totalTrades = (int) ($diag['total_trades'] ?? 0);
+    $uncategorizedTrades = (int) ($diag['uncategorized_trades'] ?? 0);
+    $ingestStmt = $pdo->prepare(
+        'SELECT
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') = \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS untrusted_total,
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') <> \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS trusted_total,
+            SUM(CASE WHEN created_at >= (UTC_TIMESTAMP() - INTERVAL 24 HOUR) AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') = \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS untrusted_24h,
+            SUM(CASE WHEN created_at >= (UTC_TIMESTAMP() - INTERVAL 24 HOUR) AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(notes_json, \'$.trust_source\')), \'\') <> \'UNTRUSTED_CLIENT_REPORTED\' THEN 1 ELSE 0 END) AS trusted_24h
+         FROM adaptive_trade_history
+         WHERE user_id = ?'
+    );
+    $ingestStmt->execute([$userId]);
+    $ingest = $ingestStmt->fetch() ?: [];
+    $trustedTotal = (int) ($ingest['trusted_total'] ?? 0);
+    $untrustedTotal = (int) ($ingest['untrusted_total'] ?? 0);
+    $trusted24h = (int) ($ingest['trusted_24h'] ?? 0);
+    $untrusted24h = (int) ($ingest['untrusted_24h'] ?? 0);
+    $ingestTotal = $trustedTotal + $untrustedTotal;
+    $ingest24hTotal = $trusted24h + $untrusted24h;
+
     return [
         'profile' => $profile,
         'adaptive_profiles' => $adaptiveProfiles,
@@ -1588,6 +1667,22 @@ function adaptiveUserIntelligenceDetail(PDO $pdo, int $userId, array $filters = 
         'decisions' => $decisions,
         'audits' => $audits,
         'category_analytics' => $categoryAnalytics,
+        'category_diagnostics' => [
+            'total_trades' => $totalTrades,
+            'categorized_trades' => max(0, $totalTrades - $uncategorizedTrades),
+            'uncategorized_trades' => $uncategorizedTrades,
+        ],
+        'ingestion_diagnostics' => [
+            'trusted_total' => $trustedTotal,
+            'untrusted_total' => $untrustedTotal,
+            'trusted_rate_pct' => $ingestTotal > 0 ? round(($trustedTotal / $ingestTotal) * 100, 1) : 0.0,
+            'untrusted_rate_pct' => $ingestTotal > 0 ? round(($untrustedTotal / $ingestTotal) * 100, 1) : 0.0,
+            'trusted_24h' => $trusted24h,
+            'untrusted_24h' => $untrusted24h,
+            'trusted_24h_rate_pct' => $ingest24hTotal > 0 ? round(($trusted24h / $ingest24hTotal) * 100, 1) : 0.0,
+            'untrusted_24h_rate_pct' => $ingest24hTotal > 0 ? round(($untrusted24h / $ingest24hTotal) * 100, 1) : 0.0,
+            'trust_promotion_window_seconds' => ADAPTIVE_CLIENT_TRUST_PROMOTION_WINDOW_SECONDS,
+        ],
     ];
 }
 

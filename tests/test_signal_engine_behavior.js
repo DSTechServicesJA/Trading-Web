@@ -295,3 +295,33 @@ test('MTF rejection breakdown tracks percentages by reason', () => {
   assert.equal(breakdown[1].count, 1);
   assert.equal(breakdown[1].percent, 33);
 });
+
+test('signal lifecycle cleanup and logging paths stay wired after resolution', () => {
+  assert.match(source, /function cleanupPendingSignalsForSymbol\(symbol, strategyType = null, options = \{\}\)/);
+  assert.match(source, /const pending = \(trade\.signalId[\s\S]*\|\| findPendingTradeSignal\(tradeSymbol\);/);
+  assert.match(source, /cleanupPendingSignalsForSymbol\(pending\.symbol \|\| tradeSymbol, "breakout_retest", \{ keepSignalId: pending\.signalId \|\| null \}\);/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| tradeSymbol, "Trade Closed"/);
+  assert.match(source, /logSignalLifecycleEvent\([^)]+, "State Reset Complete"/);
+});
+
+test('historical replay exits cleanly and clears stale pending locks', () => {
+  assert.match(source, /if \(candles\.length === 0\) \{\s*_historicalProcessing = false;\s*return;\s*\}/);
+  assert.match(source, /cleanupPendingSignalsForSymbol\(getActiveSymbol\(\), "breakout_retest"\);/);
+});
+
+test('multi-symbol signal notifications include explicit lifecycle markers', () => {
+  assert.match(source, /logSignalLifecycleEvent\(signal\.symbol, "Signal Generated"/);
+  assert.match(source, /if \(!pending\._openedLogged\) \{/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| tradeSymbol, "Trade Opened"/);
+  assert.match(source, /logSignalLifecycleEvent\(pending\.symbol \|\| symbol, "Signal Sent"/);
+});
+
+test('signal lifecycle FSM, active-trade registry, and health monitor remain wired', () => {
+  assert.match(source, /const SIGNAL_LIFECYCLE_STATE_LS_KEY = `\$\{LS_PREFIX\}signalLifecycleBySymbol`/);
+  assert.match(source, /const ACTIVE_TRADE_REGISTRY_LS_KEY = `\$\{LS_PREFIX\}activeTradeRegistry`/);
+  assert.match(source, /function transitionSignalLifecycleState\(symbol, nextState, details = \{\}\)/);
+  assert.match(source, /function registerActiveTradeRecord\(symbol, signalId, details = \{\}\)/);
+  assert.match(source, /function collectLifecycleHealthReport\(options = \{\}\)/);
+  assert.match(source, /startLifecycleHealthMonitor\(\);/);
+  assert.match(source, /stopLifecycleHealthMonitor\(\);/);
+});
