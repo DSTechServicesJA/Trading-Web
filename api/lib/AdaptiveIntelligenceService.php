@@ -1024,7 +1024,7 @@ function adaptiveEnsureFactorStatRows(PDO $pdo, int $userId, array $scope, array
         (user_id, market_category, strategy_key, symbol_scope, factor_key, wins, losses, cancelled, win_rate, sample_size,
          r_multiple_sum, avg_r_multiple, confidence_score, base_weight, current_weight, trend_direction, last_adjustment_reason, last_updated)
          VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, "FLAT", "Awaiting resolved trades", CURRENT_TIMESTAMP)
-         ON DUPLICATE KEY UPDATE updated_at = updated_at'
+         ON DUPLICATE KEY UPDATE last_updated = last_updated'
     );
     foreach ($factors as $factor) {
         $label = trim((string) $factor);

@@ -11186,7 +11186,10 @@ function buildLifecycleTelegramCaption(kind, payload) {
   };
   const title = titles[kind] || "Signal Update";
   const rrValue = Number.isFinite(payload.riskReward) ? payload.riskReward : (Number.isFinite(payload.rr) ? payload.rr : null);
-  const triggerFactors = normalizeSignalTriggerFactors(payload.triggerFactors || [], payload.mtf_status || payload.mtfStatus || null)
+  const triggerFactors = normalizeSignalTriggerFactors(
+    payload.triggerFactors || payload.factorBreakdown || payload._confFactors || [],
+    payload.mtf_status || payload.mtfStatus || null
+  )
     .filter((factor) => factor && factor.passed !== false);
   const lines = [];
   lines.push(`<b>${title}</b>`);
