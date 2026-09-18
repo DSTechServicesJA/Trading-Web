@@ -469,6 +469,8 @@ const TELEGRAM_PROXY_URL          = "../api/telegram/proxy";   /* server-side pr
 const TELEGRAM_STATUS_CLEAR_MS    = 5000;  /* auto-clear status message */
 const TELEGRAM_EXPORT_WIDTH       = 1920;  /* high-res export width for Telegram screenshots */
 const TELEGRAM_EXPORT_HEIGHT      = 1080;  /* high-res export height for Telegram screenshots */
+const TELEGRAM_CAPTION_LIMIT      = 1024;  /* Telegram Bot API caption length limit for photos */
+const TELEGRAM_MESSAGE_LIMIT      = 4096;  /* Telegram Bot API text message length limit */
 
 /* Profiles API */
 const PROFILES_API_URL            = "../api/profiles";         /* server-side profiles endpoint */
@@ -11448,6 +11450,12 @@ async function sendTelegramStrategyAlert(signal, force = false) {
   if (UI.telegramStatus) UI.telegramStatus.textContent = "Sending strategy alert…";
   stampSignalLifecycle(signal);
   const caption = decorateAdaptiveTelegramCaption(buildStrategyTelegramCaption(signal), qualification.decision);
+  
+  /* Log the caption length for debugging long message issues */
+  const captionLength = caption ? caption.length : 0;
+  const exceeds = captionLength > TELEGRAM_CAPTION_LIMIT;
+  addLog(`📤 Caption Length: ${captionLength} / ${TELEGRAM_CAPTION_LIMIT} ${exceeds ? '⚠️ EXCEEDS LIMIT' : '✓ OK'}`);
+  
   try {
     const panel = (signal.symbol && multiPanels.has(signal.symbol)) ? multiPanels.get(signal.symbol) : null;
     const blob = await captureTelegramScreenshot(panel);
@@ -18292,6 +18300,53 @@ async function captureTelegramScreenshot(panel = null) {
     return null;
   }
 }
+
+/**
+ * Check if a Telegram caption exceeds the limit and log the result.
+ * Telegram caption limit is 1024 characters.
+ * Returns an object with { exceedsLimit, length, truncated }.
+ */
+function validateTelegramCaptionLength(caption) {
+  const length = caption ? caption.length : 0;
+  const exceedsLimit = length > TELEGRAM_CAPTION_LIMIT;
+  return {
+    length,
+    exceedsLimit,
+    truncated: exceedsLimit ? caption.substring(0, TELEGRAM_CAPTION_LIMIT) : caption
+  };
+}
+
+/**
+ * Handle a long caption that exceeds Telegram's limit.
+ * Logs the incident and returns an object indicating how to proceed:
+ * { shouldSendWithoutCaption, caption, text }
+ */
+function handleLongTelegramCaption(caption, strategyType = "strategy") {
+  const validation = validateTelegramCaptionLength(caption);
+  
+  if (!validation.exceedsLimit) {
+    return {
+      shouldSendWithoutCaption: false,
+      caption,
+      text: null,
+      captionLength: validation.length,
+      deliveryMethod: "caption"
+    };
+  }
+
+  /* Caption exceeds limit — send photo without caption, then text separately */
+  addLog(`📤 Caption Length: ${validation.length} (limit: ${TELEGRAM_CAPTION_LIMIT})`);
+  addLog(`📤 MTF Caption Too Long — Switched To Text + Photo Mode`);
+
+  return {
+    shouldSendWithoutCaption: true,
+    caption: null,
+    text: caption,
+    captionLength: validation.length,
+    deliveryMethod: "text_then_photo"
+  };
+}
+
 async function sendTelegramPhoto(blob, caption) {
   /* Check rate limit before making API call */
   if (!(await waitForApiCallSlot("telegram", 20000))) {
@@ -18301,13 +18356,19 @@ async function sendTelegramPhoto(blob, caption) {
   const { token, chatId } = getTelegramCredentials();
   validateTelegramCredentials(token, chatId);
 
+  /* Check if caption exceeds Telegram's 1024-character limit */
+  const captionHandling = handleLongTelegramCaption(caption);
+
   /** Build the base FormData fields shared by both proxy and direct paths */
   function buildPhotoForm() {
     const f = new FormData();
     f.append("chat_id", chatId);
     f.append("photo", blob, "chart.png");
-    f.append("caption", caption);
-    f.append("parse_mode", "HTML");
+    /* Only include caption if it fits within Telegram's limit */
+    if (captionHandling.caption) {
+      f.append("caption", captionHandling.caption);
+      f.append("parse_mode", "HTML");
+    }
     return f;
   }
 
@@ -18336,6 +18397,19 @@ async function sendTelegramPhoto(blob, caption) {
     throw new Error(data.description || "Telegram API error");
   }
   recordTelegramDeliveryStat("sent", 1);
+
+  /* If caption was too long, send the text as a separate message */
+  if (captionHandling.shouldSendWithoutCaption && captionHandling.text) {
+    addLog(`📤 Notification Delivered (photo mode)`);
+    try {
+      await sendTelegramMessage(captionHandling.text);
+      addLog(`📤 Notification Delivered (text mode)`);
+    } catch (textErr) {
+      /* Photo was sent but text failed — log the partial delivery */
+      addLog(`📤 Warning: Photo delivered but text message failed: ${textErr.message}`);
+    }
+  }
+
   return data;
 }
 
