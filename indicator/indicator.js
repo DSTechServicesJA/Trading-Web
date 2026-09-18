@@ -11387,6 +11387,38 @@ function maybeSendBreakoutCancelled(reason) {
 }
 
 /**
+ * Universal guard applied to every strategy — including MTF Top-Down — before
+ * a "new trade signal" notification is allowed to go out. A signal must never
+ * be delivered without a stop loss and take profit, regardless of which
+ * strategy produced it, so this is enforced centrally in the shared
+ * notification pipeline rather than left to each strategy's own detector.
+ */
+function validateSignalExecutionLevels(signal, strategyLabel) {
+  const stopLoss = signal ? (signal.stopLoss ?? signal.sl) : null;
+  const takeProfit = signal ? (signal.takeProfit ?? signal.tp) : null;
+  const hasStopLoss = Number.isFinite(stopLoss);
+  const hasTakeProfit = Number.isFinite(takeProfit);
+  if (!signal || !hasStopLoss || !hasTakeProfit) {
+    console.error(`CRITICAL: ${strategyLabel || "Strategy"} signal rejected — missing stopLoss/takeProfit`, {
+      signalId: signal && signal.signalId,
+      symbol: signal && signal.symbol,
+      stopLoss,
+      takeProfit
+    });
+    addLog(`🚨 CRITICAL — ${strategyLabel || "Strategy"} signal REJECTED (no SL/TP): notification suppressed`);
+    logSignalEngineDebug("SIGNAL_REJECTED_MISSING_SLTP", {
+      strategyLabel,
+      signalId: signal && signal.signalId,
+      symbol: signal && signal.symbol,
+      stopLoss,
+      takeProfit
+    });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Send a custom strategy alert to Telegram with chart screenshot.
  * Called from processLiquiditySweep, processStopLossHunt, processFailedPinBar.
  */
@@ -11395,6 +11427,9 @@ async function sendTelegramStrategyAlert(signal, force = false) {
   if (signal) {
     if (signal._sentViaTelegram !== true) signal._sentViaTelegram = false;
     if (signal._telegramDelivered !== true) signal._telegramDelivered = false;
+  }
+  if (!validateSignalExecutionLevels(signal, resolveStrategyDisplayLabel(signal && (signal.type || signal.strategyType), signal && (signal.type || signal.strategyType) || "strategy"))) {
+    return;
   }
 
   try {
