@@ -45,6 +45,11 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/notification_preferences$ api/notification_preferences.php [L,QSA]
 
+# ── Trade management API URL rewriting ──
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/trades/(log_outcome|check_notification|signal_history)$ api/trades/$1.php [L,QSA]
+
 # ── Security headers ──
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
