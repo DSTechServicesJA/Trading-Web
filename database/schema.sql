@@ -421,9 +421,17 @@ CREATE TABLE IF NOT EXISTS adaptive_trade_history (
     stop_loss                    DECIMAL(18,8) DEFAULT NULL,
     take_profit                  DECIMAL(18,8) DEFAULT NULL,
     exit_price                   DECIMAL(18,8) DEFAULT NULL,
-    result                       ENUM('WIN','LOSS','CANCELLED') NOT NULL,
+    result                       ENUM('WIN','LOSS','CANCELLED','EXPIRED','BREAKEVEN') NOT NULL,
+    terminal_reason              VARCHAR(50)  DEFAULT NULL,
+    completion_timestamp         DATETIME     DEFAULT NULL,
     r_multiple                   DECIMAL(12,4) DEFAULT NULL,
     profit_points                DECIMAL(18,8) DEFAULT NULL,
+    partial_tp_hit               TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_level             DECIMAL(18,8) DEFAULT NULL,
+    partial_tp_timestamp         DATETIME     DEFAULT NULL,
+    entry_alert_sent             TINYINT(1)   NOT NULL DEFAULT 0,
+    outcome_notification_sent    TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_notification_sent TINYINT(1)   NOT NULL DEFAULT 0,
     telegram_sent                TINYINT(1)   NOT NULL DEFAULT 0,
     telegram_decision            VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
     confidence_score             DECIMAL(5,2) DEFAULT NULL,
@@ -709,4 +717,129 @@ CREATE TABLE IF NOT EXISTS adaptive_learning_audit_log (
         FOREIGN KEY (actor_user_id) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_adaptive_audit_target
         FOREIGN KEY (target_user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Notification deduplication registry
+-- Prevents duplicate Telegram notifications across app restarts
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS notification_dedup_registry (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT UNSIGNED NOT NULL,
+    trade_id            VARCHAR(100) NOT NULL,
+    signal_id           VARCHAR(100) DEFAULT NULL,
+    notification_type   VARCHAR(50)  NOT NULL,
+    sent_timestamp      DATETIME     NOT NULL,
+    telegram_status     ENUM('sent','failed','skipped') NOT NULL DEFAULT 'sent',
+    retry_count         INT UNSIGNED DEFAULT 0,
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY uq_notification_dedup (user_id, trade_id, notification_type),
+    INDEX idx_dedup_user_trade (user_id, trade_id),
+    INDEX idx_dedup_created (created_at),
+    
+    CONSTRAINT fk_notification_dedup_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Unified trade outcomes table (single source of truth)
+-- Tracks all completed trades with complete lifecycle
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS trade_outcomes (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT UNSIGNED NOT NULL,
+    trade_id            VARCHAR(100) NOT NULL,
+    signal_id           VARCHAR(100) DEFAULT NULL,
+    symbol              VARCHAR(32)  NOT NULL,
+    strategy_type       VARCHAR(50)  NOT NULL,
+    direction           ENUM('BULL','BEAR') NOT NULL,
+    entry_price         DECIMAL(18,8) NOT NULL,
+    entry_timestamp     DATETIME     NOT NULL,
+    stop_loss           DECIMAL(18,8) NOT NULL,
+    take_profit         DECIMAL(18,8) NOT NULL,
+    risk_amount         DECIMAL(18,8) DEFAULT NULL,
+    reward_amount       DECIMAL(18,8) DEFAULT NULL,
+    rr_ratio            DECIMAL(12,4) DEFAULT NULL,
+    
+    outcome             ENUM('WIN','LOSS','BREAKEVEN','EXPIRED','CANCELLED') NOT NULL,
+    terminal_reason     VARCHAR(50)  DEFAULT NULL,
+    exit_price          DECIMAL(18,8) DEFAULT NULL,
+    exit_timestamp      DATETIME     DEFAULT NULL,
+    profit_loss_points  DECIMAL(18,8) DEFAULT NULL,
+    profit_loss_percent DECIMAL(12,4) DEFAULT NULL,
+    
+    partial_tp_hit      TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_level    DECIMAL(18,8) DEFAULT NULL,
+    partial_tp_timestamp DATETIME    DEFAULT NULL,
+    
+    entry_alert_sent    TINYINT(1)   NOT NULL DEFAULT 0,
+    outcome_notif_sent  TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_notif_sent TINYINT(1) NOT NULL DEFAULT 0,
+    telegram_status     VARCHAR(20)  DEFAULT NULL,
+    
+    confluence_score    DECIMAL(5,2) DEFAULT NULL,
+    confidence_level    VARCHAR(20)  DEFAULT NULL,
+    metadata_json       JSON         DEFAULT NULL,
+    
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY uq_trade_outcome_id (user_id, trade_id),
+    UNIQUE KEY uq_signal_outcome_id (user_id, signal_id),
+    INDEX idx_trade_outcome_symbol (symbol, exit_timestamp),
+    INDEX idx_trade_outcome_strategy (strategy_type, outcome),
+    INDEX idx_trade_outcome_result (outcome),
+    INDEX idx_trade_outcome_created (created_at),
+    
+    CONSTRAINT fk_trade_outcome_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Grid Scalper MA signal history (front-end sync table)
+-- Tracks all Grid Scalper MA signals for recovery after app restart
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS grid_scalper_ma_signals (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT UNSIGNED NOT NULL,
+    signal_id           VARCHAR(100) NOT NULL,
+    trade_id            VARCHAR(100) DEFAULT NULL,
+    symbol              VARCHAR(32)  NOT NULL,
+    timeframe           VARCHAR(20)  NOT NULL,
+    strategy_mode       VARCHAR(20)  NOT NULL,
+    direction           ENUM('BULL','BEAR') NOT NULL,
+    entry_price         DECIMAL(18,8) NOT NULL,
+    stop_loss           DECIMAL(18,8) NOT NULL,
+    take_profit         DECIMAL(18,8) NOT NULL,
+    rr_ratio            DECIMAL(12,4) DEFAULT NULL,
+    entry_candle_idx    INT DEFAULT NULL,
+    entry_epoch         BIGINT DEFAULT NULL,
+    
+    status              ENUM('PENDING','WIN','LOSS','EXPIRED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+    terminal_reason     VARCHAR(50)  DEFAULT NULL,
+    result_timestamp    DATETIME     DEFAULT NULL,
+    
+    partial_tp_hit      TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_level    DECIMAL(18,8) DEFAULT NULL,
+    partial_tp_timestamp DATETIME    DEFAULT NULL,
+    
+    entry_alert_sent    TINYINT(1)   NOT NULL DEFAULT 0,
+    outcome_notif_sent  TINYINT(1)   NOT NULL DEFAULT 0,
+    partial_tp_notif_sent TINYINT(1) NOT NULL DEFAULT 0,
+    
+    confluence_score    DECIMAL(5,2) DEFAULT NULL,
+    confluence_factors_json JSON     DEFAULT NULL,
+    
+    created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY uq_grid_scalper_signal_id (user_id, signal_id),
+    UNIQUE KEY uq_grid_scalper_trade_id (user_id, trade_id),
+    INDEX idx_grid_scalper_status (status),
+    INDEX idx_grid_scalper_symbol (symbol),
+    INDEX idx_grid_scalper_created (created_at),
+    
+    CONSTRAINT fk_grid_scalper_user
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
