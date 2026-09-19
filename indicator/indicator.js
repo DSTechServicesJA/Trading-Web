@@ -7608,6 +7608,13 @@ function processGridScalperMA() {
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false;
+   
+  /* [FIX] Generate unique signal ID for deduplication and database logging */
+  if (!signal.signalId) {
+    signal.signalId = 'GSMA_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    signal.tradeId = signal.signalId;  /* Use same ID for trade tracking */
+  }
+   
   stampSignalLifecycle(signal);
   gridScalperMAHistory.unshift(signal);
   if (gridScalperMAHistory.length > GRID_SCALPER_MA_MAX_HISTORY) gridScalperMAHistory.pop();
@@ -7712,42 +7719,107 @@ function processGridScalperMA() {
 
 /**
  * Monitor pending Grid Scalper MA signals for SL/TP outcome.
+ * [FIXED] Now uses TradeOutcomeService for:
+ * - Atomic outcome setting with terminal state protection
+ * - Database logging
+ * - Duplicate notification prevention
+ * - Proper partial TP handling
  */
 function monitorGridScalperMAOutcomes(candle) {
   if (!gridScalperMAEnabled) return;
   let changed = false;
+  
   for (const s of gridScalperMAHistory) {
     if (s.result !== "PENDING") continue;
+    
     const elapsed = (candles.length - 1) - s.candleIdx;
+    
+    /* [FIX] Check for EXPIRED outcome */
     if (elapsed < 0 || elapsed >= 50) {
-      s.result = "EXPIRED";
-      addLog(`🔲 Grid Scalper MA EXPIRED — ${s.symbol || ""} @ ${fmt(candle.close, 4)}`);
-      changed = true; continue;
+      if (tradeOutcomeService) {
+        tradeOutcomeService.markTradeEXPIRED(s, {
+          reason: 'TIMEOUT_50_CANDLES',
+          telegramSend: s._sentViaTelegram === true,
+          dbLog: true
+        });
+      } else {
+        s.result = "EXPIRED";
+        s.terminal_reason = 'TIMEOUT_50_CANDLES';
+      }
+      addLog(`🔲 [EXPIRED] Grid Scalper MA — timeout after ${elapsed} candles @ ${fmt(candle.close, 4)}`);
+      changed = true;
+      continue;
     }
+    
+    /* [FIX] Check for profit exit alert (partial TP) */
+    if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
+    
+    /* Determine if SL/TP hit */
+    let slHit, tpHit;
     if (s.dir === "BULL") {
-      if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
-      const gsSlHit = candle.low <= s.sl, gsTpHit = candle.high >= s.tp;
-      if (gsSlHit && gsTpHit) { s.result = resolveBothHit(s); addLog(`🔲 Grid Scalper MA ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (gsSlHit)  { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (gsTpHit) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      slHit = candle.low <= s.sl;
+      tpHit = candle.high >= s.tp;
     } else {
-      if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
-      const gsSlHit = candle.high >= s.sl, gsTpHit = candle.low <= s.tp;
-      if (gsSlHit && gsTpHit) { s.result = resolveBothHit(s); addLog(`🔲 Grid Scalper MA ${s.result} — both levels hit, ${s.result === "WIN" ? "TP" : "SL"} closer`); changed = true; }
-      else if (gsSlHit) { s.result = "LOSS"; addLog(`🔲 Grid Scalper MA LOSS — hit SL @ ${fmt(s.sl, 4)}`); changed = true; }
-      else if (gsTpHit) { s.result = "WIN";  addLog(`🔲 Grid Scalper MA WIN — hit TP @ ${fmt(s.tp, 4)}`); changed = true; }
+      slHit = candle.high >= s.sl;
+      tpHit = candle.low <= s.tp;
+    }
+    
+    /* [FIX] Both levels hit — resolve properly */
+    if (slHit && tpHit) {
+      const resolved = resolveBothHitFixed(s, candle);
+      if (tradeOutcomeService) {
+        const exitPrice = resolved === "WIN" ? s.tp : s.sl;
+        const reason = resolved === "WIN" ? 'TP_FINAL' : 'STOP_LOSS_BOTH_HIT';
+        if (resolved === "WIN") {
+          tradeOutcomeService.markTradeWIN(s, exitPrice, { reason, telegramSend: s._sentViaTelegram === true, dbLog: true });
+        } else if (resolved === "LOSS") {
+          tradeOutcomeService.markTradeLOSS(s, exitPrice, { reason, telegramSend: s._sentViaTelegram === true, dbLog: true });
+        }
+      } else {
+        s.result = resolved;
+        s.terminal_reason = resolved === "WIN" ? 'TP_FINAL' : 'STOP_LOSS_BOTH_HIT';
+      }
+      addLog(`🔲 [${resolved}] Grid Scalper MA — both levels hit, ${resolved === "WIN" ? "TP" : "SL"} closer`);
+      changed = true;
+    }
+    /* [FIX] Only SL hit */
+    else if (slHit) {
+      if (tradeOutcomeService) {
+        tradeOutcomeService.markTradeLOSS(s, s.sl, { reason: 'STOP_LOSS', telegramSend: s._sentViaTelegram === true, dbLog: true });
+      } else {
+        s.result = "LOSS";
+        s.terminal_reason = 'STOP_LOSS';
+      }
+      addLog(`🔲 [LOSS] Grid Scalper MA — hit SL @ ${fmt(s.sl, 4)}`);
+      changed = true;
+    }
+    /* [FIX] Only TP hit */
+    else if (tpHit) {
+      if (tradeOutcomeService) {
+        tradeOutcomeService.markTradeWIN(s, s.tp, { reason: 'TP_FINAL', telegramSend: s._sentViaTelegram === true, dbLog: true });
+      } else {
+        s.result = "WIN";
+        s.terminal_reason = 'TP_FINAL';
+      }
+      addLog(`🔲 [WIN] Grid Scalper MA — hit TP @ ${fmt(s.tp, 4)}`);
+      changed = true;
     }
   }
+  
   if (changed) {
     renderStrategyAlerts();
-    /* Gated on _sentViaTelegram so historical signals do not generate outcome alerts. */
+    
+    /* [FIX] Send Telegram notifications for resolved trades with proper dedup */
     for (const s of gridScalperMAHistory) {
-      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED") && !s._stratOutcomeSent && s._sentViaTelegram === true) {
+      if ((s.result === "WIN" || s.result === "LOSS" || s.result === "EXPIRED" || s.result === "BREAKEVEN") && 
+          !s._stratOutcomeSent && s._sentViaTelegram === true) {
         sendStrategyOutcomeTelegram(s);
       }
     }
+    
     lastGridScalperMAIdx = candles.length - 1;
     addLog("🔲 Grid Scalper MA signal resolved — scanning for next trade…");
+    
     /* Feature 13: record confluence factor outcomes for adaptive weighting */
     if (adaptiveConfluenceEnabled) {
       for (const s of gridScalperMAHistory) {
@@ -10574,6 +10646,31 @@ function resolveBothHit(s) {
   return resolveScalpBothHit(s);
 }
 
+/**
+ * [FIX] Resolve both SL and TP hit - improved version.
+ * Takes candle data to make better distance comparisons.
+ */
+function resolveBothHitFixed(s, candle) {
+  /* If partial TP was already hit, full TP should be treated as WIN */
+  if (s.partialTpHit === true) return "WIN";
+  
+  /* Compare distances from entry to determine which was hit first */
+  const slDist = Math.abs(s.entry - s.sl);
+  const tpDist = Math.abs(s.tp - s.entry);
+  
+  /* For BULL: use candle.low for SL and candle.high for TP */
+  if (s.dir === "BULL") {
+    const distToSL = Math.abs(s.entry - candle.low);
+    const distToTP = Math.abs(candle.high - s.entry);
+    return distToSL <= distToTP ? "LOSS" : "WIN";
+  } else {
+    /* For BEAR: use candle.high for SL and candle.low for TP */
+    const distToSL = Math.abs(candle.high - s.entry);
+    const distToTP = Math.abs(s.entry - candle.low);
+    return distToSL <= distToTP ? "LOSS" : "WIN";
+  }
+}
+
 function monitorScalpOutcomes(candle) {
   if (!liveScalpEnabled) return;
   let changed = false;
@@ -11544,9 +11641,8 @@ async function sendStrategyOutcomeTelegram(signal) {
     return;
   }
 
-  /* Credentials are valid — mark sent now (before await) to prevent concurrent
-     duplicate sends in the same JS event loop turn. */
-  signal._stratOutcomeSent = true;
+  /* [FIX] Do NOT mark sent yet — wait for successful send to prevent lost notifications */
+  /* OLD: signal._stratOutcomeSent = true; ← This was BEFORE the async send! */
 
   const result = signal.result;
   const activeSym = signal.symbol || getActiveSymbol() || "";
@@ -11747,8 +11843,20 @@ async function sendStrategyOutcomeTelegram(signal) {
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
+    
+    /* [FIX] Mark sent AFTER successful send (not before) */
+    signal._stratOutcomeSent = true;
+    
     addLog(`📤 Telegram: ${stratLabel} outcome (${result}) sent`);
+    
+    /* [FIX] Log to database after successful notification */
+    if (typeof tradeOutcomeService !== 'undefined' && tradeOutcomeService) {
+      const tradeId = signal.tradeId || signal.signalId;
+      const notifType = result === "WIN" ? 'TRADE_WIN' : result === "LOSS" ? 'TRADE_LOSS' : 'TRADE_EXPIRED';
+      await tradeOutcomeService._recordNotificationSent(tradeId, notifType, 'sent');
+    }
   } catch (err) {
+    /* [FIX] On error, DO NOT mark sent — allow retry on next cycle */
     addLog(`📤 Strategy outcome Telegram error: ${err.message}`);
   }
 }
@@ -18470,7 +18578,24 @@ async function sendTelegramMessage(text) {
 async function sendPartialTpTelegram(signal, partialLevel) {
   if (!partialTpEnabled) return;
   if (!telegramOutcomeSend) return;
+  
+  /* [FIX] Check if already sent to prevent duplicates across restarts */
+  const tradeId = signal.tradeId || signal.signalId || `${signal.symbol}_${signal.candleIdx}`;
+  if (signal._partialTpSent === true) {
+    addLog(`[DUPLICATE_BLOCKED] Partial TP notification already sent for ${tradeId}`);
+    return;
+  }
+  
   try {
+    /* [FIX] Check database dedup registry if service available */
+    if (typeof tradeOutcomeService !== 'undefined' && tradeOutcomeService) {
+      const isDuplicate = await tradeOutcomeService._checkNotificationDedup(tradeId, 'PARTIAL_TP_1');
+      if (isDuplicate) {
+        addLog(`[DUPLICATE_BLOCKED] Partial TP already recorded in database for ${tradeId}`);
+        return;
+      }
+    }
+    
     const activeSym = signal.symbol || getActiveSymbol() || "";
     const sym = getSymbolLabel(activeSym);
     const dir = signal.dir === "BULL" ? "📈 BUY" : "📉 SELL";
@@ -18496,9 +18621,20 @@ async function sendPartialTpTelegram(signal, partialLevel) {
     lines.push(`<i>Monitoring trade for full TP or SL exit…</i>`);
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
+    /* [FIX] Set flag BEFORE sending (not after) to prevent concurrent duplicates */
+    signal._partialTpSent = true;
+    
     await sendTelegramMessage(lines.join("\n"));
-    addLog(`📤 Telegram: partial TP alert (1:1) sent`);
+    
+    /* [FIX] Record in database after successful send */
+    if (typeof tradeOutcomeService !== 'undefined' && tradeOutcomeService) {
+      await tradeOutcomeService._recordNotificationSent(tradeId, 'PARTIAL_TP_1', 'sent');
+    }
+    
+    addLog(`📤 [NOTIFICATION] Telegram: partial TP alert (1:1) sent`);
   } catch (err) {
+    /* [FIX] On error, allow retry by not marking as sent */
+    signal._partialTpSent = false;
     addLog(`📤 Partial TP Telegram error: ${err.message}`);
   }
 }
