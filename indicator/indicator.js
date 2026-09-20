@@ -1328,7 +1328,7 @@ async function qualifySignalForTelegram(signal, strategyLabel, force = false, ov
   } catch (err) {
     console.warn("Adaptive signal qualification failed:", err.message);
     addLog(`🧠 Adaptive Intelligence fallback — ${err.message}`);
-    return { allowed: false, decision: null };
+    return { allowed: true, decision: null };
   }
 }
 
