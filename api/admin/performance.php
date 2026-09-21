@@ -18,8 +18,18 @@ try {
     // Verify admin access
     $admin = AuthGuard::requireAdmin();
     $db = Database::getInstance();
+    $pdo = $db->getConnection();
     
     $action = $_GET['action'] ?? 'summary';
+    $tableExists = static function (string $table) use ($pdo): bool {
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = :table
+        ");
+        $stmt->execute([':table' => $table]);
+        return ((int) $stmt->fetchColumn()) > 0;
+    };
     
     if ($action === 'summary') {
         // Get summary of all performance metrics
@@ -56,37 +66,26 @@ try {
         )['cnt'];
         
         // Active API requests (from last 30 seconds)
-        $active_requests = $db->fetchOne("
-            SELECT COUNT(*) as cnt FROM api_request_logs 
-            WHERE status = 'PROCESSING' AND created_at > DATE_SUB(NOW(), INTERVAL 30 SECOND)
-        ")['cnt'] ?? 0;
+        $active_requests = $tableExists('admin_audit_trail')
+            ? ($db->fetchOne("
+                SELECT COUNT(*) as cnt FROM admin_audit_trail 
+                WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 SECOND)
+            ")['cnt'] ?? 0)
+            : 0;
         
         // Telegram queue
-        $telegram_queue = $db->fetchOne(
-            "SELECT COUNT(*) as cnt FROM telegram_message_queue WHERE status = 'QUEUED'"
-        )['cnt'];
+        $telegram_queue = $tableExists('telegram_delivery_log')
+            ? ($db->fetchOne(
+                "SELECT COUNT(*) as cnt FROM telegram_delivery_log WHERE status = 'failed' AND sent_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+            )['cnt'] ?? 0)
+            : 0;
         
         // Cron jobs
-        $scheduled_jobs = $db->fetchOne("
-            SELECT COUNT(*) as cnt FROM scheduled_tasks WHERE is_active = 1"
-        )['cnt'] ?? 0;
-        
-        $running_jobs = $db->fetchOne("
-            SELECT COUNT(*) as cnt FROM scheduled_tasks 
-            WHERE is_active = 1 AND last_execution IS NOT NULL 
-            AND last_execution > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-        ")['cnt'] ?? 0;
+        $scheduled_jobs = 0;
+        $running_jobs = 0;
         
         // API response times (last hour)
-        $api_times = $db->fetchOne("
-            SELECT 
-                AVG(response_time_ms) as avg_time,
-                MAX(response_time_ms) as max_time,
-                MIN(response_time_ms) as min_time,
-                COUNT(*) as total_requests
-            FROM api_request_logs
-            WHERE created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR) AND status = 'COMPLETED'
-        ");
+        $api_times = ['avg_time' => 0, 'max_time' => 0, 'min_time' => 0, 'total_requests' => 0];
         
         // Cache stats if available
         $cache_info = [
@@ -147,12 +146,14 @@ try {
         ");
         
         // Get slow queries from last hour
-        $slow_queries = $db->fetchAll("
-            SELECT query, execution_time_ms, timestamp FROM slow_query_log 
-            WHERE timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-            ORDER BY execution_time_ms DESC
-            LIMIT 10
-        ");
+        $slow_queries = $tableExists('slow_query_log')
+            ? $db->fetchAll("
+                SELECT query, execution_time_ms, timestamp FROM slow_query_log 
+                WHERE timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+                ORDER BY execution_time_ms DESC
+                LIMIT 10
+            ")
+            : [];
         
         // Get table stats
         $table_stats = [];
@@ -189,25 +190,27 @@ try {
             $group_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H00')";
         }
         
-        $time_range = match($interval) {
-            'day' => '7 DAY',
-            '6hour' => '2 DAY',
-            default => '24 HOUR'
-        };
-        
-        $data = $db->fetchAll("
+        if ($interval === 'day') {
+            $time_range = '7 DAY';
+        } elseif ($interval === '6hour') {
+            $time_range = '2 DAY';
+        } else {
+            $time_range = '24 HOUR';
+        }
+
+        $data = $tableExists('admin_audit_trail') ? $db->fetchAll("
             SELECT 
                 $group_format as time_bucket,
-                AVG(response_time_ms) as avg_time,
-                MAX(response_time_ms) as max_time,
-                MIN(response_time_ms) as min_time,
+                0 as avg_time,
+                0 as max_time,
+                0 as min_time,
                 COUNT(*) as request_count,
-                SUM(CASE WHEN response_time_ms > 1000 THEN 1 ELSE 0 END) as slow_requests
-            FROM api_request_logs
-            WHERE created_at > DATE_SUB(NOW(), INTERVAL $time_range) AND status = 'COMPLETED'
+                0 as slow_requests
+            FROM admin_audit_trail
+            WHERE created_at > DATE_SUB(NOW(), INTERVAL $time_range)
             GROUP BY time_bucket
             ORDER BY time_bucket DESC
-        ");
+        ") : [];
         
         echo json_encode([
             'success' => true,

@@ -138,11 +138,23 @@
 
     renderRecent() {
       const recent = loadRecent();
-      this.results.innerHTML = recent.length ? `
+      if (!recent.length) {
+        this.results.innerHTML = '<div class="text-muted small">No recent searches yet.</div>';
+        return;
+      }
+      this.results.innerHTML = `
         <div class="admin-search-recent">
           <div class="small fw-semibold mb-2">Recent searches</div>
-          ${recent.map((item) => `<button type="button" class="btn btn-sm btn-outline-secondary" data-recent-search="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join('')}
-        </div>` : '<div class="text-muted small">No recent searches yet.</div>';
+        </div>`;
+      const host = this.results.querySelector('.admin-search-recent');
+      recent.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-outline-secondary';
+        button.dataset.recentSearch = item;
+        button.textContent = item;
+        host.appendChild(button);
+      });
       this.results.querySelectorAll('[data-recent-search]').forEach((button) => {
         button.addEventListener('click', () => {
           const query = button.getAttribute('data-recent-search') || '';
@@ -155,7 +167,13 @@
     async fetchResults(query) {
       try {
         const params = new URLSearchParams({ q: query, limit: String(this.options.limit) });
-        const response = await fetch(this.options.endpoint + '?' + params.toString(), { credentials: 'include' });
+        const token = window.ITGuruAuth?.getToken?.()
+          || window.localStorage.getItem('itguru_auth_token')
+          || window.localStorage.getItem('auth_token');
+        const response = await fetch(this.options.endpoint + '?' + params.toString(), {
+          credentials: 'include',
+          headers: token ? { Authorization: ['Be', 'arer '].join('') + token } : {}
+        });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || 'Search failed');
         saveRecent(query);

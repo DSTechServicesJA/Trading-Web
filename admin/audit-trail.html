@@ -318,6 +318,7 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWbSxccPQtF3EpF3fnJHog6LaEVF6+rWBdXKvP+yPf7cqIIxIw" crossorigin="anonymous"></script>
+    <script src="../auth.js"></script>
     <script src="./js/components.js"></script>
     <script src="./js/audit-trail-export.js"></script>
      
@@ -325,6 +326,12 @@
         let currentPage = 1;
         const perPage = 25;
         let totalEntries = 0;
+
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
@@ -376,12 +383,7 @@
                 .map(key => `${key}=${encodeURIComponent(filters[key])}`)
                 .join('&');
             
-            fetch(`/api/admin/audit_trail?${queryString}`, {
-                headers: {
-                    'Authorization': sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token')
-                }
-            })
-            .then(r => r.json())
+            AdminComponents.apiRequest(`/admin/audit_trail?${queryString}`)
             .then(data => {
                 if (!data.success) throw new Error(data.error);
                 
@@ -409,7 +411,7 @@
             document.getElementById('emptyState').style.display = 'none';
             
             container.innerHTML = entries.map(entry => {
-                const actionClass = entry.action.toLowerCase().replace('_', '-');
+                const actionClass = String(entry.action || '').toLowerCase().replace(/_/g, '-').replace(/[^a-z0-9-]/g, '');
                 const actionLabel = formatActionLabel(entry.action);
                 
                 let valuesHtml = '';
@@ -418,11 +420,11 @@
                         <div class="audit-values">
                             <div class="audit-value-pair">
                                 <span class="audit-value-label">Previous Value:</span>
-                                <div class="audit-value-old">${entry.old_value || '—'}</div>
+                                <div class="audit-value-old">${escapeHtml(entry.old_value || '—')}</div>
                             </div>
                             <div class="audit-value-pair">
                                 <span class="audit-value-label">New Value:</span>
-                                <div class="audit-value-new">${entry.new_value || '—'}</div>
+                                <div class="audit-value-new">${escapeHtml(entry.new_value || '—')}</div>
                             </div>
                         </div>
                     `;
@@ -432,25 +434,25 @@
                     <div class="audit-entry action-${actionClass}">
                         <div class="audit-header">
                             <div>
-                                <span class="audit-action ${actionClass.split('-')[0]}">${actionLabel}</span>
-                                <strong class="ms-3">${entry.entity_type.toUpperCase()}</strong>
-                                ${entry.entity_id ? `<code class="ms-2">#${entry.entity_id}</code>` : ''}
+                                <span class="audit-action ${actionClass.split('-')[0]}">${escapeHtml(actionLabel)}</span>
+                                <strong class="ms-3">${escapeHtml((entry.entity_type || '').toUpperCase())}</strong>
+                                ${entry.entity_id ? `<code class="ms-2">#${escapeHtml(entry.entity_id)}</code>` : ''}
                             </div>
-                            <small class="text-muted">${formatDate(entry.created_at)}</small>
+                            <small class="text-muted">${escapeHtml(formatDate(entry.created_at))}</small>
                         </div>
                         <div class="audit-details">
-                            <strong>${entry.admin_name || entry.admin_id}</strong> 
-                            ${getActionDescription(entry)}
+                            <strong>${escapeHtml(entry.admin_name || entry.admin_id)}</strong> 
+                            ${escapeHtml(getActionDescription(entry))}
                         </div>
                         ${valuesHtml}
                         <div class="audit-meta">
                             <div class="audit-meta-item">
                                 <i class="fas fa-map-marker-alt"></i>
-                                <span>${entry.ip_address || 'Unknown'}</span>
+                                <span>${escapeHtml(entry.ip_address || 'Unknown')}</span>
                             </div>
                             <div class="audit-meta-item">
                                 <i class="fas fa-check-circle"></i>
-                                <span>${entry.status || 'completed'}</span>
+                                <span>${escapeHtml(entry.status || 'completed')}</span>
                             </div>
                         </div>
                     </div>

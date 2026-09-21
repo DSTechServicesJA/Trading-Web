@@ -235,14 +235,14 @@ const AdminMobileNav = (() => {
             const swipeThreshold = 50; // Minimum swipe distance
             const diff = touchStartX - touchEndX;
             
-            // Swipe left - open menu
-            if (diff > swipeThreshold && !isOffcanvasOpen) {
-                openOffcanvas();
+            // Swipe left - close menu
+            if (diff > swipeThreshold && isOffcanvasOpen) {
+                closeOffcanvas();
             }
             
-            // Swipe right - close menu
-            if (diff < -swipeThreshold && isOffcanvasOpen) {
-                closeOffcanvas();
+            // Swipe right - open menu
+            if (diff < -swipeThreshold && !isOffcanvasOpen) {
+                openOffcanvas();
             }
         }
     }

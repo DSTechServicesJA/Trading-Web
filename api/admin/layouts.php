@@ -24,7 +24,8 @@ try {
     
     $method = $_SERVER['REQUEST_METHOD'];
     $path_parts = array_filter(explode('/', trim($_GET['path'] ?? '', '/')));
-    $layout_id = isset($path_parts[1]) ? (int) $path_parts[1] : null;
+    $path_parts = array_values($path_parts);
+    $layout_id = isset($path_parts[0]) ? (int) $path_parts[0] : null;
     
     if ($method === 'GET') {
         if ($layout_id) {
@@ -81,7 +82,7 @@ try {
     elseif ($method === 'POST') {
         $body = json_decode(file_get_contents('php://input'), true);
         
-        if (isset($path_parts[2]) && $path_parts[2] === 'apply') {
+        if (isset($path_parts[1]) && $path_parts[1] === 'apply') {
             // Set layout as default
             if (!$layout_id) {
                 http_response_code(400);

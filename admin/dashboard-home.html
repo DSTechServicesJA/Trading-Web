@@ -148,6 +148,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="../auth.js"></script>
   <script src="js/components.js"></script>
   <script src="js/search.js"></script>
   <script src="js/layout-manager.js"></script>
@@ -159,7 +160,7 @@
     (function () {
       'use strict';
 
-      const DASHBOARD_ENDPOINT = '/api/admin/dashboard';
+      const DASHBOARD_ENDPOINT = '/admin/dashboard';
       const THEME_KEY = 'itguru_admin_theme';
       const SECTION_ORDER_KEY = 'itguru_dashboard_section_order';
       const DRAG_ENABLED_KEY = 'itguru_dashboard_drag_enabled';
@@ -433,12 +434,7 @@
         const region = document.getElementById('dashboardAlertRegion');
         region.innerHTML = '';
         try {
-          const response = await fetch(API_BASE + DASHBOARD_ENDPOINT, { credentials: 'include' });
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.error || 'Failed to load dashboard data');
-          }
-          const payload = await response.json();
+          const payload = await AdminComponents.apiRequest(DASHBOARD_ENDPOINT);
           renderKPIs(payload);
           renderHealthSummary(payload);
           renderSections(payload);

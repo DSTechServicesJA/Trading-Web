@@ -48,15 +48,11 @@ self.addEventListener('install', (event) => {
         caches.open(STATIC_CACHE)
             .then((cache) => {
                 console.log('[Service Worker] Caching static assets');
-                return cache.addAll(STATIC_ASSETS.map(url => {
-                    // Handle gracefully missing items
-                    return new Promise((resolve) => {
-                        cache.add(url).then(resolve).catch(() => {
-                            console.warn(`[Service Worker] Could not cache ${url}`);
-                            resolve();
-                        });
-                    });
-                }));
+                return Promise.all(STATIC_ASSETS.map((url) => (
+                    cache.add(url).catch(() => {
+                        console.warn(`[Service Worker] Could not cache ${url}`);
+                    })
+                )));
             })
             .then(() => self.skipWaiting())
             .catch((error) => {
@@ -94,6 +90,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const { request } = event;
     const url = new URL(request.url);
+
+    if (request.method !== 'GET') {
+        return;
+    }
     
     // Skip cross-origin requests
     if (url.origin !== self.location.origin && !isAllowedCDN(url.origin)) {

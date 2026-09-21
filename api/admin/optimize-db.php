@@ -15,11 +15,6 @@ require_once(__DIR__ . '/../lib/AuthGuard.php');
 try {
     // Verify admin access
     $admin = AuthGuard::requireAdmin();
-    if (!isset($admin) || $admin['role'] !== 'super_admin') {
-        http_response_code(403);
-        echo json_encode(['error' => 'Requires super admin role']);
-        exit;
-    }
     
     $db = Database::getInstance();
     $conn = $db->getConnection();
@@ -36,35 +31,33 @@ try {
         // Users table
         ['table' => 'users', 'name' => 'idx_users_role', 'columns' => '(role)', 'unique' => false],
         ['table' => 'users', 'name' => 'idx_users_status', 'columns' => '(status)', 'unique' => false],
-        ['table' => 'users', 'name' => 'idx_users_telegram_id', 'columns' => '(telegram_id)', 'unique' => false],
+        ['table' => 'users', 'name' => 'idx_users_subscription_status', 'columns' => '(subscription_status)', 'unique' => false],
+        ['table' => 'users', 'name' => 'idx_users_telegram_user_id', 'columns' => '(telegram_user_id)', 'unique' => false],
         
-        // Trades table
-        ['table' => 'trades', 'name' => 'idx_trades_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'trades', 'name' => 'idx_trades_symbol', 'columns' => '(symbol)', 'unique' => false],
-        ['table' => 'trades', 'name' => 'idx_trades_strategy', 'columns' => '(strategy)', 'unique' => false],
-        ['table' => 'trades', 'name' => 'idx_trades_timestamp', 'columns' => '(timestamp)', 'unique' => false],
-        ['table' => 'trades', 'name' => 'idx_trades_user_timestamp', 'columns' => '(user_id, timestamp)', 'unique' => false],
+        // Trade outcomes table
+        ['table' => 'trade_outcomes', 'name' => 'idx_trade_outcomes_user_id', 'columns' => '(user_id)', 'unique' => false],
+        ['table' => 'trade_outcomes', 'name' => 'idx_trade_outcomes_symbol', 'columns' => '(symbol)', 'unique' => false],
+        ['table' => 'trade_outcomes', 'name' => 'idx_trade_outcomes_strategy', 'columns' => '(strategy_type)', 'unique' => false],
+        ['table' => 'trade_outcomes', 'name' => 'idx_trade_outcomes_created_at', 'columns' => '(created_at)', 'unique' => false],
         
         // Signals table
-        ['table' => 'signals', 'name' => 'idx_signals_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'signals', 'name' => 'idx_signals_strategy', 'columns' => '(strategy)', 'unique' => false],
-        ['table' => 'signals', 'name' => 'idx_signals_timestamp', 'columns' => '(timestamp)', 'unique' => false],
-        ['table' => 'signals', 'name' => 'idx_signals_symbol', 'columns' => '(symbol)', 'unique' => false],
-        ['table' => 'signals', 'name' => 'idx_signals_user_timestamp', 'columns' => '(user_id, timestamp)', 'unique' => false],
+        ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_user_id', 'columns' => '(user_id)', 'unique' => false],
+        ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_strategy_mode', 'columns' => '(strategy_mode)', 'unique' => false],
+        ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_symbol', 'columns' => '(symbol)', 'unique' => false],
+        ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_created_at', 'columns' => '(created_at)', 'unique' => false],
         
-        // Subscriptions table
-        ['table' => 'subscriptions', 'name' => 'idx_subscriptions_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'subscriptions', 'name' => 'idx_subscriptions_status', 'columns' => '(status)', 'unique' => false],
-        ['table' => 'subscriptions', 'name' => 'idx_subscriptions_expires', 'columns' => '(expires_at)', 'unique' => false],
-        
-        // Notifications table
-        ['table' => 'notifications', 'name' => 'idx_notifications_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'notifications', 'name' => 'idx_notifications_is_read', 'columns' => '(is_read)', 'unique' => false],
-        ['table' => 'notifications', 'name' => 'idx_notifications_created_at', 'columns' => '(created_at)', 'unique' => false],
+        // Notification tables
+        ['table' => 'user_notifications', 'name' => 'idx_un_user_id', 'columns' => '(user_id)', 'unique' => false],
+        ['table' => 'user_notifications', 'name' => 'idx_un_is_read', 'columns' => '(is_read)', 'unique' => false],
+        ['table' => 'user_notifications', 'name' => 'idx_un_created_at', 'columns' => '(created_at)', 'unique' => false],
+        ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_user_id', 'columns' => '(user_id)', 'unique' => false],
+        ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_status', 'columns' => '(status)', 'unique' => false],
+        ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_sent_at', 'columns' => '(sent_at)', 'unique' => false],
         
         // Adaptive intelligence
-        ['table' => 'adaptive_intelligence', 'name' => 'idx_adaptive_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'adaptive_intelligence', 'name' => 'idx_adaptive_strategy', 'columns' => '(strategy)', 'unique' => false],
+        ['table' => 'adaptive_learning_profiles', 'name' => 'idx_alp_user_id', 'columns' => '(user_id)', 'unique' => false],
+        ['table' => 'adaptive_learning_profiles', 'name' => 'idx_alp_strategy_key', 'columns' => '(strategy_key)', 'unique' => false],
+        ['table' => 'adaptive_learning_profiles', 'name' => 'idx_alp_updated_at', 'columns' => '(updated_at)', 'unique' => false],
         
         // Admin audit trail
         ['table' => 'admin_audit_trail', 'name' => 'idx_audit_admin_id', 'columns' => '(admin_id)', 'unique' => false],
@@ -118,10 +111,10 @@ try {
     // Add composite indexes for common queries
     try {
         $compositeIndexes = [
-            "ALTER TABLE trades ADD INDEX idx_trades_user_symbol_timestamp (user_id, symbol, timestamp)",
-            "ALTER TABLE signals ADD INDEX idx_signals_user_strategy_timestamp (user_id, strategy, timestamp)",
-            "ALTER TABLE notifications ADD INDEX idx_notifications_user_read_created (user_id, is_read, created_at)",
-            "ALTER TABLE subscriptions ADD INDEX idx_subscriptions_user_status_expires (user_id, status, expires_at)",
+            "ALTER TABLE trade_outcomes ADD INDEX idx_to_user_symbol_created (user_id, symbol, created_at)",
+            "ALTER TABLE grid_scalper_ma_signals ADD INDEX idx_gsms_user_strategy_created (user_id, strategy_mode, created_at)",
+            "ALTER TABLE user_notifications ADD INDEX idx_un_user_read_created (user_id, is_read, created_at)",
+            "ALTER TABLE telegram_delivery_log ADD INDEX idx_tdl_status_sent_at (status, sent_at)",
         ];
         
         foreach ($compositeIndexes as $sql) {
@@ -152,7 +145,7 @@ try {
     
     // Analyze table statistics
     try {
-        $tables = ['users', 'trades', 'signals', 'subscriptions', 'notifications', 'adaptive_intelligence'];
+        $tables = ['users', 'trade_outcomes', 'grid_scalper_ma_signals', 'user_notifications', 'telegram_delivery_log', 'adaptive_learning_profiles'];
         foreach ($tables as $table) {
             $conn->exec("ANALYZE TABLE {$table}");
         }

@@ -45,8 +45,8 @@ try {
             )['cnt'];
             
             $profiles = $db->fetchAll("
-                SELECT id, user_id, strategy_type, learning_stage, qualification_level,
-                       trades_analyzed, wins_captured, overall_confidence, created_at, updated_at
+                SELECT id, user_id, scope_type, market_category, strategy_key, symbol_scope,
+                       trade_count, wins, losses, confidence_score, created_at, updated_at
                 FROM adaptive_learning_profiles
                 WHERE user_id = :user_id
                 ORDER BY updated_at DESC
@@ -86,8 +86,8 @@ try {
             )['cnt'];
             
             $rules = $db->fetchAll("
-                SELECT id, user_id, rule_name, strategy_type, rule_type, confidence_threshold,
-                       is_active, success_count, total_applications, created_at, updated_at
+                SELECT id, user_id, market_category, strategy_key, symbol_scope, reject_below,
+                       watchlist_below, high_confidence_min, min_sample_size, enabled, created_at, updated_at
                 FROM adaptive_qualification_rules
                 WHERE user_id = :user_id
                 ORDER BY updated_at DESC
@@ -119,7 +119,7 @@ try {
             )['cnt'];
             
             $active_profiles = $db->fetchOne(
-                "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles WHERE overall_confidence > 0.5"
+                "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles WHERE confidence_score >= 50"
             )['cnt'];
             
             $users_with_adaptive = $db->fetchOne(
@@ -128,9 +128,9 @@ try {
             
             // Get strategy breakdown
             $by_strategy = $db->fetchAll("
-                SELECT strategy_type, COUNT(*) as count, AVG(overall_confidence) as avg_confidence
+                SELECT strategy_key, COUNT(*) as count, AVG(confidence_score) as avg_confidence
                 FROM adaptive_learning_profiles
-                GROUP BY strategy_type
+                GROUP BY strategy_key
                 ORDER BY count DESC
             ");
             
@@ -142,7 +142,7 @@ try {
                 'users_with_adaptive' => (int) $users_with_adaptive,
                 'by_strategy' => array_map(function($s) {
                     return [
-                        'strategy' => $s['strategy_type'],
+                        'strategy' => $s['strategy_key'],
                         'count' => (int) $s['count'],
                         'avg_confidence' => round($s['avg_confidence'] ?? 0, 2)
                     ];

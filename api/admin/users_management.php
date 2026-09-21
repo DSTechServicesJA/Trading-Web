@@ -24,8 +24,13 @@ try {
     
     if ($method === 'GET') {
         // List users with pagination and filters
-        $page = (int) ($_GET['page'] ?? 1);
-        $per_page = (int) ($_GET['per_page'] ?? 50);
+        $draw = (int) ($_GET['draw'] ?? 0);
+        $start = max(0, (int) ($_GET['start'] ?? 0));
+        $length = (int) ($_GET['length'] ?? 0);
+        $page = (int) ($_GET['page'] ?? ($length > 0 ? floor($start / $length) + 1 : 1));
+        $per_page = (int) ($_GET['per_page'] ?? ($length > 0 ? $length : 50));
+        $page = max($page, 1);
+        $per_page = max(1, $per_page);
         
         $filters = [];
         if (isset($_GET['search'])) $filters['search'] = $_GET['search'];
@@ -37,20 +42,48 @@ try {
         
         echo json_encode([
             'success' => true,
+            'draw' => $draw,
             'page' => $result['page'],
             'per_page' => $result['per_page'],
             'total' => $result['total'],
             'last_page' => $result['last_page'],
+            'recordsTotal' => $result['total'],
+            'recordsFiltered' => $result['total'],
             'users' => $result['users']
         ]);
     }
     elseif ($method === 'POST') {
         // Perform bulk action
         $body = json_decode(file_get_contents('php://input'), true);
-        
+
         if (!isset($body['action'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'action is required']);
+            if (!isset($body['username'], $body['password'], $body['email'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'action is required']);
+                exit;
+            }
+
+            $db->execute("
+                INSERT INTO users (username, password_hash, email, display_name, role, status, subscription_status, subscription_plan, created_at, updated_at)
+                VALUES (:username, :password_hash, :email, :display_name, :role, :status, :subscription_status, :subscription_plan, NOW(), NOW())
+            ", [
+                ':username' => trim((string) $body['username']),
+                ':password_hash' => password_hash((string) $body['password'], PASSWORD_BCRYPT),
+                ':email' => trim((string) $body['email']),
+                ':display_name' => trim((string) ($body['display_name'] ?? $body['username'])),
+                ':role' => in_array(($body['role'] ?? 'user'), ['admin', 'user'], true) ? $body['role'] : 'user',
+                ':status' => in_array(($body['status'] ?? 'active'), ['active', 'locked'], true) ? $body['status'] : 'active',
+                ':subscription_status' => in_array(($body['subscription_status'] ?? 'active'), ['active', 'inactive', 'trial'], true) ? $body['subscription_status'] : 'active',
+                ':subscription_plan' => in_array(($body['subscription_plan'] ?? 'trial'), ['trial', 'weekly', 'monthly'], true)
+                    ? $body['subscription_plan']
+                    : 'trial'
+            ]);
+
+            echo json_encode([
+                'success' => true,
+                'user_id' => (int) $db->lastInsertId(),
+                'message' => 'User created successfully'
+            ]);
             exit;
         }
         
@@ -176,11 +209,11 @@ try {
         
         if (!empty($updates)) {
             $set_clause = implode(', ', array_map(fn($k) => "$k = :$k", array_keys($updates)));
-            $params = array_merge($updates, [':user_id' => $user_id]);
-            $params = array_combine(
-                array_map(fn($k) => ':' . $k, array_keys($updates)) + [':user_id' => ':user_id'],
-                array_values($updates) + [$user_id]
-            );
+            $params = [];
+            foreach ($updates as $key => $value) {
+                $params[':' . $key] = $value;
+            }
+            $params[':user_id'] = $user_id;
             
             $db->execute(
                 "UPDATE users SET $set_clause, updated_at = NOW() WHERE id = :user_id",
