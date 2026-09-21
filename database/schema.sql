@@ -947,6 +947,27 @@ CREATE TABLE IF NOT EXISTS admin_notifications_center (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ──────────────────────────────────────────────
+-- Dashboard Layout Management
+-- Stores saved dashboard widget layouts per admin
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_dashboard_layouts (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    admin_id        BIGINT UNSIGNED NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    layout_data     JSON NOT NULL,
+    is_default      TINYINT(1) NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    CONSTRAINT fk_adl_admin_id
+        FOREIGN KEY (admin_id) REFERENCES users (id) ON DELETE CASCADE,
+    
+    UNIQUE KEY uk_adl_admin_default (admin_id, is_default),
+    INDEX idx_adl_created (created_at),
+    INDEX idx_adl_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
 -- Performance indexes for existing tables
 -- These improve query performance for admin dashboard
 -- ──────────────────────────────────────────────
