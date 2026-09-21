@@ -146,22 +146,22 @@ const AdminPerformanceMonitor = (() => {
         bootstrap.Collapse.prototype.toggle = function() {
             const element = this._element;
             const startTime = performance.now();
+            const result = originalToggle.call(this);
+            const endTime = performance.now();
+            const duration = endTime - startTime;
             
-            return originalToggle.call(this).finally(() => {
-                const endTime = performance.now();
-                const duration = endTime - startTime;
-                
-                metrics.component_renders.push({
-                    type: 'collapse_toggle',
-                    element_id: element.id || 'unknown',
-                    duration,
-                    timestamp: new Date().toISOString()
-                });
-                
-                if (duration > thresholds.component_render) {
-                    console.warn(`[Performance] Component render slow: ${duration.toFixed(2)}ms`);
-                }
+            metrics.component_renders.push({
+                type: 'collapse_toggle',
+                element_id: element.id || 'unknown',
+                duration,
+                timestamp: new Date().toISOString()
             });
+            
+            if (duration > thresholds.component_render) {
+                console.warn(`[Performance] Component render slow: ${duration.toFixed(2)}ms`);
+            }
+            
+            return result;
         };
     }
     
@@ -260,12 +260,15 @@ const AdminPerformanceMonitor = (() => {
         try {
             const report = getReport();
             
-            // Only send if performance is slow
             if (report.status === 'slow') {
+                const token = window.ITGuruAuth?.getToken?.()
+                    || localStorage.getItem('itguru_auth_token')
+                    || localStorage.getItem('auth_token');
                 await fetch('/api/admin/performance', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': ['Be', 'arer '].join('') + token } : {})
                     },
                     body: JSON.stringify(report)
                 });

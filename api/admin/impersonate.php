@@ -20,9 +20,18 @@ try {
     
     $method = $_SERVER['REQUEST_METHOD'];
     $action = $_GET['action'] ?? null;
+
+    $allowedIdsRaw = trim((string) env('ADMIN_IMPERSONATION_ALLOWED_IDS', '1'));
+    $allowedAdminIds = array_values(array_filter(array_map('intval', explode(',', $allowedIdsRaw))));
+    if (empty($allowedAdminIds)) {
+        $allowedAdminIds = [1];
+    }
+    if (!in_array((int) $admin['id'], $allowedAdminIds, true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Impersonation requires super admin privileges']);
+        exit;
+    }
     
-    // Check if user is super admin (based on some criteria - for now, just admin role)
-    // In a real system, you might have a separate "super_admin" role or permission
     if ($method === 'POST') {
         $body = json_decode(file_get_contents('php://input'), true);
         
@@ -100,13 +109,23 @@ try {
                 ':ua' => $_SERVER['HTTP_USER_AGENT'] ?? null
             ]);
             
-            // Return impersonation token/session info
+            $tokenPayload = [
+                'sub' => (int) $user_id,
+                'username' => $user['username'],
+                'impersonated_by' => (int) $admin['id'],
+                'iat' => time(),
+                'exp' => time() + 3600
+            ];
+            $impersonationToken = jwtEncode($tokenPayload);
+
             echo json_encode([
                 'success' => true,
                 'log_id' => $log_id,
                 'user_id' => $user_id,
                 'username' => $user['username'],
-                'message' => 'Impersonation started - you can now access resources as this user'
+                'impersonation_token' => $impersonationToken,
+                'expires_in' => 3600,
+                'message' => 'Impersonation token generated for selected user'
             ]);
         }
     }

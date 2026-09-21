@@ -32,17 +32,23 @@ try {
     $params = [];
     
     if ($level) {
-        $where .= " AND level = :level";
-        $params[':level'] = strtoupper($level);
+        $normalizedLevel = strtolower($level);
+        if (!in_array($normalizedLevel, ['error', 'info'], true)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Unsupported level filter. Use info or error.']);
+            exit;
+        }
+        $where .= " AND status = :level";
+        $params[':level'] = $normalizedLevel === 'error' ? 'failed' : 'success';
     }
     
     if ($source) {
-        $where .= " AND source = :source";
+        $where .= " AND entity_type = :source";
         $params[':source'] = $source;
     }
     
     if ($search) {
-        $where .= " AND (message LIKE :search OR context LIKE :search)";
+        $where .= " AND (action LIKE :search OR old_value LIKE :search OR new_value LIKE :search OR error_message LIKE :search)";
         $params[':search'] = "%$search%";
     }
     
@@ -58,14 +64,21 @@ try {
     
     // Get total count
     $total = $db->fetchOne(
-        "SELECT COUNT(*) as cnt FROM system_logs $where",
+        "SELECT COUNT(*) as cnt FROM admin_audit_trail $where",
         $params
     )['cnt'];
     
     // Get logs
     $logs = $db->fetchAll("
-        SELECT id, level, source, message, context, stack_trace, created_at
-        FROM system_logs
+        SELECT id,
+               status,
+               entity_type,
+               action,
+               old_value,
+               new_value,
+               error_message,
+               created_at
+        FROM admin_audit_trail
         $where
         ORDER BY created_at DESC
         LIMIT :offset, :limit
@@ -76,22 +89,23 @@ try {
     
     // Get available sources and levels for filtering
     $available_sources = $db->fetchAll("
-        SELECT DISTINCT source FROM system_logs ORDER BY source
+        SELECT DISTINCT entity_type FROM admin_audit_trail ORDER BY entity_type
     ");
     $available_levels = $db->fetchAll("
-        SELECT DISTINCT level FROM system_logs ORDER BY FIELD(level, 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL')
+        SELECT DISTINCT status FROM admin_audit_trail ORDER BY status
     ");
     
     // Get log statistics for the date range filter
     $stats = $db->fetchOne("
         SELECT 
             COUNT(*) as total_logs,
-            SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count,
-            SUM(CASE WHEN level = 'WARNING' THEN 1 ELSE 0 END) as warning_count,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as error_count,
+        0 as warning_count,
             MIN(created_at) as earliest_log,
             MAX(created_at) as latest_log
-        FROM system_logs
-    ");
+    FROM admin_audit_trail
+    $where
+    ", $params);
     
     echo json_encode([
         'success' => true,
@@ -106,23 +120,29 @@ try {
             'date_from' => $date_from,
             'date_to' => $date_to
         ],
-        'available_sources' => array_column($available_sources, 'source'),
-        'available_levels' => array_column($available_levels, 'level'),
+        'available_sources' => array_column($available_sources, 'entity_type'),
+        'available_levels' => array_map(static function ($status) {
+            return $status === 'failed' ? 'ERROR' : 'INFO';
+        }, array_column($available_levels, 'status')),
         'stats' => [
             'total_logs' => (int) $stats['total_logs'],
             'error_count' => (int) $stats['error_count'],
-            'warning_count' => (int) $stats['warning_count'],
+            'warning_count' => 0,
             'earliest_log' => $stats['earliest_log'],
             'latest_log' => $stats['latest_log']
         ],
         'logs' => array_map(function($log) {
             return [
                 'id' => (int) $log['id'],
-                'level' => $log['level'],
-                'source' => $log['source'],
-                'message' => $log['message'],
-                'context' => $log['context'] ? json_decode($log['context'], true) : null,
-                'stack_trace' => $log['stack_trace'],
+                'level' => ($log['status'] === 'failed') ? 'ERROR' : 'INFO',
+                'source' => $log['entity_type'],
+                'message' => $log['action'],
+                'context' => [
+                    'old_value' => $log['old_value'],
+                    'new_value' => $log['new_value'],
+                    'error_message' => $log['error_message']
+                ],
+                'stack_trace' => null,
                 'created_at' => $log['created_at']
             ];
         }, $logs)

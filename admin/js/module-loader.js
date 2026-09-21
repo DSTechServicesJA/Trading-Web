@@ -158,6 +158,7 @@ const AdminModuleLoader = (() => {
                 if (window.DataTable) return; // Already loaded
                 
                 return Promise.all([
+                    loadExternalScript('https://code.jquery.com/jquery-3.7.1.min.js'),
                     loadExternalScript('https://cdn.jsdelivr.net/npm/datatables.net/js/jquery.dataTables.min.js'),
                     loadExternalCSS('https://cdn.jsdelivr.net/npm/datatables.net-dt/css/jquery.dataTables.min.css')
                 ]);

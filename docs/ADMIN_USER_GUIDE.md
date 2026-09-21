@@ -374,11 +374,11 @@ Include:
 
 ### Accessibility
 
-- WCAG 2.1 Level AA compliant
+- Accessibility checks are built into the admin dashboard audit tooling.
 - Keyboard navigation supported
-- Screen reader compatible
 - Reduced motion supported
 - High contrast mode supported
+- WCAG 2.1 AA and screen-reader conformance should be validated after audit remediation is complete.
 
 ---
 

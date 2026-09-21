@@ -447,7 +447,9 @@ const AdminComponents = (() => {
 
     // ─── API Request Helper ───
     const apiRequest = async (path, options = {}) => {
-        const token = ITGuruAuth?.getToken?.() || localStorage.getItem('auth_token');
+        const token = window.ITGuruAuth?.getToken?.()
+            || localStorage.getItem('itguru_auth_token')
+            || localStorage.getItem('auth_token');
         const headers = {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': 'Bearer ' + token } : {}),

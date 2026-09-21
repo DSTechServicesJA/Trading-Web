@@ -412,9 +412,48 @@ const AdminAccessibilityAudit = (() => {
      * Calculate color contrast ratio
      */
     function calculateContrast(foreground, background) {
-        // Simplified contrast calculation
-        // In production, use actual luminance calculation
-        return 4.5; // Placeholder
+        function parseColor(value) {
+            if (!value) return null;
+            const normalized = String(value).trim().toLowerCase();
+            if (normalized === 'transparent') return null;
+            const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+            if (hex) {
+                const raw = hex[1];
+                const full = raw.length === 3 ? raw.split('').map((n) => n + n).join('') : raw;
+                return [
+                    parseInt(full.slice(0, 2), 16),
+                    parseInt(full.slice(2, 4), 16),
+                    parseInt(full.slice(4, 6), 16)
+                ];
+            }
+            const rgb = normalized.match(/^rgba?\(([^)]+)\)$/);
+            if (rgb) {
+                const parts = rgb[1].split(',').map((part) => Number(part.trim()));
+                if (parts.length >= 3) {
+                    return [parts[0], parts[1], parts[2]].map((channel) => Math.max(0, Math.min(255, channel)));
+                }
+            }
+            return null;
+        }
+
+        function luminance(rgb) {
+            const channels = rgb.map((value) => {
+                const channel = value / 255;
+                return channel <= 0.03928
+                    ? channel / 12.92
+                    : Math.pow((channel + 0.055) / 1.055, 2.4);
+            });
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+        }
+
+        const fg = parseColor(foreground) || [0, 0, 0];
+        const bg = parseColor(background) || [255, 255, 255];
+        const fgLum = luminance(fg);
+        const bgLum = luminance(bg);
+        const lighter = Math.max(fgLum, bgLum);
+        const darker = Math.min(fgLum, bgLum);
+
+        return (lighter + 0.05) / (darker + 0.05);
     }
     
     /**

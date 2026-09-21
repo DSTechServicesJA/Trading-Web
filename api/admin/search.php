@@ -32,6 +32,7 @@ try {
     }
     
     $results = [
+        'success' => true,
         'query' => $query,
         'results' => [],
         'total' => 0
@@ -131,9 +132,9 @@ try {
     // Search adaptive rules
     if ($type === 'all' || $type === 'rules') {
         $rules = $db->fetchAll("
-            SELECT id, user_id, rule_name, strategy_type, created_at
+            SELECT id, user_id, market_category, strategy_key, symbol_scope, created_at
             FROM adaptive_qualification_rules
-            WHERE rule_name LIKE :search OR strategy_type LIKE :search
+            WHERE market_category LIKE :search OR strategy_key LIKE :search OR symbol_scope LIKE :search
             ORDER BY created_at DESC
             LIMIT :limit
         ", [
@@ -146,8 +147,8 @@ try {
                 return [
                     'type' => 'rule',
                     'id' => $r['id'],
-                    'title' => $r['rule_name'],
-                    'subtitle' => 'User #' . $r['user_id'] . ' • ' . $r['strategy_type'],
+                    'title' => $r['strategy_key'] . ' (' . $r['market_category'] . ')',
+                    'subtitle' => 'User #' . $r['user_id'] . ' • Scope: ' . $r['symbol_scope'],
                     'meta' => 'Adaptive Rule',
                     'created_at' => $r['created_at'],
                     'link' => '/admin/#rule-' . $r['id']

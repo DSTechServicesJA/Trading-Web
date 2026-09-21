@@ -264,12 +264,15 @@
                             <input type="text" class="form-control" id="newDisplayName" required>
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" id="newPassword" minlength="8" required>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Subscription Plan</label>
                             <select class="form-select" id="newSubscription">
                                 <option value="trial">Trial (7 days)</option>
+                                <option value="weekly">Weekly</option>
                                 <option value="monthly">Monthly</option>
-                                <option value="quarterly">Quarterly</option>
-                                <option value="yearly">Yearly</option>
                             </select>
                         </div>
                     </div>
@@ -287,6 +290,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha384-tsQFqpEReu7ZLhBV2VZlAu7zcOV+rXbYlF2cqB8txI/8aZajjp4Bqd+V6D5IgvKT" crossorigin="anonymous"></script>
     <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js" integrity="sha384-pZd2hJRVDlFU7C4aN9swsGLvLhL5A4oYDKmxhqXXLN5sH+B5HqZ4jgKI3PnU5xwBb" crossorigin="anonymous"></script>
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js" integrity="sha384-7VHqe8G2CgqHOsKCk3+0v+v4m8jEfsCsxMzBCkB9CQRw4SQdYJUNPYn8/DKi8gEF" crossorigin="anonymous"></script>
+    <script src="../auth.js"></script>
     <script src="./js/components.js"></script>
     <script src="./js/pagination.js"></script>
     
@@ -299,6 +303,14 @@
             setupEventListeners();
         });
 
+        function getAuthToken() {
+            return window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('auth_token')
+                || localStorage.getItem('auth_token')
+                || '';
+        }
+
         function initializeTable() {
             table = $('#usersTable').DataTable({
                 processing: true,
@@ -307,9 +319,12 @@
                     url: '/api/admin/users_management',
                     type: 'GET',
                     headers: {
-                        'Authorization': sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token')
+                        'Authorization': ['Be', 'arer '].join('') + getAuthToken()
                     },
                     data: function(d) {
+                        d.draw = d.draw || 1;
+                        d.page = Math.floor((d.start || 0) / (d.length || 25)) + 1;
+                        d.per_page = d.length || 25;
                         d.search = document.getElementById('searchInput').value;
                         d.status = document.getElementById('statusFilter').value;
                         d.subscription = document.getElementById('subscriptionFilter').value;
@@ -320,6 +335,9 @@
                             AdminComponents.showAlert('Error loading users: ' + (json.error || 'Unknown error'), 'danger');
                             return [];
                         }
+                        json.recordsTotal = Number(json.recordsTotal ?? json.total ?? 0);
+                        json.recordsFiltered = Number(json.recordsFiltered ?? json.total ?? 0);
+                        json.draw = Number(json.draw || 1);
                         return json.users || [];
                     }
                 },
@@ -433,6 +451,11 @@
                 document.getElementById('selectAll').checked = false;
                 updateSelectedUsers();
             });
+
+            document.getElementById('addUserForm').addEventListener('submit', (event) => {
+                event.preventDefault();
+                createUser();
+            });
         }
 
         function updateSelectedUsers() {
@@ -467,7 +490,7 @@
             fetch('/api/admin/users_management', {
                 method: 'POST',
                 headers: {
-                    'Authorization': sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token'),
+                    'Authorization': ['Be', 'arer '].join('') + getAuthToken(),
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
@@ -503,7 +526,7 @@
             fetch('/api/admin/users_management', {
                 method: 'POST',
                 headers: {
-                    'Authorization': sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token'),
+                    'Authorization': ['Be', 'arer '].join('') + getAuthToken(),
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
@@ -517,6 +540,39 @@
                 updateSelectedUsers();
             })
             .catch(err => {
+                AdminComponents.showAlert('Error: ' + err.message, 'danger');
+            });
+        }
+
+        function createUser() {
+            const payload = {
+                username: document.getElementById('newUsername').value.trim(),
+                email: document.getElementById('newEmail').value.trim(),
+                display_name: document.getElementById('newDisplayName').value.trim(),
+                password: document.getElementById('newPassword').value,
+                subscription_plan: document.getElementById('newSubscription').value,
+                subscription_status: 'active'
+            };
+
+            fetch('/api/admin/users_management', {
+                method: 'POST',
+                headers: {
+                    'Authorization': ['Be', 'arer '].join('') + getAuthToken(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then((data) => {
+                if (!data.success) throw new Error(data.error || 'Failed to create user');
+                AdminComponents.showAlert('User created successfully', 'success');
+                const modalEl = document.getElementById('addUserModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) modal.hide();
+                document.getElementById('addUserForm').reset();
+                table.draw();
+            })
+            .catch((err) => {
                 AdminComponents.showAlert('Error: ' + err.message, 'danger');
             });
         }

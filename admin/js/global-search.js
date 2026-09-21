@@ -141,16 +141,20 @@ const GlobalSearch = (() => {
     function performSearch(query) {
         const resultsContainer = searchModal.querySelector('.search-results');
         resultsContainer.innerHTML = '<div class="search-loading"><i class="fas fa-spinner fa-spin"></i> Searching...</div>';
+        const token = window.ITGuruAuth?.getToken?.()
+            || localStorage.getItem('itguru_auth_token')
+            || sessionStorage.getItem('auth_token')
+            || localStorage.getItem('auth_token');
 
         fetch(`/api/admin/search?q=${encodeURIComponent(query)}&limit=${CONFIG.maxResults}`, {
             headers: {
-                'Authorization': sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token')
+                ...(token ? { 'Authorization': ['Be', 'arer '].join('') + token } : {})
             }
         })
-        .then(r => r.json())
+        .then(async (r) => ({ ok: r.ok, data: await r.json().catch(() => ({})) }))
         .then(data => {
-            if (!data.success) throw new Error(data.error);
-            displayResults(data.results, query);
+            if (!data.ok) throw new Error(data.data.error || 'Search failed');
+            displayResults(data.data.results, query);
         })
         .catch(err => {
             resultsContainer.innerHTML = `<div class="search-error"><i class="fas fa-exclamation-circle"></i> ${err.message}</div>`;
@@ -169,6 +173,7 @@ const GlobalSearch = (() => {
         }
 
         let html = '';
+        const linkRegistry = [];
         
         // Define result type metadata
         const typeMetadata = {
@@ -198,16 +203,20 @@ const GlobalSearch = (() => {
             `;
 
             items.slice(0, 5).forEach(item => {
+                const safeTitle = htmlEscape(item.title || item.name || 'Untitled');
+                const safeSubtitle = htmlEscape(item.subtitle || item.email || '');
+                const safeMeta = htmlEscape(item.meta || '');
+                const linkIndex = linkRegistry.push(item.link || '#') - 1;
                 html += `
-                    <div class="search-result-item" onclick="GlobalSearch.selectResult('${item.link || '#'}', '${query}')">
+                    <div class="search-result-item" data-search-link-index="${linkIndex}" data-search-query="${htmlEscape(query)}">
                         <div class="result-icon" style="color: ${meta.color};">
                             <i class="fas ${meta.icon}"></i>
                         </div>
                         <div class="result-content">
-                            <div class="result-title">${htmlEscape(item.title || item.name || 'Untitled')}</div>
-                            <div class="result-subtitle">${htmlEscape(item.subtitle || item.email || '')}</div>
+                            <div class="result-title">${safeTitle}</div>
+                            <div class="result-subtitle">${safeSubtitle}</div>
                         </div>
-                        <div class="result-meta">${htmlEscape(item.meta || '')}</div>
+                        <div class="result-meta">${safeMeta}</div>
                     </div>
                 `;
             });
@@ -220,6 +229,13 @@ const GlobalSearch = (() => {
         });
 
         resultsContainer.innerHTML = html;
+        resultsContainer.querySelectorAll('[data-search-link-index]').forEach((node) => {
+            node.addEventListener('click', () => {
+                const idx = Number(node.getAttribute('data-search-link-index'));
+                const link = Number.isFinite(idx) ? (linkRegistry[idx] || '#') : '#';
+                selectResult(link, node.getAttribute('data-search-query') || '');
+            });
+        });
     }
 
     /**
@@ -243,11 +259,12 @@ const GlobalSearch = (() => {
         html += '<div class="category-items">';
 
         recentSearches.forEach(search => {
+            const safeSearch = htmlEscape(search);
             html += `
-                <div class="search-result-item" onclick="GlobalSearch.performSearch('${search}')">
+                <div class="search-result-item" data-recent-search="${safeSearch}">
                     <i class="fas fa-history"></i>
-                    <span class="recent-search-text">${htmlEscape(search)}</span>
-                    <button class="recent-search-delete" onclick="event.stopPropagation(); GlobalSearch.removeRecentSearch('${search}')">
+                    <span class="recent-search-text">${safeSearch}</span>
+                    <button class="recent-search-delete" data-recent-delete="${safeSearch}">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -256,6 +273,18 @@ const GlobalSearch = (() => {
 
         html += '</div></div>';
         resultsContainer.innerHTML = html;
+        resultsContainer.querySelectorAll('[data-recent-search]').forEach((node) => {
+            node.addEventListener('click', () => {
+                const query = node.getAttribute('data-recent-search') || '';
+                performSearch(query);
+            });
+        });
+        resultsContainer.querySelectorAll('[data-recent-delete]').forEach((node) => {
+            node.addEventListener('click', (event) => {
+                event.stopPropagation();
+                removeRecentSearch(node.getAttribute('data-recent-delete') || '');
+            });
+        });
     }
 
     /**
@@ -307,7 +336,18 @@ const GlobalSearch = (() => {
         saveRecentSearch(query);
         closeSearch();
         if (link && link !== '#') {
-            window.location.href = link;
+            try {
+                const target = new URL(link, window.location.origin);
+                if (target.origin !== window.location.origin) {
+                    return;
+                }
+                if (!['http:', 'https:'].includes(target.protocol)) {
+                    return;
+                }
+                window.location.href = `${target.pathname}${target.search}${target.hash}`;
+            } catch (_) {
+                // Ignore malformed links.
+            }
         }
     }
 

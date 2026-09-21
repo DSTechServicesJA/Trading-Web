@@ -134,7 +134,7 @@ try {
             (admin_id, action, entity_type, entity_id, old_value, new_value, ip_address, user_agent, status, error_message, created_at)
             VALUES (:admin_id, :action, :entity_type, :entity_id, :old_value, :new_value, :ip, :ua, :status, :error, NOW())
         ", [
-            ':admin_id' => $body['admin_id'] ?? $admin['id'],
+            ':admin_id' => $admin['id'],
             ':action' => $body['action'],
             ':entity_type' => $body['entity_type'],
             ':entity_id' => $body['entity_id'] ?? null,

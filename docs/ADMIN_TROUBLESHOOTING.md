@@ -133,9 +133,7 @@ if ('memory' in performance) {
 **Diagnosis:**
 ```javascript
 // Test global search
-AdminGlobalSearch.search('test')
-  .then(results => console.log('Search results:', results))
-  .catch(e => console.error('Search error:', e))
+GlobalSearch.performSearch('test')
 ```
 
 **Solutions:**
@@ -499,4 +497,3 @@ A: System is tested for 100+ concurrent users. Higher loads require server scali
 
 **Q: Can I customize the dashboard layout?**
 A: Yes! Save custom layouts for different workflows. Each admin has independent layout settings.
-
