@@ -68,7 +68,7 @@ Error: "Session expired" or "Not authorized"
 2. Log out and log back in
 3. Check admin role in database:
    ```sql
-   SELECT id, email, role FROM users WHERE role='super_admin' LIMIT 1;
+   SELECT id, email, role FROM users WHERE role='admin' LIMIT 1;
    ```
 
 ### 2. Slow Performance
