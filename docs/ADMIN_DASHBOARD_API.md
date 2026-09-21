@@ -496,6 +496,279 @@ curl -H "Authorization: ******" \
 
 ---
 
+## Strategy Statistics APIs
+
+### GET /api/admin/strategy_stats?action=stats&strategy=grid_scalper_ma
+Get statistics for a specific strategy.
+
+**Query Parameters:**
+- `strategy`: Strategy type (grid_scalper_ma, mtf, breakout_retest)
+- `action`: 'stats', 'signals', or 'performance'
+
+**Response:**
+```json
+{
+  "success": true,
+  "strategy": "grid_scalper_ma",
+  "signals": {
+    "total": 450,
+    "active": 12,
+    "completed": 438
+  },
+  "trades_30d": {
+    "total": 120,
+    "wins": 78,
+    "losses": 35,
+    "breakeven": 7,
+    "win_rate": 65.0,
+    "avg_return": 2.35,
+    "best_trade": 15.5,
+    "worst_trade": -8.25,
+    "profitable_trades": 78
+  },
+  "today": {
+    "trades": 8,
+    "wins": 6,
+    "total_return": 18.75
+  },
+  "top_symbols": [
+    {
+      "symbol": "EURUSD",
+      "trades": 12,
+      "wins": 9,
+      "avg_return": 2.5
+    }
+  ]
+}
+```
+
+### GET /api/admin/strategy_stats?action=performance
+Get performance comparison across all strategies.
+
+---
+
+## Adaptive Intelligence Management APIs
+
+### GET /api/admin/adaptive_intelligence?user_id=123
+Get adaptive profiles for a user.
+
+**Query Parameters:**
+- `user_id`: User ID (required)
+- `page`: Page number (default: 1)
+- `per_page`: Results per page (default: 50)
+
+**Response:**
+```json
+{
+  "success": true,
+  "user_id": 123,
+  "total": 4,
+  "profiles": [
+    {
+      "id": 1,
+      "user_id": 123,
+      "strategy_type": "grid_scalper_ma",
+      "learning_stage": "QUALIFIED",
+      "qualification_level": 0.87,
+      "trades_analyzed": 45,
+      "wins_captured": 32,
+      "overall_confidence": 0.92,
+      "created_at": "2026-09-01 10:00:00",
+      "updated_at": "2026-09-21 15:30:00"
+    }
+  ]
+}
+```
+
+### GET /api/admin/adaptive_intelligence?action=stats
+Get adaptive system statistics.
+
+**Response:**
+```json
+{
+  "success": true,
+  "total_profiles": 450,
+  "total_rules": 1200,
+  "active_profiles": 380,
+  "users_with_adaptive": 145,
+  "by_strategy": [
+    {
+      "strategy": "grid_scalper_ma",
+      "count": 200,
+      "avg_confidence": 0.85
+    }
+  ]
+}
+```
+
+### POST /api/admin/adaptive_intelligence
+Reset adaptive intelligence for a user.
+
+**Request Body:**
+```json
+{
+  "user_id": 123
+}
+```
+
+---
+
+## System Logs APIs
+
+### GET /api/admin/logs?level=error&limit=50
+Get system logs with filtering and search.
+
+**Query Parameters:**
+- `level`: Log level (debug, info, warning, error, fatal)
+- `source`: Log source (strategy, telegram, api, database)
+- `search`: Search in message and context
+- `date_from`: Start date (YYYY-MM-DD)
+- `date_to`: End date (YYYY-MM-DD)
+- `limit`: Number of logs (default: 50, max: 1000)
+- `offset`: Pagination offset (default: 0)
+
+**Response:**
+```json
+{
+  "success": true,
+  "total": 456,
+  "has_more": true,
+  "logs": [
+    {
+      "id": 1,
+      "level": "ERROR",
+      "source": "telegram",
+      "message": "Failed to send message to user 123",
+      "context": {"user_id": 123, "reason": "rate_limit"},
+      "created_at": "2026-09-21 15:30:00"
+    }
+  ],
+  "available_sources": ["api", "database", "strategy", "telegram"],
+  "available_levels": ["DEBUG", "INFO", "WARNING", "ERROR", "FATAL"],
+  "stats": {
+    "total_logs": 5000,
+    "error_count": 120,
+    "warning_count": 450,
+    "earliest_log": "2026-09-01 00:00:00",
+    "latest_log": "2026-09-21 23:59:59"
+  }
+}
+```
+
+---
+
+## Telegram Queue Monitor APIs
+
+### GET /api/admin/telegram_queue
+Get Telegram queue status and statistics.
+
+**Response:**
+```json
+{
+  "success": true,
+  "queue_status": {
+    "queued": 12,
+    "sent_today": 456,
+    "failed": 3,
+    "retry_queue": 2,
+    "oldest_queued": "2026-09-21 15:20:00"
+  },
+  "today_stats": {
+    "total_messages": 471,
+    "sent": 456,
+    "failed": 3,
+    "success_rate": 96.81,
+    "avg_delivery_time_sec": 2.35
+  },
+  "health_indicators": {
+    "rate_limit_events_24h": 0,
+    "queue_healthy": true,
+    "last_check": "2026-09-21 15:35:00"
+  }
+}
+```
+
+### GET /api/admin/telegram_queue?action=messages&status=FAILED
+Get queued or failed messages.
+
+**Query Parameters:**
+- `action`: 'messages', 'retry', or 'health'
+- `status`: QUEUED, FAILED, RETRY, SENT
+- `page`: Page number
+- `per_page`: Results per page
+
+### POST /api/admin/telegram_queue?action=retry
+Retry a failed message.
+
+**Request Body:**
+```json
+{
+  "message_id": 123
+}
+```
+
+### GET /api/admin/telegram_queue?action=health
+Get Telegram API health status.
+
+---
+
+## System Performance Monitoring APIs
+
+### GET /api/admin/performance
+Get all system performance metrics.
+
+**Response:**
+```json
+{
+  "success": true,
+  "server": {
+    "php_version": "8.2.0",
+    "os": "Linux kernel 5.15",
+    "timestamp": "2026-09-21 15:35:00"
+  },
+  "memory": {
+    "current_usage_mb": 128.5,
+    "peak_usage_mb": 256.0,
+    "limit": "512M",
+    "percentage_used": 50.2
+  },
+  "database": {
+    "total_tables": 45,
+    "total_size_mb": 1024.5,
+    "active_connections": 12,
+    "signal_queue": 450
+  },
+  "processing": {
+    "active_requests": 8,
+    "telegram_queue": 12,
+    "scheduled_jobs_total": 15,
+    "scheduled_jobs_running": 3
+  },
+  "api": {
+    "avg_response_time_ms": 145.5,
+    "max_response_time_ms": 2500.0,
+    "min_response_time_ms": 15.0,
+    "total_requests_1h": 4500
+  },
+  "cache": {
+    "enabled": true,
+    "type": "redis"
+  }
+}
+```
+
+### GET /api/admin/performance?action=database
+Get detailed database performance metrics.
+
+### GET /api/admin/performance?action=api-response-times&interval=hour
+Get API response time analytics.
+
+**Query Parameters:**
+- `interval`: 'hour', 'day', or '6hour'
+
+---
+
 ## Version History
 
 - **v1.0** (2026-09-21) - Initial implementation with core APIs for dashboard redesign
+- **v1.1** (2026-09-21) - Added strategy statistics, adaptive intelligence, logs, Telegram queue, and performance monitoring APIs

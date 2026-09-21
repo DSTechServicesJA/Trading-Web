@@ -33,7 +33,7 @@ RewriteRule ^api/adaptive/(bootstrap|metrics|profiles|qualify|trades)$ api/adapt
 # ── Admin API URL rewriting ──
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/admin/(users|user|strategies|strategy_access|auth_guard|telegram|profiles|adaptive|notification_preferences|telegram_delivery_log|dashboard|preferences|audit_trail|impersonate|notifications_center|search|users_management)$ api/admin/$1.php [L,QSA]
+RewriteRule ^api/admin/(users|user|strategies|strategy_access|auth_guard|telegram|profiles|adaptive|notification_preferences|telegram_delivery_log|dashboard|preferences|audit_trail|impersonate|notifications_center|search|users_management|strategy_stats|adaptive_intelligence|logs|telegram_queue|performance)$ api/admin/$1.php [L,QSA]
 
 # ── Telegram API URL rewriting (extensionless PHP) ──
 RewriteCond %{REQUEST_FILENAME} !-f
