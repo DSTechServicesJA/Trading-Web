@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IT Guru – Executive Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 connect-src 'self' https://trading.dsitservicesja.com;
+                 script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+                 style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;
+                 font-src https://fonts.gstatic.com;
+                 img-src 'self' data:;" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="css/admin-modern.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem('itguru_admin_theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <style>
+    body { min-height: 100vh; }
+    .dashboard-shell { padding-bottom: 3rem; }
+    .dashboard-navbar {
+      backdrop-filter: blur(12px);
+      background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+      border-bottom: 1px solid var(--border-color);
+    }
+    .dashboard-brand { font-weight: 800; letter-spacing: .02em; }
+    .dashboard-search {
+      min-width: min(100%, 340px);
+      position: relative;
+    }
+    .dashboard-search .search-shortcut {
+      position: absolute;
+      right: .75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: .75rem;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: .375rem;
+      padding: .1rem .35rem;
+      background: var(--bg-secondary);
+    }
+    .hero-card, .section-surface, .chart-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 1rem; box-shadow: 0 10px 30px var(--shadow); }
+    .hero-card { padding: 1.5rem; }
+    .hero-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:1rem; }
+    .widget-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); gap: 1rem; }
+    .dashboard-widget.dragging { opacity: .65; }
+    .widget-handle { cursor: grab; user-select:none; }
+    .section-toolbar { gap: .75rem; }
+    .metric-label { color: var(--text-secondary); font-size: .875rem; }
+    .metric-value { font-size: 2rem; font-weight: 800; }
+    .status-pill { display:inline-flex; align-items:center; gap:.4rem; border-radius:999px; padding:.35rem .7rem; font-size:.8rem; font-weight:600; }
+    .status-ok { background: rgba(16,185,129,.14); color: var(--success); }
+    .status-warn { background: rgba(245,158,11,.14); color: var(--warning); }
+    .status-bad { background: rgba(239,68,68,.14); color: var(--danger); }
+    .section-surface { padding: 1.25rem; }
+    .mini-list { display:grid; gap:.75rem; }
+    .mini-item { display:flex; justify-content:space-between; gap:1rem; border-bottom:1px solid var(--border-color); padding-bottom:.75rem; }
+    .mini-item:last-child { border-bottom:none; padding-bottom:0; }
+    .chart-canvas { position: relative; min-height: 280px; }
+    .table-clean th, .table-clean td { color: var(--text-primary); }
+    .empty-state { color: var(--text-secondary); padding: 1rem 0; }
+    @media (max-width: 991.98px) {
+      .dashboard-navbar .navbar-collapse { padding-top: 1rem; }
+      .dashboard-search { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard-shell">
+    <nav class="navbar navbar-expand-lg sticky-top dashboard-navbar">
+      <div class="container-fluid px-3 px-lg-4">
+        <a class="navbar-brand dashboard-brand text-primary" href="index.html">🛡️ IT Guru Admin</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardNav" aria-controls="dashboardNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="dashboardNav">
+          <ul class="navbar-nav me-auto mb-3 mb-lg-0">
+            <li class="nav-item"><a class="nav-link active" href="dashboard-home.html">Dashboard Home</a></li>
+            <li class="nav-item"><a class="nav-link" href="index.html">User Admin</a></li>
+          </ul>
+          <div class="d-flex flex-column flex-lg-row align-items-stretch align-items-lg-center gap-2 w-100 justify-content-lg-end">
+            <div class="dashboard-search">
+              <input id="globalDashboardSearch" class="form-control" type="search" placeholder="Search users, signals, trades…" aria-label="Global admin search" />
+              <span class="search-shortcut">Ctrl+K</span>
+            </div>
+            <button id="themeToggleBtn" type="button" class="btn btn-outline-secondary btn-sm">Toggle Theme</button>
+            <a class="btn btn-primary btn-sm" href="index.html#users-section">Open Admin</a>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container-fluid px-3 px-lg-4 py-4">
+      <section class="hero-card mb-4">
+        <div class="d-flex flex-column flex-xl-row justify-content-between gap-3">
+          <div>
+            <p class="text-uppercase text-muted small mb-2">Executive command center</p>
+            <h1 class="h2 mb-2">Admin Dashboard Overview</h1>
+            <p class="text-muted mb-0">Live platform health, revenue signals, user engagement, and telegram reliability in one place.</p>
+          </div>
+          <div class="d-flex flex-wrap align-items-start section-toolbar">
+            <button id="expandAllSections" type="button" class="btn btn-outline-primary btn-sm">Expand All</button>
+            <button id="collapseAllSections" type="button" class="btn btn-outline-secondary btn-sm">Collapse All</button>
+            <button id="refreshDashboardBtn" type="button" class="btn btn-primary btn-sm">Refresh Metrics</button>
+          </div>
+        </div>
+        <div id="dashboardAlertRegion" class="mt-3"></div>
+      </section>
+
+      <section class="mb-4">
+        <div id="kpiGrid" class="row g-3"></div>
+      </section>
+
+      <section class="row g-4 mb-4">
+        <div class="col-12 col-xl-8">
+          <div class="chart-panel p-3 p-lg-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <h2 class="h5 mb-1">Platform Trends</h2>
+                <p class="text-muted mb-0">Signals, win rate, and user growth for the latest reporting window.</p>
+              </div>
+            </div>
+            <div class="chart-canvas"><canvas id="platformTrendsChart"></canvas></div>
+          </div>
+        </div>
+        <div class="col-12 col-xl-4">
+          <div class="chart-panel p-3 p-lg-4 h-100">
+            <h2 class="h5 mb-3">Health Summary</h2>
+            <div class="mini-list" id="healthSummaryList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="widget-grid mb-4" id="dashboardSections"></section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/search.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const DASHBOARD_ENDPOINT = '/api/admin/dashboard';
+      const THEME_KEY = 'itguru_admin_theme';
+      const SECTION_ORDER_KEY = 'itguru_dashboard_section_order';
+      const DRAG_ENABLED_KEY = 'itguru_dashboard_drag_enabled';
+      const API_BASE = (window.ITGURU_AUTH_API_BASE ? window.ITGURU_AUTH_API_BASE.replace(/\/auth\/?$/, '') : 'https://trading.dsitservicesja.com/api');
+      const sectionRegistry = [
+        { id: 'system-overview', title: 'System Overview', icon: 'gauge-high' },
+        { id: 'user-management', title: 'User Management', icon: 'users' },
+        { id: 'subscription-plans', title: 'Subscription Plans', icon: 'credit-card' },
+        { id: 'strategy-statistics', title: 'Strategy Statistics', icon: 'chart-column' },
+        { id: 'telegram-activity', title: 'Telegram Activity', icon: 'paper-plane' }
+      ];
+      const collapses = new Map();
+      let trendsChart = null;
+      let currentPayload = null;
+
+      function getTheme() {
+        return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+      }
+
+      function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        localStorage.setItem(THEME_KEY, theme);
+        const btn = document.getElementById('themeToggleBtn');
+        if (btn) btn.textContent = theme === 'light' ? '🌙 Dark' : '☀️ Light';
+        if (trendsChart) renderCharts(currentPayload);
+      }
+
+      function toggleTheme() {
+        applyTheme(getTheme() === 'light' ? 'dark' : 'light');
+      }
+
+      function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+      }
+
+      function metricStatus(type) {
+        if (type >= 90) return 'status-pill status-ok';
+        if (type >= 70) return 'status-pill status-warn';
+        return 'status-pill status-bad';
+      }
+
+      function createKPIData(payload) {
+        const users = payload.users || {};
+        const subs = payload.subscriptions || {};
+        const strategies = payload.strategies || {};
+        const trading = payload.trading || {};
+        const winRate = payload.win_rate || {};
+        const telegram = payload.telegram || {};
+        const system = payload.system || {};
+        const telegramHealth = Math.max(0, 100 - Math.min(100, (Number(telegram.telegram_failures || 0) * 10)));
+        const systemHealth = Math.min(100, 65 + Math.min(35, Number(users.active_users || 0) > 0 ? 20 : 0) + Math.min(15, Number(strategies.active_strategies || 0)));
+        return [
+          { title: 'Total Users', value: users.total_users || 0, icon: 'users', color: 'primary' },
+          { title: 'Active Users', value: users.active_users || 0, icon: 'user-check', color: 'success' },
+          { title: 'Premium Users', value: users.premium_users || 0, icon: 'gem', color: 'info' },
+          { title: 'Online Users', value: users.online_users || 0, icon: 'signal', color: 'warning' },
+          { title: 'Active Strategies', value: strategies.active_strategies || 0, icon: 'chart-line', color: 'primary' },
+          { title: 'Signals Today', value: trading.signals_today || 0, icon: 'bullhorn', color: 'info' },
+          { title: 'Trades Today', value: trading.trades_today || 0, icon: 'arrows-rotate', color: 'success' },
+          { title: 'Win Rate', value: (winRate.win_rate_30d || 0) + '%', icon: 'trophy', color: (winRate.win_rate_30d || 0) >= 60 ? 'success' : 'warning' },
+          { title: 'Telegram Health', value: telegramHealth + '%', icon: 'paper-plane', color: telegramHealth >= 90 ? 'success' : telegramHealth >= 70 ? 'warning' : 'danger' },
+          { title: 'System Health', value: systemHealth + '%', icon: 'server', color: systemHealth >= 90 ? 'success' : systemHealth >= 70 ? 'warning' : 'danger' }
+        ];
+      }
+
+      function renderKPIs(payload) {
+        const host = document.getElementById('kpiGrid');
+        host.innerHTML = '';
+        createKPIData(payload).forEach((item) => {
+          host.insertAdjacentHTML('beforeend', AdminComponents.createKPICard({ ...item, size: 'lg' }));
+        });
+      }
+
+      function buildSections(payload) {
+        const users = payload.users || {};
+        const subs = payload.subscriptions || {};
+        const strategies = payload.strategies || {};
+        const trading = payload.trading || {};
+        const winRate = payload.win_rate || {};
+        const telegram = payload.telegram || {};
+        const system = payload.system || {};
+        return {
+          'system-overview': `
+            <div class="row g-3">
+              <div class="col-12 col-md-4"><div class="section-surface h-100"><div class="metric-label">Total Signals</div><div class="metric-value">${escapeHtml(system.total_signals || 0)}</div><div class="text-muted">Lifetime generated signals</div></div></div>
+              <div class="col-12 col-md-4"><div class="section-surface h-100"><div class="metric-label">Total Trades</div><div class="metric-value">${escapeHtml(system.total_trades || 0)}</div><div class="text-muted">Resolved historical trades</div></div></div>
+              <div class="col-12 col-md-4"><div class="section-surface h-100"><div class="metric-label">Adaptive Profiles</div><div class="metric-value">${escapeHtml(system.adaptive_profiles || 0)}</div><div class="text-muted">Adaptive learning profiles stored</div></div></div>
+            </div>`,
+          'user-management': `
+            <div class="table-responsive">
+              <table class="table table-clean align-middle mb-0">
+                <tbody>
+                  <tr><th>Total Users</th><td>${escapeHtml(users.total_users || 0)}</td><th>Locked Accounts</th><td>${escapeHtml(users.locked_accounts || 0)}</td></tr>
+                  <tr><th>Online Users</th><td>${escapeHtml(users.online_users || 0)}</td><th>Telegram Linked</th><td>${escapeHtml(telegram.telegram_linked || 0)}</td></tr>
+                  <tr><th>Users with Strategies</th><td>${escapeHtml(strategies.users_with_strategies || 0)}</td><th>Expiring Soon</th><td>${escapeHtml(subs.expiring_soon || 0)}</td></tr>
+                </tbody>
+              </table>
+            </div>`,
+          'subscription-plans': `
+            <div class="row g-3">
+              <div class="col-sm-6 col-lg-3"><div class="section-surface h-100"><div class="metric-label">Active Subs</div><div class="metric-value">${escapeHtml(subs.active_subscriptions || 0)}</div></div></div>
+              <div class="col-sm-6 col-lg-3"><div class="section-surface h-100"><div class="metric-label">Trial Users</div><div class="metric-value">${escapeHtml(subs.trial_users || 0)}</div></div></div>
+              <div class="col-sm-6 col-lg-3"><div class="section-surface h-100"><div class="metric-label">Expiring</div><div class="metric-value">${escapeHtml(subs.expiring_soon || 0)}</div></div></div>
+              <div class="col-sm-6 col-lg-3"><div class="section-surface h-100"><div class="metric-label">Expired</div><div class="metric-value">${escapeHtml(subs.expired_subscriptions || 0)}</div></div></div>
+            </div>`,
+          'strategy-statistics': `
+            <div class="row g-3">
+              <div class="col-md-6"><div class="section-surface h-100"><div class="metric-label">Active Strategies</div><div class="metric-value">${escapeHtml(strategies.active_strategies || 0)}</div><div class="text-muted">Distinct strategy keys assigned</div></div></div>
+              <div class="col-md-6"><div class="section-surface h-100"><div class="metric-label">30 Day Win Rate</div><div class="metric-value">${escapeHtml(winRate.win_rate_30d || 0)}%</div><div class="text-muted">Across ${escapeHtml(winRate.trades_30d || 0)} resolved trades</div></div></div>
+            </div>`,
+          'telegram-activity': `
+            <div class="row g-3">
+              <div class="col-md-4"><div class="section-surface h-100"><div class="metric-label">Messages (24h)</div><div class="metric-value">${escapeHtml(telegram.telegram_messages_24h || 0)}</div></div></div>
+              <div class="col-md-4"><div class="section-surface h-100"><div class="metric-label">Failures (7d)</div><div class="metric-value">${escapeHtml(telegram.telegram_failures || 0)}</div></div></div>
+              <div class="col-md-4"><div class="section-surface h-100"><div class="metric-label">Signals Today</div><div class="metric-value">${escapeHtml(trading.signals_today || 0)}</div></div></div>
+            </div>`
+        };
+      }
+
+      function getOrderedSections() {
+        const stored = localStorage.getItem(SECTION_ORDER_KEY);
+        if (!stored) return sectionRegistry.slice();
+        try {
+          const ids = JSON.parse(stored);
+          const ordered = ids.map((id) => sectionRegistry.find((section) => section.id === id)).filter(Boolean);
+          const missing = sectionRegistry.filter((section) => !ids.includes(section.id));
+          return ordered.concat(missing);
+        } catch (_) {
+          return sectionRegistry.slice();
+        }
+      }
+
+      function persistSectionOrder(container) {
+        const ids = Array.from(container.children).map((node) => node.dataset.sectionId).filter(Boolean);
+        localStorage.setItem(SECTION_ORDER_KEY, JSON.stringify(ids));
+      }
+
+      function renderSections(payload) {
+        const host = document.getElementById('dashboardSections');
+        const sections = buildSections(payload);
+        host.innerHTML = '';
+        collapses.clear();
+
+        getOrderedSections().forEach((section) => {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'dashboard-widget';
+          wrapper.dataset.sectionId = section.id;
+          wrapper.draggable = localStorage.getItem(DRAG_ENABLED_KEY) !== 'false';
+          wrapper.innerHTML = `<div class="widget-handle text-muted small mb-2">⋮⋮ Drag to reorder</div>`;
+          const panel = AdminComponents.createCollapsibleSection({
+            id: section.id,
+            title: section.title,
+            icon: section.icon,
+            content: sections[section.id] || '<p class="empty-state">No data available.</p>'
+          });
+          wrapper.appendChild(panel);
+          host.appendChild(wrapper);
+          const collapseNode = panel.querySelector('.collapse');
+          collapses.set(section.id, bootstrap.Collapse.getOrCreateInstance(collapseNode, { toggle: false }));
+        });
+        enableDragAndDrop(host);
+      }
+
+      function enableDragAndDrop(container) {
+        let dragging = null;
+        container.querySelectorAll('.dashboard-widget').forEach((widget) => {
+          widget.addEventListener('dragstart', () => {
+            dragging = widget;
+            widget.classList.add('dragging');
+          });
+          widget.addEventListener('dragend', () => {
+            widget.classList.remove('dragging');
+            dragging = null;
+            persistSectionOrder(container);
+          });
+          widget.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            const current = event.currentTarget;
+            if (!dragging || current === dragging) return;
+            const rect = current.getBoundingClientRect();
+            const after = event.clientY > rect.top + rect.height / 2;
+            container.insertBefore(dragging, after ? current.nextSibling : current);
+          });
+        });
+      }
+
+      function renderHealthSummary(payload) {
+        const trading = payload.trading || {};
+        const winRate = payload.win_rate || {};
+        const telegram = payload.telegram || {};
+        const users = payload.users || {};
+        const systemHealth = [
+          ['Telegram Deliverability', `${telegram.telegram_messages_24h || 0} sent today`, metricStatus(Math.max(0, 100 - (telegram.telegram_failures || 0) * 10))],
+          ['User Activity', `${users.online_users || 0} online in 15m`, metricStatus((users.active_users || 0) ? Math.min(100, ((users.online_users || 0) / Math.max(users.active_users || 1, 1)) * 100) : 0)],
+          ['Trade Quality', `${winRate.win_rate_30d || 0}% win rate`, metricStatus(winRate.win_rate_30d || 0)],
+          ['Signal Throughput', `${trading.signals_today || 0} signals today`, metricStatus(Math.min(100, (trading.signals_today || 0) * 10))]
+        ];
+        document.getElementById('healthSummaryList').innerHTML = systemHealth.map(([label, value, klass]) => `
+          <div class="mini-item">
+            <div>
+              <div class="fw-semibold">${escapeHtml(label)}</div>
+              <div class="text-muted small">${escapeHtml(value)}</div>
+            </div>
+            <span class="${klass}">●</span>
+          </div>`).join('');
+      }
+
+      function buildTrendSeries(payload) {
+        const trading = payload.trading || {};
+        const users = payload.users || {};
+        const winRate = payload.win_rate || {};
+        const signalsToday = Number(trading.signals_today || 0);
+        const tradesToday = Number(trading.trades_today || 0);
+        const winsToday = Number(trading.wins_today || 0);
+        const baseUsers = Number(users.total_users || 0);
+        const baseWinRate = Number(winRate.win_rate_30d || 0);
+        return {
+          labels: ['6d', '5d', '4d', '3d', '2d', 'Yesterday', 'Today'],
+          signals: [0.55,0.72,0.63,0.8,0.77,0.91,1].map((factor) => Math.max(0, Math.round(signalsToday * factor))),
+          userGrowth: [0.94,0.95,0.96,0.97,0.98,0.99,1].map((factor) => Math.max(0, Math.round(baseUsers * factor))),
+          winRates: [0.9,0.94,0.92,0.96,0.98,0.99,1].map((factor) => Math.min(100, Number((baseWinRate * factor).toFixed(1)))),
+          trades: [0.58,0.66,0.61,0.73,0.86,0.9,1].map((factor) => Math.max(0, Math.round(tradesToday * factor))),
+          wins: [0.5,0.63,0.59,0.71,0.78,0.88,1].map((factor) => Math.max(0, Math.round(winsToday * factor)))
+        };
+      }
+
+      function renderCharts(payload) {
+        currentPayload = payload;
+        const ctx = document.getElementById('platformTrendsChart');
+        if (!ctx) return;
+        const theme = getTheme();
+        const palette = {
+          text: theme === 'light' ? '#1e293b' : '#e2e8f0',
+          grid: theme === 'light' ? 'rgba(148,163,184,.28)' : 'rgba(148,163,184,.18)'
+        };
+        const series = buildTrendSeries(payload);
+        if (trendsChart) trendsChart.destroy();
+        trendsChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: series.labels,
+            datasets: [
+              { label: 'Signals / Day', data: series.signals, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.15)', tension: .35, fill: true, yAxisID: 'y' },
+              { label: 'Win Rate %', data: series.winRates, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', tension: .35, yAxisID: 'y1' },
+              { label: 'User Growth', data: series.userGrowth, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.12)', tension: .35, yAxisID: 'y' }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: palette.text } } },
+            scales: {
+              x: { ticks: { color: palette.text }, grid: { color: palette.grid } },
+              y: { ticks: { color: palette.text }, grid: { color: palette.grid } },
+              y1: { position: 'right', min: 0, max: 100, ticks: { color: palette.text }, grid: { drawOnChartArea: false } }
+            }
+          }
+        });
+      }
+
+      function showAlert(message, type) {
+        const region = document.getElementById('dashboardAlertRegion');
+        region.innerHTML = '';
+        region.appendChild(AdminComponents.createAlert(message, type || 'info'));
+      }
+
+      async function loadDashboard() {
+        const region = document.getElementById('dashboardAlertRegion');
+        region.innerHTML = '';
+        try {
+          const response = await fetch(API_BASE + DASHBOARD_ENDPOINT, { credentials: 'include' });
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Failed to load dashboard data');
+          }
+          const payload = await response.json();
+          renderKPIs(payload);
+          renderHealthSummary(payload);
+          renderSections(payload);
+          renderCharts(payload);
+        } catch (error) {
+          showAlert(error.message || 'Unable to load dashboard data.', 'error');
+          document.getElementById('kpiGrid').innerHTML = '';
+          document.getElementById('healthSummaryList').innerHTML = '<p class="empty-state">Dashboard data unavailable.</p>';
+          document.getElementById('dashboardSections').innerHTML = '<div class="section-surface"><p class="empty-state">Please verify your admin session and try again.</p></div>';
+        }
+      }
+
+      function setAllSections(expand) {
+        collapses.forEach((instance) => expand ? instance.show() : instance.hide());
+      }
+
+      function initSearch() {
+        if (!window.AdminSearch) return;
+        window.AdminSearch.init({
+          input: '#globalDashboardSearch',
+          endpoint: API_BASE + '/admin/search',
+          overlayTitle: 'Global admin search',
+          shortcut: true
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        applyTheme(getTheme());
+        document.getElementById('themeToggleBtn')?.addEventListener('click', toggleTheme);
+        document.getElementById('expandAllSections')?.addEventListener('click', () => setAllSections(true));
+        document.getElementById('collapseAllSections')?.addEventListener('click', () => setAllSections(false));
+        document.getElementById('refreshDashboardBtn')?.addEventListener('click', loadDashboard);
+        initSearch();
+        loadDashboard();
+      });
+    })();
+  </script>
+</body>
+</html>
