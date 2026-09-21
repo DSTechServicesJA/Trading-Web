@@ -12013,6 +12013,7 @@ function buildSessionRangeTelegramCaption(signalType) {
 
 async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
   if (!telegramSessionRangeOutcomeSend) return;
+  if (resolvedTrade._stratOutcomeSent) return;  /* Already sent */
   if (resolvedTrade.result && !canSendTradeResolutionNotification(resolvedTrade, resolvedTrade.result)) return;
 
   /* Sync credentials from DOM */
@@ -12075,6 +12076,7 @@ async function sendSessionRangeOutcomeTelegram(resolvedTrade, panelSymbol) {
     lines.push(`<i>${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC</i>`);
 
     await sendTelegramMessage(lines.join("\n"));
+    resolvedTrade._stratOutcomeSent = true;
     addLog(`📤 Telegram: Session Range outcome (${result}) sent`);
   } catch (err) {
     addLog(`📤 Session Range outcome Telegram error: ${err.message}`);
@@ -17860,7 +17862,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry - risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
+        sessionRangeTrade = { entry, sl, tp, dir: "BEAR", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", strategyType: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -17926,7 +17928,7 @@ function detectLondonAsianSweep() {
         const userReward = parseFloat(UI.rewardInput  && UI.rewardInput.value) || 2;
         const rr  = userReward / userRisk;
         const tp  = entry + risk * rr;
-        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
+        sessionRangeTrade = { entry, sl, tp, dir: "BULL", rr, entryIdx: i, candleIdx: i, symbol: getActiveSymbol(), result: "PENDING", epoch: c.epoch, type: "session_range", strategyType: "session_range", _stratOutcomeSent: false, _sentViaTelegram: false };
 
         /* Push to history for strategy alerts panel */
         sessionRangeHistory.unshift(sessionRangeTrade);
@@ -17979,14 +17981,12 @@ function resetSessionRanges() {
 
 function monitorSessionRangeTradeOutcome(candle) {
   if (!sessionRangesEnabled || !sessionRangeTrade) return;
-  if (sessionRangeTrade.result && sessionRangeTrade.result !== "PENDING") return;
+  if (sessionRangeTrade.result !== "PENDING") return;
 
   const srt = sessionRangeTrade;
 
   /* Track 1R profit level and fire exit alert if price reverses to entry */
-  if (srt.result === "PENDING") {
-    _checkProfitExitAlert(srt, candle, "Session Range");
-  }
+  _checkProfitExitAlert(srt, candle, "Session Range");
 
   let result = null;
 
@@ -18038,11 +18038,13 @@ function monitorSessionRangeTradeOutcome(candle) {
   }
   renderStrategyAlerts();
 
-  /* Send dedicated session range outcome via the session-range Telegram channel */
-  if (telegramSessionRangeOutcomeSend && !_historicalProcessing) {
+   /* Send dedicated session range outcome via the session-range Telegram channel */
+  if (telegramSessionRangeOutcomeSend && !_historicalProcessing && !srt._stratOutcomeSent) {
     const resolvedTrade = { ...srt, result };
+    resolvedTrade._stratOutcomeSent = false;  /* Reset to allow sendSessionRangeOutcomeTelegram to mark it */
     const currentPanelSymbol = _multiPanelProcessing || null;
     setTimeout(() => sendSessionRangeOutcomeTelegram(resolvedTrade, currentPanelSymbol), 100);
+    srt._stratOutcomeSent = true;  /* Mark immediately to prevent duplicate calls in same tick */
   }
 
   /* Auto-reset: clear the trade so the session can continue.
