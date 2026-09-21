@@ -135,20 +135,53 @@ const ITGuruAuth = (() => {
 
   /** Get stored auth token */
   function getToken() {
-    return sessionStorage.getItem(SESSION_KEY) || "";
+    let token = sessionStorage.getItem(SESSION_KEY);
+    
+    /* Restore persisted session from localStorage (Remember Me) if sessionStorage is empty */
+    if (!token && localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+      const persisted = localStorage.getItem(PERSIST_TOKEN_KEY);
+      if (persisted) {
+        token = persisted;
+        sessionStorage.setItem(SESSION_KEY, persisted);
+        const pUser = localStorage.getItem(PERSIST_USER_KEY);
+        if (pUser) sessionStorage.setItem(USER_KEY, pUser);
+        const pStrat = localStorage.getItem(PERSIST_STRAT_KEY);
+        if (pStrat) sessionStorage.setItem(STRATEGIES_KEY, pStrat);
+      }
+    }
+    
+    return token || "";
   }
 
   /** Get stored user info */
   function getUser() {
     try {
-      return JSON.parse(sessionStorage.getItem(USER_KEY) || "null");
+      let user = sessionStorage.getItem(USER_KEY);
+      /* Restore persisted user from localStorage (Remember Me) if sessionStorage is empty */
+      if (!user && localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+        const pUser = localStorage.getItem(PERSIST_USER_KEY);
+        if (pUser) {
+          sessionStorage.setItem(USER_KEY, pUser);
+          user = pUser;
+        }
+      }
+      return JSON.parse(user || "null");
     } catch { return null; }
   }
 
   /** Get granted strategy keys for the current user */
   function getStrategies() {
     try {
-      return JSON.parse(sessionStorage.getItem(STRATEGIES_KEY) || "[]");
+      let strat = sessionStorage.getItem(STRATEGIES_KEY);
+      /* Restore persisted strategies from localStorage (Remember Me) if sessionStorage is empty */
+      if (!strat && localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+        const pStrat = localStorage.getItem(PERSIST_STRAT_KEY);
+        if (pStrat) {
+          sessionStorage.setItem(STRATEGIES_KEY, pStrat);
+          strat = pStrat;
+        }
+      }
+      return JSON.parse(strat || "[]");
     } catch { return []; }
   }
 
