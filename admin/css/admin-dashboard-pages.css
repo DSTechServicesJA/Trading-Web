@@ -1,0 +1,26 @@
+body { min-height: 100vh; }
+.dashboard-navbar { backdrop-filter: blur(12px); background: color-mix(in srgb, var(--bg-primary) 82%, transparent); border-bottom: 1px solid var(--border-color); }
+.dashboard-brand { font-weight: 800; letter-spacing: .02em; }
+.dashboard-search { min-width: min(100%, 340px); position: relative; }
+.dashboard-search .search-shortcut { position: absolute; right: .75rem; top: 50%; transform: translateY(-50%); font-size: .75rem; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: .375rem; padding: .1rem .35rem; background: var(--bg-secondary); }
+.hero-card, .section-surface, .chart-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 1rem; box-shadow: 0 10px 30px var(--shadow); }
+.hero-card { padding: 1.5rem; }
+.chart-canvas { position: relative; min-height: 280px; }
+.metric-label { color: var(--text-secondary); font-size: .875rem; }
+.metric-value { font-size: 2rem; font-weight: 800; }
+.mini-list { display: grid; gap: .75rem; }
+.mini-item { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: .75rem; }
+.mini-item:last-child { border-bottom: none; padding-bottom: 0; }
+.status-pill { display: inline-flex; align-items: center; gap: .4rem; border-radius: 999px; padding: .35rem .7rem; font-size: .8rem; font-weight: 600; }
+.status-ok { background: rgba(16,185,129,.14); color: var(--success); }
+.status-warn { background: rgba(245,158,11,.14); color: var(--warning); }
+.status-bad { background: rgba(239,68,68,.14); color: var(--danger); }
+.nav-tabs { border-bottom-color: var(--border-color); }
+.nav-tabs .nav-link { color: var(--text-secondary); border: 1px solid transparent; }
+.nav-tabs .nav-link.active { color: var(--text-primary); background: var(--bg-secondary); border-color: var(--border-color) var(--border-color) var(--bg-secondary); }
+.accordion-button { background: var(--bg-secondary); color: var(--text-primary); }
+.accordion-button:not(.collapsed) { background: color-mix(in srgb, var(--primary) 12%, var(--bg-secondary)); color: var(--text-primary); box-shadow: none; }
+.accordion-button:focus { box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
+.progress { background: var(--bg-primary); }
+code { color: var(--text-primary); }
+@media (max-width: 991.98px) { .dashboard-navbar .navbar-collapse { padding-top: 1rem; } .dashboard-search { width: 100%; } }
