@@ -55,11 +55,16 @@ try {
     elseif ($method === 'POST') {
         // Perform bulk action
         $body = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($body)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid JSON body']);
+            exit;
+        }
 
         if (!isset($body['action'])) {
             if (!isset($body['username'], $body['password'], $body['email'])) {
                 http_response_code(400);
-                echo json_encode(['error' => 'action is required']);
+                echo json_encode(['error' => 'username, password, and email are required']);
                 exit;
             }
 
@@ -162,6 +167,11 @@ try {
     elseif ($method === 'PUT') {
         // Update single user
         $body = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($body)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid JSON body']);
+            exit;
+        }
         
         // Extract user_id from URL path or body
         $user_id = null;
