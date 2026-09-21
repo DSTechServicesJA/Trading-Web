@@ -186,31 +186,66 @@ const AuditTrailExport = (() => {
     }
     
     /**
-     * Get audit trail data from table or API
+     * Get audit trail data from list or API
      */
     function getAuditTrailData() {
         const rows = [];
         
-        // Try to get from visible table rows
-        const table = document.querySelector('[data-audit-trail-table]');
-        if (table) {
-            table.querySelectorAll('tbody tr').forEach(tr => {
-                const cells = tr.querySelectorAll('td');
-                if (cells.length >= 9) {
+        // Try to get from audit list (new structure)
+        const auditList = document.getElementById('auditList');
+        if (auditList) {
+            auditList.querySelectorAll('.audit-entry').forEach(entry => {
+                const header = entry.querySelector('.audit-header');
+                const values = entry.querySelector('.audit-values');
+                const details = entry.querySelector('.audit-details');
+                
+                if (header && values) {
+                    // Extract data from the audit entry
+                    const adminEl = header.querySelector('[data-admin]');
+                    const timestampEl = header.querySelector('[data-timestamp]');
+                    const actionEl = entry.querySelector('.audit-action');
+                    
+                    const oldValueEls = values.querySelectorAll('[data-old-value]');
+                    const newValueEls = values.querySelectorAll('[data-new-value]');
+                    
                     rows.push({
-                        id: cells[0].textContent.trim(),
-                        admin_name: cells[1].textContent.trim(),
-                        action: cells[2].textContent.trim(),
-                        entity_type: cells[3].textContent.trim(),
-                        entity_id: cells[4].textContent.trim(),
-                        old_value: cells[5].textContent.trim(),
-                        new_value: cells[6].textContent.trim(),
-                        ip_address: cells[7].textContent.trim(),
-                        status: cells[8].textContent.trim(),
-                        timestamp: cells[9] ? cells[9].textContent.trim() : ''
+                        id: entry.getAttribute('data-entry-id') || '',
+                        admin_name: adminEl ? adminEl.textContent.trim() : '',
+                        action: actionEl ? actionEl.textContent.trim() : '',
+                        entity_type: entry.getAttribute('data-entity-type') || '',
+                        entity_id: entry.getAttribute('data-entity-id') || '',
+                        old_value: oldValueEls.length > 0 ? oldValueEls[0].textContent.trim() : '',
+                        new_value: newValueEls.length > 0 ? newValueEls[0].textContent.trim() : '',
+                        ip_address: entry.getAttribute('data-ip-address') || '',
+                        status: entry.getAttribute('data-status') || 'completed',
+                        timestamp: timestampEl ? timestampEl.textContent.trim() : ''
                     });
                 }
             });
+        }
+        
+        // Fallback: try to get from table if it exists
+        if (rows.length === 0) {
+            const table = document.querySelector('[data-audit-trail-table]');
+            if (table) {
+                table.querySelectorAll('tbody tr').forEach(tr => {
+                    const cells = tr.querySelectorAll('td');
+                    if (cells.length >= 9) {
+                        rows.push({
+                            id: cells[0].textContent.trim(),
+                            admin_name: cells[1].textContent.trim(),
+                            action: cells[2].textContent.trim(),
+                            entity_type: cells[3].textContent.trim(),
+                            entity_id: cells[4].textContent.trim(),
+                            old_value: cells[5].textContent.trim(),
+                            new_value: cells[6].textContent.trim(),
+                            ip_address: cells[7].textContent.trim(),
+                            status: cells[8].textContent.trim(),
+                            timestamp: cells[9] ? cells[9].textContent.trim() : ''
+                        });
+                    }
+                });
+            }
         }
         
         return { rows };

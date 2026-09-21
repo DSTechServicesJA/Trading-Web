@@ -217,9 +217,11 @@
                 <p class="text-muted mb-0">Track all administrative actions and changes</p>
             </div>
             <div class="col-md-6 text-end">
-                <button class="btn btn-primary" id="exportBtn">
-                    <i class="fas fa-download me-2"></i>Export
-                </button>
+                <div data-audit-trail-controls>
+                    <button class="btn btn-primary" id="exportBtn">
+                        <i class="fas fa-download me-2"></i>Export
+                    </button>
+                </div>
                 <button class="btn btn-secondary" id="refreshBtn">
                     <i class="fas fa-sync me-2"></i>Refresh
                 </button>
@@ -317,7 +319,8 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWbSxccPQtF3EpF3fnJHog6LaEVF6+rWBdXKvP+yPf7cqIIxIw" crossorigin="anonymous"></script>
     <script src="./js/components.js"></script>
-    
+    <script src="./js/audit-trail-export.js"></script>
+     
     <script>
         let currentPage = 1;
         const perPage = 25;
