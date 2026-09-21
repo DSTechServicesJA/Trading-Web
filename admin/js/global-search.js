@@ -173,6 +173,7 @@ const GlobalSearch = (() => {
         }
 
         let html = '';
+        const linkRegistry = [];
         
         // Define result type metadata
         const typeMetadata = {
@@ -202,12 +203,12 @@ const GlobalSearch = (() => {
             `;
 
             items.slice(0, 5).forEach(item => {
-                const safeLink = htmlEscape(item.link || '#');
                 const safeTitle = htmlEscape(item.title || item.name || 'Untitled');
                 const safeSubtitle = htmlEscape(item.subtitle || item.email || '');
                 const safeMeta = htmlEscape(item.meta || '');
+                const linkIndex = linkRegistry.push(item.link || '#') - 1;
                 html += `
-                    <div class="search-result-item" data-search-link="${safeLink}" data-search-query="${htmlEscape(query)}">
+                    <div class="search-result-item" data-search-link-index="${linkIndex}" data-search-query="${htmlEscape(query)}">
                         <div class="result-icon" style="color: ${meta.color};">
                             <i class="fas ${meta.icon}"></i>
                         </div>
@@ -228,9 +229,11 @@ const GlobalSearch = (() => {
         });
 
         resultsContainer.innerHTML = html;
-        resultsContainer.querySelectorAll('[data-search-link]').forEach((node) => {
+        resultsContainer.querySelectorAll('[data-search-link-index]').forEach((node) => {
             node.addEventListener('click', () => {
-                selectResult(node.getAttribute('data-search-link') || '#', node.getAttribute('data-search-query') || '');
+                const idx = Number(node.getAttribute('data-search-link-index'));
+                const link = Number.isFinite(idx) ? (linkRegistry[idx] || '#') : '#';
+                selectResult(link, node.getAttribute('data-search-query') || '');
             });
         });
     }
@@ -333,7 +336,18 @@ const GlobalSearch = (() => {
         saveRecentSearch(query);
         closeSearch();
         if (link && link !== '#') {
-            window.location.href = link;
+            try {
+                const target = new URL(link, window.location.origin);
+                if (target.origin !== window.location.origin) {
+                    return;
+                }
+                if (!['http:', 'https:'].includes(target.protocol)) {
+                    return;
+                }
+                window.location.href = `${target.pathname}${target.search}${target.hash}`;
+            } catch (_) {
+                // Ignore malformed links.
+            }
         }
     }
 

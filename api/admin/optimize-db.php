@@ -15,6 +15,16 @@ require_once(__DIR__ . '/../lib/AuthGuard.php');
 try {
     // Verify admin access
     $admin = AuthGuard::requireAdmin();
+    $allowedIdsRaw = trim((string) env('ADMIN_DB_OPTIMIZER_ALLOWED_IDS', '1'));
+    $allowedAdminIds = array_values(array_filter(array_map('intval', explode(',', $allowedIdsRaw))));
+    if (empty($allowedAdminIds)) {
+        $allowedAdminIds = [1];
+    }
+    if (!in_array((int) $admin['id'], $allowedAdminIds, true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Database optimization requires super admin privileges']);
+        exit;
+    }
     
     $db = Database::getInstance();
     $conn = $db->getConnection();

@@ -32,8 +32,14 @@ try {
     $params = [];
     
     if ($level) {
+        $normalizedLevel = strtolower($level);
+        if (!in_array($normalizedLevel, ['error', 'info'], true)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Unsupported level filter. Use info or error.']);
+            exit;
+        }
         $where .= " AND status = :level";
-        $params[':level'] = strtolower($level) === 'error' ? 'failed' : 'success';
+        $params[':level'] = $normalizedLevel === 'error' ? 'failed' : 'success';
     }
     
     if ($source) {
@@ -94,11 +100,12 @@ try {
         SELECT 
             COUNT(*) as total_logs,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as error_count,
-        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as warning_count,
+        0 as warning_count,
             MIN(created_at) as earliest_log,
             MAX(created_at) as latest_log
     FROM admin_audit_trail
-    ");
+    $where
+    ", $params);
     
     echo json_encode([
         'success' => true,
@@ -120,7 +127,7 @@ try {
         'stats' => [
             'total_logs' => (int) $stats['total_logs'],
             'error_count' => (int) $stats['error_count'],
-            'warning_count' => (int) $stats['warning_count'],
+            'warning_count' => 0,
             'earliest_log' => $stats['earliest_log'],
             'latest_log' => $stats['latest_log']
         ],

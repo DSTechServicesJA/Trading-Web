@@ -28,8 +28,8 @@ test('service worker does not cache non-GET requests and uses Promise.all for in
   assert.match(source, /Promise\.all\(STATIC_ASSETS\.map/);
 });
 
-test('performance API stays PHP 7.4 compatible and avoids api_request_logs dependency', () => {
+test('performance API stays PHP 7.4 compatible and reports unsupported response-time data explicitly', () => {
   const source = read('api/admin/performance.php');
   assert.equal(source.includes('match($interval)'), false);
-  assert.equal(source.includes('FROM api_request_logs'), false);
+  assert.equal(source.includes("'supported' => false"), true);
 });

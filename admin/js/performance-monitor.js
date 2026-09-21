@@ -264,9 +264,13 @@ const AdminPerformanceMonitor = (() => {
                 const token = window.ITGuruAuth?.getToken?.()
                     || localStorage.getItem('itguru_auth_token')
                     || localStorage.getItem('auth_token');
-                await fetch('/api/admin/performance?action=summary', {
-                    method: 'GET',
-                    headers: token ? { 'Authorization': ['Be', 'arer '].join('') + token } : {}
+                await fetch('/api/admin/performance', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': ['Be', 'arer '].join('') + token } : {})
+                    },
+                    body: JSON.stringify(report)
                 });
             }
         } catch (error) {

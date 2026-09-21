@@ -19,6 +19,7 @@ try {
     $admin = AuthGuard::requireAdmin();
     $db = Database::getInstance();
     $pdo = $db->getConnection();
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     
     $action = $_GET['action'] ?? 'summary';
     $tableExists = static function (string $table) use ($pdo): bool {
@@ -31,7 +32,28 @@ try {
         return ((int) $stmt->fetchColumn()) > 0;
     };
     
-    if ($action === 'summary') {
+    if ($method === 'POST') {
+        $payload = json_decode(file_get_contents('php://input'), true);
+        if (!is_array($payload)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid JSON payload']);
+            exit;
+        }
+
+        $db->execute("
+            INSERT INTO admin_audit_trail
+            (admin_id, action, entity_type, entity_id, new_value, ip_address, user_agent, status, created_at)
+            VALUES (:admin_id, 'performance_reported', 'performance', 'client', :new_value, :ip, :ua, 'success', NOW())
+        ", [
+            ':admin_id' => (int) $admin['id'],
+            ':new_value' => json_encode($payload),
+            ':ip' => $_SERVER['REMOTE_ADDR'] ?? null,
+            ':ua' => $_SERVER['HTTP_USER_AGENT'] ?? null
+        ]);
+
+        echo json_encode(['success' => true]);
+    }
+    elseif ($action === 'summary') {
         // Get summary of all performance metrics
         
         // Server info
@@ -66,17 +88,17 @@ try {
         )['cnt'];
         
         // Active API requests (from last 30 seconds)
-        $active_requests = $tableExists('admin_audit_trail')
+        $active_requests = $tableExists('api_request_logs')
             ? ($db->fetchOne("
-                SELECT COUNT(*) as cnt FROM admin_audit_trail 
-                WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 SECOND)
+                SELECT COUNT(*) as cnt FROM api_request_logs 
+                WHERE status = 'PROCESSING' AND created_at > DATE_SUB(NOW(), INTERVAL 30 SECOND)
             ")['cnt'] ?? 0)
             : 0;
         
         // Telegram queue
-        $telegram_queue = $tableExists('telegram_delivery_log')
+        $telegram_queue = $tableExists('telegram_message_queue')
             ? ($db->fetchOne(
-                "SELECT COUNT(*) as cnt FROM telegram_delivery_log WHERE status = 'failed' AND sent_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+                "SELECT COUNT(*) as cnt FROM telegram_message_queue WHERE status = 'QUEUED'"
             )['cnt'] ?? 0)
             : 0;
         
@@ -198,23 +220,34 @@ try {
             $time_range = '24 HOUR';
         }
 
-        $data = $tableExists('admin_audit_trail') ? $db->fetchAll("
+        if (!$tableExists('api_request_logs')) {
+            echo json_encode([
+                'success' => true,
+                'interval' => $interval,
+                'supported' => false,
+                'data' => []
+            ]);
+            exit;
+        }
+
+        $data = $db->fetchAll("
             SELECT 
                 $group_format as time_bucket,
-                0 as avg_time,
-                0 as max_time,
-                0 as min_time,
+                AVG(response_time_ms) as avg_time,
+                MAX(response_time_ms) as max_time,
+                MIN(response_time_ms) as min_time,
                 COUNT(*) as request_count,
-                0 as slow_requests
-            FROM admin_audit_trail
-            WHERE created_at > DATE_SUB(NOW(), INTERVAL $time_range)
+                SUM(CASE WHEN response_time_ms > 1000 THEN 1 ELSE 0 END) as slow_requests
+            FROM api_request_logs
+            WHERE created_at > DATE_SUB(NOW(), INTERVAL $time_range) AND status = 'COMPLETED'
             GROUP BY time_bucket
             ORDER BY time_bucket DESC
-        ") : [];
+        ");
         
         echo json_encode([
             'success' => true,
             'interval' => $interval,
+            'supported' => true,
             'data' => array_map(function($d) {
                 return [
                     'time' => $d['time_bucket'],
