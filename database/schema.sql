@@ -843,3 +843,118 @@ CREATE TABLE IF NOT EXISTS grid_scalper_ma_signals (
     CONSTRAINT fk_grid_scalper_user
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────────────────────────────────────
+-- ADMIN DASHBOARD REDESIGN TABLES
+-- ──────────────────────────────────────────────────────────────────────────────
+
+-- ──────────────────────────────────────────────
+-- Admin dashboard layout preferences
+-- Stores personalized dashboard configuration per admin user
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_dashboard_preferences (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    admin_id        INT UNSIGNED NOT NULL,
+    layout_name     VARCHAR(100) DEFAULT 'default',
+    widgets_json    LONGTEXT NOT NULL,
+    collapsed_sections JSON DEFAULT NULL,
+    theme           ENUM('dark','light') NOT NULL DEFAULT 'dark',
+    is_default      TINYINT(1) NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY uq_admin_layout (admin_id, layout_name),
+    INDEX idx_adp_admin (admin_id),
+    INDEX idx_adp_default (is_default),
+    
+    CONSTRAINT fk_adp_admin_id
+        FOREIGN KEY (admin_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Admin audit trail
+-- Tracks all administrative actions for compliance and debugging
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_audit_trail (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    admin_id        INT UNSIGNED NOT NULL,
+    action          VARCHAR(50) NOT NULL,
+    entity_type     VARCHAR(50) NOT NULL,
+    entity_id       VARCHAR(100) DEFAULT NULL,
+    old_value       LONGTEXT DEFAULT NULL,
+    new_value       LONGTEXT DEFAULT NULL,
+    ip_address      VARCHAR(45) DEFAULT NULL,
+    user_agent      VARCHAR(255) DEFAULT NULL,
+    status          ENUM('success','failed') NOT NULL DEFAULT 'success',
+    error_message   TEXT DEFAULT NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_aat_admin (admin_id),
+    INDEX idx_aat_action (action),
+    INDEX idx_aat_entity (entity_type, entity_id),
+    INDEX idx_aat_created (created_at),
+    
+    CONSTRAINT fk_aat_admin_id
+        FOREIGN KEY (admin_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Admin impersonation log
+-- Tracks when super admins impersonate users for security
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_impersonation_log (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    admin_id        INT UNSIGNED NOT NULL,
+    user_id         INT UNSIGNED NOT NULL,
+    ip_address      VARCHAR(45) DEFAULT NULL,
+    user_agent      VARCHAR(255) DEFAULT NULL,
+    reason          VARCHAR(255) DEFAULT NULL,
+    started_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at        TIMESTAMP DEFAULT NULL,
+    
+    INDEX idx_ail_admin (admin_id),
+    INDEX idx_ail_user (user_id),
+    INDEX idx_ail_started (started_at),
+    
+    CONSTRAINT fk_ail_admin_id
+        FOREIGN KEY (admin_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ail_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Admin notifications center
+-- Aggregates system errors, warnings, and events
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_notifications_center (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    notification_type ENUM('error','warning','info','success') NOT NULL DEFAULT 'info',
+    category        VARCHAR(50) NOT NULL,
+    title           VARCHAR(255) NOT NULL,
+    message         TEXT NOT NULL,
+    severity        ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
+    source_entity   VARCHAR(50) DEFAULT NULL,
+    source_id       VARCHAR(100) DEFAULT NULL,
+    related_data    JSON DEFAULT NULL,
+    is_read         TINYINT(1) NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_anc_type (notification_type),
+    INDEX idx_anc_category (category),
+    INDEX idx_anc_severity (severity),
+    INDEX idx_anc_read (is_read),
+    INDEX idx_anc_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ──────────────────────────────────────────────
+-- Performance indexes for existing tables
+-- These improve query performance for admin dashboard
+-- ──────────────────────────────────────────────
+-- Add these if they don't already exist:
+-- ALTER TABLE users ADD INDEX idx_users_subscription_status (subscription_status);
+-- ALTER TABLE users ADD INDEX idx_users_role_status (role, status);
+-- ALTER TABLE strategy_access ADD INDEX idx_sa_user_strategy (user_id, strategy_key);
+-- ALTER TABLE user_notifications ADD INDEX idx_un_user_created (user_id, created_at);
+-- ALTER TABLE telegram_delivery_log ADD INDEX idx_tdl_user_created (user_id, created_at);
+-- ALTER TABLE adaptive_learning_profiles ADD INDEX idx_alp_user_strategy (user_id, strategy_type);
+-- ALTER TABLE adaptive_metric_snapshots ADD INDEX idx_ams_user_timestamp (user_id, capture_timestamp);
