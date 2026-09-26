@@ -56,6 +56,7 @@ try {
     /* Check subscription expiry */
     if ($user['subscription_expires_at'] !== null
         && strtotime($user['subscription_expires_at']) < time()
+        && ($user['role'] ?? 'user') !== 'admin'
     ) {
         jsonResponse(['error' => 'Your subscription has expired. Please renew to regain access.'], 403);
     }
