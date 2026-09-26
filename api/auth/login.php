@@ -70,13 +70,13 @@ try {
     /* ── Fetch granted strategies ── */
     $strategies = fetchUserStrategies($pdo, (int) $user['id']);
 
-    /* ── Issue JWT (8-hour expiry) ── */
+    /* ── Issue JWT (24-hour expiry) ── */
     $token = jwtEncode([
         'sub'      => $user['id'],
         'username' => $user['username'],
         'role'     => $user['role'] ?? 'user',
         'iat'      => time(),
-        'exp'      => time() + 28800,
+        'exp'      => time() + 86400,
     ]);
 
     jsonResponse([

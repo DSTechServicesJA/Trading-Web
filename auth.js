@@ -231,7 +231,9 @@ const ITGuruAuth = (() => {
     }
 
     checkNotifications();
+    startAutoRefresh();  /* Begin automatic token refresh */
     return data;
+
   }
 
   /** Register a new account */
@@ -324,6 +326,114 @@ const ITGuruAuth = (() => {
   }
 
   /**
+   * Refresh JWT token to extend session lifetime.
+   * Silently extends the current session without user interaction.
+   * Returns true if refresh was successful, false otherwise.
+   */
+  async function refreshToken() {
+    const token = getToken();
+    if (!token) return false;
+
+    try {
+      const resp = await authFetch("refresh", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        }
+      });
+
+      const data = await safeJson(resp);
+
+      if (!resp.ok) {
+        /* Token refresh failed — likely token is expired */
+        if (resp.status === 401 || resp.status === 403) {
+          /* Session expired — clear stale session */
+          sessionStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem(USER_KEY);
+          sessionStorage.removeItem(STRATEGIES_KEY);
+          /* Show login overlay + expiration message */
+          showSessionExpired("Your session has expired. Please sign in again.");
+          return false;
+        }
+        return false;
+      }
+
+      if (data.token) {
+        /* Store the new token */
+        sessionStorage.setItem(SESSION_KEY, data.token);
+        
+        /* Update user info if provided */
+        if (data.user) {
+          setUser(data.user);
+        }
+        if (Array.isArray(data.user?.strategies)) {
+          sessionStorage.setItem(STRATEGIES_KEY, JSON.stringify(data.user.strategies));
+        }
+
+        /* Keep persisted localStorage in sync when Remember Me is active */
+        if (localStorage.getItem(REMEMBER_ME_KEY) === "1") {
+          localStorage.setItem(PERSIST_TOKEN_KEY, data.token);
+          if (data.user) localStorage.setItem(PERSIST_USER_KEY, JSON.stringify(data.user));
+          if (Array.isArray(data.user?.strategies)) {
+            localStorage.setItem(PERSIST_STRAT_KEY, JSON.stringify(data.user.strategies));
+          }
+        }
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      /* Network error or parsing error — don't block the user */
+      console.warn("Token refresh failed:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Start automatic token refresh loop.
+   * Refreshes token every 12 hours (well before the 24-hour expiration).
+   * Safe to call multiple times; only one loop runs at a time.
+   */
+  let autoRefreshTimer = null;
+  function startAutoRefresh() {
+    if (autoRefreshTimer !== null) return; /* Already running */
+
+    const REFRESH_INTERVAL = 12 * 60 * 60 * 1000; /* 12 hours in milliseconds */
+
+    autoRefreshTimer = setInterval(() => {
+      if (isLoggedIn()) {
+        refreshToken().catch(err => console.warn("Auto-refresh error:", err));
+      }
+    }, REFRESH_INTERVAL);
+  }
+
+  /**
+   * Stop automatic token refresh loop.
+   */
+  function stopAutoRefresh() {
+    if (autoRefreshTimer !== null) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+  }
+
+  /**
+   * Show session expired message and trigger login overlay.
+   */
+  function showSessionExpired(message) {
+    const overlay = document.getElementById("loginOverlay");
+    const errorEl = document.getElementById("loginError");
+
+    if (overlay) overlay.style.display = "";
+    if (errorEl) {
+      errorEl.style.display = "";
+      errorEl.textContent = message || "Your session has expired. Please sign in again.";
+    }
+  }
+
+  /**
    * Update nav UI elements that reflect the current auth state:
    *   - #adminNavItem  → shown only for admin users
    *   - #indicatorV2NavItem → shown for admins or users with indicator_v2 access
@@ -390,6 +500,7 @@ const ITGuruAuth = (() => {
 
   /** Logout – clear session */
   function logout() {
+    stopAutoRefresh();  /* Stop automatic token refresh */
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(STRATEGIES_KEY);
@@ -668,6 +779,9 @@ const ITGuruAuth = (() => {
     getStrategies,
     login,
     verify,
+    refreshToken,
+    startAutoRefresh,
+    stopAutoRefresh,
     logout,
     updateNavUI,
     initLoginGate,

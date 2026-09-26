@@ -18,7 +18,7 @@ RewriteRule (^\.|/\.) - [F,L]
 # Maps /api/auth/login → /api/auth/login.php etc.
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/auth/(login|register|verify|status)$ api/auth/$1.php [L,QSA]
+RewriteRule ^api/auth/(login|register|verify|refresh|status)$ api/auth/$1.php [L,QSA]
 
 # ── User profiles API URL rewriting ──
 RewriteCond %{REQUEST_FILENAME} !-f
