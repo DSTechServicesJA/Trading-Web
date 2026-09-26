@@ -378,7 +378,9 @@ class TradeOutcomeService {
                 strategy_type: trade.type || 'unknown',
                 direction: trade.dir,
                 entry_price: trade.entry,
-                entry_timestamp: new Date().toISOString(),
+                entry_timestamp: (Number.isFinite(trade.epoch) && trade.epoch > 0)
+                    ? new Date(trade.epoch * 1000).toISOString()
+                    : (Number.isFinite(trade.createdAtMs) ? new Date(trade.createdAtMs).toISOString() : new Date().toISOString()),
                 stop_loss: trade.sl,
                 take_profit: trade.tp,
                 outcome: trade.result,
