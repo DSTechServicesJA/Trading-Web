@@ -73,11 +73,11 @@ function telegramBotApiCall(string $method, array $payload): ?array
  * @param PDO $pdo
  * @param int $userId  Web platform user ID
  */
-function telegramAddIfLinked(PDO $pdo, int $userId): void
+function telegramAddIfLinked(PDO $pdo, int $userId): bool
 {
     $chatId = env('TELEGRAM_GROUP_CHAT_ID');
     if ($chatId === '') {
-        return;
+        return false;
     }
 
     /* Fetch the user's Telegram ID */
@@ -88,7 +88,7 @@ function telegramAddIfLinked(PDO $pdo, int $userId): void
     $row = $stmt->fetch();
 
     if (!$row || empty($row['telegram_user_id'])) {
-        return;
+        return false;
     }
 
     $tgUserId = (int) $row['telegram_user_id'];
@@ -114,14 +114,16 @@ function telegramAddIfLinked(PDO $pdo, int $userId): void
 
     if ($inviteLink) {
         $name = $row['telegram_username'] ? '@' . $row['telegram_username'] : 'there';
-        telegramBotApiCall('sendMessage', [
+        $messageResp = telegramBotApiCall('sendMessage', [
             'chat_id'    => $tgUserId,
             'text'       => "✅ Your subscription is now *active*!\n\nHi {$name}, click the link below to join the private trading group:\n\n{$inviteLink}\n\n⚠️ This link expires in 15 minutes and can only be used once.",
             'parse_mode' => 'Markdown',
         ]);
+        return !empty($messageResp['ok']);
     }
     /* No else-unban needed: unbanChatMember was already called unconditionally above
        before the invite link was created. */
+    return false;
 }
 
 /**

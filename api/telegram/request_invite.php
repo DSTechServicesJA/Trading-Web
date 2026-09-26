@@ -26,7 +26,7 @@ try {
     $pdo = getDB();
 
     $stmt = $pdo->prepare(
-        'SELECT id, subscription_status, telegram_user_id, telegram_username FROM users WHERE id = ?'
+        'SELECT id, subscription_status, subscription_expires_at, telegram_user_id, telegram_username FROM users WHERE id = ?'
     );
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
@@ -43,8 +43,19 @@ try {
         jsonResponse(['error' => 'An active subscription is required to join the Telegram group.'], 403);
     }
 
+    // Check subscription expiry
+    if ($user['subscription_expires_at'] !== null
+        && strtotime($user['subscription_expires_at']) < time()
+    ) {
+        jsonResponse(['error' => 'Your subscription has expired. Please renew to regain access.'], 403);
+    }
+
     /* Send a fresh invite link via the bot */
-    telegramAddIfLinked($pdo, $userId);
+    $inviteSent = telegramAddIfLinked($pdo, $userId);
+
+    if (!$inviteSent) {
+        jsonResponse(['error' => 'Failed to send invite. Please try again or contact support.'], 500);
+    }
 
     jsonResponse(['message' => 'Invite sent to your Telegram account. Check your Telegram messages.']);
 

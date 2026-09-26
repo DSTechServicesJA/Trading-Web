@@ -39,13 +39,18 @@ try {
 
     /* Verify user exists and has an active subscription */
     $stmt = $pdo->prepare(
-        'SELECT id, subscription_status FROM users WHERE id = ?'
+        'SELECT id, role, subscription_status FROM users WHERE id = ?'
     );
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
 
     if (!$user) {
         jsonResponse(['error' => 'User not found'], 404);
+    }
+
+    /* Enforce subscription requirement */
+    if (($user['role'] ?? 'user') !== 'admin' && ($user['subscription_status'] ?? 'active') !== 'active') {
+        jsonResponse(['error' => 'An active subscription is required to link Telegram.'], 403);
     }
 
     /* ── Clean up expired tokens for this user ── */
