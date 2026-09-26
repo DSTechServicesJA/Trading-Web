@@ -19487,6 +19487,7 @@ function _snapshotChartGlobals() {
     liquiditySweepHistory, lastLiquiditySweepIdx, stopLossHuntHistory, lastStopLossHuntIdx,
     failedPinBarHistory, lastFailedPinBarIdx, fibScalpHistory, lastFibScalpIdx,
     po3History, lastPo3Idx, gridScalperMAHistory, lastGridScalperMAIdx,
+    gridScalperMAPendingSetup, gridScalperMALossReversalWatch,
     fvgStratHistory, lastFvgStratIdx, mtfTopDownHistory, lastMtfTopDownIdx,
     candleInterpHistory, lastCandleInterpIdx, orderblockHistory, lastOrderblockIdx,
     tiktokHistory, lastTiktokIdx, po3_4hHistory, lastPo3_4hIdx,
@@ -19552,6 +19553,8 @@ function _restoreChartGlobals(s) {
   fibScalpHistory = s.fibScalpHistory; lastFibScalpIdx = s.lastFibScalpIdx;
   po3History = s.po3History; lastPo3Idx = s.lastPo3Idx;
   gridScalperMAHistory = s.gridScalperMAHistory; lastGridScalperMAIdx = s.lastGridScalperMAIdx;
+  gridScalperMAPendingSetup = s.gridScalperMAPendingSetup;
+  gridScalperMALossReversalWatch = Array.isArray(s.gridScalperMALossReversalWatch) ? s.gridScalperMALossReversalWatch : [];
   fvgStratHistory = s.fvgStratHistory; lastFvgStratIdx = s.lastFvgStratIdx;
   mtfTopDownHistory = s.mtfTopDownHistory; lastMtfTopDownIdx = s.lastMtfTopDownIdx;
   candleInterpHistory = s.candleInterpHistory; lastCandleInterpIdx = s.lastCandleInterpIdx;
@@ -23456,6 +23459,13 @@ function adjustIndicesAfterSlice(removed) {
   for (const h of [liquiditySweepHistory, stopLossHuntHistory, failedPinBarHistory, fibScalpHistory, po3History, gridScalperMAHistory, liveScalpHistory, nyOpenRangeHistory, sessionRangeHistory, mtfTopDownHistory]) {
     for (const s of h) {
       if (s.candleIdx != null) s.candleIdx = Math.max(0, s.candleIdx - removed);
+    }
+  }
+   
+  /* Adjust reversal watch indices for SL→TP analytics when candles are sliced */
+  for (const watch of gridScalperMALossReversalWatch) {
+    if (watch && watch.slHitIdx != null) {
+      watch.slHitIdx = Math.max(0, watch.slHitIdx - removed);
     }
   }
 }
