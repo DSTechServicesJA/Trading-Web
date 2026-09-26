@@ -172,8 +172,9 @@ try {
         echo json_encode(['error' => 'Unknown action: ' . htmlspecialchars($action)]);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
+} catch (\Throwable $e) {
+    error_log('Admin telegram_queue error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);
 }
 ?>

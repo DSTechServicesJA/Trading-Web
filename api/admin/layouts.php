@@ -238,8 +238,9 @@ try {
         echo json_encode(['error' => 'Method not allowed']);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
+} catch (\Throwable $e) {
+    error_log('Admin layouts error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);
 }
 ?>
