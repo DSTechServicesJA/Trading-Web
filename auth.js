@@ -539,6 +539,7 @@ const ITGuruAuth = (() => {
     if (isLoggedIn()) {
       overlay.style.display = "none";
       updateNavUI();
+      refreshToken().catch(err => console.warn("Auto-refresh error:", err));  /* Refresh restored token immediately */
       startAutoRefresh();  /* Start automatic token refresh for restored session */
     } else {
       overlay.style.display = "flex";
