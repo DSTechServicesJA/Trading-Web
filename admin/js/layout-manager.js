@@ -280,6 +280,19 @@ const AdminLayoutManager = (() => {
                 })
             });
             
+            // Fallback to .php on 404
+            if (response.status === 404) {
+                response = await fetch(API_BASE + '.php', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        name: nameInput.value.trim(),
+                        description: descInput.value.trim(),
+                        widgets: currentLayout
+                    })
+                });
+            }
+            
             const data = await response.json();
             
             if (!data.success) {
@@ -323,9 +336,9 @@ const AdminLayoutManager = (() => {
             
             let response = await fetch(`${API_BASE}/${layoutId}`, { headers });
             
-            // Fallback to .php
+            // Fallback to .php with path parameter
             if (response.status === 404) {
-                response = await fetch(`${API_BASE}/${layoutId}.php`, { headers });
+                response = await fetch(`${API_BASE}.php?path=${layoutId}`, { headers });
             }
             
             // Handle auth errors
@@ -534,7 +547,9 @@ const AdminLayoutManager = (() => {
     async function loadDefaultLayout() {
         // Check if there's a default layout for this admin
         try {
-            const token = window.ITGuruAuth?.getToken?.() || localStorage.getItem("itguru_auth_token") || sessionStorage.getItem("itguru_auth_token"); const headers = { "Content-Type": "application/json", ...(token ? { "Authorization": "Bearer " + token } : {}) }; const response = await fetch(API_BASE, { headers });
+            const token = window.ITGuruAuth?.getToken?.() || localStorage.getItem("itguru_auth_token") || sessionStorage.getItem("itguru_auth_token");
+            const headers = { "Content-Type": "application/json", ...(token ? { "Authorization": "Bearer " + token } : {}) };
+            const response = await fetch(API_BASE, { headers });
             const data = await response.json();
             
             if (data.success && data.layouts && data.layouts.length > 0) {
@@ -542,7 +557,13 @@ const AdminLayoutManager = (() => {
                 
                 if (defaultLayout) {
                     // Load the default layout automatically
-                    const layoutResp = await fetch(`${API_BASE}/${defaultLayout.id}`);
+                    let layoutResp = await fetch(`${API_BASE}/${defaultLayout.id}`, { headers });
+                    
+                    // Fallback to .php with path parameter
+                    if (layoutResp.status === 404) {
+                        layoutResp = await fetch(`${API_BASE}.php?path=${defaultLayout.id}`, { headers });
+                    }
+                    
                     const layoutData = await layoutResp.json();
                     
                     if (layoutData.success) {

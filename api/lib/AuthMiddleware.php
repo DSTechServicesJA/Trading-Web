@@ -178,7 +178,8 @@ final class AuthMiddleware
                 : '');
         
         if ($authHeader === '') {
-            // No token provided — this is handled by caller
+            // No token provided — log this before returning
+            self::logAuthFailure('unknown', 0, 'Missing Authorization header', 401);
             return null;
         }
         
