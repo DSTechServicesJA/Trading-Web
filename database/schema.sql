@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS adaptive_adjustment_log (
     reason_text       TEXT         NOT NULL,
     confidence_score  DECIMAL(5,2) DEFAULT NULL,
     sample_size       INT UNSIGNED DEFAULT NULL,
-    impact_json       JSON         DEFAULT NULL,
+    impact_json       JSON,
     revertable        TINYINT(1)   NOT NULL DEFAULT 1,
     created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -441,9 +441,9 @@ CREATE TABLE IF NOT EXISTS adaptive_trade_history (
     strategy_reliability_score   DECIMAL(5,2) DEFAULT NULL,
     qualification_band           VARCHAR(32)  NOT NULL DEFAULT 'UNQUALIFIED',
     confluence_factors_json      JSON         NOT NULL,
-    confluence_factors_raw_json  JSON         DEFAULT NULL,
+    confluence_factors_raw_json  JSON,
     mtf_status                   VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
-    notes_json                   JSON         DEFAULT NULL,
+    notes_json                   JSON,
     created_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -609,7 +609,7 @@ CREATE TABLE IF NOT EXISTS adaptive_learning_profiles (
     avg_r_multiple        DECIMAL(12,4) NOT NULL DEFAULT 0,
     confidence_score      DECIMAL(5,2) NOT NULL DEFAULT 0,
     qualification_threshold DECIMAL(5,2) NOT NULL DEFAULT 80,
-    learning_profile_json JSON         DEFAULT NULL,
+    learning_profile_json JSON,
     last_trade_id         VARCHAR(100) DEFAULT NULL,
     last_signal_id        VARCHAR(100) DEFAULT NULL,
     last_result           VARCHAR(32)  DEFAULT NULL,
@@ -677,8 +677,8 @@ CREATE TABLE IF NOT EXISTS adaptive_signal_decisions (
     final_confidence_score       DECIMAL(5,2) NOT NULL,
     factors_json                 JSON         NOT NULL,
     mtf_status                   VARCHAR(32)  NOT NULL DEFAULT 'UNKNOWN',
-    rule_snapshot_json           JSON         DEFAULT NULL,
-    decision_trace_json          JSON         DEFAULT NULL,
+    rule_snapshot_json           JSON,
+    decision_trace_json          JSON,
     created_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -704,8 +704,8 @@ CREATE TABLE IF NOT EXISTS adaptive_learning_audit_log (
     market_category     VARCHAR(32)  DEFAULT NULL,
     strategy_key        VARCHAR(64)  DEFAULT NULL,
     symbol_scope        VARCHAR(32)  DEFAULT NULL,
-    previous_value_json JSON         DEFAULT NULL,
-    new_value_json      JSON         DEFAULT NULL,
+    previous_value_json JSON,
+    new_value_json      JSON,
     reason_text         TEXT         NOT NULL,
     created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -951,7 +951,7 @@ CREATE TABLE IF NOT EXISTS grid_scalper_ma_signals (
     partial_tp_notif_sent TINYINT(1) NOT NULL DEFAULT 0,
     
     confluence_score    DECIMAL(5,2) DEFAULT NULL,
-    confluence_factors_json JSON     DEFAULT NULL,
+    confluence_factors_json JSON,
     
     created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -979,7 +979,7 @@ CREATE TABLE IF NOT EXISTS admin_dashboard_preferences (
     admin_id        INT UNSIGNED NOT NULL,
     layout_name     VARCHAR(100) DEFAULT 'default',
     widgets_json    LONGTEXT NOT NULL,
-    collapsed_sections JSON DEFAULT NULL,
+    collapsed_sections JSON,
     theme           ENUM('dark','light') NOT NULL DEFAULT 'dark',
     is_default      TINYINT(1) NOT NULL DEFAULT 0,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1057,7 +1057,7 @@ CREATE TABLE IF NOT EXISTS admin_notifications_center (
     severity        ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
     source_entity   VARCHAR(50) DEFAULT NULL,
     source_id       VARCHAR(100) DEFAULT NULL,
-    related_data    JSON DEFAULT NULL,
+    related_data    JSON,
     is_read         TINYINT(1) NOT NULL DEFAULT 0,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
