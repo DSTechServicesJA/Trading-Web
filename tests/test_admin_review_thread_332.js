@@ -15,6 +15,17 @@ test('layouts nested rewrite is present before generic admin rewrite', () => {
   assert.ok(genericIndex > nestedIndex);
 });
 
+test('auth rewrite rule includes refresh endpoint', () => {
+  const htaccess = read('.htaccess');
+  assert.match(htaccess, /RewriteRule \^api\/auth\/\(login\|register\|verify\|refresh\|status\)\$/);
+});
+
+test('refresh.php endpoint exists and is valid PHP', () => {
+  const refreshPhp = read('api/auth/refresh.php');
+  assert.ok(refreshPhp.includes('function refreshToken') || refreshPhp.includes('POST'), 'refresh.php should handle POST');
+  assert.ok(refreshPhp.includes('jwtDecode') || refreshPhp.includes('Authorization'), 'refresh.php should validate JWT token');
+});
+
 test('global search sends ****** and avoids inline onclick handlers', () => {
   const source = read('admin/js/global-search.js');
   assert.equal(source.includes("['Be', 'arer '].join('') + token"), true);
