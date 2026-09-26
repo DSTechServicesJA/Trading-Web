@@ -39,7 +39,7 @@ try {
 
     /* Verify user exists and has an active subscription */
     $stmt = $pdo->prepare(
-        'SELECT id, role, subscription_status FROM users WHERE id = ?'
+        'SELECT id, role, subscription_status, subscription_expires_at FROM users WHERE id = ?'
     );
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
@@ -51,6 +51,13 @@ try {
     /* Enforce subscription requirement */
     if (($user['role'] ?? 'user') !== 'admin' && ($user['subscription_status'] ?? 'active') !== 'active') {
         jsonResponse(['error' => 'An active subscription is required to link Telegram.'], 403);
+    }
+
+    /* Check subscription expiry */
+    if ($user['subscription_expires_at'] !== null
+        && strtotime($user['subscription_expires_at']) < time()
+    ) {
+        jsonResponse(['error' => 'Your subscription has expired. Please renew to regain access.'], 403);
     }
 
     /* ── Clean up expired tokens for this user ── */

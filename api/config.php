@@ -468,8 +468,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REQUEST_URI'] ?? '',
             $_SERVER['REMOTE_ADDR'] ?? ''
         ));
-        http_response_code(401);
-        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Authentication required']);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Authentication required'], 401);
     }
     
     if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
@@ -480,8 +479,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REQUEST_URI'] ?? '',
             $_SERVER['REMOTE_ADDR'] ?? ''
         ));
-        http_response_code(401);
-        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid authorization header']);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid authorization header'], 401);
     }
     
     $payload = jwtDecode($m[1]);
@@ -493,8 +491,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REQUEST_URI'] ?? '',
             $_SERVER['REMOTE_ADDR'] ?? ''
         ));
-        http_response_code(401);
-        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid or expired token']);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid or expired token'], 401);
     }
     
     $userId = (int) $payload['sub'];

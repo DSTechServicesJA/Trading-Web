@@ -7,7 +7,7 @@
  * Functions provided
  * ──────────────────
  *   telegramBotApiCall(string $method, array $payload) : array|null
- *   telegramAddIfLinked(PDO $pdo, int $userId)         : void
+ *   telegramAddIfLinked(PDO $pdo, int $userId)         : bool
  *   telegramKickIfLinked(PDO $pdo, int $userId)        : void
  *
  * Requires the following .env variables:
@@ -72,6 +72,7 @@ function telegramBotApiCall(string $method, array $payload): ?array
  *
  * @param PDO $pdo
  * @param int $userId  Web platform user ID
+ * @return bool        True if the invite was sent successfully, false otherwise
  */
 function telegramAddIfLinked(PDO $pdo, int $userId): bool
 {
