@@ -514,8 +514,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REMOTE_ADDR'] ?? '',
             $e->getMessage()
         ));
-        http_response_code(500);
-        jsonResponse(['error' => 'Unauthorized', 'code' => 500, 'message' => 'Database error during authentication']);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 500, 'message' => 'Database error during authentication'], 500);
     }
     
     if (!$user) {
@@ -527,8 +526,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REQUEST_URI'] ?? '',
             $_SERVER['REMOTE_ADDR'] ?? ''
         ));
-        http_response_code(401);
-        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'User not found']);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'User not found'], 401);
     }
     
     if (($user['status'] ?? 'active') === 'locked') {
@@ -540,8 +538,7 @@ function authenticateUserFromToken(): int
             $_SERVER['REQUEST_URI'] ?? '',
             $_SERVER['REMOTE_ADDR'] ?? ''
         ));
-        http_response_code(403);
-        jsonResponse(['error' => 'Forbidden', 'code' => 403, 'message' => 'Account is locked']);
+        jsonResponse(['error' => 'Forbidden', 'code' => 403, 'message' => 'Account is locked'], 403);
     }
     
     return $userId;

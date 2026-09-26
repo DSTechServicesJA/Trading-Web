@@ -178,14 +178,22 @@ async function apiRequest(path, options = {}) {
   };
 
   const url  = ADMIN_API + path;
-  const resp = await fetch(url, { ...options, headers });
-  /* Fallback: if .htaccess URL rewriting is not available (e.g. Nginx without rewrite rules),
-     retry with explicit .php extension so the endpoint is always reachable. */
-  if (resp.status === 404 && !path.endsWith(".php")) {
-    const phpPath = path.includes("?") ? path.replace("?", ".php?") : path + ".php";
-    const fallback = await fetch(ADMIN_API + phpPath, { ...options, headers });
-    return fallback;
-  }
+  
+  /* Use auth error handler for 401/403 responses */
+  const resp = await AdminAuthErrorHandler.fetchWithAuthHandling(
+    url,
+    async () => {
+      let fetchResp = await fetch(url, { ...options, headers });
+      /* Fallback: if .htaccess URL rewriting is not available (e.g. Nginx without rewrite rules),
+         retry with explicit .php extension so the endpoint is always reachable. */
+      if (fetchResp.status === 404 && !path.endsWith(".php")) {
+        const phpPath = path.includes("?") ? path.replace("?", ".php?") : path + ".php";
+        fetchResp = await fetch(ADMIN_API + phpPath, { ...options, headers });
+      }
+      return fetchResp;
+    },
+    { retry: true, stopPollingOnFailure: true }
+  );
   return resp;
 }
 

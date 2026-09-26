@@ -549,7 +549,13 @@ const AdminLayoutManager = (() => {
         try {
             const token = window.ITGuruAuth?.getToken?.() || localStorage.getItem("itguru_auth_token") || sessionStorage.getItem("itguru_auth_token");
             const headers = { "Content-Type": "application/json", ...(token ? { "Authorization": "Bearer " + token } : {}) };
-            const response = await fetch(API_BASE, { headers });
+            let response = await fetch(API_BASE, { headers });
+            
+            // Fallback to .php if 404
+            if (response.status === 404) {
+                response = await fetch(API_BASE + '.php', { headers });
+            }
+            
             const data = await response.json();
             
             if (data.success && data.layouts && data.layouts.length > 0) {

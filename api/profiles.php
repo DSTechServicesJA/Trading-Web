@@ -28,18 +28,27 @@ try {
     $pdo = getDB();
     
     // Get user details for subscription check
-    $stmt = $pdo->prepare('SELECT role, subscription_expires_at FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT role, subscription_status, subscription_expires_at FROM users WHERE id = ?');
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
     
-    if (($user['role'] ?? 'user') !== 'admin'
-        && $user['subscription_expires_at'] !== null
-        && strtotime($user['subscription_expires_at']) < time()
-    ) {
-        jsonResponse([
-            'error'  => 'Your subscription has expired. Please renew to regain access.',
-            'reason' => 'subscription_expired',
-        ], 403);
+    if (($user['role'] ?? 'user') !== 'admin') {
+        // Check subscription status first
+        if (($user['subscription_status'] ?? 'active') !== 'active') {
+            jsonResponse([
+                'error'  => 'Your subscription is not active. Please renew to regain access.',
+                'reason' => 'subscription_inactive',
+            ], 403);
+        }
+        // Check subscription expiry
+        if ($user['subscription_expires_at'] !== null
+            && strtotime($user['subscription_expires_at']) < time()
+        ) {
+            jsonResponse([
+                'error'  => 'Your subscription has expired. Please renew to regain access.',
+                'reason' => 'subscription_expired',
+            ], 403);
+        }
     }
 } catch (\Throwable $e) {
     error_log('profiles.php subscription check error: ' . $e->getMessage());
