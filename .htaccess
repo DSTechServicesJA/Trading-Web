@@ -46,6 +46,11 @@ RewriteRule ^api/telegram/(link_token|webhook|unlink|setup_webhook|request_invit
 # ── User notification preferences API URL rewriting ──
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^api/notifications$ api/notifications.php [L,QSA]
+
+# ── User notification preferences API URL rewriting ──
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^api/notification_preferences$ api/notification_preferences.php [L,QSA]
 
 # ── Trade management API URL rewriting ──

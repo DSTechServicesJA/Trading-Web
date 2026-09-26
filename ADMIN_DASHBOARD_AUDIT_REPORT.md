@@ -198,8 +198,9 @@ The 404 errors for `/api/notifications` and `/api/admin/notifications` were **ro
 
 **Issue:** Frontend was calling `/api/notifications` without the .php extension
 **Root Cause:** .htaccess routing rule was missing
-**Status:** FIXED - Rule now covers:
+**Status:** FIXED - Rules now cover:
 ```
+RewriteRule ^api/notifications$ api/notifications.php [L,QSA]
 RewriteRule ^api/notification_preferences$ api/notification_preferences.php [L,QSA]
 ```
 
