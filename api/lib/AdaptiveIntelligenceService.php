@@ -79,22 +79,58 @@ function adaptiveAuthUserId(PDO $pdo): int
 {
     $authHeader = $_SERVER['HTTP_AUTHORIZATION']
         ?? (function_exists('apache_request_headers') ? (apache_request_headers()['Authorization'] ?? '') : '');
+    
     if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-        jsonResponse(['error' => 'Authentication required'], 401);
+        error_log(sprintf(
+            '[%s] Adaptive auth failure: Missing or malformed Authorization header [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Authentication required'], 401);
     }
+    
     $payload = jwtDecode($m[1]);
     if (!$payload || empty($payload['sub'])) {
-        jsonResponse(['error' => 'Invalid or expired token'], 401);
+        error_log(sprintf(
+            '[%s] Adaptive auth failure: Invalid or expired token [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid or expired token'], 401);
     }
-    $stmt = $pdo->prepare('SELECT id, status FROM users WHERE id = ?');
+    
+    $stmt = $pdo->prepare('SELECT id, status FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([$payload['sub']]);
     $user = $stmt->fetch();
+    
     if (!$user) {
-        jsonResponse(['error' => 'User not found'], 401);
+        error_log(sprintf(
+            '[%s] Adaptive auth failure: User not found (ID: %d) [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            (int) $payload['sub'],
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'User not found'], 401);
     }
+    
     if (($user['status'] ?? 'active') === 'locked') {
-        jsonResponse(['error' => 'Account is locked'], 403);
+        error_log(sprintf(
+            '[%s] Adaptive auth failure: Account locked (ID: %d) [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            (int) $user['id'],
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        jsonResponse(['error' => 'Forbidden', 'code' => 403, 'message' => 'Account is locked'], 403);
     }
+    
     return (int) $user['id'];
 }
 
