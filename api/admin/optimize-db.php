@@ -176,7 +176,7 @@ try {
     
 } catch (\Throwable $e) {
     error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-    http_response_code(403);
+    http_response_code(500);
     echo json_encode([
         'error' => $e->getMessage(),
         'success' => false

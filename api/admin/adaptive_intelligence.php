@@ -50,11 +50,9 @@ try {
                 FROM adaptive_learning_profiles
                 WHERE user_id = ?
                 ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT $per_page OFFSET $offset
             ", [
-                $user_id,
-                $per_page,
-                $offset
+                $user_id
             ]);
             
             echo json_encode([
@@ -91,11 +89,9 @@ try {
                 FROM adaptive_qualification_rules
                 WHERE user_id = ?
                 ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT $per_page OFFSET $offset
             ", [
-                $user_id,
-                $per_page,
-                $offset
+                $user_id
             ]);
             
             echo json_encode([
