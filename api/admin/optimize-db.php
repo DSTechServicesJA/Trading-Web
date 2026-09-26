@@ -58,7 +58,6 @@ try {
         
         // Notification tables
         ['table' => 'user_notifications', 'name' => 'idx_un_user_id', 'columns' => '(user_id)', 'unique' => false],
-        ['table' => 'user_notifications', 'name' => 'idx_un_is_read', 'columns' => '(is_read)', 'unique' => false],
         ['table' => 'user_notifications', 'name' => 'idx_un_created_at', 'columns' => '(created_at)', 'unique' => false],
         ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_user_id', 'columns' => '(user_id)', 'unique' => false],
         ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_status', 'columns' => '(status)', 'unique' => false],
@@ -124,7 +123,6 @@ try {
         $compositeIndexes = [
             ['table' => 'trade_outcomes', 'name' => 'idx_to_user_symbol_created', 'columns' => '(user_id, symbol, created_at)'],
             ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_user_strategy_created', 'columns' => '(user_id, strategy_mode, created_at)'],
-            ['table' => 'user_notifications', 'name' => 'idx_un_user_read_created', 'columns' => '(user_id, is_read, created_at)'],
             ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_status_sent_at', 'columns' => '(status, sent_at)'],
         ];
         
@@ -176,6 +174,7 @@ try {
     // Analyze table statistics
     try {
         $tables = ['users', 'trade_outcomes', 'grid_scalper_ma_signals', 'user_notifications', 'telegram_delivery_log', 'adaptive_learning_profiles'];
+        $skippedTables = [];
         foreach ($tables as $table) {
             // Check if table exists before analyzing
             $checkTableSql = "SELECT 1 FROM information_schema.tables 
@@ -190,9 +189,17 @@ try {
                 $conn->exec("ANALYZE TABLE `{$table}`");
             } else {
                 error_log("Admin optimize-db: Table {$table} does not exist, skipping analysis");
+                $skippedTables[] = $table;
             }
         }
-        $results['analysis_completed'] = true;
+        $results['analysis_completed'] = empty($skippedTables);
+        if (!empty($skippedTables)) {
+            $results['skipped_tables'] = $skippedTables;
+            if (empty($results['errors'])) {
+                $results['success'] = false;
+                http_response_code(500);
+            }
+        }
     } catch (\Throwable $e) {
     error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         $results['errors'][] = [
@@ -201,8 +208,8 @@ try {
         ];
     }
     
-    // Set response status based on whether errors occurred
-    if (!empty($results['errors'])) {
+    // Set response status based on whether errors or skipped tables occurred
+    if (!empty($results['errors']) || !empty($results['skipped_tables'] ?? [])) {
         $results['success'] = false;
         http_response_code(500);
     } else {
