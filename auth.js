@@ -398,6 +398,9 @@ const ITGuruAuth = (() => {
     localStorage.removeItem(PERSIST_TOKEN_KEY);
     localStorage.removeItem(PERSIST_USER_KEY);
     localStorage.removeItem(PERSIST_STRAT_KEY);
+    
+    // Dispatch logout event for auth error handler and other listeners
+    document.dispatchEvent(new Event('ITGuruAuthLogout'));
   }
 
   /**

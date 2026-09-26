@@ -497,7 +497,54 @@ function authenticateUserFromToken(): int
         jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid or expired token']);
     }
     
-    return (int) $payload['sub'];
+    $userId = (int) $payload['sub'];
+    
+    // Check user exists and is not locked
+    try {
+        $pdo = getDB();
+        $stmt = $pdo->prepare('SELECT id, status FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+    } catch (\Throwable $e) {
+        error_log(sprintf(
+            '[%s] Auth failure: Database error checking user [%s %s from %s]: %s',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            $e->getMessage()
+        ));
+        http_response_code(500);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 500, 'message' => 'Database error during authentication']);
+    }
+    
+    if (!$user) {
+        error_log(sprintf(
+            '[%s] Auth failure: User not found [user_id: %d, %s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $userId,
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        http_response_code(401);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'User not found']);
+    }
+    
+    if (($user['status'] ?? 'active') === 'locked') {
+        error_log(sprintf(
+            '[%s] Auth failure: Account locked [user_id: %d, %s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $userId,
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        http_response_code(403);
+        jsonResponse(['error' => 'Forbidden', 'code' => 403, 'message' => 'Account is locked']);
+    }
+    
+    return $userId;
 }
 
 /* ══════════════════════════════════════════════

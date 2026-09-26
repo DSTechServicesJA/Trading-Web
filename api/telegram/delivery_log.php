@@ -32,3 +32,38 @@ if ($method === 'OPTIONS') {
 
 /* ── Authenticate caller ── */
 $userId = authenticateUserFromToken();
+
+if ($method !== 'POST') {
+    jsonResponse(['error' => 'Method not allowed'], 405);
+}
+
+$body = getJsonBody();
+
+$notificationType = trim((string) ($body['notification_type'] ?? ''));
+$status            = trim((string) ($body['status'] ?? ''));
+
+if ($notificationType === '' || !in_array($status, ['sent', 'failed', 'skipped'], true)) {
+    jsonResponse(['error' => 'notification_type and a valid status are required'], 400);
+}
+
+try {
+    $pdo = getDB();
+    $pdo->prepare(
+        'INSERT INTO telegram_delivery_log
+            (user_id, signal_id, notification_type, strategy, symbol, status, telegram_response, error_detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    )->execute([
+        $userId,
+        isset($body['signal_id']) ? substr((string) $body['signal_id'], 0, 120) : null,
+        substr($notificationType, 0, 40),
+        isset($body['strategy']) ? substr((string) $body['strategy'], 0, 60) : null,
+        isset($body['symbol']) ? substr((string) $body['symbol'], 0, 40) : null,
+        $status,
+        isset($body['telegram_response']) ? (string) $body['telegram_response'] : null,
+        isset($body['error_detail']) ? (string) $body['error_detail'] : null,
+    ]);
+    jsonResponse(['ok' => true]);
+} catch (\Throwable $e) {
+    error_log('delivery_log.php POST error: ' . $e->getMessage());
+    jsonResponse(['error' => 'Failed to record delivery log'], 500);
+}

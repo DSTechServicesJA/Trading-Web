@@ -129,13 +129,13 @@ const AdminAuthErrorHandler = (() => {
                 if (response.status === 401 || response.status === 403) {
                     console.warn(`Auth error (${response.status}) on ${endpoint}`);
                     
-                    if (stopPollingOnFailure) {
-                        this.stopAllPolling();
-                    }
-                    
                     if (retry) {
                         const shouldContinue = this.recordFailure(endpoint, response.status);
                         if (!shouldContinue) {
+                            // Only stop polling after max retries exceeded
+                            if (stopPollingOnFailure) {
+                                this.stopAllPolling();
+                            }
                             throw new Error(`Authentication failed. Max retries exceeded for ${endpoint}`);
                         }
                     } else {
