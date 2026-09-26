@@ -104,8 +104,8 @@ try {
                 continue;
             }
             
-            // Create index
-            $sql = "ALTER TABLE {$table} ADD {$unique} INDEX {$name} {$columns}";
+            // Create index (with backticks to prevent SQL injection)
+            $sql = "ALTER TABLE `{$table}` ADD {$unique} INDEX `{$name}` {$columns}";
             $conn->exec($sql);
             
             $results['indexes_created'][] = $name;
@@ -122,30 +122,47 @@ try {
     // Add composite indexes for common queries
     try {
         $compositeIndexes = [
-            "ALTER TABLE trade_outcomes ADD INDEX idx_to_user_symbol_created (user_id, symbol, created_at)",
-            "ALTER TABLE grid_scalper_ma_signals ADD INDEX idx_gsms_user_strategy_created (user_id, strategy_mode, created_at)",
-            "ALTER TABLE user_notifications ADD INDEX idx_un_user_read_created (user_id, is_read, created_at)",
-            "ALTER TABLE telegram_delivery_log ADD INDEX idx_tdl_status_sent_at (status, sent_at)",
+            ['table' => 'trade_outcomes', 'name' => 'idx_to_user_symbol_created', 'columns' => '(user_id, symbol, created_at)'],
+            ['table' => 'grid_scalper_ma_signals', 'name' => 'idx_gsms_user_strategy_created', 'columns' => '(user_id, strategy_mode, created_at)'],
+            ['table' => 'user_notifications', 'name' => 'idx_un_user_read_created', 'columns' => '(user_id, is_read, created_at)'],
+            ['table' => 'telegram_delivery_log', 'name' => 'idx_tdl_status_sent_at', 'columns' => '(status, sent_at)'],
         ];
         
-        foreach ($compositeIndexes as $sql) {
-            // Extract index name from SQL
-            preg_match('/INDEX\s+(\w+)\s+/', $sql, $matches);
-            $indexName = $matches[1] ?? '';
-            
+        foreach ($compositeIndexes as $compositeIndex) {
             try {
+                $table = $compositeIndex['table'];
+                $indexName = $compositeIndex['name'];
+                $columns = $compositeIndex['columns'];
+                
+                // Check if composite index already exists
+                $checkSql = "SELECT 1 FROM information_schema.statistics 
+                            WHERE table_schema = DATABASE() 
+                            AND table_name = :table 
+                            AND index_name = :name
+                            LIMIT 1";
+                
+                $checkStmt = $conn->prepare($checkSql);
+                $checkStmt->execute([
+                    ':table' => $table,
+                    ':name' => $indexName
+                ]);
+                
+                if ($checkStmt->rowCount() > 0) {
+                    $results['indexes_already_exist'][] = $indexName;
+                    continue;
+                }
+                
+                // Create composite index (with backticks to prevent SQL injection)
+                $sql = "ALTER TABLE `{$table}` ADD INDEX `{$indexName}` {$columns}";
                 $conn->exec($sql);
                 $results['indexes_created'][] = $indexName;
+                
             } catch (\Throwable $e) {
     error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-                if (strpos($e->getMessage(), 'Duplicate key name') === false) {
-                    $results['errors'][] = [
-                        'index' => $indexName,
-                        'error' => $e->getMessage()
-                    ];
-                } else {
-                    $results['indexes_already_exist'][] = $indexName;
-                }
+                $results['errors'][] = [
+                    'index' => $compositeIndex['name'],
+                    'error' => $e->getMessage()
+                ];
             }
         }
     } catch (\Throwable $e) {
@@ -160,7 +177,20 @@ try {
     try {
         $tables = ['users', 'trade_outcomes', 'grid_scalper_ma_signals', 'user_notifications', 'telegram_delivery_log', 'adaptive_learning_profiles'];
         foreach ($tables as $table) {
-            $conn->exec("ANALYZE TABLE {$table}");
+            // Check if table exists before analyzing
+            $checkTableSql = "SELECT 1 FROM information_schema.tables 
+                            WHERE table_schema = DATABASE() 
+                            AND table_name = :table
+                            LIMIT 1";
+            
+            $checkTableStmt = $conn->prepare($checkTableSql);
+            $checkTableStmt->execute([':table' => $table]);
+            
+            if ($checkTableStmt->rowCount() > 0) {
+                $conn->exec("ANALYZE TABLE `{$table}`");
+            } else {
+                error_log("Admin optimize-db: Table {$table} does not exist, skipping analysis");
+            }
         }
         $results['analysis_completed'] = true;
     } catch (\Throwable $e) {
