@@ -8067,6 +8067,19 @@ function monitorGridScalperMAOutcomes(candle) {
           ? Math.max(0, s.sl - candle.low)
           : Math.max(0, candle.high - s.sl);
         s._slOvershoot = Math.max(Number(s._slOvershoot) || 0, overshoot);
+        /* Register reversal watch for SL→TP analytics */
+        if (s.tradeId || s.signalId) {
+          gridScalperMALossReversalWatch.push({
+            tradeId: s.tradeId || s.signalId,
+            dir: s.dir,
+            tp: s.tp,
+            sl: s.sl,
+            slHitIdx: nowIdx,
+            slHitEpoch: s._slHitEpoch,
+            maxReversalDistance: 0,
+            completed: false
+          });
+        }
       }
       if (tradeOutcomeService) {
         const exitPrice = resolved === "WIN" ? s.tp : s.sl;
@@ -28551,6 +28564,8 @@ function activatePanel(p) {
   lastPo3Idx            = p.lastPo3Idx            != null ? p.lastPo3Idx            : -999;
   gridScalperMAHistory  = p.gridScalperMAHistory  || [];
   lastGridScalperMAIdx  = p.lastGridScalperMAIdx  != null ? p.lastGridScalperMAIdx  : -999;
+  gridScalperMAPendingSetup = p.gridScalperMAPendingSetup || null;
+  gridScalperMALossReversalWatch = Array.isArray(p.gridScalperMALossReversalWatch) ? p.gridScalperMALossReversalWatch : [];
   fvgStratHistory       = p.fvgStratHistory       || [];
   lastFvgStratIdx       = p.lastFvgStratIdx       != null ? p.lastFvgStratIdx       : -999;
   mtfTopDownHistory     = p.mtfTopDownHistory     || [];
@@ -28728,6 +28743,8 @@ function savePanel(p) {
   p.lastPo3Idx            = lastPo3Idx;
   p.gridScalperMAHistory  = gridScalperMAHistory;
   p.lastGridScalperMAIdx  = lastGridScalperMAIdx;
+  p.gridScalperMAPendingSetup = gridScalperMAPendingSetup;
+  p.gridScalperMALossReversalWatch = gridScalperMALossReversalWatch;
   p.fvgStratHistory       = fvgStratHistory;
   p.lastFvgStratIdx       = lastFvgStratIdx;
   p.mtfTopDownHistory     = mtfTopDownHistory;

@@ -804,6 +804,18 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ──────────────────────────────────────────────
+-- Migration: Add analytics columns to trade_outcomes for existing deployments
+-- ──────────────────────────────────────────────
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS entry_quality_score DECIMAL(5,2) DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS mae DECIMAL(18,8) DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS mfe DECIMAL(18,8) DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS sl_overshoot DECIMAL(18,8) DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS sl_then_tp_flag TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS tp_after_sl_seconds INT UNSIGNED DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS reversal_distance DECIMAL(18,8) DEFAULT NULL;
+ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS metadata_json JSON DEFAULT NULL;
+
+-- ──────────────────────────────────────────────
 -- Grid Scalper MA signal history (front-end sync table)
 -- Tracks all Grid Scalper MA signals for recovery after app restart
 -- ──────────────────────────────────────────────

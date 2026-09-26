@@ -120,7 +120,7 @@ try {
                 COUNT(*) AS losses_then_tp
             FROM trade_outcomes
             WHERE strategy_type = :strategy
-              AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              AND DATE(COALESCE(entry_timestamp, created_at)) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
               AND sl_then_tp_flag = 1
             GROUP BY day_name, hour_of_day
             ORDER BY losses_then_tp DESC

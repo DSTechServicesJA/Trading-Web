@@ -128,14 +128,14 @@ try {
             partial_tp_notif_sent = VALUES(partial_tp_notif_sent),
             rr_ratio = VALUES(rr_ratio),
             confluence_score = VALUES(confluence_score),
-            mae = VALUES(mae),
-            mfe = VALUES(mfe),
-            sl_overshoot = VALUES(sl_overshoot),
-            sl_then_tp_flag = VALUES(sl_then_tp_flag),
-            tp_after_sl_seconds = VALUES(tp_after_sl_seconds),
-            reversal_distance = VALUES(reversal_distance),
-            entry_quality_score = VALUES(entry_quality_score),
-            metadata_json = VALUES(metadata_json),
+            mae = IF(VALUES(mae) IS NOT NULL, VALUES(mae), mae),
+            mfe = IF(VALUES(mfe) IS NOT NULL, VALUES(mfe), mfe),
+            sl_overshoot = IF(VALUES(sl_overshoot) IS NOT NULL, VALUES(sl_overshoot), sl_overshoot),
+            sl_then_tp_flag = IF(VALUES(sl_then_tp_flag) != 0, VALUES(sl_then_tp_flag), sl_then_tp_flag),
+            tp_after_sl_seconds = IF(VALUES(tp_after_sl_seconds) IS NOT NULL, VALUES(tp_after_sl_seconds), tp_after_sl_seconds),
+            reversal_distance = IF(VALUES(reversal_distance) IS NOT NULL, VALUES(reversal_distance), reversal_distance),
+            entry_quality_score = IF(VALUES(entry_quality_score) IS NOT NULL, VALUES(entry_quality_score), entry_quality_score),
+            metadata_json = IF(VALUES(metadata_json) IS NOT NULL, VALUES(metadata_json), metadata_json),
             updated_at = CURRENT_TIMESTAMP"
     );
     
