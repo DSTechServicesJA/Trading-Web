@@ -72,13 +72,13 @@ try {
     $stmt->execute([$username, $email ?: null, $hash, $username]);
     $userId = (int) $pdo->lastInsertId();
 
-    /* ── Issue JWT ── */
+    /* ── Issue JWT (24-hour expiry) ── */
     $token = jwtEncode([
         'sub'      => $userId,
         'username' => $username,
         'role'     => 'user',
         'iat'      => time(),
-        'exp'      => time() + 3600,
+        'exp'      => time() + 86400,
     ]);
 
     jsonResponse([
