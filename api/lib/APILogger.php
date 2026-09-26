@@ -45,7 +45,7 @@ class APILogger
             'file' => $file,
             'line' => (int) $line,
             'sql_query' => $sqlQuery,
-            'sql_params' => $params,
+            'sql_params' => self::sanitizeSQLParams($params),
             'request_data' => self::sanitizeRequestData($requestData),
         ];
         
@@ -54,6 +54,9 @@ class APILogger
         
         // Determine detailed error message for client
         $errorMessage = self::categorizeError($exception->getMessage(), $sqlQuery);
+        if (!self::isDebug()) {
+            $errorMessage = self::sanitizeErrorMessage($errorMessage);
+        }
         
         // Build response
         $response = [
@@ -106,7 +109,7 @@ class APILogger
         }
         
         // Connection issues
-        if (str_contains($message, 'Connection refused') || str_contains($message, 'SQLSTATE')) {
+        if (str_contains($message, 'Connection refused') || str_contains($message, 'Connection timed out') || str_contains($message, 'Lost connection') || str_contains($message, 'Connection reset')) {
             return "Database error: Cannot connect to database — check configuration";
         }
         
@@ -139,6 +142,44 @@ class APILogger
         
         // Generic error
         return "API Error: Operation failed";
+    }
+    
+    /**
+     * Check if debug mode is enabled
+     */
+    private static function isDebug(): bool
+    {
+        return getenv('APP_DEBUG') === 'true' || getenv('DEBUG') === '1';
+    }
+    
+    /**
+     * Sanitize error message to hide database details when not in debug mode
+     */
+    private static function sanitizeErrorMessage(string $message): string
+    {
+        // Replace detailed error information with generic message
+        if (str_contains($message, 'Database error:')) {
+            return "Database error: Operation failed";
+        }
+        return "API Error: Operation failed";
+    }
+    
+    /**
+     * Sanitize SQL parameters for logging (remove sensitive values)
+     */
+    private static function sanitizeSQLParams(?array $params): ?array
+    {
+        if (!$params) {
+            return null;
+        }
+        
+        $sanitized = [];
+        foreach ($params as $key => $value) {
+            // Redact all parameter values to avoid leaking sensitive data
+            $sanitized[$key] = '***REDACTED***';
+        }
+        
+        return $sanitized;
     }
     
     /**

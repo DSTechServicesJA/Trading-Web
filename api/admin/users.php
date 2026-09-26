@@ -24,6 +24,8 @@ if ($method === 'OPTIONS') {
    GET — list users
    ═══════════════════════════════════════════════ */
 if ($method === 'GET') {
+    $lastQuery = null;
+    $lastParams = [];
     try {
         $pdo = getDB();
 
@@ -63,33 +65,35 @@ if ($method === 'GET') {
         $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
         /* Total count */
-        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM users u $whereSql");
-        $countStmt->execute($params);
+        $lastQuery = "SELECT COUNT(*) FROM users u $whereSql";
+        $lastParams = $params;
+        $countStmt = $pdo->prepare($lastQuery);
+        $countStmt->execute($lastParams);
         $total = (int) $countStmt->fetchColumn();
 
         /* Users */
         $paginatedParams = array_merge($params, [$perPage, $offset]);
-        $stmt = $pdo->prepare(
-            "SELECT u.id, u.username, u.email, u.display_name, u.role, u.status,
-                    u.subscription_status, u.subscription_plan, u.subscription_expires_at, u.last_login_at,
-                    u.telegram_user_id, u.telegram_username, u.telegram_linked_at,
-                    u.created_at
-             FROM users u
-             $whereSql
-             ORDER BY u.id DESC
-             LIMIT ? OFFSET ?"
-        );
-        $stmt->execute($paginatedParams);
+        $lastQuery = "SELECT u.id, u.username, u.email, u.display_name, u.role, u.status,
+                u.subscription_status, u.subscription_plan, u.subscription_expires_at, u.last_login_at,
+                u.telegram_user_id, u.telegram_username, u.telegram_linked_at,
+                u.created_at
+         FROM users u
+         $whereSql
+         ORDER BY u.id DESC
+         LIMIT ? OFFSET ?";
+        $lastParams = $paginatedParams;
+        $stmt = $pdo->prepare($lastQuery);
+        $stmt->execute($lastParams);
         $users = $stmt->fetchAll();
 
         /* Attach strategies */
         if ($users) {
             $ids   = array_column($users, 'id');
             $in    = implode(',', array_fill(0, count($ids), '?'));
-            $saStmt = $pdo->prepare(
-                "SELECT user_id, strategy_key FROM strategy_access WHERE user_id IN ($in) ORDER BY strategy_key"
-            );
-            $saStmt->execute($ids);
+            $lastQuery = "SELECT user_id, strategy_key FROM strategy_access WHERE user_id IN ($in) ORDER BY strategy_key";
+            $lastParams = $ids;
+            $saStmt = $pdo->prepare($lastQuery);
+            $saStmt->execute($lastParams);
             $stratMap = [];
             foreach ($saStmt->fetchAll() as $row) {
                 $stratMap[$row['user_id']][] = $row['strategy_key'];
@@ -102,25 +106,25 @@ if ($method === 'GET') {
         }
 
         /* Aggregate stats across all matching users (not just current page) */
-        $statsStmt = $pdo->prepare(
-            "SELECT
-                SUM(subscription_status = 'active')  AS active_subs,
-                SUM(subscription_status = 'trial')   AS trial_subs,
-                SUM(status = 'locked')               AS locked_count,
-                SUM(subscription_expires_at IS NOT NULL
-                    AND subscription_expires_at > NOW()
-                    AND subscription_expires_at <= DATE_ADD(NOW(), INTERVAL 7 DAY)) AS expiring_soon
-             FROM users u $whereSql"
-        );
-        $statsStmt->execute($params);
+        $lastQuery = "SELECT
+            SUM(subscription_status = 'active')  AS active_subs,
+            SUM(subscription_status = 'trial')   AS trial_subs,
+            SUM(status = 'locked')               AS locked_count,
+            SUM(subscription_expires_at IS NOT NULL
+                AND subscription_expires_at > NOW()
+                AND subscription_expires_at <= DATE_ADD(NOW(), INTERVAL 7 DAY)) AS expiring_soon
+         FROM users u $whereSql";
+        $lastParams = $params;
+        $statsStmt = $pdo->prepare($lastQuery);
+        $statsStmt->execute($lastParams);
         $stats = $statsStmt->fetch() ?: [];
 
         /* Global count of users with any bot strategy access */
-        $botStmt = $pdo->prepare(
-            "SELECT COUNT(DISTINCT user_id) FROM strategy_access
-             WHERE strategy_key IN (?, ?)"
-        );
-        $botStmt->execute(['bot_hc_1hz75v', 'bot_normal']);
+        $lastQuery = "SELECT COUNT(DISTINCT user_id) FROM strategy_access
+         WHERE strategy_key IN (?, ?)";
+        $lastParams = ['bot_hc_1hz75v', 'bot_normal'];
+        $botStmt = $pdo->prepare($lastQuery);
+        $botStmt->execute($lastParams);
         $botAccessCount = (int) $botStmt->fetchColumn();
 
         jsonResponse([
@@ -138,7 +142,7 @@ if ($method === 'GET') {
             ],
         ]);
     } catch (\Throwable $e) {
-        $response = APILogger::logEndpointError('/api/admin/users', 'GET', $e);
+        $response = APILogger::logEndpointError('/api/admin/users', 'GET', $e, $lastQuery, $lastParams);
         jsonResponse($response, 500);
     }
 }
@@ -212,30 +216,34 @@ if ($method === 'POST') {
     }
 
     try {
+        $lastQuery = null;
+        $lastParams = [];
         $pdo = getDB();
 
         /* Duplicate username */
-        $stmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
-        $stmt->execute([$username]);
+        $lastQuery = 'SELECT id FROM users WHERE username = ?';
+        $lastParams = [$username];
+        $stmt = $pdo->prepare($lastQuery);
+        $stmt->execute($lastParams);
         if ($stmt->fetch()) {
             jsonResponse(['error' => 'Username already exists'], 409);
         }
 
         /* Duplicate email */
         if ($email !== '') {
-            $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
-            $stmt->execute([$email]);
+            $lastQuery = 'SELECT id FROM users WHERE email = ?';
+            $lastParams = [$email];
+            $stmt = $pdo->prepare($lastQuery);
+            $stmt->execute($lastParams);
             if ($stmt->fetch()) {
                 jsonResponse(['error' => 'Email already registered'], 409);
             }
         }
 
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-        $stmt = $pdo->prepare(
-            'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_plan, subscription_expires_at, telegram_username)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->execute([
+        $lastQuery = 'INSERT INTO users (username, email, password_hash, display_name, role, status, subscription_status, subscription_plan, subscription_expires_at, telegram_username)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        $lastParams = [
             $username,
             $email ?: null,
             $hash,
@@ -246,27 +254,29 @@ if ($method === 'POST') {
             $subPlan,
             ($subExp !== '' && $subExp !== null) ? $subExp : null,
             $tgUsername,
-        ]);
+        ];
+        $stmt = $pdo->prepare($lastQuery);
+        $stmt->execute($lastParams);
         $newId = (int) $pdo->lastInsertId();
 
         /* Grant initial strategies if provided */
         $strategies = $body['strategies'] ?? [];
         if (is_array($strategies) && $strategies) {
             $adminId = $GLOBALS['adminUserId'];
-            $ins = $pdo->prepare(
-                'INSERT IGNORE INTO strategy_access (user_id, strategy_key, granted_by) VALUES (?, ?, ?)'
-            );
+            $lastQuery = 'INSERT IGNORE INTO strategy_access (user_id, strategy_key, granted_by) VALUES (?, ?, ?)';
+            $ins = $pdo->prepare($lastQuery);
             foreach ($strategies as $key) {
                 $key = trim((string) $key);
                 if ($key !== '') {
-                    $ins->execute([$newId, $key, $adminId]);
+                    $lastParams = [$newId, $key, $adminId];
+                    $ins->execute($lastParams);
                 }
             }
         }
 
         jsonResponse(['id' => $newId, 'message' => 'User created'], 201);
     } catch (\Throwable $e) {
-        $response = APILogger::logEndpointError('/api/admin/users', 'POST', $e);
+        $response = APILogger::logEndpointError('/api/admin/users', 'POST', $e, $lastQuery, $lastParams);
         jsonResponse($response, 500);
     }
 }
