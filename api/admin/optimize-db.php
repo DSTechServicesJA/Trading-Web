@@ -171,7 +171,13 @@ try {
         ];
     }
     
-    http_response_code(200);
+    // Set response status based on whether errors occurred
+    if (!empty($results['errors'])) {
+        $results['success'] = false;
+        http_response_code(500);
+    } else {
+        http_response_code(200);
+    }
     echo json_encode($results);
     
 } catch (\Throwable $e) {
