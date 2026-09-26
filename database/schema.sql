@@ -806,14 +806,117 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
 -- ──────────────────────────────────────────────
 -- Migration: Add analytics columns to trade_outcomes for existing deployments
 -- ──────────────────────────────────────────────
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS entry_quality_score DECIMAL(5,2) DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS mae DECIMAL(18,8) DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS mfe DECIMAL(18,8) DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS sl_overshoot DECIMAL(18,8) DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS sl_then_tp_flag TINYINT(1) NOT NULL DEFAULT 0;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS tp_after_sl_seconds INT UNSIGNED DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS reversal_distance DECIMAL(18,8) DEFAULT NULL;
-ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS metadata_json JSON DEFAULT NULL;
+SET @trade_has_entry_quality_score := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'entry_quality_score'
+);
+SET @sql := IF(@trade_has_entry_quality_score = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN entry_quality_score DECIMAL(5,2) DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_mae := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'mae'
+);
+SET @sql := IF(@trade_has_mae = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN mae DECIMAL(18,8) DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_mfe := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'mfe'
+);
+SET @sql := IF(@trade_has_mfe = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN mfe DECIMAL(18,8) DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_sl_overshoot := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'sl_overshoot'
+);
+SET @sql := IF(@trade_has_sl_overshoot = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN sl_overshoot DECIMAL(18,8) DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_sl_then_tp_flag := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'sl_then_tp_flag'
+);
+SET @sql := IF(@trade_has_sl_then_tp_flag = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN sl_then_tp_flag TINYINT(1) NOT NULL DEFAULT 0',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_tp_after_sl_seconds := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'tp_after_sl_seconds'
+);
+SET @sql := IF(@trade_has_tp_after_sl_seconds = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN tp_after_sl_seconds INT UNSIGNED DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_reversal_distance := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'reversal_distance'
+);
+SET @sql := IF(@trade_has_reversal_distance = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN reversal_distance DECIMAL(18,8) DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @trade_has_metadata_json := (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'trade_outcomes'
+      AND COLUMN_NAME = 'metadata_json'
+);
+SET @sql := IF(@trade_has_metadata_json = 0,
+    'ALTER TABLE trade_outcomes ADD COLUMN metadata_json JSON DEFAULT NULL',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ──────────────────────────────────────────────
 -- Grid Scalper MA signal history (front-end sync table)
