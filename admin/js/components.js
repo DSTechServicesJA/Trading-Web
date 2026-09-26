@@ -458,22 +458,22 @@ const AdminComponents = (() => {
 
         const url = config.apiBase + path;
         
-        // Use auth error handler for 401/403 responses
-        const response = await AdminAuthErrorHandler.fetchWithAuthHandling(
-            url,
-            async () => {
-                let resp = await fetch(url, { ...options, headers });
-                
-                // Fallback to .php extension
-                if (resp.status === 404 && !path.endsWith('.php')) {
-                    const phpPath = path.includes('?') ? path.replace('?', '.php?') : path + '.php';
-                    resp = await fetch(config.apiBase + phpPath, { ...options, headers });
-                }
-                
-                return resp;
-            },
-            { retry: true, stopPollingOnFailure: true }
-        );
+        // Use auth error handler for 401/403 responses if available
+        const fetchFn = async () => {
+            let resp = await fetch(url, { ...options, headers });
+            
+            // Fallback to .php extension
+            if (resp.status === 404 && !path.endsWith('.php')) {
+                const phpPath = path.includes('?') ? path.replace('?', '.php?') : path + '.php';
+                resp = await fetch(config.apiBase + phpPath, { ...options, headers });
+            }
+            
+            return resp;
+        };
+        
+        const response = typeof AdminAuthErrorHandler !== 'undefined' && AdminAuthErrorHandler?.fetchWithAuthHandling
+            ? await AdminAuthErrorHandler.fetchWithAuthHandling(url, fetchFn, { retry: true, stopPollingOnFailure: true })
+            : await fetchFn();
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ error: response.statusText }));

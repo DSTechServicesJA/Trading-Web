@@ -556,6 +556,15 @@ const AdminLayoutManager = (() => {
                 response = await fetch(API_BASE + '.php', { headers });
             }
             
+            // Handle auth failures
+            if (response.status === 401 || response.status === 403) {
+                console.error('Auth failure loading layouts:', response.status);
+                if (window.ITGuruAuth?.logout) {
+                    window.ITGuruAuth.logout();
+                }
+                return;
+            }
+            
             const data = await response.json();
             
             if (data.success && data.layouts && data.layouts.length > 0) {
@@ -568,6 +577,15 @@ const AdminLayoutManager = (() => {
                     // Fallback to .php with path parameter
                     if (layoutResp.status === 404) {
                         layoutResp = await fetch(`${API_BASE}.php?path=${defaultLayout.id}`, { headers });
+                    }
+                    
+                    // Handle auth failures on layout fetch
+                    if (layoutResp.status === 401 || layoutResp.status === 403) {
+                        console.error('Auth failure loading default layout:', layoutResp.status);
+                        if (window.ITGuruAuth?.logout) {
+                            window.ITGuruAuth.logout();
+                        }
+                        return;
                     }
                     
                     const layoutData = await layoutResp.json();
