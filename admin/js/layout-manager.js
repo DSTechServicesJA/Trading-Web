@@ -561,6 +561,7 @@ const AdminLayoutManager = (() => {
                 console.error('Auth failure loading layouts:', response.status);
                 if (window.ITGuruAuth?.logout) {
                     window.ITGuruAuth.logout();
+                    window.location.href = '/admin/index.html';
                 }
                 return;
             }
@@ -584,6 +585,7 @@ const AdminLayoutManager = (() => {
                         console.error('Auth failure loading default layout:', layoutResp.status);
                         if (window.ITGuruAuth?.logout) {
                             window.ITGuruAuth.logout();
+                            window.location.href = '/admin/index.html';
                         }
                         return;
                     }
