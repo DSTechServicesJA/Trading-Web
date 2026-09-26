@@ -264,6 +264,7 @@ if ($method === 'POST') {
         if (is_array($strategies) && $strategies) {
             $adminId = $GLOBALS['adminUserId'];
             $lastQuery = 'INSERT IGNORE INTO strategy_access (user_id, strategy_key, granted_by) VALUES (?, ?, ?)';
+            $lastParams = [];
             $ins = $pdo->prepare($lastQuery);
             foreach ($strategies as $key) {
                 $key = trim((string) $key);

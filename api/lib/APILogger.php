@@ -53,7 +53,7 @@ class APILogger
         error_log(json_encode($logEntry, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
         
         // Determine detailed error message for client
-        $errorMessage = self::categorizeError($exception->getMessage(), $sqlQuery);
+        $errorMessage = self::categorizeError($exception);
         if (!self::isDebug()) {
             $errorMessage = self::sanitizeErrorMessage($errorMessage);
         }
@@ -65,7 +65,7 @@ class APILogger
         ];
         
         // Include technical details if debugging is enabled
-        if (getenv('APP_DEBUG') === 'true' || getenv('DEBUG') === '1') {
+        if (self::isDebug()) {
             $response['_debug'] = [
                 'exception_type' => get_class($exception),
                 'exception_message' => $exception->getMessage(),
@@ -81,8 +81,10 @@ class APILogger
     /**
      * Categorize and extract meaningful error message
      */
-    private static function categorizeError(string $message, ?string $sqlQuery): string
+    private static function categorizeError(\Throwable $exception): string
     {
+        $message = $exception->getMessage();
+        
         // Database schema issues
         if (str_contains($message, 'Unknown column')) {
             preg_match("/Unknown column '([^']+)'/", $message, $matches);
@@ -108,9 +110,18 @@ class APILogger
             return "Database error: Required table not found";
         }
         
-        // Connection issues
+        // Connection issues (check both this exception and previous exceptions)
         if (str_contains($message, 'Connection refused') || str_contains($message, 'Connection timed out') || str_contains($message, 'Lost connection') || str_contains($message, 'Connection reset')) {
             return "Database error: Cannot connect to database — check configuration";
+        }
+        
+        // Inspect previous exception for wrapped PDO connection errors
+        $prev = $exception->getPrevious();
+        if ($prev !== null) {
+            $prevMessage = $prev->getMessage();
+            if (str_contains($prevMessage, 'Connection refused') || str_contains($prevMessage, 'Connection timed out') || str_contains($prevMessage, 'Lost connection') || str_contains($prevMessage, 'Connection reset')) {
+                return "Database error: Cannot connect to database — check configuration";
+            }
         }
         
         if (str_contains($message, 'Access denied')) {
@@ -149,7 +160,7 @@ class APILogger
      */
     private static function isDebug(): bool
     {
-        return getenv('APP_DEBUG') === 'true' || getenv('DEBUG') === '1';
+        return \isDebug();
     }
     
     /**
@@ -210,7 +221,7 @@ class APILogger
      */
     public static function logQuery(string $query, ?array $params = null, float $executionTime = 0.0): void
     {
-        if (getenv('APP_DEBUG') !== 'true' && getenv('DEBUG') !== '1') {
+        if (!\isDebug()) {
             return;
         }
         
@@ -218,7 +229,7 @@ class APILogger
             'timestamp' => date('Y-m-d H:i:s'),
             'type' => 'SQL_QUERY',
             'query' => $query,
-            'params' => $params,
+            'params' => self::sanitizeSQLParams($params),
             'execution_time_ms' => round($executionTime * 1000, 2),
         ];
         
