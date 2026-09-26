@@ -69,6 +69,7 @@ try {
     )['cnt'];
     
     // Get logs
+    // Note: LIMIT must use integer values, not parameters
     $logs = $db->fetchAll("
         SELECT id,
                status,
@@ -81,11 +82,8 @@ try {
         FROM admin_audit_trail
         $where
         ORDER BY created_at DESC
-        LIMIT :offset, :limit
-    ", array_merge($params, [
-        ':offset' => $offset,
-        ':limit' => $limit
-    ]));
+        LIMIT $limit OFFSET $offset
+    ", $params);
     
     // Get available sources and levels for filtering
     $available_sources = $db->fetchAll("

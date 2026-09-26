@@ -74,17 +74,15 @@ try {
         $last_page = max(1, ceil($total / $per_page));
         
         // Get paginated results
+        // Note: LIMIT must use integer values, not parameters
         $entries = $db->fetchAll(
             "SELECT id, admin_id, action, entity_type, entity_id, old_value, new_value, 
                     ip_address, status, error_message, created_at
              FROM admin_audit_trail 
              WHERE $where_clause
              ORDER BY created_at DESC
-             LIMIT :offset, :per_page",
-            array_merge($params, [
-                ':offset' => $offset,
-                ':per_page' => $per_page
-            ])
+             LIMIT $per_page OFFSET $offset",
+            $params
         );
         
         // Get admin names for display

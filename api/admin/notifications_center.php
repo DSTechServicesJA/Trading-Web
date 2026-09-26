@@ -70,17 +70,15 @@ try {
         $unread_count = (int) $unread_result['count'];
         
         // Get paginated results
+        // Note: LIMIT must use integer values, not parameters
         $notifications = $db->fetchAll(
             "SELECT id, notification_type, category, title, message, severity, 
                     source_entity, source_id, related_data, is_read, created_at
              FROM admin_notifications_center 
              WHERE $where_clause
              ORDER BY created_at DESC, severity DESC
-             LIMIT :offset, :per_page",
-            array_merge($params, [
-                ':offset' => $offset,
-                ':per_page' => $per_page
-            ])
+             LIMIT $per_page OFFSET $offset",
+            $params
         );
         
         echo json_encode([

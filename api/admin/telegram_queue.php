@@ -83,10 +83,10 @@ try {
         $per_page = min(max((int) ($_GET['per_page'] ?? 50), 10), 500);
         $offset = ($page - 1) * $per_page;
         
-        $total = $db->fetchOne(
+        $total = (int) (($db->fetchOne(
             "SELECT COUNT(*) as cnt FROM telegram_delivery_log WHERE status = :status",
             [':status' => $status]
-        )['cnt'];
+        )['cnt']) ?? 0);
         
         $messages = $db->fetchAll("
             SELECT id, user_id, signal_id, notification_type, status, 
@@ -94,11 +94,9 @@ try {
             FROM telegram_delivery_log
             WHERE status = :status
             ORDER BY sent_at DESC
-            LIMIT :offset, :per_page
+            LIMIT $per_page OFFSET $offset
         ", [
-            ':status' => $status,
-            ':offset' => $offset,
-            ':per_page' => $per_page
+            ':status' => $status
         ]);
         
         echo json_encode([

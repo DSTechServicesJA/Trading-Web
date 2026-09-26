@@ -10,12 +10,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-$pdo = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 $action = (string) ($_GET['action'] ?? 'dashboard');
 $adminUserId = (int) ($GLOBALS['adminUserId'] ?? 0);
 
 try {
+    $pdo = getDB();
     if ($method === 'GET') {
         if ($action === 'profiles') {
             jsonResponse(adaptiveListUserIntelligenceProfiles($pdo, $_GET));
