@@ -103,14 +103,18 @@ try {
             outcome, terminal_reason, exit_price, exit_timestamp,
             partial_tp_hit, partial_tp_level, partial_tp_timestamp,
             entry_alert_sent, outcome_notif_sent, partial_tp_notif_sent,
-            rr_ratio, confluence_score, metadata_json
+            rr_ratio, confluence_score,
+            mae, mfe, sl_overshoot, sl_then_tp_flag, tp_after_sl_seconds, reversal_distance, entry_quality_score,
+            metadata_json
         ) VALUES (
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?,
-            ?, ?, ?
+            ?, ?,
+            ?, ?, ?, ?, ?, ?, ?,
+            ?
         )
         ON DUPLICATE KEY UPDATE
             outcome = VALUES(outcome),
@@ -123,6 +127,15 @@ try {
             outcome_notif_sent = VALUES(outcome_notif_sent),
             partial_tp_notif_sent = VALUES(partial_tp_notif_sent),
             rr_ratio = VALUES(rr_ratio),
+            confluence_score = VALUES(confluence_score),
+            mae = VALUES(mae),
+            mfe = VALUES(mfe),
+            sl_overshoot = VALUES(sl_overshoot),
+            sl_then_tp_flag = VALUES(sl_then_tp_flag),
+            tp_after_sl_seconds = VALUES(tp_after_sl_seconds),
+            reversal_distance = VALUES(reversal_distance),
+            entry_quality_score = VALUES(entry_quality_score),
+            metadata_json = VALUES(metadata_json),
             updated_at = CURRENT_TIMESTAMP"
     );
     
@@ -154,6 +167,13 @@ try {
         
         isset($input['rr_ratio']) ? (float)$input['rr_ratio'] : null,
         isset($input['confluence_score']) ? (float)$input['confluence_score'] : null,
+        isset($input['mae']) ? (float)$input['mae'] : null,
+        isset($input['mfe']) ? (float)$input['mfe'] : null,
+        isset($input['sl_overshoot']) ? (float)$input['sl_overshoot'] : null,
+        !empty($input['sl_then_tp_flag']) ? 1 : 0,
+        isset($input['tp_after_sl_seconds']) ? (int)$input['tp_after_sl_seconds'] : null,
+        isset($input['reversal_distance']) ? (float)$input['reversal_distance'] : null,
+        isset($input['entry_quality_score']) ? (float)$input['entry_quality_score'] : null,
         isset($input['metadata_json']) ? json_encode($input['metadata_json']) : null
     ]);
     

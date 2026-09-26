@@ -780,6 +780,13 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
     
     confluence_score    DECIMAL(5,2) DEFAULT NULL,
     confidence_level    VARCHAR(20)  DEFAULT NULL,
+    entry_quality_score DECIMAL(5,2) DEFAULT NULL,
+    mae                 DECIMAL(18,8) DEFAULT NULL,
+    mfe                 DECIMAL(18,8) DEFAULT NULL,
+    sl_overshoot        DECIMAL(18,8) DEFAULT NULL,
+    sl_then_tp_flag     TINYINT(1)   NOT NULL DEFAULT 0,
+    tp_after_sl_seconds INT UNSIGNED DEFAULT NULL,
+    reversal_distance   DECIMAL(18,8) DEFAULT NULL,
     metadata_json       JSON         DEFAULT NULL,
     
     created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
