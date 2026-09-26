@@ -15,6 +15,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -45,8 +46,8 @@ if ($method === 'GET') {
         );
         jsonResponse(['notifications' => $stmt->fetchAll()]);
     } catch (\Throwable $e) {
-        error_log('Admin notifications GET error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to load notifications'], 500);
+        $response = APILogger::logEndpointError('/api/admin/notifications', 'GET', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -94,8 +95,8 @@ if ($method === 'POST') {
             'target'  => $userId === null ? 'all' : $username,
         ], 201);
     } catch (\Throwable $e) {
-        error_log('Admin notifications POST error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to send notification'], 500);
+        $response = APILogger::logEndpointError('/api/admin/notifications', 'POST', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -116,8 +117,8 @@ if ($method === 'DELETE') {
         }
         jsonResponse(['ok' => true]);
     } catch (\Throwable $e) {
-        error_log('Admin notifications DELETE error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to delete notification'], 500);
+        $response = APILogger::logEndpointError('/api/admin/notifications', 'DELETE', $e);
+        jsonResponse($response, 500);
     }
 }
 

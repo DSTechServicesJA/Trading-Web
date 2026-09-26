@@ -30,6 +30,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 
 const ADMIN_NOTIF_PREF_COLUMNS = [
     'telegram_trade_setup'          => true,
@@ -71,8 +72,8 @@ if ($method === 'OPTIONS') {
 try {
     $pdo = getDB();
 } catch (\Throwable $e) {
-    error_log('Admin notification_preferences DB connection error: ' . $e->getMessage());
-    jsonResponse(['error' => 'Database connection failed'], 500);
+    $response = APILogger::logEndpointError('/api/admin/notification_preferences', $_SERVER['REQUEST_METHOD'], $e);
+    jsonResponse($response, 500);
 }
 
 /* ═══════════════════════════════════════════════
@@ -132,8 +133,8 @@ if ($method === 'GET') {
             'stats'      => $stats,
         ]);
     } catch (\Throwable $e) {
-        error_log('Admin notification_preferences GET error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to load notification preferences'], 500);
+        $response = APILogger::logEndpointError('/api/admin/notification_preferences', 'GET', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -167,8 +168,8 @@ if ($method === 'POST') {
 
             jsonResponse(['ok' => true, 'applied_count' => count($missing)]);
         } catch (\Throwable $e) {
-            error_log('Admin notification_preferences apply_defaults error: ' . $e->getMessage());
-            jsonResponse(['error' => 'Failed to apply defaults'], 500);
+            $response = APILogger::logEndpointError('/api/admin/notification_preferences', 'POST', $e);
+            jsonResponse($response, 500);
         }
     }
 
@@ -224,8 +225,8 @@ if ($method === 'POST') {
 
             jsonResponse(['ok' => true, 'updated_count' => $updatedCount]);
         } catch (\Throwable $e) {
-            error_log('Admin notification_preferences bulk_update error: ' . $e->getMessage());
-            jsonResponse(['error' => 'Failed to bulk update preferences'], 500);
+            $response = APILogger::logEndpointError('/api/admin/notification_preferences', 'POST', $e);
+            jsonResponse($response, 500);
         }
     }
 
@@ -246,8 +247,8 @@ if ($method === 'POST') {
 
             jsonResponse(['ok' => true, 'preferences' => adminNotifPrefDefaults()]);
         } catch (\Throwable $e) {
-            error_log('Admin notification_preferences reset error: ' . $e->getMessage());
-            jsonResponse(['error' => 'Failed to reset preferences'], 500);
+            $response = APILogger::logEndpointError('/api/admin/notification_preferences', 'POST', $e);
+            jsonResponse($response, 500);
         }
     }
 
@@ -296,8 +297,8 @@ if ($method === 'POST') {
 
         jsonResponse(['ok' => true, 'preferences' => $current]);
     } catch (\Throwable $e) {
-        error_log('Admin notification_preferences POST error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to save notification preferences'], 500);
+        $response = APILogger::logEndpointError('/api/admin/notification_preferences', 'POST', $e);
+        jsonResponse($response, 500);
     }
 }
 

@@ -16,6 +16,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -88,6 +89,6 @@ try {
         'stats'   => $statusCounts,
     ]);
 } catch (\Throwable $e) {
-    error_log('Admin telegram_delivery_log GET error: ' . $e->getMessage());
-    jsonResponse(['error' => 'Failed to load delivery log'], 500);
+    $response = APILogger::logEndpointError('/api/admin/telegram_delivery_log', 'GET', $e);
+    jsonResponse($response, 500);
 }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 require_once __DIR__ . '/../lib/AdaptiveIntelligenceService.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -301,6 +302,6 @@ try {
     if ($pdo && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    error_log('Admin adaptive error: ' . $e->getMessage());
-    jsonResponse(['error' => categoriseAuthError('Adaptive admin request failed', $e)], 500);
+    $response = APILogger::logEndpointError('/api/admin/adaptive', $_SERVER['REQUEST_METHOD'], $e);
+    jsonResponse($response, 500);
 }

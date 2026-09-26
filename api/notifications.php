@@ -13,6 +13,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/lib/APILogger.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -53,8 +54,8 @@ if ($method === 'GET') {
         $stmt->execute([$userId, $userCreatedAt, $userId]);
         jsonResponse(['notifications' => $stmt->fetchAll()]);
     } catch (\Throwable $e) {
-        error_log('notifications.php GET error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to load notifications'], 500);
+        $response = APILogger::logEndpointError('/api/notifications', 'GET', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -96,8 +97,8 @@ if ($method === 'POST') {
 
         jsonResponse(['ok' => true]);
     } catch (\Throwable $e) {
-        error_log('notifications.php POST error: ' . $e->getMessage());
-        jsonResponse(['error' => 'Failed to update notification'], 500);
+        $response = APILogger::logEndpointError('/api/notifications', 'POST', $e);
+        jsonResponse($response, 500);
     }
 }
 

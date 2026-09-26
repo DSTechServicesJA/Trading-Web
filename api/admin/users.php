@@ -11,6 +11,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -137,8 +138,8 @@ if ($method === 'GET') {
             ],
         ]);
     } catch (\Throwable $e) {
-        error_log('Admin GET /users error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to list users', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/users', 'GET', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -265,8 +266,8 @@ if ($method === 'POST') {
 
         jsonResponse(['id' => $newId, 'message' => 'User created'], 201);
     } catch (\Throwable $e) {
-        error_log('Admin POST /users error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to create user', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/users', 'POST', $e);
+        jsonResponse($response, 500);
     }
 }
 
