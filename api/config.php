@@ -446,6 +446,60 @@ function jwtDecode(string $token): ?array
     return $data;
 }
 
+/**
+ * Authenticate user from JWT token in Authorization header.
+ * Returns user ID on success, exits with standardized JSON response on failure.
+ * Logs auth failures with structured context.
+ *
+ * @return int User ID
+ */
+function authenticateUserFromToken(): int
+{
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION']
+        ?? (function_exists('apache_request_headers')
+            ? (apache_request_headers()['Authorization'] ?? '')
+            : '');
+    
+    if ($authHeader === '') {
+        error_log(sprintf(
+            '[%s] Auth failure: Missing Authorization header [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        http_response_code(401);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Authentication required']);
+    }
+    
+    if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        error_log(sprintf(
+            '[%s] Auth failure: Malformed Authorization header [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        http_response_code(401);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid authorization header']);
+    }
+    
+    $payload = jwtDecode($m[1]);
+    if (!$payload || empty($payload['sub'])) {
+        error_log(sprintf(
+            '[%s] Auth failure: Invalid or expired token [%s %s from %s]',
+            date('Y-m-d H:i:s'),
+            $_SERVER['REQUEST_METHOD'] ?? '',
+            $_SERVER['REQUEST_URI'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? ''
+        ));
+        http_response_code(401);
+        jsonResponse(['error' => 'Unauthorized', 'code' => 401, 'message' => 'Invalid or expired token']);
+    }
+    
+    return (int) $payload['sub'];
+}
+
 /* ══════════════════════════════════════════════
    4. IP-based rate limiting (file-system)
    ══════════════════════════════════════════════ */

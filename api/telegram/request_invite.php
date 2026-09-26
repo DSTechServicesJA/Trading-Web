@@ -20,43 +20,4 @@ require_once __DIR__ . '/helpers.php';
 requirePost();
 
 /* ── Authenticate user ── */
-$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-    jsonResponse(['error' => 'Authentication required'], 401);
-}
-$jwtPayload = jwtDecode($m[1]);
-if (!$jwtPayload || empty($jwtPayload['sub'])) {
-    jsonResponse(['error' => 'Invalid or expired token'], 401);
-}
-$userId = (int) $jwtPayload['sub'];
-
-try {
-    $pdo = getDB();
-
-    $stmt = $pdo->prepare(
-        'SELECT id, subscription_status, telegram_user_id, telegram_username FROM users WHERE id = ?'
-    );
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-
-    if (!$user) {
-        jsonResponse(['error' => 'User not found'], 404);
-    }
-
-    if (empty($user['telegram_user_id'])) {
-        jsonResponse(['error' => 'No Telegram account is linked. Please link your Telegram account first.'], 400);
-    }
-
-    if ($user['subscription_status'] !== 'active') {
-        jsonResponse(['error' => 'An active subscription is required to join the Telegram group.'], 403);
-    }
-
-    /* Send a fresh invite link via the bot */
-    telegramAddIfLinked($pdo, $userId);
-
-    jsonResponse(['message' => 'Invite sent to your Telegram account. Check your Telegram messages.']);
-
-} catch (\Throwable $e) {
-    error_log('request_invite error: ' . $e->getMessage());
-    jsonResponse(['error' => categoriseAuthError('Failed to send invite', $e)], 500);
-}
+$userId = authenticateUserFromToken();

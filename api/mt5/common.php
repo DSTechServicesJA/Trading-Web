@@ -89,18 +89,7 @@ function mt5ReadState(): array
 
 function mt5AuthUserId(): int
 {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION']
-        ?? (function_exists('apache_request_headers')
-            ? (apache_request_headers()['Authorization'] ?? '')
-            : '');
-    if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-        jsonResponse(['error' => 'Authentication required'], 401);
-    }
-    $payload = jwtDecode($m[1]);
-    if (!$payload || empty($payload['sub'])) {
-        jsonResponse(['error' => 'Invalid or expired token'], 401);
-    }
-    return (int) $payload['sub'];
+    return authenticateUserFromToken();
 }
 
 /**

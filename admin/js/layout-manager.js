@@ -144,7 +144,30 @@ const AdminLayoutManager = (() => {
         try {
             layoutList.innerHTML = '<p class="text-muted"><i class="fas fa-spin fa-spinner"></i> Loading...</p>';
             
-            const response = await fetch(API_BASE);
+            // Get auth token
+            const token = window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('itguru_auth_token');
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            };
+            
+            let response = await fetch(API_BASE, { headers });
+            
+            // Fallback to .php if not found
+            if (response.status === 404) {
+                response = await fetch(API_BASE + '.php', { headers });
+            }
+            
+            // Handle auth errors
+            if (response.status === 401 || response.status === 403) {
+                layoutList.innerHTML = '<p class="text-danger">Authentication required. Please log in again.</p>';
+                window.ITGuruAuth?.logout?.();
+                return;
+            }
+            
             const data = await response.json();
             
             if (!data.success || !data.layouts) {
@@ -238,11 +261,18 @@ const AdminLayoutManager = (() => {
         const currentLayout = captureCurrentLayout();
         
         try {
-            const response = await fetch(API_BASE, {
+            const token = window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('itguru_auth_token');
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            };
+            
+            let response = await fetch(API_BASE, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers,
                 body: JSON.stringify({
                     name: nameInput.value.trim(),
                     description: descInput.value.trim(),
@@ -282,7 +312,29 @@ const AdminLayoutManager = (() => {
      */
     async function loadLayout(layoutId) {
         try {
-            const response = await fetch(`${API_BASE}/${layoutId}`);
+            const token = window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('itguru_auth_token');
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            };
+            
+            let response = await fetch(`${API_BASE}/${layoutId}`, { headers });
+            
+            // Fallback to .php
+            if (response.status === 404) {
+                response = await fetch(`${API_BASE}/${layoutId}.php`, { headers });
+            }
+            
+            // Handle auth errors
+            if (response.status === 401 || response.status === 403) {
+                alert('Authentication required. Please log in again.');
+                window.ITGuruAuth?.logout?.();
+                return;
+            }
+            
             const data = await response.json();
             
             if (!data.success) {
@@ -312,9 +364,34 @@ const AdminLayoutManager = (() => {
      */
     async function setDefaultLayout(layoutId) {
         try {
-            const response = await fetch(`${API_BASE}/${layoutId}/apply`, {
-                method: 'POST'
+            const token = window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('itguru_auth_token');
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            };
+            
+            let response = await fetch(`${API_BASE}/${layoutId}/apply`, {
+                method: 'POST',
+                headers
             });
+            
+            // Fallback to .php
+            if (response.status === 404) {
+                response = await fetch(`${API_BASE}/${layoutId}/apply.php`, {
+                    method: 'POST',
+                    headers
+                });
+            }
+            
+            // Handle auth errors
+            if (response.status === 401 || response.status === 403) {
+                alert('Authentication required. Please log in again.');
+                window.ITGuruAuth?.logout?.();
+                return;
+            }
             
             const data = await response.json();
             
@@ -341,9 +418,34 @@ const AdminLayoutManager = (() => {
         }
         
         try {
-            const response = await fetch(`${API_BASE}/${layoutId}`, {
-                method: 'DELETE'
+            const token = window.ITGuruAuth?.getToken?.()
+                || localStorage.getItem('itguru_auth_token')
+                || sessionStorage.getItem('itguru_auth_token');
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+            };
+            
+            let response = await fetch(`${API_BASE}/${layoutId}`, {
+                method: 'DELETE',
+                headers
             });
+            
+            // Fallback to .php
+            if (response.status === 404) {
+                response = await fetch(`${API_BASE}/${layoutId}.php`, {
+                    method: 'DELETE',
+                    headers
+                });
+            }
+            
+            // Handle auth errors
+            if (response.status === 401 || response.status === 403) {
+                alert('Authentication required. Please log in again.');
+                window.ITGuruAuth?.logout?.();
+                return;
+            }
             
             const data = await response.json();
             
@@ -432,7 +534,7 @@ const AdminLayoutManager = (() => {
     async function loadDefaultLayout() {
         // Check if there's a default layout for this admin
         try {
-            const response = await fetch(API_BASE);
+            const token = window.ITGuruAuth?.getToken?.() || localStorage.getItem("itguru_auth_token") || sessionStorage.getItem("itguru_auth_token"); const headers = { "Content-Type": "application/json", ...(token ? { "Authorization": "Bearer " + token } : {}) }; const response = await fetch(API_BASE, { headers });
             const data = await response.json();
             
             if (data.success && data.layouts && data.layouts.length > 0) {
