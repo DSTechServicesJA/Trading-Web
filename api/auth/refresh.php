@@ -15,17 +15,15 @@
  *   { error: "Unauthorized", message: "Invalid or expired token" }
  */
 
+declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 
 require_once(__DIR__ . '/../config.php');
 require_once(__DIR__ . '/../lib/Database.php');
 
 try {
-    // 1. Verify request method is POST
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        http_response_code(405);
-        jsonResponse(['error' => 'Method not allowed'], 405);
-    }
+    // 1. Verify request method is POST (also handles OPTIONS for CORS preflight)
+    requirePost();
 
     // 2. Extract and validate current token from Authorization header
     $authHeader = $_SERVER['HTTP_AUTHORIZATION']
@@ -56,14 +54,16 @@ try {
 
     $userId = (int) $payload['sub'];
 
-    // 3. Fetch fresh user data from database
+    // 2. Reject impersonation tokens (they should not be refreshed into full 24-hour tokens)
+    if (!empty($payload['impersonated_by'])) {
+        error_log('[' . date('Y-m-d H:i:s') . '] Auth refresh: Attempted to refresh impersonation token');
+        http_response_code(403);
+        jsonResponse(['error' => 'Forbidden', 'message' => 'Impersonation tokens cannot be refreshed'], 403);
+    }
+
+    // 3. Fetch fresh user data from database using schema-tolerant lookup
     $pdo = Database::getInstance()->getConnection();
-    $stmt = $pdo->prepare(
-        "SELECT id, username, role, display_name, subscription_status, subscription_plan, subscription_expires_at, telegram_username, telegram_user_id
-         FROM users WHERE id = ? LIMIT 1"
-    );
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+    $user = fetchAuthUser($pdo, 'id', $userId);
 
     if (!$user) {
         error_log('[' . date('Y-m-d H:i:s') . '] Auth refresh: User not found (ID: ' . $userId . ')');
@@ -71,7 +71,14 @@ try {
         jsonResponse(['error' => 'Unauthorized', 'message' => 'User not found'], 401);
     }
 
-    // 4. Check if subscription has expired
+    // 4. Check if account is locked
+    if (($user['status'] ?? 'active') === 'locked') {
+        error_log('[' . date('Y-m-d H:i:s') . '] Auth refresh: Account locked for user ' . $user['username']);
+        http_response_code(403);
+        jsonResponse(['error' => 'Forbidden', 'message' => 'Account is locked'], 403);
+    }
+
+    // 5. Check if subscription has expired
     $subExpired = $user['subscription_expires_at'] !== null
         && strtotime($user['subscription_expires_at']) < time();
 
@@ -84,10 +91,10 @@ try {
         ], 403);
     }
 
-    // 5. Fetch granted strategies
+    // 6. Fetch granted strategies
     $strategies = fetchUserStrategies($pdo, $userId);
 
-    // 6. Issue new JWT token with extended expiration
+    // 7. Issue new JWT token with extended expiration
     $newToken = jwtEncode([
         'sub'      => $user['id'],
         'username' => $user['username'],
@@ -98,7 +105,7 @@ try {
 
     error_log('[' . date('Y-m-d H:i:s') . '] Auth refresh success: User ' . $user['username'] . ' (ID: ' . $userId . ')');
 
-    // 7. Return new token and updated user info
+    // 8. Return new token and updated user info
     http_response_code(200);
     jsonResponse([
         'token' => $newToken,
