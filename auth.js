@@ -348,11 +348,8 @@ const ITGuruAuth = (() => {
       if (!resp.ok) {
         /* Token refresh failed — likely token is expired */
         if (resp.status === 401 || resp.status === 403) {
-          /* Session expired — clear stale session */
-          sessionStorage.removeItem(SESSION_KEY);
-          sessionStorage.removeItem(USER_KEY);
-          sessionStorage.removeItem(STRATEGIES_KEY);
-          /* Show login overlay + expiration message */
+          /* Session expired — clear all session data and show login overlay */
+          logout();
           showSessionExpired("Your session has expired. Please sign in again.");
           return false;
         }
@@ -542,6 +539,7 @@ const ITGuruAuth = (() => {
     if (isLoggedIn()) {
       overlay.style.display = "none";
       updateNavUI();
+      startAutoRefresh();  /* Start automatic token refresh for restored session */
     } else {
       overlay.style.display = "flex";
     }
