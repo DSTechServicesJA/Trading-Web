@@ -14,6 +14,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $action = (string) ($_GET['action'] ?? 'dashboard');
 $adminUserId = (int) ($GLOBALS['adminUserId'] ?? 0);
 
+$pdo = null;
 try {
     $pdo = getDB();
     if ($method === 'GET') {
@@ -297,7 +298,7 @@ try {
 
     jsonResponse(['error' => 'Method not allowed'], 405);
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
+    if ($pdo && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
     error_log('Admin adaptive error: ' . $e->getMessage());
