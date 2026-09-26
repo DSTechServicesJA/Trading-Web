@@ -477,7 +477,8 @@ const AdminComponents = (() => {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ error: response.statusText }));
-            throw new Error(error.error || `API Error: ${response.status}`);
+            const errorMsg = error.error || error.message || response.statusText || `HTTP ${response.status}`;
+            throw new Error(errorMsg);
         }
 
         return response.json();
