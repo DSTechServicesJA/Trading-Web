@@ -787,7 +787,7 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
     sl_then_tp_flag     TINYINT(1)   NOT NULL DEFAULT 0,
     tp_after_sl_seconds INT UNSIGNED DEFAULT NULL,
     reversal_distance   DECIMAL(18,8) DEFAULT NULL,
-    metadata_json       JSON         DEFAULT NULL,
+    metadata_json       JSON,
     
     created_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -912,7 +912,7 @@ SET @trade_has_metadata_json := (
       AND COLUMN_NAME = 'metadata_json'
 );
 SET @sql := IF(@trade_has_metadata_json = 0,
-    'ALTER TABLE trade_outcomes ADD COLUMN metadata_json JSON DEFAULT NULL',
+    'ALTER TABLE trade_outcomes ADD COLUMN metadata_json JSON',
     'SELECT 1');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;

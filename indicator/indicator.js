@@ -23468,6 +23468,11 @@ function adjustIndicesAfterSlice(removed) {
       watch.slHitIdx = Math.max(0, watch.slHitIdx - removed);
     }
   }
+   
+  /* Adjust pending setup trigger index when candles are sliced */
+  if (gridScalperMAPendingSetup && gridScalperMAPendingSetup.triggerIdx != null) {
+    gridScalperMAPendingSetup.triggerIdx = Math.max(0, gridScalperMAPendingSetup.triggerIdx - removed);
+  }
 }
 
 function computeEMAs() {
