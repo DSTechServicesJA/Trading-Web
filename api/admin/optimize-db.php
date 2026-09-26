@@ -110,7 +110,8 @@ try {
             
             $results['indexes_created'][] = $name;
             
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
+    error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
             $results['errors'][] = [
                 'index' => $index['name'],
                 'error' => $e->getMessage()
@@ -135,7 +136,8 @@ try {
             try {
                 $conn->exec($sql);
                 $results['indexes_created'][] = $indexName;
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
+    error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
                 if (strpos($e->getMessage(), 'Duplicate key name') === false) {
                     $results['errors'][] = [
                         'index' => $indexName,
@@ -146,7 +148,8 @@ try {
                 }
             }
         }
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
+    error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         $results['errors'][] = [
             'type' => 'composite_indexes',
             'error' => $e->getMessage()
@@ -160,7 +163,8 @@ try {
             $conn->exec("ANALYZE TABLE {$table}");
         }
         $results['analysis_completed'] = true;
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
+    error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         $results['errors'][] = [
             'type' => 'table_analysis',
             'error' => $e->getMessage()
@@ -170,7 +174,8 @@ try {
     http_response_code(200);
     echo json_encode($results);
     
-} catch (Exception $e) {
+} catch (\Throwable $e) {
+    error_log('Admin optimize-db error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     http_response_code(403);
     echo json_encode([
         'error' => $e->getMessage(),

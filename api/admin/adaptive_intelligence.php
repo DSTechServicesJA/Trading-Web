@@ -39,22 +39,22 @@ try {
             $per_page = min(max((int) ($_GET['per_page'] ?? 50), 10), 500);
             $offset = ($page - 1) * $per_page;
             
-            $total = $db->fetchOne(
-                "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles WHERE user_id = :user_id",
-                [':user_id' => $user_id]
-            )['cnt'];
+            $total = (int) (($db->fetchOne(
+                "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles WHERE user_id = ?",
+                [$user_id]
+            )['cnt']) ?? 0);
             
             $profiles = $db->fetchAll("
                 SELECT id, user_id, scope_type, market_category, strategy_key, symbol_scope,
                        trade_count, wins, losses, confidence_score, created_at, updated_at
                 FROM adaptive_learning_profiles
-                WHERE user_id = :user_id
+                WHERE user_id = ?
                 ORDER BY updated_at DESC
-                LIMIT :offset, :per_page
+                LIMIT ? OFFSET ?
             ", [
-                ':user_id' => $user_id,
-                ':offset' => $offset,
-                ':per_page' => $per_page
+                $user_id,
+                $per_page,
+                $offset
             ]);
             
             echo json_encode([
@@ -80,22 +80,22 @@ try {
             $per_page = min(max((int) ($_GET['per_page'] ?? 50), 10), 500);
             $offset = ($page - 1) * $per_page;
             
-            $total = $db->fetchOne(
-                "SELECT COUNT(*) as cnt FROM adaptive_qualification_rules WHERE user_id = :user_id",
-                [':user_id' => $user_id]
-            )['cnt'];
+            $total = (int) (($db->fetchOne(
+                "SELECT COUNT(*) as cnt FROM adaptive_qualification_rules WHERE user_id = ?",
+                [$user_id]
+            )['cnt']) ?? 0);
             
             $rules = $db->fetchAll("
                 SELECT id, user_id, market_category, strategy_key, symbol_scope, reject_below,
                        watchlist_below, high_confidence_min, min_sample_size, enabled, created_at, updated_at
                 FROM adaptive_qualification_rules
-                WHERE user_id = :user_id
+                WHERE user_id = ?
                 ORDER BY updated_at DESC
-                LIMIT :offset, :per_page
+                LIMIT ? OFFSET ?
             ", [
-                ':user_id' => $user_id,
-                ':offset' => $offset,
-                ':per_page' => $per_page
+                $user_id,
+                $per_page,
+                $offset
             ]);
             
             echo json_encode([
@@ -110,21 +110,21 @@ try {
         }
         elseif ($action === 'stats') {
             // Get adaptive system statistics
-            $total_profiles = $db->fetchOne(
+            $total_profiles = (int) (($db->fetchOne(
                 "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles"
-            )['cnt'];
+            )['cnt']) ?? 0);
             
-            $total_rules = $db->fetchOne(
+            $total_rules = (int) (($db->fetchOne(
                 "SELECT COUNT(*) as cnt FROM adaptive_qualification_rules"
-            )['cnt'];
+            )['cnt']) ?? 0);
             
-            $active_profiles = $db->fetchOne(
+            $active_profiles = (int) (($db->fetchOne(
                 "SELECT COUNT(*) as cnt FROM adaptive_learning_profiles WHERE confidence_score >= 50"
-            )['cnt'];
+            )['cnt']) ?? 0);
             
-            $users_with_adaptive = $db->fetchOne(
+            $users_with_adaptive = (int) (($db->fetchOne(
                 "SELECT COUNT(DISTINCT user_id) as cnt FROM adaptive_learning_profiles"
-            )['cnt'];
+            )['cnt']) ?? 0);
             
             // Get strategy breakdown
             $by_strategy = $db->fetchAll("
@@ -136,10 +136,10 @@ try {
             
             echo json_encode([
                 'success' => true,
-                'total_profiles' => (int) $total_profiles,
-                'total_rules' => (int) $total_rules,
-                'active_profiles' => (int) $active_profiles,
-                'users_with_adaptive' => (int) $users_with_adaptive,
+                'total_profiles' => $total_profiles,
+                'total_rules' => $total_rules,
+                'active_profiles' => $active_profiles,
+                'users_with_adaptive' => $users_with_adaptive,
                 'by_strategy' => array_map(function($s) {
                     return [
                         'strategy' => $s['strategy_key'],
@@ -167,7 +167,7 @@ try {
         $user_id = (int) $body['user_id'];
         
         // Verify user exists
-        $user = $db->fetchOne("SELECT id FROM users WHERE id = :user_id", [':user_id' => $user_id]);
+        $user = $db->fetchOne("SELECT id FROM users WHERE id = ?", [$user_id]);
         if (!$user) {
             http_response_code(404);
             echo json_encode(['error' => 'User not found']);
@@ -188,8 +188,9 @@ try {
         echo json_encode(['error' => 'Method not allowed']);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
-    echo json_encode(['error' => $e->getMessage()]);
+} catch (\Throwable $e) {
+    http_response_code(500);
+    error_log('Admin adaptive_intelligence error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    echo json_encode(['error' => 'Failed to process request: ' . $e->getMessage()]);
 }
 ?>

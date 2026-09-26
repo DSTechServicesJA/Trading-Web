@@ -74,17 +74,15 @@ try {
         $last_page = max(1, ceil($total / $per_page));
         
         // Get paginated results
+        // Note: LIMIT must use integer values, not parameters
         $entries = $db->fetchAll(
             "SELECT id, admin_id, action, entity_type, entity_id, old_value, new_value, 
                     ip_address, status, error_message, created_at
              FROM admin_audit_trail 
              WHERE $where_clause
              ORDER BY created_at DESC
-             LIMIT :offset, :per_page",
-            array_merge($params, [
-                ':offset' => $offset,
-                ':per_page' => $per_page
-            ])
+             LIMIT $per_page OFFSET $offset",
+            $params
         );
         
         // Get admin names for display
@@ -153,8 +151,9 @@ try {
         echo json_encode(['error' => 'Method not allowed']);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
+} catch (\Throwable $e) {
+    error_log('Admin audit_trail error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);
 }
 ?>

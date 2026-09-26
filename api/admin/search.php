@@ -47,10 +47,9 @@ try {
             FROM users
             WHERE username LIKE :search OR email LIKE :search OR display_name LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($users)) {
@@ -77,10 +76,9 @@ try {
             FROM trade_outcomes
             WHERE trade_id LIKE :search OR symbol LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($trades)) {
@@ -107,10 +105,9 @@ try {
             FROM grid_scalper_ma_signals
             WHERE signal_id LIKE :search OR symbol LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($signals)) {
@@ -136,10 +133,9 @@ try {
             FROM adaptive_qualification_rules
             WHERE market_category LIKE :search OR strategy_key LIKE :search OR symbol_scope LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($rules)) {
@@ -165,10 +161,9 @@ try {
             FROM indicator_profiles
             WHERE name LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($profiles)) {
@@ -194,10 +189,9 @@ try {
             FROM admin_notifications_center
             WHERE title LIKE :search OR message LIKE :search
             ORDER BY created_at DESC
-            LIMIT :limit
+            LIMIT " . (int)$limit . "
         ", [
-            ':search' => $search_term,
-            ':limit' => $limit
+            ':search' => $search_term
         ]);
         
         if (!empty($notifications)) {
@@ -218,8 +212,9 @@ try {
     
     echo json_encode($results);
     
-} catch (Exception $e) {
-    http_response_code(403);
-    echo json_encode(['error' => $e->getMessage()]);
+} catch (\Throwable $e) {
+    http_response_code(500);
+    error_log('Admin search error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    echo json_encode(['error' => 'Search failed: ' . $e->getMessage()]);
 }
 ?>

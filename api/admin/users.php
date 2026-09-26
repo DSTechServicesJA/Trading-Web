@@ -112,7 +112,7 @@ if ($method === 'GET') {
              FROM users u $whereSql"
         );
         $statsStmt->execute($params);
-        $stats = $statsStmt->fetch();
+        $stats = $statsStmt->fetch() ?: [];
 
         /* Global count of users with any bot strategy access */
         $botStmt = $pdo->prepare(

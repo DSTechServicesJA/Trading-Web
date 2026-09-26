@@ -192,10 +192,10 @@ try {
         $per_page = min(max((int) ($_GET['per_page'] ?? 50), 10), 500);
         $offset = ($page - 1) * $per_page;
         
-        $total = $db->fetchOne(
+        $total = (int) (($db->fetchOne(
             "SELECT COUNT(*) as cnt FROM grid_scalper_ma_signals WHERE strategy_mode = :strategy",
             [':strategy' => $strategy]
-        )['cnt'];
+        )['cnt']) ?? 0);
         
         $signals = $db->fetchAll("
             SELECT id, user_id, signal_id, symbol, timeframe, direction, status,
@@ -204,11 +204,9 @@ try {
             FROM grid_scalper_ma_signals
             WHERE strategy_mode = :strategy
             ORDER BY created_at DESC
-            LIMIT :offset, :per_page
+            LIMIT $per_page OFFSET $offset
         ", [
-            ':strategy' => $strategy,
-            ':offset' => $offset,
-            ':per_page' => $per_page
+            ':strategy' => $strategy
         ]);
         
         echo json_encode([
@@ -260,8 +258,9 @@ try {
         echo json_encode(['error' => 'Unknown action: ' . htmlspecialchars($action)]);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
+} catch (\Throwable $e) {
+    error_log('Admin strategy_stats error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);
 }
 ?>

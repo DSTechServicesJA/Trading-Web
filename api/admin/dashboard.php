@@ -109,8 +109,9 @@ try {
         ]);
     }
     
-} catch (Exception $e) {
-    http_response_code(403);
-    echo json_encode(['error' => $e->getMessage()]);
+} catch (\Throwable $e) {
+    http_response_code(500);
+    error_log('Admin dashboard error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    echo json_encode(['error' => 'Dashboard failed: ' . $e->getMessage()]);
 }
 ?>
