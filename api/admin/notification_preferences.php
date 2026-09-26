@@ -68,7 +68,12 @@ if ($method === 'OPTIONS') {
     exit;
 }
 
-$pdo = getDB();
+try {
+    $pdo = getDB();
+} catch (\Throwable $e) {
+    error_log('Admin notification_preferences DB connection error: ' . $e->getMessage());
+    jsonResponse(['error' => 'Database connection failed'], 500);
+}
 
 /* ═══════════════════════════════════════════════
    GET — list all users' preferences + stats, or one user
