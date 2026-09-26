@@ -79,17 +79,17 @@ if ($method === 'GET') {
         /* List all profiles */
         $stmt = $pdo->prepare(
             'SELECT ip.id, ip.name, ip.is_admin_profile, ip.created_at, ip.updated_at,
-                    u.username AS created_by_username,
+                    COALESCE(u.username, \'[deleted user]\') AS created_by_username,
                     (SELECT COUNT(*) FROM user_profile_assignments upa WHERE upa.profile_id = ip.id) AS assignment_count
                FROM indicator_profiles ip
                LEFT JOIN users u ON u.id = ip.created_by
               ORDER BY ip.is_admin_profile DESC, ip.updated_at DESC'
         );
         $stmt->execute();
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll() ?: [];
         foreach ($rows as &$r) {
-            $r['is_admin_profile']  = (bool) $r['is_admin_profile'];
-            $r['assignment_count']  = (int)  $r['assignment_count'];
+            $r['is_admin_profile']  = (bool) ($r['is_admin_profile'] ?? false);
+            $r['assignment_count']  = (int)  ($r['assignment_count'] ?? 0);
         }
         jsonResponse(['profiles' => $rows]);
     } catch (\Throwable $e) {

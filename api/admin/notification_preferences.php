@@ -57,7 +57,7 @@ function adminNotifPrefRowToBool(array $row): array
 {
     $out = [];
     foreach (array_keys(ADMIN_NOTIF_PREF_COLUMNS) as $col) {
-        $out[$col] = !empty($row[$col]) ? true : false;
+        $out[$col] = !empty($row[$col] ?? false) ? true : false;
     }
     return $out;
 }
@@ -104,16 +104,26 @@ if ($method === 'GET') {
         }
 
         /* List all users with their preferences (defaults if not saved) */
-        $users = $pdo->query('SELECT id, username FROM users ORDER BY username')->fetchAll();
-        $rows  = $pdo->query('SELECT * FROM user_notification_preferences')->fetchAll();
+        $userStmt = $pdo->prepare('SELECT id, username FROM users ORDER BY username');
+        $userStmt->execute();
+        $users = $userStmt->fetchAll() ?: [];
+        
+        $prefStmt = $pdo->prepare('SELECT * FROM user_notification_preferences');
+        $prefStmt->execute();
+        $prefRows = $prefStmt->fetchAll() ?: [];
         $byUser = [];
-        foreach ($rows as $r) {
-            $byUser[(int) $r['user_id']] = adminNotifPrefRowToBool($r);
+        foreach ($prefRows as $r) {
+            if ($r && isset($r['user_id'])) {
+                $byUser[(int) $r['user_id']] = adminNotifPrefRowToBool($r);
+            }
         }
 
         $list = [];
         $stats = array_fill_keys(array_keys(ADMIN_NOTIF_PREF_COLUMNS), 0);
         foreach ($users as $u) {
+            if (!$u || !isset($u['id'])) {
+                continue;
+            }
             $uid = (int) $u['id'];
             $prefs = $byUser[$uid] ?? adminNotifPrefDefaults();
             foreach ($prefs as $col => $val) {
@@ -121,7 +131,7 @@ if ($method === 'GET') {
             }
             $list[] = [
                 'user_id'     => $uid,
-                'username'    => $u['username'],
+                'username'    => $u['username'] ?? 'unknown',
                 'preferences' => $prefs,
                 'is_default'  => !isset($byUser[$uid]),
             ];
