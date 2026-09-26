@@ -29,6 +29,9 @@ if ($method !== 'GET') {
     jsonResponse(['error' => 'Method not allowed'], 405);
 }
 
+$lastQuery = null;
+$lastParams = [];
+
 try {
     $pdo = getDB();
 
@@ -56,29 +59,41 @@ try {
     $offset = max(0, (int) ($_GET['offset'] ?? 0));
 
     $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+    $params[] = $limit;
+    $params[] = $offset;
 
-    $stmt = $pdo->prepare(
-        "SELECT l.id, l.user_id, u.username, l.signal_id, l.notification_type, l.strategy,
+    $lastQuery = "SELECT l.id, l.user_id, u.username, l.signal_id, l.notification_type, l.strategy,
                 l.symbol, l.status, l.telegram_response, l.error_detail, l.sent_at
            FROM telegram_delivery_log l
            LEFT JOIN users u ON u.id = l.user_id
            $whereSql
           ORDER BY l.sent_at DESC, l.id DESC
-          LIMIT $limit OFFSET $offset"
-    );
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll();
+          LIMIT ? OFFSET ?";
+    $lastParams = $params;
+    $stmt = $pdo->prepare($lastQuery);
+    $stmt->execute($lastParams);
+    $rows = $stmt->fetchAll() ?: [];
 
-    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM telegram_delivery_log l $whereSql");
-    $countStmt->execute($params);
-    $total = (int) $countStmt->fetchColumn();
+    // Count total
+    array_pop($params); // Remove OFFSET
+    array_pop($params); // Remove LIMIT
+    $lastQuery = "SELECT COUNT(*) FROM telegram_delivery_log l $whereSql";
+    $lastParams = $params;
+    $countStmt = $pdo->prepare($lastQuery);
+    $countStmt->execute($lastParams);
+    $total = (int) ($countStmt->fetchColumn() ?: 0);
 
-    $statStmt = $pdo->query(
-        "SELECT status, COUNT(*) AS c FROM telegram_delivery_log GROUP BY status"
-    )->fetchAll();
+    // Get status stats
+    $lastQuery = "SELECT status, COUNT(*) AS c FROM telegram_delivery_log GROUP BY status";
+    $lastParams = [];
+    $statStmt = $pdo->prepare($lastQuery);
+    $statStmt->execute($lastParams);
+    $statResults = $statStmt->fetchAll() ?: [];
     $statusCounts = ['sent' => 0, 'failed' => 0, 'skipped' => 0];
-    foreach ($statStmt as $s) {
-        $statusCounts[$s['status']] = (int) $s['c'];
+    foreach ($statResults as $s) {
+        if ($s && isset($s['status'], $s['c'])) {
+            $statusCounts[$s['status']] = (int) $s['c'];
+        }
     }
 
     jsonResponse([
@@ -89,6 +104,6 @@ try {
         'stats'   => $statusCounts,
     ]);
 } catch (\Throwable $e) {
-    $response = APILogger::logEndpointError('/api/admin/telegram_delivery_log', 'GET', $e);
+    $response = APILogger::logEndpointError('/api/admin/telegram_delivery_log', 'GET', $e, $lastQuery, $lastParams);
     jsonResponse($response, 500);
 }

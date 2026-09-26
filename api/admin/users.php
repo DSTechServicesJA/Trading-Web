@@ -95,11 +95,13 @@ if ($method === 'GET') {
             $saStmt = $pdo->prepare($lastQuery);
             $saStmt->execute($lastParams);
             $stratMap = [];
-            foreach ($saStmt->fetchAll() as $row) {
-                $stratMap[$row['user_id']][] = $row['strategy_key'];
+            foreach ($saStmt->fetchAll() ?: [] as $row) {
+                if ($row && isset($row['user_id'], $row['strategy_key'])) {
+                    $stratMap[(int) $row['user_id']][] = $row['strategy_key'];
+                }
             }
             foreach ($users as &$u) {
-                $u['strategies']      = $stratMap[$u['id']] ?? [];
+                $u['strategies']      = $stratMap[(int) ($u['id'] ?? 0)] ?? [];
                 $u['telegram_linked'] = !empty($u['telegram_user_id']);
             }
             unset($u);
@@ -117,7 +119,7 @@ if ($method === 'GET') {
         $lastParams = $params;
         $statsStmt = $pdo->prepare($lastQuery);
         $statsStmt->execute($lastParams);
-        $stats = $statsStmt->fetch() ?: [];
+        $stats = $statsStmt->fetch() ?: ['active_subs' => 0, 'trial_subs' => 0, 'locked_count' => 0, 'expiring_soon' => 0];
 
         /* Global count of users with any bot strategy access */
         $lastQuery = "SELECT COUNT(DISTINCT user_id) FROM strategy_access
@@ -125,7 +127,7 @@ if ($method === 'GET') {
         $lastParams = ['bot_hc_1hz75v', 'bot_normal'];
         $botStmt = $pdo->prepare($lastQuery);
         $botStmt->execute($lastParams);
-        $botAccessCount = (int) $botStmt->fetchColumn();
+        $botAccessCount = (int) ($botStmt->fetchColumn() ?: 0);
 
         jsonResponse([
             'users'        => $users,

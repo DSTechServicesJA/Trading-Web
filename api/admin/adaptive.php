@@ -118,7 +118,10 @@ try {
             if (!$current) {
                 jsonResponse(['error' => 'Factor stat not found'], 404);
             }
-            $targetFactorUserId = (int) $current['user_id'];
+            $targetFactorUserId = (int) ($current['user_id'] ?? 0);
+            if ($targetFactorUserId <= 0) {
+                jsonResponse(['error' => 'Invalid factor: user_id missing or invalid'], 400);
+            }
             adaptiveAcquireUserTradeLock($pdo, $targetFactorUserId);
             try {
                 $currentStmt->execute([$factorId]);
@@ -157,7 +160,7 @@ try {
                 if (array_key_exists('locked_by_admin', $body)) {
                     $actionType = !empty($body['locked_by_admin']) ? 'ADMIN_FACTOR_LOCK' : 'ADMIN_FACTOR_UNLOCK';
                 }
-                adaptiveAudit($pdo, $adminUserId, 'admin', (int) $current['user_id'], $actionType, 'factor_stat', (string) $current['factor_key'], (string) $current['market_category'], (string) $current['strategy_key'], (string) $current['symbol_scope'], $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
+                adaptiveAudit($pdo, $adminUserId, 'admin', (int) ($current['user_id'] ?? 0), $actionType, 'factor_stat', (string) ($current['factor_key'] ?? ''), (string) ($current['market_category'] ?? ''), (string) ($current['strategy_key'] ?? ''), (string) ($current['symbol_scope'] ?? ''), $current, $nextValue, (string) ($body['reason'] ?? 'Admin updated factor statistics'));
                 $pdo->commit();
                 jsonResponse(['message' => 'Factor statistics updated']);
             } catch (Throwable $e) {
@@ -185,10 +188,17 @@ try {
             if (!$row) {
                 jsonResponse(['error' => 'Trade not found'], 404);
             }
+            $tradeUserId = (int) ($row['user_id'] ?? 0);
+            if ($tradeUserId <= 0) {
+                jsonResponse(['error' => 'Invalid trade: user_id missing or invalid'], 400);
+            }
             $pdo->beginTransaction();
             $pdo->prepare('DELETE FROM adaptive_trade_history WHERE id = ?')->execute([$id]);
-            adaptiveRebuildUserHistory($pdo, (int) $row['user_id'], (string) $row['market_category']);
-            adaptiveAudit($pdo, $adminUserId, 'admin', (int) $row['user_id'], 'ADMIN_DELETE_TRADE', 'trade_history', (string) $row['trade_id'], (string) $row['market_category'], (string) $row['strategy_key'], (string) $row['symbol'], $row, null, 'Admin deleted adaptive trade record');
+            adaptiveRebuildUserHistory($pdo, $tradeUserId, (string) ($row['market_category'] ?? null));
+            adaptiveAudit($pdo, $adminUserId, 'admin', $tradeUserId, 'ADMIN_DELETE_TRADE', 'trade_history', 
+                (string) ($row['trade_id'] ?? ''), (string) ($row['market_category'] ?? ''), 
+                (string) ($row['strategy_key'] ?? ''), (string) ($row['symbol'] ?? ''), $row, null, 
+                'Admin deleted adaptive trade record');
             $pdo->commit();
             jsonResponse(['message' => 'Trade deleted and adaptive aggregates rebuilt']);
         }
