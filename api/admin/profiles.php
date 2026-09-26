@@ -20,6 +20,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../lib/APILogger.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
@@ -92,8 +93,8 @@ if ($method === 'GET') {
         }
         jsonResponse(['profiles' => $rows]);
     } catch (\Throwable $e) {
-        error_log('Admin GET /admin/profiles error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to load profiles', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/profiles', 'GET', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -131,8 +132,8 @@ if ($method === 'POST') {
             $ins->execute([$userId, $profileId, $GLOBALS['adminUserId']]);
             jsonResponse(['message' => 'Profile assigned']);
         } catch (\Throwable $e) {
-            error_log('Admin POST assign profile error: ' . $e->getMessage());
-            jsonResponse(['error' => categoriseAuthError('Failed to assign profile', $e)], 500);
+            $response = APILogger::logEndpointError('/api/admin/profiles', 'POST', $e);
+            jsonResponse($response, 500);
         }
     }
 
@@ -162,8 +163,8 @@ if ($method === 'POST') {
         $ins->execute([$name, $settingsJson, $GLOBALS['adminUserId'], $isAdmin ? 1 : 0]);
         jsonResponse(['message' => 'Profile created', 'id' => (int) $pdo->lastInsertId()], 201);
     } catch (\Throwable $e) {
-        error_log('Admin POST create profile error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to create profile', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/profiles', 'POST', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -222,8 +223,8 @@ if ($method === 'PATCH') {
         }
         jsonResponse(['message' => 'Profile updated']);
     } catch (\Throwable $e) {
-        error_log('Admin PATCH profile error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to update profile', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/profiles', 'PATCH', $e);
+        jsonResponse($response, 500);
     }
 }
 
@@ -247,8 +248,8 @@ if ($method === 'DELETE') {
             $del->execute([$userId, $profileId]);
             jsonResponse(['message' => 'Assignment removed']);
         } catch (\Throwable $e) {
-            error_log('Admin DELETE unassign profile error: ' . $e->getMessage());
-            jsonResponse(['error' => categoriseAuthError('Failed to remove assignment', $e)], 500);
+            $response = APILogger::logEndpointError('/api/admin/profiles', 'DELETE', $e);
+            jsonResponse($response, 500);
         }
     }
 
@@ -267,8 +268,8 @@ if ($method === 'DELETE') {
         }
         jsonResponse(['message' => 'Profile deleted']);
     } catch (\Throwable $e) {
-        error_log('Admin DELETE profile error: ' . $e->getMessage());
-        jsonResponse(['error' => categoriseAuthError('Failed to delete profile', $e)], 500);
+        $response = APILogger::logEndpointError('/api/admin/profiles', 'DELETE', $e);
+        jsonResponse($response, 500);
     }
 }
 
