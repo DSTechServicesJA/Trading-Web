@@ -350,6 +350,27 @@ class TradeOutcomeService {
     async _logOutcomeToDatabase(trade) {
         try {
             const token = getTelegramCredentials?.()?.token || sessionStorage.getItem('authToken') || '';
+            const metadata = {
+                candleIdx: trade.candleIdx,
+                epoch: trade.epoch,
+                mode: trade.mode,
+                volCategory: trade.volCategory,
+                entry_delay_mode: trade.entryDelayMode || null,
+                trigger_level: Number.isFinite(trade.triggerLevel) ? Number(trade.triggerLevel) : null,
+                trigger_idx: Number.isFinite(trade.triggerIdx) ? Number(trade.triggerIdx) : null,
+                entry_quality_score: Number.isFinite(trade.entryQualityScore) ? Number(trade.entryQualityScore) : null,
+                entry_quality_breakdown: trade.entryQualityBreakdown || null,
+                trend_strength_score: Number.isFinite(trade.trendStrengthScore) ? Number(trade.trendStrengthScore) : null,
+                atr_ratio: Number.isFinite(trade.atrRatio) ? Number(trade.atrRatio) : null,
+                structure_ok: typeof trade.structureOk === 'boolean' ? trade.structureOk : null,
+                pullback_ok: typeof trade.pullbackOk === 'boolean' ? trade.pullbackOk : null,
+                mae: Number.isFinite(trade._mae) ? Number(trade._mae) : null,
+                mfe: Number.isFinite(trade._mfe) ? Number(trade._mfe) : null,
+                sl_overshoot: Number.isFinite(trade._slOvershoot) ? Number(trade._slOvershoot) : null,
+                sl_then_tp_flag: trade._slThenTpFlag ? 1 : 0,
+                tp_after_sl_seconds: Number.isFinite(trade._tpAfterSlSeconds) ? Number(trade._tpAfterSlSeconds) : null,
+                reversal_distance: Number.isFinite(trade._reversalDistance) ? Number(trade._reversalDistance) : null
+            };
             const payload = {
                 trade_id: trade.tradeId || trade.signalId || this.generateTradeId(),
                 signal_id: trade.signalId || null,
@@ -370,12 +391,14 @@ class TradeOutcomeService {
                 rr_ratio: trade.rr,
                 confluence_score: trade.confluenceScore,
                 outcome_notif_sent: trade._stratOutcomeSent ? 1 : 0,
-                metadata_json: {
-                    candleIdx: trade.candleIdx,
-                    epoch: trade.epoch,
-                    mode: trade.mode,
-                    volCategory: trade.volCategory
-                }
+                mae: Number.isFinite(trade._mae) ? Number(trade._mae) : null,
+                mfe: Number.isFinite(trade._mfe) ? Number(trade._mfe) : null,
+                sl_overshoot: Number.isFinite(trade._slOvershoot) ? Number(trade._slOvershoot) : null,
+                sl_then_tp_flag: trade._slThenTpFlag ? 1 : 0,
+                tp_after_sl_seconds: Number.isFinite(trade._tpAfterSlSeconds) ? Number(trade._tpAfterSlSeconds) : null,
+                reversal_distance: Number.isFinite(trade._reversalDistance) ? Number(trade._reversalDistance) : null,
+                entry_quality_score: Number.isFinite(trade.entryQualityScore) ? Number(trade.entryQualityScore) : null,
+                metadata_json: metadata
             };
 
             const response = await fetch('/api/trades/log_outcome', {
@@ -395,6 +418,12 @@ class TradeOutcomeService {
         } catch (err) {
             this._log('WARN', `Error logging outcome to database: ${err.message}`);
         }
+    }
+
+    async syncTradeAnalytics(trade) {
+        if (!trade || !this.autoLogToDatabase) return false;
+        await this._logOutcomeToDatabase(trade);
+        return true;
     }
 
     /**

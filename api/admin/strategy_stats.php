@@ -87,6 +87,45 @@ try {
             ORDER BY avg_return DESC
             LIMIT 5
         ", [':strategy' => $strategy]);
+
+        $sl_then_tp = $db->fetchOne("
+            SELECT
+                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS total_losses,
+                SUM(CASE WHEN outcome = 'LOSS' AND sl_then_tp_flag = 1 THEN 1 ELSE 0 END) AS losses_then_tp,
+                AVG(CASE WHEN outcome = 'LOSS' THEN sl_overshoot END) AS avg_sl_overshoot,
+                AVG(CASE WHEN outcome = 'LOSS' AND sl_then_tp_flag = 1 THEN reversal_distance END) AS avg_reversal_distance,
+                AVG(CASE WHEN outcome = 'LOSS' AND sl_then_tp_flag = 1 THEN tp_after_sl_seconds END) AS avg_time_to_reversal
+            FROM trade_outcomes
+            WHERE strategy_type = :strategy AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        ", [':strategy' => $strategy]);
+
+        $entry_quality_by_outcome = $db->fetchAll("
+            SELECT
+                outcome,
+                COUNT(*) AS trades,
+                AVG(entry_quality_score) AS avg_entry_quality
+            FROM trade_outcomes
+            WHERE strategy_type = :strategy
+              AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              AND entry_quality_score IS NOT NULL
+              AND outcome IN ('WIN', 'LOSS')
+            GROUP BY outcome
+            ORDER BY outcome
+        ", [':strategy' => $strategy]);
+
+        $timing_patterns = $db->fetchAll("
+            SELECT
+                DAYNAME(COALESCE(entry_timestamp, created_at)) AS day_name,
+                HOUR(COALESCE(entry_timestamp, created_at)) AS hour_of_day,
+                COUNT(*) AS losses_then_tp
+            FROM trade_outcomes
+            WHERE strategy_type = :strategy
+              AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              AND sl_then_tp_flag = 1
+            GROUP BY day_name, hour_of_day
+            ORDER BY losses_then_tp DESC
+            LIMIT 20
+        ", [':strategy' => $strategy]);
         
         echo json_encode([
             'success' => true,
@@ -119,7 +158,31 @@ try {
                     'wins' => (int) $s['wins'],
                     'avg_return' => round($s['avg_return'] ?? 0, 2)
                 ];
-            }, $top_symbols)
+            }, $top_symbols),
+            'sl_then_tp_30d' => [
+                'total_losses' => (int)($sl_then_tp['total_losses'] ?? 0),
+                'losses_then_tp' => (int)($sl_then_tp['losses_then_tp'] ?? 0),
+                'pct_losses_then_tp' => ((int)($sl_then_tp['total_losses'] ?? 0) > 0)
+                    ? round(((int)$sl_then_tp['losses_then_tp'] / (int)$sl_then_tp['total_losses']) * 100, 2)
+                    : 0,
+                'avg_sl_overshoot' => round($sl_then_tp['avg_sl_overshoot'] ?? 0, 6),
+                'avg_reversal_distance' => round($sl_then_tp['avg_reversal_distance'] ?? 0, 6),
+                'avg_time_to_reversal_seconds' => round($sl_then_tp['avg_time_to_reversal'] ?? 0, 2),
+            ],
+            'entry_quality_30d' => array_map(function($row) {
+                return [
+                    'outcome' => $row['outcome'],
+                    'trades' => (int)$row['trades'],
+                    'avg_entry_quality' => round($row['avg_entry_quality'] ?? 0, 2),
+                ];
+            }, $entry_quality_by_outcome ?? []),
+            'sl_then_tp_timing_patterns_30d' => array_map(function($row) {
+                return [
+                    'day' => $row['day_name'] ?? 'Unknown',
+                    'hour' => isset($row['hour_of_day']) ? (int)$row['hour_of_day'] : null,
+                    'count' => (int)($row['losses_then_tp'] ?? 0),
+                ];
+            }, $timing_patterns ?? [])
         ]);
     }
     elseif ($action === 'signals') {

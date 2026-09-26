@@ -3044,6 +3044,21 @@ const GRID_SCALPER_MA_MAX_SL_ATR   = 2.0;    /* max SL distance as ATR multiple 
 const GRID_SCALPER_MA_RR_VOL1S     = 1.5;    /* Volatility 1s: quick 1.5:1 scalp */
 const GRID_SCALPER_MA_RR_STANDARD  = 2.5;    /* Volatility Standard: ride 2.5:1 */
 const GRID_SCALPER_MA_RR_DEFAULT   = 2.0;    /* all other symbols: balanced 2:1 */
+const GRID_SCALPER_MA_CONFIRM_MAX_WAIT = 3;  /* max candles to wait for delayed entry confirmation */
+const GRID_SCALPER_MA_ATR_RATIO_MIN = 0.65;  /* reject overly quiet conditions */
+const GRID_SCALPER_MA_ATR_RATIO_MAX = 2.4;   /* reject overly noisy conditions */
+const GRID_SCALPER_MA_TREND_SLOPE_MIN_ATR = 0.03;
+const GRID_SCALPER_MA_MA_SEPARATION_MIN_ATR = 0.05;
+const GRID_SCALPER_MA_MOMENTUM_MIN_ATR = 0.08;
+let gridScalperMAEntryDelayMode = "follow_through"; /* immediate | one_candle | close_beyond_trigger | follow_through | break_retest */
+let gridScalperMATrendStrengthFilterEnabled = true;
+let gridScalperMAVolatilityFilterEnabled = true;
+let gridScalperMAStructureFilterEnabled = true;
+let gridScalperMAPullbackFilterEnabled = true;
+let gridScalperMAEntryQualityFilterEnabled = true;
+let gridScalperMAEntryQualityMinScore = 55;
+let gridScalperMAPendingSetup = null;
+let gridScalperMALossReversalWatch = [];
 
 /* ================= STRATEGY 12: ORDERBLOCK DETECTION ================= */
 let orderblockEnabled   = false;     /* master toggle */
@@ -7367,6 +7382,194 @@ function monitorCrtTbsOutcomes(candle) {
 }
 
 /* ================= STRATEGY 8: GRID SCALPER MA ================= */
+function buildGridScalperMASignal(dir, idx, mode, breakLevel = null) {
+  if (!dir || idx < 0 || idx >= candles.length) return null;
+  const atr = atrValue > 0 ? atrValue : (candles[idx].high - candles[idx].low);
+  const slBuffer = atr * 0.15;
+  const entry = candles[idx].close;
+  let sl;
+  if (dir === "BULL") {
+    const swingLow = findSwingLow(idx);
+    sl = swingLow - slBuffer;
+    if (sl >= entry) sl = entry - atr;
+  } else {
+    const swingHigh = findSwingHigh(idx);
+    sl = swingHigh + slBuffer;
+    if (sl <= entry) sl = entry + atr;
+  }
+  let risk = Math.abs(entry - sl);
+  const maxRisk = atr * GRID_SCALPER_MA_MAX_SL_ATR;
+  if (risk > maxRisk) {
+    sl = dir === "BULL" ? entry - maxRisk : entry + maxRisk;
+    risk = maxRisk;
+  }
+  if (risk < atr * 0.05) return null;
+  const sym = getActiveSymbol() || "";
+  let rrMultiplier = GRID_SCALPER_MA_RR_DEFAULT;
+  let volCategory = "default";
+  if (/^1HZ/i.test(sym)) { rrMultiplier = GRID_SCALPER_MA_RR_VOL1S; volCategory = "vol1s"; }
+  else if (/^R_/i.test(sym)) { rrMultiplier = GRID_SCALPER_MA_RR_STANDARD; volCategory = "standard"; }
+  const tp = dir === "BULL" ? entry + risk * rrMultiplier : entry - risk * rrMultiplier;
+  const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
+  return {
+    dir, entry, sl, tp, rr,
+    candleIdx: idx,
+    epoch: candles[idx].epoch,
+    symbol: sym,
+    result: "PENDING",
+    type: "grid_scalper_ma",
+    mode: mode || gridScalperMAStrategy,
+    volCategory,
+    breakLevel
+  };
+}
+
+function evaluateGridScalperMAEntryDelay(setup, idx) {
+  if (!setup || !Number.isFinite(idx)) return { pass: false, reason: "invalid delayed-entry setup" };
+  if (idx <= setup.triggerIdx) return { pass: false, wait: true, reason: "waiting for next candle" };
+  const c = candles[idx];
+  const prev = candles[idx - 1];
+  const dir = setup.dir;
+  const triggerLevel = Number.isFinite(setup.triggerLevel) ? setup.triggerLevel : setup.entry;
+  if (!c || !prev) return { pass: false, wait: true, reason: "waiting for candle context" };
+  if (gridScalperMAEntryDelayMode === "one_candle") return { pass: true };
+  if (gridScalperMAEntryDelayMode === "close_beyond_trigger") {
+    const pass = dir === "BULL" ? c.close > triggerLevel : c.close < triggerLevel;
+    return pass ? { pass: true } : { pass: false, wait: true, reason: "confirmation close not beyond trigger level" };
+  }
+  if (gridScalperMAEntryDelayMode === "break_retest") {
+    const retested = dir === "BULL" ? c.low <= triggerLevel : c.high >= triggerLevel;
+    const reclaimed = dir === "BULL" ? c.close > triggerLevel : c.close < triggerLevel;
+    if (retested && reclaimed) return { pass: true };
+    return { pass: false, wait: true, reason: "waiting for break-retest confirmation" };
+  }
+  if (gridScalperMAEntryDelayMode === "follow_through") {
+    const pass = dir === "BULL"
+      ? (c.close > prev.close && c.high >= prev.high)
+      : (c.close < prev.close && c.low <= prev.low);
+    return pass ? { pass: true } : { pass: false, wait: true, reason: "follow-through candle not confirmed" };
+  }
+  return { pass: true };
+}
+
+function evaluateGridScalperMAStructure(dir, idx) {
+  if (!gridScalperMAStructureFilterEnabled || idx < 2) return { pass: true, structureOk: null };
+  const c1 = candles[idx - 1];
+  const c2 = candles[idx - 2];
+  if (!c1 || !c2) return { pass: true, structureOk: null };
+  const bullish = c1.high > c2.high && c1.low > c2.low;
+  const bearish = c1.high < c2.high && c1.low < c2.low;
+  const pass = dir === "BULL" ? bullish : bearish;
+  return { pass, structureOk: pass, reason: pass ? null : `market structure failed (${dir === "BULL" ? "HH/HL" : "LH/LL"} not present)` };
+}
+
+function evaluateGridScalperMATrendStrength(dir, idx) {
+  const result = { pass: true, score: 0, details: {} };
+  if (!gridScalperMATrendStrengthFilterEnabled) return result;
+  const adxPass = adxValue >= ADX_TRENDING_THRESHOLD;
+  result.details.adx = Number.isFinite(adxValue) ? adxValue : null;
+  if (adxPass) result.score += 25;
+  const fastNow = emaFast[idx];
+  const fastPrev = emaFast[idx - 1];
+  const slowNow = emaSlow[idx];
+  const slowPrev = emaSlow[idx - 1];
+  const atrRef = atrValue > 0 ? atrValue : getAtrReference();
+  let slopeAtr = null;
+  if (Number.isFinite(fastNow) && Number.isFinite(fastPrev) && atrRef > 0) {
+    slopeAtr = Math.abs(fastNow - fastPrev) / atrRef;
+    const slopePass = slopeAtr >= GRID_SCALPER_MA_TREND_SLOPE_MIN_ATR;
+    result.details.slope_atr = slopeAtr;
+    if (slopePass) result.score += 20;
+  }
+  let maSeparationAtr = null;
+  if (Number.isFinite(fastNow) && Number.isFinite(slowNow) && atrRef > 0) {
+    maSeparationAtr = Math.abs(fastNow - slowNow) / atrRef;
+    const maPass = maSeparationAtr >= GRID_SCALPER_MA_MA_SEPARATION_MIN_ATR;
+    result.details.ma_separation_atr = maSeparationAtr;
+    if (maPass) result.score += 20;
+  }
+  let momentumAtr = null;
+  if (idx > 2 && atrRef > 0) {
+    momentumAtr = Math.abs(candles[idx].close - candles[idx - 2].close) / atrRef;
+    const momentumPass = momentumAtr >= GRID_SCALPER_MA_MOMENTUM_MIN_ATR;
+    result.details.momentum_atr = momentumAtr;
+    if (momentumPass) result.score += 20;
+  }
+  const maAligned = Number.isFinite(fastNow) && Number.isFinite(slowNow)
+    ? (dir === "BULL" ? fastNow > slowNow : fastNow < slowNow)
+    : true;
+  if (maAligned) result.score += 15;
+  result.pass = adxPass && maAligned && result.score >= 55;
+  if (!result.pass) result.reason = `trend strength gate failed (score ${result.score}/100)`;
+  return result;
+}
+
+function evaluateGridScalperMAVolatility(idx) {
+  const out = { pass: true, atrRatio: null };
+  if (!gridScalperMAVolatilityFilterEnabled) return out;
+  const atr = atrValue > 0 ? atrValue : getAtrReference();
+  const valid = (atrValues || []).filter(v => Number.isFinite(v) && v > 0);
+  const sample = valid.slice(Math.max(0, valid.length - 40));
+  const avgAtr = sample.length > 0 ? sample.reduce((sum, v) => sum + v, 0) / sample.length : atr;
+  const ratio = (atr > 0 && avgAtr > 0) ? atr / avgAtr : null;
+  out.atrRatio = ratio;
+  if (!Number.isFinite(ratio)) return out;
+  out.pass = ratio >= GRID_SCALPER_MA_ATR_RATIO_MIN && ratio <= GRID_SCALPER_MA_ATR_RATIO_MAX;
+  if (!out.pass) out.reason = `ATR regime rejected (${fmt(ratio, 2)} outside ${fmt(GRID_SCALPER_MA_ATR_RATIO_MIN, 2)}-${fmt(GRID_SCALPER_MA_ATR_RATIO_MAX, 2)})`;
+  return out;
+}
+
+function evaluateGridScalperMAPullback(dir, idx) {
+  const out = { pass: true, pullbackOk: null };
+  if (!gridScalperMAPullbackFilterEnabled || idx < 1) return out;
+  const closes = candles.map(c => c.close);
+  const sma20 = computeSMA(closes, 20);
+  const ref = sma20[idx];
+  const prev = candles[idx - 1];
+  if (ref == null || !prev) return out;
+  const touched = dir === "BULL" ? prev.low <= ref : prev.high >= ref;
+  out.pullbackOk = touched;
+  out.pass = touched;
+  if (!touched) out.reason = "pullback confirmation missing";
+  return out;
+}
+
+function evaluateGridScalperMAEntryQuality(signal) {
+  const idx = signal && Number.isFinite(signal.candleIdx) ? signal.candleIdx : candles.length - 1;
+  const timing = evaluateEntryTimingQuality(signal.dir, candles[idx], signal.breakLevel ?? signal.entry, getAtrReference(), {
+    symbol: signal.symbol || getActiveSymbol(),
+    granSec: getCurrentGranularitySec(),
+    entryMode: "confirmed_close"
+  });
+  const trend = evaluateGridScalperMATrendStrength(signal.dir, idx);
+  const vol = evaluateGridScalperMAVolatility(idx);
+  const structure = evaluateGridScalperMAStructure(signal.dir, idx);
+  const pullback = evaluateGridScalperMAPullback(signal.dir, idx);
+  let score = 0;
+  if (trend.pass) score += 35;
+  if (timing.pass) score += 25;
+  if (vol.pass) score += 15;
+  if (structure.pass) score += 15;
+  if (pullback.pass) score += 10;
+  return {
+    pass: !gridScalperMAEntryQualityFilterEnabled || score >= gridScalperMAEntryQualityMinScore,
+    score,
+    details: {
+      timing: timing.pass,
+      trend: trend.pass,
+      volatility: vol.pass,
+      structure: structure.pass,
+      pullback: pullback.pass
+    },
+    timing,
+    trend,
+    volatility: vol,
+    structure,
+    pullback,
+    reason: score >= gridScalperMAEntryQualityMinScore ? null : `entry quality ${score}/${gridScalperMAEntryQualityMinScore} below threshold`
+  };
+}
+
 /**
  * Detect a Grid Scalper MA signal.
  *
@@ -7474,61 +7677,83 @@ function detectGridScalperMA() {
 
   if (!dir) return null;
 
-  /* ── Compute SL using structural swing points ── */
-  const atr = atrValue > 0 ? atrValue : (candles[idx].high - candles[idx].low);
-  const slBuffer = atr * 0.15;
-  const entry = candles[idx].close;
-
-  let sl;
-  if (dir === "BULL") {
-    const swingLow = findSwingLow(idx);
-    sl = swingLow - slBuffer;
-    /* Ensure SL is below entry */
-    if (sl >= entry) sl = entry - atr;
-  } else {
-    const swingHigh = findSwingHigh(idx);
-    sl = swingHigh + slBuffer;
-    /* Ensure SL is above entry */
-    if (sl <= entry) sl = entry + atr;
-  }
-
-  let risk = Math.abs(entry - sl);
-  const maxRisk = atr * GRID_SCALPER_MA_MAX_SL_ATR;
-  if (risk > maxRisk) {
-    sl = dir === "BULL" ? entry - maxRisk : entry + maxRisk;
-    risk = maxRisk;
-  }
-  if (risk < atr * 0.05) return null;
-
-  /* ── TP: symbol-aware R:R for optimised profits ── */
-  const sym = getActiveSymbol() || "";
-  let rrMultiplier = GRID_SCALPER_MA_RR_DEFAULT;
-  let volCategory  = "default";
-  if (/^1HZ/i.test(sym))     { rrMultiplier = GRID_SCALPER_MA_RR_VOL1S;    volCategory = "vol1s"; }
-  else if (/^R_/i.test(sym)) { rrMultiplier = GRID_SCALPER_MA_RR_STANDARD; volCategory = "standard"; }
-
-  const tp = dir === "BULL" ? entry + risk * rrMultiplier : entry - risk * rrMultiplier;
-  const rr = risk > 0 ? (Math.abs(tp - entry) / risk) : 0;
-
-  return {
-    dir, entry, sl, tp, rr,
-    candleIdx: idx,
-    epoch: candles[idx].epoch,
-    symbol: sym,
-    result: "PENDING",
-    type: "grid_scalper_ma",
-    mode: gridScalperMAStrategy,
-    volCategory,
-    breakLevel
-  };
+  const built = buildGridScalperMASignal(dir, idx, gridScalperMAStrategy, breakLevel);
+  if (!built) return null;
+  built.triggerLevel = Number.isFinite(breakLevel) ? breakLevel : built.entry;
+  built.triggerIdx = idx;
+  return built;
 }
 
 /**
  * Run the Grid Scalper MA scanner and handle alerting.
  */
 function processGridScalperMA() {
-  const signal = detectGridScalperMA();
+  const idx = candles.length - 1;
+  let signal = null;
+  if (gridScalperMAPendingSetup) {
+    const waitCandles = idx - gridScalperMAPendingSetup.triggerIdx;
+    if (waitCandles > GRID_SCALPER_MA_CONFIRM_MAX_WAIT) {
+      addLog(`⚠ Grid Scalper MA REJECTED — delayed-entry timeout (${GRID_SCALPER_MA_CONFIRM_MAX_WAIT} candles)`);
+      gridScalperMAPendingSetup = null;
+    } else {
+      const delayCheck = evaluateGridScalperMAEntryDelay(gridScalperMAPendingSetup, idx);
+      if (delayCheck.pass) {
+        signal = buildGridScalperMASignal(
+          gridScalperMAPendingSetup.dir,
+          idx,
+          gridScalperMAPendingSetup.mode,
+          gridScalperMAPendingSetup.breakLevel
+        );
+        if (signal) {
+          signal.triggerIdx = gridScalperMAPendingSetup.triggerIdx;
+          signal.triggerLevel = gridScalperMAPendingSetup.triggerLevel;
+          signal.entryDelayMode = gridScalperMAEntryDelayMode;
+        }
+        gridScalperMAPendingSetup = null;
+      }
+    }
+  }
+  if (!signal) {
+    const detected = detectGridScalperMA();
+    if (!detected) return;
+    if (gridScalperMAEntryDelayMode !== "immediate") {
+      gridScalperMAPendingSetup = {
+        dir: detected.dir,
+        mode: detected.mode,
+        breakLevel: detected.breakLevel,
+        triggerIdx: detected.candleIdx,
+        triggerLevel: Number.isFinite(detected.triggerLevel) ? detected.triggerLevel : detected.entry
+      };
+      lastGridScalperMAIdx = detected.candleIdx;
+      addLog(`⏳ Grid Scalper MA setup armed — waiting for ${gridScalperMAEntryDelayMode} confirmation`);
+      return;
+    }
+    signal = detected;
+    signal.entryDelayMode = "immediate";
+  }
   if (!signal) return;
+
+  const entryQuality = evaluateGridScalperMAEntryQuality(signal);
+  signal.entryQualityScore = entryQuality.score;
+  signal.entryQualityBreakdown = entryQuality.details;
+  signal.trendStrengthScore = entryQuality.trend.score;
+  signal.atrRatio = entryQuality.volatility.atrRatio;
+  signal.structureOk = entryQuality.structure.structureOk;
+  signal.pullbackOk = entryQuality.pullback.pullbackOk;
+  if (!entryQuality.pass) {
+    addLog(`⚠ Grid Scalper MA REJECTED — ${entryQuality.reason}`);
+    return;
+  }
+  const recentLossPause = shouldPauseAfterRecentLosses(gridScalperMAHistory, {
+    symbol: signal.symbol || getActiveSymbol(),
+    dir: signal.dir,
+    strategyType: "grid_scalper_ma",
+    timeframeSec: getCurrentGranularitySec()
+  });
+  if (recentLossPause.block) {
+    addLog(`⚠ Grid Scalper MA REJECTED — ${recentLossPause.reason}`);
+    return;
+  }
 
   if (minConfluenceEnabled) {
     const confGate = checkConfluenceGate(signal.dir, signal.entry, signal.candleIdx);
@@ -7608,6 +7833,14 @@ function processGridScalperMA() {
 
   signal._stratOutcomeSent = false;
   signal._sentViaTelegram  = false;
+  signal._mae = 0;
+  signal._mfe = 0;
+  signal._slOvershoot = 0;
+  signal._slThenTpFlag = 0;
+  signal._tpAfterSlSeconds = null;
+  signal._reversalDistance = null;
+  signal._maxReversalDistance = 0;
+  signal._slHitEpoch = null;
    
   /* [FIX] Generate unique signal ID for deduplication and database logging */
   if (!signal.signalId) {
@@ -7728,6 +7961,55 @@ function processGridScalperMA() {
 function monitorGridScalperMAOutcomes(candle) {
   if (!gridScalperMAEnabled) return;
   let changed = false;
+  const nowIdx = candles.length - 1;
+
+  if (gridScalperMALossReversalWatch.length > 0) {
+    const nextWatch = [];
+    for (const watch of gridScalperMALossReversalWatch) {
+      if (!watch || watch.completed) continue;
+      const age = nowIdx - watch.slHitIdx;
+      if (age > 50) continue;
+      if (watch.dir === "BULL") {
+        watch.maxReversalDistance = Math.max(watch.maxReversalDistance || 0, Math.max(0, candle.high - watch.sl));
+        if (candle.high >= watch.tp) {
+          watch.completed = true;
+          const target = gridScalperMAHistory.find(t => t && t.tradeId === watch.tradeId);
+          if (target) {
+            target._slThenTpFlag = 1;
+            target._tpAfterSlSeconds = (Number.isFinite(candle.epoch) && Number.isFinite(watch.slHitEpoch))
+              ? Math.max(0, Math.round(candle.epoch - watch.slHitEpoch))
+              : null;
+            target._reversalDistance = watch.maxReversalDistance || null;
+            target._maxReversalDistance = watch.maxReversalDistance || 0;
+            if (tradeOutcomeService && typeof tradeOutcomeService.syncTradeAnalytics === "function") {
+              tradeOutcomeService.syncTradeAnalytics(target);
+            }
+          }
+          continue;
+        }
+      } else {
+        watch.maxReversalDistance = Math.max(watch.maxReversalDistance || 0, Math.max(0, watch.sl - candle.low));
+        if (candle.low <= watch.tp) {
+          watch.completed = true;
+          const target = gridScalperMAHistory.find(t => t && t.tradeId === watch.tradeId);
+          if (target) {
+            target._slThenTpFlag = 1;
+            target._tpAfterSlSeconds = (Number.isFinite(candle.epoch) && Number.isFinite(watch.slHitEpoch))
+              ? Math.max(0, Math.round(candle.epoch - watch.slHitEpoch))
+              : null;
+            target._reversalDistance = watch.maxReversalDistance || null;
+            target._maxReversalDistance = watch.maxReversalDistance || 0;
+            if (tradeOutcomeService && typeof tradeOutcomeService.syncTradeAnalytics === "function") {
+              tradeOutcomeService.syncTradeAnalytics(target);
+            }
+          }
+          continue;
+        }
+      }
+      nextWatch.push(watch);
+    }
+    gridScalperMALossReversalWatch = nextWatch;
+  }
   
   for (const s of gridScalperMAHistory) {
     if (s.result !== "PENDING") continue;
@@ -7753,6 +8035,18 @@ function monitorGridScalperMAOutcomes(candle) {
     
     /* [FIX] Check for profit exit alert (partial TP) */
     if (_checkProfitExitAlert(s, candle, "Grid Scalper MA")) changed = true;
+
+    if (s.dir === "BULL") {
+      const adverse = Math.max(0, s.entry - candle.low);
+      const favorable = Math.max(0, candle.high - s.entry);
+      s._mae = Math.max(Number(s._mae) || 0, adverse);
+      s._mfe = Math.max(Number(s._mfe) || 0, favorable);
+    } else {
+      const adverse = Math.max(0, candle.high - s.entry);
+      const favorable = Math.max(0, s.entry - candle.low);
+      s._mae = Math.max(Number(s._mae) || 0, adverse);
+      s._mfe = Math.max(Number(s._mfe) || 0, favorable);
+    }
     
     /* Determine if SL/TP hit */
     let slHit, tpHit;
@@ -7767,6 +8061,13 @@ function monitorGridScalperMAOutcomes(candle) {
     /* [FIX] Both levels hit — resolve properly */
     if (slHit && tpHit) {
       const resolved = resolveBothHitFixed(s, candle);
+      if (resolved === "LOSS") {
+        s._slHitEpoch = Number.isFinite(candle.epoch) ? candle.epoch : s._slHitEpoch;
+        const overshoot = s.dir === "BULL"
+          ? Math.max(0, s.sl - candle.low)
+          : Math.max(0, candle.high - s.sl);
+        s._slOvershoot = Math.max(Number(s._slOvershoot) || 0, overshoot);
+      }
       if (tradeOutcomeService) {
         const exitPrice = resolved === "WIN" ? s.tp : s.sl;
         const reason = resolved === "WIN" ? 'TP_FINAL' : 'STOP_LOSS_BOTH_HIT';
@@ -7784,11 +8085,28 @@ function monitorGridScalperMAOutcomes(candle) {
     }
     /* [FIX] Only SL hit */
     else if (slHit) {
+      s._slHitEpoch = Number.isFinite(candle.epoch) ? candle.epoch : s._slHitEpoch;
+      const overshoot = s.dir === "BULL"
+        ? Math.max(0, s.sl - candle.low)
+        : Math.max(0, candle.high - s.sl);
+      s._slOvershoot = Math.max(Number(s._slOvershoot) || 0, overshoot);
       if (tradeOutcomeService) {
         tradeOutcomeService.markTradeLOSS(s, s.sl, { reason: 'STOP_LOSS', telegramSend: s._sentViaTelegram === true, dbLog: true });
       } else {
         s.result = "LOSS";
         s.terminal_reason = 'STOP_LOSS';
+      }
+      if (s.tradeId || s.signalId) {
+        gridScalperMALossReversalWatch.push({
+          tradeId: s.tradeId || s.signalId,
+          dir: s.dir,
+          tp: s.tp,
+          sl: s.sl,
+          slHitIdx: nowIdx,
+          slHitEpoch: s._slHitEpoch,
+          maxReversalDistance: 0,
+          completed: false
+        });
       }
       addLog(`🔲 [LOSS] Grid Scalper MA — hit SL @ ${fmt(s.sl, 4)}`);
       changed = true;
