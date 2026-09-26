@@ -95,11 +95,13 @@ if ($method === 'GET') {
             $saStmt = $pdo->prepare($lastQuery);
             $saStmt->execute($lastParams);
             $stratMap = [];
-            foreach ($saStmt->fetchAll() as $row) {
-                $stratMap[$row['user_id']][] = $row['strategy_key'];
+            foreach ($saStmt->fetchAll() ?: [] as $row) {
+                if ($row && isset($row['user_id'], $row['strategy_key'])) {
+                    $stratMap[(int) $row['user_id']][] = $row['strategy_key'];
+                }
             }
             foreach ($users as &$u) {
-                $u['strategies']      = $stratMap[$u['id']] ?? [];
+                $u['strategies']      = $stratMap[(int) ($u['id'] ?? 0)] ?? [];
                 $u['telegram_linked'] = !empty($u['telegram_user_id']);
             }
             unset($u);
